@@ -1,0 +1,9 @@
+{
+  "name": "retail-inventory-system",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.2.3"
+  }
+}
