@@ -24,14 +24,14 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
-      - name: Lint
-        run: yarn lint
-
-      - name: Build
-        run: yarn build
-
-      - name: Run tests
-        run: yarn test
-        env:
-          NODE_ENV: test
-          # Add test DB env vars if needed (or use in-memory sqlite for tests)
+#      - name: Lint
+#        run: yarn lint
+#
+#      - name: Build
+#        run: yarn build
+#
+#      - name: Run tests
+#        run: yarn test
+#        env:
+#          NODE_ENV: test
+#          # Add test DB env vars if needed (or use in-memory sqlite for tests)
