@@ -1,19 +1,37 @@
 {
   "name": "retail-inventory-system",
   "private": true,
+  "type": "module",
   "workspaces": [
     "apps/*",
     "libs/*"
   ],
   "scripts": {
     "build": "yarn workspaces run build",
-    "lint": "yarn workspaces run lint",
     "test": "yarn workspaces run test",
-    "start:dev": "concurrently \"yarn workspace api-gateway start:dev\" \"yarn workspace inventory-service start:dev\""
+    "start:dev": "concurrently \"yarn workspace api-gateway start:dev\" \"yarn workspace inventory-service start:dev\"",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix --max-warnings 0",
+    "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
+    "format:check": "prettier --check \"apps/**/*.ts\" \"libs/**/*.ts\"",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.3",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.2.3",
-    "concurrently": "^9.0.1"
+    "@typescript-eslint/eslint-plugin": "^8.55.0",
+    "@typescript-eslint/parser": "^8.55.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.8.1",
+    "typescript-eslint": "^8.55.0"
   },
   "packageManager": "yarn@4.12.0"
 }
