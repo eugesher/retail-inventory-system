@@ -1,9 +1,19 @@
 {
   "name": "retail-inventory-system",
-  "version": "1.0.0",
-  "main": "index.js",
-  "license": "MIT",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "libs/*"
+  ],
+  "scripts": {
+    "build": "yarn workspaces run build",
+    "lint": "yarn workspaces run lint",
+    "test": "yarn workspaces run test",
+    "start:dev": "concurrently \"yarn workspace api-gateway start:dev\" \"yarn workspace inventory-service start:dev\""
+  },
   "devDependencies": {
-    "@types/node": "^25.2.3"
-  }
+    "@types/node": "^25.2.3",
+    "concurrently": "^9.0.1"
+  },
+  "packageManager": "yarn@4.12.0"
 }
