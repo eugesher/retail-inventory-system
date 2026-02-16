@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2023"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist", // not really used at root, but harmless
+    "rootDir": ".", // ← monorepo root
+    "baseUrl": ".",
+    "paths": {
+      "@libs/config": ["libs/config/src/configuration.ts"],
+      "@libs/config/*": ["libs/config/src/*"]
+      // add more aliases later if needed, e.g. "@libs/common": ["libs/common/src/index.ts"]
+    }
+  },
+  "include": ["apps/**/*", "libs/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
