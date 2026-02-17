@@ -1,7 +1,7 @@
 {
-  "name": "inventory-service",
+  "name": "order-service",
   "scripts": {
-    "build": "nest build inventory-service",
+    "build": "nest build order-service",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",

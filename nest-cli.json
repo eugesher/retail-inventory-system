@@ -1,12 +1,19 @@
 {
   "$schema": "https://json.schemastore.org/nest-cli",
   "collection": "@nestjs/schematics",
-  "sourceRoot": "apps/api-gateway/src",
+  "sourceRoot": "apps",
   "compilerOptions": {
-    "webpack": true,
-    "tsConfigPath": "apps/api-gateway/tsconfig.app.json"
+    "builder": "webpack",
+    "webpackConfigPath": "webpack.config.js",
+    "deleteOutDir": true,
+    "assets": ["**/*.proto", "**/*.json"],
+    "tsConfigPath": "tsconfig.build.json",
+    "generateOptions": {
+      "flat": false
+    }
   },
   "monorepo": true,
+  "root": "apps",
   "projects": {
     "api-gateway": {
       "type": "application",
@@ -26,15 +33,6 @@
         "tsConfigPath": "apps/inventory-service/tsconfig.app.json"
       }
     },
-    "notification-service": {
-      "type": "application",
-      "root": "apps/notification-service",
-      "entryFile": "main",
-      "sourceRoot": "apps/notification-service/src",
-      "compilerOptions": {
-        "tsConfigPath": "apps/notification-service/tsconfig.app.json"
-      }
-    },
     "order-service": {
       "type": "application",
       "root": "apps/order-service",
@@ -44,13 +42,13 @@
         "tsConfigPath": "apps/order-service/tsconfig.app.json"
       }
     },
-    "libs": {
-      "type": "library",
-      "root": "libs/config",
-      "entryFile": "index",
-      "sourceRoot": "libs/config/src",
+    "notification-service": {
+      "type": "application",
+      "root": "apps/notification-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/notification-service/src",
       "compilerOptions": {
-        "tsConfigPath": "libs/config/tsconfig.lib.json"
+        "tsConfigPath": "apps/notification-service/tsconfig.app.json"
       }
     }
   }

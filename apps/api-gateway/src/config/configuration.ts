@@ -1,5 +1,5 @@
 import { registerAs } from '@nestjs/config';
-import sharedConfig from '@libs/config';
+import { sharedConfig } from '@retail-system/config';
 
 export default registerAs('gateway', () => ({
   ...sharedConfig(),

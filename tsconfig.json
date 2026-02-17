@@ -1,21 +1,25 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
     "module": "commonjs",
-    "lib": ["ES2023"],
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "outDir": "./dist", // not really used at root, but harmless
-    "rootDir": ".", // ← monorepo root
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "target": "es2022",
+    "sourceMap": true,
+    "outDir": "./dist",
     "baseUrl": ".",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@libs/config": ["libs/config/src/configuration.ts"],
-      "@libs/config/*": ["libs/config/src/*"]
-      // add more aliases later if needed, e.g. "@libs/common": ["libs/common/src/index.ts"]
+      "@retail-system/config": ["libs/config/src"],
+      "@retail-system/config/*": ["libs/config/src/*"],
+      "@retail-system/common/*": ["libs/common/src/*"]
     }
-  },
-  "include": ["apps/**/*", "libs/**/*"],
-  "exclude": ["node_modules", "dist"]
+  }
 }
