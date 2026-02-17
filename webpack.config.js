@@ -1,4 +1,5 @@
 const path = require('path');
+const TerserWebpackPlugin = require('terser-webpack-plugin');
 const tsconfigPathsWebpackPlugin = require('tsconfig-paths-webpack-plugin');
 const webpack = require('webpack');
 const webpackNodeExternals = require('webpack-node-externals');
@@ -52,6 +53,25 @@ module.exports = (options) => {
     node: {
       __dirname: false,
       __filename: false,
+    },
+    optimization: {
+      minimize: true,
+      minimizer: [
+        new TerserWebpackPlugin({
+          terserOptions: {
+            format: {
+              comments: false,
+              beautify: true,
+              indent_level: 2,
+              indent_start: 0,
+              keep_numbers: true,
+            },
+            compress: false,
+            mangle: false,
+          },
+          extractComments: false,
+        }),
+      ],
     },
   };
 };
