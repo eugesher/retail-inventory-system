@@ -1,30 +1,27 @@
 const path = require('path');
+const tsconfigPathsWebpackPlugin = require('tsconfig-paths-webpack-plugin');
 const webpack = require('webpack');
-const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
-const nodeExternals = require('webpack-node-externals');
+const webpackNodeExternals = require('webpack-node-externals');
 
-module.exports = (options, webpack) => {
-  const { entry } = options;
+module.exports = (options) => {
+  const { entry, plugins, resolve } = options;
 
   let projectName = 'default';
 
   if (entry && typeof entry === 'string') {
     const match = entry.match(/apps\/([^/]+)\/src\/main\.ts$/);
+
     if (match && match[1]) {
       projectName = match[1];
     }
   }
 
-  if (projectName === 'default') {
-    const cwd = process.cwd();
-    const possibleName = path.basename(cwd);
-    if (possibleName !== 'apps') projectName = possibleName;
-  }
+  console.log(`[Webpack] Building project: ${projectName}\n`);
 
   return {
     ...options,
     externals: [
-      nodeExternals({
+      webpackNodeExternals({
         allowlist: [/^@retail-system/],
       }),
     ],
@@ -35,17 +32,17 @@ module.exports = (options, webpack) => {
       clean: true,
     },
     resolve: {
-      ...options.resolve,
+      ...resolve,
       plugins: [
-        ...(options.resolve?.plugins || []),
-        new TsconfigPathsPlugin({
+        ...(resolve?.plugins || []),
+        new tsconfigPathsWebpackPlugin({
           configFile: path.resolve(__dirname, 'tsconfig.json'),
         }),
       ],
     },
     plugins: [
-      ...(options.plugins || []),
-      new webpack.BannerPlugin({
+      ...(plugins || []),
+      new webpack['BannerPlugin']({
         banner: 'require("source-map-support").install();',
         raw: true,
         entryOnly: true,

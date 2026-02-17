@@ -19,6 +19,7 @@
     "paths": {
       "@retail-system/config": ["libs/config/src"],
       "@retail-system/config/*": ["libs/config/src/*"],
+      "@retail-system/common": ["libs/common/src"],
       "@retail-system/common/*": ["libs/common/src/*"]
     }
   }

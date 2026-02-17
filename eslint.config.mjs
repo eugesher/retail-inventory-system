@@ -1,8 +1,8 @@
 import eslint from '@eslint/js';
-import tseslint from 'typescript-eslint';
-import prettierPlugin from 'eslint-plugin-prettier';
+import eslintPluginPrettier from 'eslint-plugin-prettier';
+import typescriptEslint from 'typescript-eslint';
 
-export default tseslint.config(
+export default typescriptEslint.config(
   {
     ignores: [
       '**/node_modules/**',
@@ -14,11 +14,11 @@ export default tseslint.config(
     ],
   },
   eslint.configs.recommended,
-  ...tseslint.configs.recommended,
+  ...typescriptEslint.configs.recommended,
   {
     files: ['**/*.js', '**/*.cjs', '**/*.mjs', '**/*.ts', '**/*.tsx'],
     plugins: {
-      prettier: prettierPlugin,
+      prettier: eslintPluginPrettier,
     },
     rules: {
       '@typescript-eslint/interface-name-prefix': 'off',
@@ -31,7 +31,10 @@ export default tseslint.config(
   },
   {
     files: ['**/*.ts', '**/*.tsx'],
-    extends: [...tseslint.configs.recommendedTypeChecked, ...tseslint.configs.stylisticTypeChecked],
+    extends: [
+      ...typescriptEslint.configs.recommendedTypeChecked,
+      ...typescriptEslint.configs.stylisticTypeChecked,
+    ],
     languageOptions: {
       parserOptions: {
         projectService: true,

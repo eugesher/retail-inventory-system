@@ -443,12 +443,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@retail-system/config@workspace:libs/config":
-  version: 0.0.0-use.local
-  resolution: "@retail-system/config@workspace:libs/config"
-  languageName: unknown
-  linkType: soft
-
 "@sqltools/formatter@npm:^1.2.5":
   version: 1.2.5
   resolution: "@sqltools/formatter@npm:1.2.5"
@@ -2946,6 +2940,12 @@ __metadata:
   languageName: node
   linkType: hard
 
+"notification-service@workspace:apps/notification-service":
+  version: 0.0.0-use.local
+  resolution: "notification-service@workspace:apps/notification-service"
+  languageName: unknown
+  linkType: soft
+
 "object-assign@npm:^4, object-assign@npm:^4.1.1":
   version: 4.1.1
   resolution: "object-assign@npm:4.1.1"
@@ -3000,6 +3000,12 @@ __metadata:
   checksum: 10c0/4afb687a059ee65b61df74dfe87d8d6815cd6883cb8b3d5883a910df72d0f5d029821f37025e4bccf4048873dbdb09acc6d303d27b8f76b1a80dd5a7d5334675
   languageName: node
   linkType: hard
+
+"order-service@workspace:apps/order-service":
+  version: 0.0.0-use.local
+  resolution: "order-service@workspace:apps/order-service"
+  languageName: unknown
+  linkType: soft
 
 "p-limit@npm:^3.0.2":
   version: 3.1.0
