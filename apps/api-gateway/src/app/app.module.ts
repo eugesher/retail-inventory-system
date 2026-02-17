@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-// import { validationSchema } from '@retail-system/config/validation-schema';
+import { validationSchema } from '@retail-system/config/validation-schema';
 import configuration from '../config/configuration';
 
 // import { HealthModule } from './health/health.module'; // optional but recommended
@@ -12,11 +12,11 @@ import configuration from '../config/configuration';
       isGlobal: true,
       load: [configuration],
       envFilePath: ['.env.local', '.env'],
-      // validationSchema,
-      // validationOptions: {
-      //   allowUnknown: true,
-      //   abortEarly: false,
-      // },
+      validationSchema,
+      validationOptions: {
+        allowUnknown: true,
+        abortEarly: false,
+      },
     }),
 
     ClientsModule.registerAsync([

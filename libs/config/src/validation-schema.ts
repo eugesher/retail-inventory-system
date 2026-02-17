@@ -1,27 +1,24 @@
 import * as Joi from 'joi';
 
 export const validationSchema = Joi.object({
-  NODE_ENV: Joi.string()
-    .valid('development', 'production', 'test')
-    .default('development')
-    .required(),
+  NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
 
   PORT: Joi.number().default(3000).port(),
 
   DATABASE_URL: Joi.string()
     .uri({ scheme: ['mysql'] })
-    .required(),
+    .default('mysql://retail:retailpass@mysql:3306/retail_db'),
 
   REDIS_URL: Joi.string()
     .uri({ scheme: ['redis'] })
-    .required(),
+    .default('redis://redis:6379'),
 
   RABBITMQ_URL: Joi.string()
     .uri({ scheme: ['amqp'] })
-    .default('amqp://guest:guest@localhost:5672')
-    .required(),
+    .default('amqp://guest:guest@rabbitmq:5672'),
 
-  JWT_SECRET: Joi.string().min(32).required(),
+  JWT_SECRET: Joi.string().min(16).default('local-dev-secret-very-insecure-do-not-use-in-prod'),
+
   JWT_EXPIRES_IN: Joi.string().default('1d'),
 
   GATEWAY_PORT: Joi.number().default(3000).port(),
@@ -35,13 +32,9 @@ export const validationSchema = Joi.object({
   MAX_ORDER_ITEMS: Joi.number().integer().min(1).default(50),
 
   EMAIL_PROVIDER: Joi.string().valid('console', 'sendgrid', 'resend').default('console'),
-  EMAIL_API_KEY: Joi.string().when('EMAIL_PROVIDER', {
-    is: Joi.string().valid('sendgrid', 'resend'),
-    then: Joi.string().required(),
-    otherwise: Joi.string().optional(),
-  }),
+  EMAIL_API_KEY: Joi.string().optional(),
 
-  SENTRY_DSN: Joi.string().uri().optional(),
+  SENTRY_DSN: Joi.string().uri().optional().default(''),
 
   THROTTLE_TTL: Joi.number().default(60),
   THROTTLE_LIMIT: Joi.number().default(100),
