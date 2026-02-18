@@ -29,9 +29,3 @@ jobs:
 
       - name: Build
         run: yarn build
-
-#      - name: Run tests
-#        run: yarn test
-#        env:
-#          NODE_ENV: test
-#          # Add test DB env vars if needed (or use in-memory sqlite for tests)

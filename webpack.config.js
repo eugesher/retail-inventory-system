@@ -23,7 +23,7 @@ module.exports = (options) => {
     ...options,
     externals: [
       webpackNodeExternals({
-        allowlist: [/^@retail-system/],
+        allowlist: [/^@retail-inventory/],
       }),
     ],
     output: {

@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { validationSchema } from '@retail-system/config/validation-schema';
-import configuration from '../config/configuration';
 
-// import { HealthModule } from './health/health.module'; // optional but recommended
+import { validationSchema } from '@retail-inventory/config';
+import { configuration } from '../config';
 
 @Module({
   imports: [
@@ -63,8 +62,6 @@ import configuration from '../config/configuration';
         inject: [ConfigService],
       },
     ]),
-
-    // HealthModule, // good for docker health checks
   ],
 })
 export class AppModule {}

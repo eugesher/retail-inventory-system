@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import configuration from '../config/configuration';
+
+import { validationSchema } from '@retail-inventory/config';
+import { configuration } from '../config';
 
 @Module({
   imports: [
@@ -8,9 +10,10 @@ import configuration from '../config/configuration';
       isGlobal: true,
       load: [configuration],
       envFilePath: ['.env.local', '.env'],
-      validate: (config) => {
-        // Optional: add runtime validation with zod/joi later
-        return config;
+      validationSchema,
+      validationOptions: {
+        allowUnknown: true,
+        abortEarly: false,
       },
     }),
   ],

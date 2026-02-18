@@ -1,9 +1,4 @@
 import { registerAs } from '@nestjs/config';
-import { sharedConfig } from '@retail-system/config';
+import { sharedConfiguration } from '@retail-inventory/config';
 
-export default registerAs('inventory', () => ({
-  ...sharedConfig(),
-
-  lowStockThreshold: +(process.env.LOW_STOCK_THRESHOLD ?? '10'),
-  cacheTtlSeconds: +(process.env.CACHE_TTL_SECONDS ?? '300'),
-}));
+export const configuration = registerAs('inventory-service', () => ({ ...sharedConfiguration() }));

@@ -1,8 +1,4 @@
 import { registerAs } from '@nestjs/config';
-import { sharedConfig } from '@retail-system/config';
+import { sharedConfiguration } from '@retail-inventory/config';
 
-export default registerAs('order', () => ({
-  ...sharedConfig(),
-
-  maxOrderItems: +(process.env.MAX_ORDER_ITEMS ?? '50'),
-}));
+export const configuration = registerAs('order-service', () => ({ ...sharedConfiguration() }));
