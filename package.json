@@ -29,8 +29,7 @@
     "migration:create": "ts-node ./scripts/migration-create.ts",
     "migration:run": "yarn typeorm:migration-cli migration:run",
     "migration:revert": "yarn typeorm:migration-cli migration:revert",
-    "migration:show": "yarn typeorm:migration-cli migration:show",
-    "temp:start": "rm -rf node_modules && yarn && yarn build && concurrently --names \"API_GATEWAY,INVENTORY_SERVICE,ORDER_SERVICE,NOTIFICATION_SERVICE\" --prefix \"[{name}]\" --prefix-colors \"magenta,blue,yellow,cyan\" \"node dist/apps/api-gateway/main.js\" \"node dist/apps/inventory-service/main.js\" \"node dist/apps/order-service/main.js\" \"node dist/apps/notification-service/main.js\""
+    "migration:show": "yarn typeorm:migration-cli migration:show"
   },
   "dependencies": {
     "@nestjs/cli": "^11.0.16",
