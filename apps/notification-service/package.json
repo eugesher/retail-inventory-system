@@ -1,5 +1,6 @@
 {
   "name": "notification-service",
+  "private": true,
   "scripts": {
     "build": "nest build notification-service",
     "start": "nest start",

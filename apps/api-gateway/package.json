@@ -1,5 +1,6 @@
 {
   "name": "api-gateway",
+  "private": true,
   "scripts": {
     "build": "nest build api-gateway",
     "start": "nest start",

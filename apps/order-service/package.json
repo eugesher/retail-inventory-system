@@ -1,5 +1,6 @@
 {
   "name": "order-service",
+  "private": true,
   "scripts": {
     "build": "nest build order-service",
     "start": "nest start",
