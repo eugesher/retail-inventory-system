@@ -11,6 +11,7 @@
     "build:inventory-service": "nest build inventory-service",
     "build:order-service": "nest build order-service",
     "build:notification-service": "nest build notification-service",
+    "start:dev": "concurrently --names \"API_GATEWAY,INVENTORY_SERVICE,ORDER_SERVICE,NOTIFICATION_SERVICE\" --prefix \"[{name}]\" --prefix-colors \"magenta,blue,cyan,yellow\" \"yarn start:dev:api-gateway\" \"yarn start:dev:inventory-service\" \"yarn start:dev:order-service\" \"yarn start:dev:notification-service\"",
     "start:dev:api-gateway": "nest start api-gateway --watch",
     "start:dev:inventory-service": "nest start inventory-service --watch",
     "start:dev:order-service": "nest start order-service --watch",
@@ -31,6 +32,7 @@
     "migration:show": "yarn typeorm:migration-cli migration:show"
   },
   "dependencies": {
+    "@nestjs/cli": "^11.0.16",
     "@nestjs/common": "^11.1.13",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.1.13",
@@ -45,6 +47,7 @@
     "mysql2": "^3.17.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "ts-loader": "^9.5.4",
     "tsconfig-paths-webpack-plugin": "^4.2.0",
     "typeorm": "^0.3.28",
     "webpack": "^5.105.2",
@@ -53,7 +56,6 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^9.39.2",
-    "@nestjs/cli": "^11.0.16",
     "@types/amqplib": "^0",
     "@types/node": "^25.2.3",
     "@types/webpack": "^5.28.5",
@@ -70,7 +72,6 @@
     "lint-staged": "^16.2.7",
     "prettier": "^3.8.1",
     "terser-webpack-plugin": "^5.3.16",
-    "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.55.0"
