@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ClientsModule, Transport } from '@nestjs/microservices';
+import { ConfigModule } from '@nestjs/config';
 
 import { validationSchema } from '@retail-inventory/config';
+import { MicroserviceClientsModule } from './common/modules';
 import { configuration } from '../config';
+import { ProductModule } from './api';
 
 @Module({
   imports: [
@@ -17,51 +18,8 @@ import { configuration } from '../config';
         abortEarly: false,
       },
     }),
-
-    ClientsModule.registerAsync([
-      {
-        name: 'INVENTORY_SERVICE',
-        useFactory: (configService: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [configService.get<string>('RABBITMQ_URL')!],
-            queue: 'inventory_queue',
-            queueOptions: {
-              durable: true,
-            },
-          },
-        }),
-        inject: [ConfigService],
-      },
-      {
-        name: 'ORDER_SERVICE',
-        useFactory: (configService: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [configService.get<string>('RABBITMQ_URL')!],
-            queue: 'order_queue',
-            queueOptions: {
-              durable: true,
-            },
-          },
-        }),
-        inject: [ConfigService],
-      },
-      {
-        name: 'NOTIFICATION_SERVICE',
-        useFactory: (configService: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [configService.get<string>('RABBITMQ_URL')!],
-            queue: 'notification_events',
-            queueOptions: {
-              durable: true,
-            },
-          },
-        }),
-        inject: [ConfigService],
-      },
-    ]),
+    MicroserviceClientsModule,
+    ProductModule,
   ],
 })
 export class AppModule {}

@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
 import { AppModule } from './app';
+import { MicroserviceClientQueueEnum } from '@retail-inventory/common';
 
 async function bootstrap() {
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
@@ -10,7 +11,7 @@ async function bootstrap() {
     options: {
       urls: [process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672'],
       noAck: false,
-      queue: 'notification_events',
+      queue: MicroserviceClientQueueEnum.NOTIFICATION_EVENTS,
       queueOptions: {
         durable: true,
       },

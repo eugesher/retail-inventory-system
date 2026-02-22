@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { validationSchema } from '@retail-inventory/config';
 import { configuration } from '../config';
+import { ProductStockModule } from './api';
 
 @Module({
   imports: [
@@ -29,6 +30,8 @@ import { configuration } from '../config';
       }),
       inject: [ConfigService],
     }),
+
+    ProductStockModule,
   ],
 })
 export class AppModule {}
