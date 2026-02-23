@@ -1,27 +1,29 @@
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-// import { ConfigService } from '@nestjs/config';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
 import { AppModule } from './app';
+import { MicroserviceClientNameEnum, MicroserviceClientQueueEnum } from '@retail-inventory/common';
 
 async function bootstrap() {
+  const configService = new ConfigService();
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
     transport: Transport.RMQ,
     options: {
-      urls: [process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672'],
-      queue: 'inventory_queue',
+      urls: [configService.get<string>('RABBITMQ_URL')!],
+      queue: MicroserviceClientQueueEnum.INVENTORY_QUEUE,
       queueOptions: {
         durable: true,
       },
     },
   });
 
-  // const configService = app.get(ConfigService);
-  const logger = new Logger('InventoryService');
-
   await app.listen();
-  logger.log('Inventory Microservice is listening for messages');
+
+  const logger = new Logger(MicroserviceClientNameEnum.INVENTORY_SERVICE);
+
+  logger.log('Microservice is listening for messages');
 }
 
 void bootstrap().catch((err) => {
