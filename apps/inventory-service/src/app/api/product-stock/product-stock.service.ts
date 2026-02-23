@@ -3,11 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { max, omit } from 'lodash';
 import { Repository } from 'typeorm';
 
-import {
-  ProductStockGetDto,
-  ProductStock,
-  ProductStockResponseDto,
-} from '@retail-inventory/common';
+import { IProductStockGet, ProductStock, ProductStockDto } from '@retail-inventory/common';
 
 @Injectable()
 export class ProductStockService {
@@ -16,19 +12,21 @@ export class ProductStockService {
     private productStockRepository: Repository<ProductStock>,
   ) {}
 
-  public async getProductStock(dto: ProductStockGetDto): Promise<ProductStockResponseDto> {
+  public async getProductStock(data: IProductStockGet): Promise<ProductStockDto> {
+    const { productId, storeIds } = data;
+
     const builder = this.productStockRepository
       .createQueryBuilder('ProductStock')
-      .where('ProductStock.productId = :productId', { productId: dto.productId });
+      .where('ProductStock.productId = :productId', { productId });
 
-    if (dto.storeIds && dto.storeIds.length > 0) {
-      builder.andWhere('ProductStock.storeId IN (:...storeIds)', { storeIds: dto.storeIds });
+    if (storeIds && storeIds.length > 0) {
+      builder.andWhere('ProductStock.storeId IN (:...storeIds)', { storeIds });
     }
 
     const stock = await builder.getMany();
 
     return {
-      productId: dto.productId,
+      productId: data.productId,
       stock: stock.map((item) => omit(item, 'productId')),
       updatedAt: max(stock.map(({ updatedAt }) => updatedAt)) ?? new Date(),
     };
