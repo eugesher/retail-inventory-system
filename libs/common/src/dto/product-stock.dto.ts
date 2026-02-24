@@ -15,11 +15,14 @@ export class ProductStockDto {
   @ApiResponseProperty()
   public productId: string;
 
-  @ApiResponseProperty({
-    type: [ProductStockStockItemDto],
-  })
-  public stock: ProductStockStockItemDto[];
+  @ApiResponseProperty()
+  public quantity: number;
 
   @ApiResponseProperty()
   public updatedAt: Date;
+
+  @ApiResponseProperty({
+    type: [ProductStockStockItemDto],
+  })
+  public items: ProductStockStockItemDto[];
 }
