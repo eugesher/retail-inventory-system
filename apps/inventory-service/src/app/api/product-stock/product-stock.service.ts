@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { max, omit } from 'lodash';
+import { maxBy, omit, sumBy } from 'lodash';
 import { Repository } from 'typeorm';
 
 import { IProductStockGet, ProductStock, ProductStockDto } from '@retail-inventory/common';
@@ -24,11 +24,10 @@ export class ProductStockService {
     }
 
     const stock = await builder.getMany();
+    const items = stock.map((item) => omit(item, 'productId'));
+    const quantity = sumBy(stock, 'quantity');
+    const updatedAt = maxBy(stock, 'updatedAt')?.updatedAt ?? new Date();
 
-    return {
-      productId: data.productId,
-      stock: stock.map((item) => omit(item, 'productId')),
-      updatedAt: max(stock.map(({ updatedAt }) => updatedAt)) ?? new Date(),
-    };
+    return { productId, quantity, updatedAt, items };
   }
 }
