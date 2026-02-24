@@ -3,16 +3,17 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { maxBy, omit, sumBy } from 'lodash';
 import { Repository } from 'typeorm';
 
-import { IProductStockGet, ProductStock, ProductStockDto } from '@retail-inventory/common';
+import { IProductStockGet, ProductStockDto } from '@retail-inventory/common';
+import { ProductStock } from '../../../common/entities';
 
 @Injectable()
-export class ProductStockService {
+export class ProductStockGetService {
   constructor(
     @InjectRepository(ProductStock)
-    private productStockRepository: Repository<ProductStock>,
+    private readonly productStockRepository: Repository<ProductStock>,
   ) {}
 
-  public async getProductStock(data: IProductStockGet): Promise<ProductStockDto> {
+  public async execute(data: IProductStockGet): Promise<ProductStockDto> {
     const { productId, storeIds } = data;
 
     const builder = this.productStockRepository

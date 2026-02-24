@@ -22,13 +22,37 @@ export default typescriptEslint.config(
       prettier: eslintPluginPrettier,
     },
     rules: {
-      '@typescript-eslint/interface-name-prefix': 'off',
-      '@typescript-eslint/explicit-function-return-type': 'off',
-      '@typescript-eslint/explicit-module-boundary-types': 'off',
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unused-vars': 'error',
 
+      '@typescript-eslint/explicit-function-return-type': 'warn',
+      '@typescript-eslint/explicit-module-boundary-types': 'warn',
+
+      'no-console': 'error',
       'prettier/prettier': 'error',
+      quotes: ['warn', 'single'],
+      semi: ['error', 'always'],
+
+      // '@typescript-eslint/no-unsafe-member-access': ['error', { allowOptionalChaining: true }],
+
+      '@typescript-eslint/explicit-member-accessibility': [
+        'error',
+        { overrides: { constructors: 'off' } },
+      ],
+
+      '@typescript-eslint/naming-convention': [
+        'error',
+        {
+          selector: 'interface',
+          format: ['PascalCase'],
+          custom: { regex: 'I[A-Z]', match: true },
+        },
+        {
+          selector: 'enum',
+          format: ['PascalCase'],
+          custom: { regex: '[A-Za-z]Enum$', match: true },
+        },
+      ],
     },
   },
   {

@@ -6,14 +6,14 @@ import {
   MicroserviceMessagePatternEnum,
   ProductStockDto,
 } from '@retail-inventory/common';
-import { ProductStockService } from './product-stock.service';
+import { ProductStockGetService } from './services';
 
 @Controller()
 export class ProductStockController {
-  constructor(private readonly productStockService: ProductStockService) {}
+  constructor(private readonly stockGetService: ProductStockGetService) {}
 
   @MessagePattern(MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET)
   public async getProductStock(@Payload() data: IProductStockGet): Promise<ProductStockDto> {
-    return this.productStockService.getProductStock(data);
+    return this.stockGetService.execute(data);
   }
 }

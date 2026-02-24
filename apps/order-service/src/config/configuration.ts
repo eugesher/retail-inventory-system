@@ -1,4 +1,4 @@
 import { registerAs } from '@nestjs/config';
 import { sharedConfiguration } from '@retail-inventory/config';
 
-export const configuration = registerAs('order-service', () => ({ ...sharedConfiguration() }));
+export const configuration = registerAs('order-service', () => ({ ...sharedConfiguration }));

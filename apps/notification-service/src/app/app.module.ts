@@ -1,21 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
-import { validationSchema } from '@retail-inventory/config';
-import { configuration } from '../config';
+import { configModuleOptions } from '../config';
 
-@Module({
-  imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      load: [configuration],
-      envFilePath: ['.env.local', '.env'],
-      validationSchema,
-      validationOptions: {
-        allowUnknown: true,
-        abortEarly: false,
-      },
-    }),
-  ],
-})
+@Module({ imports: [ConfigModule.forRoot(configModuleOptions)] })
 export class AppModule {}

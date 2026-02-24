@@ -1,21 +1,14 @@
 import * as Joi from 'joi';
 
 export const validationSchema = Joi.object({
-  NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
+  NODE_ENV: Joi.string().valid('development', 'production', 'test').required(),
 
-  API_GATEWAY_PORT: Joi.number().default(3000).port(),
+  API_GATEWAY_PORT: Joi.number().required().port(),
+  API_GATEWAY_PREFIX: Joi.string().required(),
 
-  DATABASE_URL: Joi.string()
-    .uri({ scheme: ['mysql'] })
-    .default('mysql://retail:retailpass@localhost:3306/retail_db'),
+  DATABASE_URL: Joi.string().uri({ scheme: 'mysql' }).required(),
 
-  REDIS_URL: Joi.string()
-    .uri({ scheme: ['redis'] })
-    .default('redis://redis:6379'),
+  RABBITMQ_URL: Joi.string().uri({ scheme: 'amqp' }).required(),
 
-  RABBITMQ_URL: Joi.string()
-    .uri({ scheme: ['amqp'] })
-    .default('amqp://guest:guest@localhost:5672'),
-
-  API_PREFIX: Joi.string().default('api'),
+  REDIS_URL: Joi.string().uri({ scheme: 'redis' }).required(),
 }).options({ allowUnknown: true, abortEarly: false });

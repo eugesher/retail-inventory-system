@@ -2,28 +2,31 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
+import { MicroserviceQueueEnum } from '@retail-inventory/common';
 import { AppModule } from './app';
-import { MicroserviceClientQueueEnum } from '@retail-inventory/common';
 
-async function bootstrap() {
-  const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
-    transport: Transport.RMQ,
-    options: {
-      urls: [process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672'],
-      noAck: false,
-      queue: MicroserviceClientQueueEnum.NOTIFICATION_EVENTS,
-      queueOptions: {
-        durable: true,
+((): void => {
+  const logger = new Logger('NotificationServiceBootstrap');
+
+  void (async (): Promise<void> => {
+    const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
+      transport: Transport.RMQ,
+      options: {
+        urls: [process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672'],
+        noAck: false,
+        queue: MicroserviceQueueEnum.NOTIFICATION_EVENTS,
+        queueOptions: {
+          durable: true,
+        },
       },
-    },
+    });
+
+    await app.listen();
+
+    logger.log('Microservice is listening for messages');
+  })().catch((e: Error) => {
+    logger.error(e.message, e.stack);
+
+    process.exit(1);
   });
-
-  const logger = new Logger('NotificationService');
-  await app.listen();
-  logger.log('Notification Worker is listening for events');
-}
-
-bootstrap().catch((err) => {
-  console.error('Notification bootstrap failed', err);
-  process.exit(1);
-});
+})();

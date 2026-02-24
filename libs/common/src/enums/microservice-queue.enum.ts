@@ -1,4 +1,4 @@
-export enum MicroserviceClientQueueEnum {
+export enum MicroserviceQueueEnum {
   INVENTORY_QUEUE = 'inventory_queue',
   ORDER_QUEUE = 'order_queue',
   NOTIFICATION_EVENTS = 'notification_events',
