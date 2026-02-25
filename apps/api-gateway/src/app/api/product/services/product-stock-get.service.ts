@@ -3,11 +3,10 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
 import {
-  IProductStockGet,
   MicroserviceClientNameEnum,
   MicroserviceMessagePatternEnum,
-  ProductStockDto,
 } from '@retail-inventory/common';
+import { IProductStockGet, ProductStockDto } from '@retail-inventory/inventory';
 
 @Injectable()
 export class ProductStockGetService {

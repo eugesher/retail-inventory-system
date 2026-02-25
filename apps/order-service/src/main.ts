@@ -1,10 +1,10 @@
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
 import { MicroserviceQueueEnum } from '@retail-inventory/common';
 import { AppModule } from './app';
-import { ConfigService } from '@nestjs/config';
 
 ((): void => {
   const logger = new Logger('OrderServiceBootstrap');

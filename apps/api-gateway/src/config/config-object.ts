@@ -1,5 +1,6 @@
 import { ConfigObject } from '@nestjs/config';
+import { ConfigPropertyKeyEnum } from '@retail-inventory/config';
 
 export const configObject: ConfigObject = {
-  ['use-api-reference']: process.env.NODE_ENV !== 'production',
+  [ConfigPropertyKeyEnum.USE_API_REFERENCE]: process.env.NODE_ENV !== 'production',
 };

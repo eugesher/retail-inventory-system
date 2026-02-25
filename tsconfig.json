@@ -17,10 +17,12 @@
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@retail-inventory/config": ["libs/config/src"],
-      "@retail-inventory/config/*": ["libs/config/src/*"],
-      "@retail-inventory/common": ["libs/common/src"],
-      "@retail-inventory/common/*": ["libs/common/src/*"]
+      "@retail-inventory/common": ["libs/common"],
+      "@retail-inventory/config": ["libs/config"],
+      "@retail-inventory/config/*": ["libs/config/*"],
+      "@retail-inventory/enums": ["libs/enums"],
+      "@retail-inventory/enums/*": ["libs/enums/*"],
+      "@retail-inventory/inventory": ["libs/inventory"]
     }
   }
 }

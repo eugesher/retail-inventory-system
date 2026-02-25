@@ -33,8 +33,6 @@ export default typescriptEslint.config(
       quotes: ['warn', 'single'],
       semi: ['error', 'always'],
 
-      // '@typescript-eslint/no-unsafe-member-access': ['error', { allowOptionalChaining: true }],
-
       '@typescript-eslint/explicit-member-accessibility': [
         'error',
         { overrides: { constructors: 'off' } },

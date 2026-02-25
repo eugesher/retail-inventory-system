@@ -8,7 +8,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
-import { ProductStockDto } from '@retail-inventory/common';
+import { ProductStockDto } from '@retail-inventory/inventory';
 import { ProductStockGetService } from './services';
 
 @ApiTags('Product')

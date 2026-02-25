@@ -1,10 +1,11 @@
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 
 import { AppModule } from './app';
+import { ConfigPropertyPathEnum } from '@retail-inventory/config';
 
 ((): void => {
   const logger = new Logger('ApiGatewayBootstrap');
@@ -15,7 +16,9 @@ import { AppModule } from './app';
     const configService = app.get(ConfigService);
     const apiPrefix = configService.get<string>('API_GATEWAY_PREFIX')!;
     const port = configService.get<number>('API_GATEWAY_PORT')!;
-    const useApiReference = configService.get<boolean>('api-gateway.use-api-reference');
+    const useApiReference = configService.get<boolean>(
+      ConfigPropertyPathEnum.API_GATEWAY_USE_API_REFERENCE,
+    );
 
     app.setGlobalPrefix(apiPrefix);
     app.useGlobalPipes(

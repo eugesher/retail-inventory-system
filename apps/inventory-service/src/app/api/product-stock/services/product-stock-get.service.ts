@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { maxBy, omit, sumBy } from 'lodash';
 import { Repository } from 'typeorm';
 
-import { IProductStockGet, ProductStockDto } from '@retail-inventory/common';
+import { IProductStockGet, ProductStockDto } from '@retail-inventory/inventory';
 import { ProductStock } from '../../../common/entities';
 
 @Injectable()

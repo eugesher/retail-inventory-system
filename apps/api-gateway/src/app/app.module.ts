@@ -1,13 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
-import { ConfigModuleConfiguration } from '@retail-inventory/config';
+import { ConfigFactoryTokenEnum, ConfigModuleConfiguration } from '@retail-inventory/config';
 import { configObject } from '../config';
 import { ProductModule } from './api';
 
 @Module({
   imports: [
-    ConfigModule.forRoot(new ConfigModuleConfiguration('api-gateway', configObject)),
+    ConfigModule.forRoot(
+      new ConfigModuleConfiguration(ConfigFactoryTokenEnum.API_GATEWAY, configObject),
+    ),
     ProductModule,
   ],
 })
