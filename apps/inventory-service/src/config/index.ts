@@ -1,2 +1,2 @@
-export * from './config-module-options';
+export * from './config-object';
 export * from './typeorm-module-configuration';

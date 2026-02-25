@@ -1,2 +1,2 @@
-export * from './configuration';
-export * from './validation-schema';
+export * from './config-module-configuration';
+export * from './global-config-object';

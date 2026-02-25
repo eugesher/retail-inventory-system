@@ -4,19 +4,20 @@ import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
 import { MicroserviceQueueEnum } from '@retail-inventory/common';
 import { AppModule } from './app';
+import { ConfigService } from '@nestjs/config';
 
 ((): void => {
   const logger = new Logger('OrderServiceBootstrap');
 
   void (async (): Promise<void> => {
+    const configService = new ConfigService();
+
     const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
       transport: Transport.RMQ,
       options: {
-        urls: [process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672'],
+        urls: [configService.get<string>('RABBITMQ_URL')!],
         queue: MicroserviceQueueEnum.ORDER_QUEUE,
-        queueOptions: {
-          durable: true,
-        },
+        queueOptions: { durable: true },
       },
     });
 

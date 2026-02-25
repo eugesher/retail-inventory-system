@@ -1,1 +1,1 @@
-export * from './config-module-options';
+export * from './config-object';

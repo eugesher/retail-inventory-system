@@ -9,7 +9,7 @@ export class TypeormModuleConfiguration implements TypeOrmModuleAsyncOptions {
   constructor(entities: TypeOrmModuleOptions['entities']) {
     this.useFactory = (configService: ConfigService): TypeOrmModuleOptions => ({
       url: configService.get<string>('DATABASE_URL'),
-      logging: configService.get<boolean>('DATABASE_LOGGING'),
+      logging: configService.get<boolean>('global.database-logging'),
       type: 'mysql',
       synchronize: false,
       entities,

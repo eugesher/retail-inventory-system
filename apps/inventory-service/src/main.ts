@@ -11,6 +11,7 @@ import { AppModule } from './app';
 
   void (async (): Promise<void> => {
     const configService = new ConfigService();
+
     const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
       transport: Transport.RMQ,
       options: {
