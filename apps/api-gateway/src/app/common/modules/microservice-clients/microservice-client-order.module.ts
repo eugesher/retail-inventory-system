@@ -3,13 +3,13 @@ import { ConfigModule } from '@nestjs/config';
 import { ClientsModule } from '@nestjs/microservices';
 
 import { MicroserviceClientNameEnum, MicroserviceQueueEnum } from '@retail-inventory/common';
-import { MicroserviceClientOptions } from './config';
+import { MicroserviceClientConfiguration } from './config';
 
 @Module({
   imports: [
     ConfigModule,
     ClientsModule.registerAsync([
-      new MicroserviceClientOptions(
+      new MicroserviceClientConfiguration(
         MicroserviceClientNameEnum.ORDER_SERVICE,
         MicroserviceQueueEnum.ORDER_QUEUE,
       ),

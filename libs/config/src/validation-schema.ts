@@ -7,6 +7,7 @@ export const validationSchema = Joi.object({
   API_GATEWAY_PREFIX: Joi.string().required(),
 
   DATABASE_URL: Joi.string().uri({ scheme: 'mysql' }).required(),
+  DATABASE_LOGGING: Joi.boolean().required(),
 
   RABBITMQ_URL: Joi.string().uri({ scheme: 'amqp' }).required(),
 

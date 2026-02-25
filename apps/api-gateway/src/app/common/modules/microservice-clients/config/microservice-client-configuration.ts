@@ -3,8 +3,9 @@ import { ClientsProviderAsyncOptions, RmqOptions, Transport } from '@nestjs/micr
 
 import { MicroserviceClientNameEnum, MicroserviceQueueEnum } from '@retail-inventory/common';
 
-export class MicroserviceClientOptions implements ClientsProviderAsyncOptions {
+export class MicroserviceClientConfiguration implements ClientsProviderAsyncOptions {
   public readonly useFactory: ClientsProviderAsyncOptions['useFactory'];
+
   public readonly inject = [ConfigService];
 
   constructor(

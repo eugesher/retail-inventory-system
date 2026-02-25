@@ -1,1 +1,1 @@
-export * from './microservice-client-options';
+export * from './microservice-client-configuration';
