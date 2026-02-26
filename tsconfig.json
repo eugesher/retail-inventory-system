@@ -19,9 +19,6 @@
     "paths": {
       "@retail-inventory/common": ["libs/common"],
       "@retail-inventory/config": ["libs/config"],
-      "@retail-inventory/config/*": ["libs/config/*"],
-      "@retail-inventory/enums": ["libs/enums"],
-      "@retail-inventory/enums/*": ["libs/enums/*"],
       "@retail-inventory/inventory": ["libs/inventory"]
     }
   }
