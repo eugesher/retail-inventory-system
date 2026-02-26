@@ -1,5 +1,4 @@
-import { Controller, Get, Param, Query, Inject } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
@@ -8,21 +7,14 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import { firstValueFrom } from 'rxjs';
 
-import {
-  IProductStockGet,
-  MicroserviceClientNameEnum,
-  MicroserviceMessagePatternEnum,
-  ProductStockDto,
-} from '@retail-inventory/common';
+import { ProductStockDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetService } from './services';
 
 @ApiTags('Product')
 @Controller('products')
 export class ProductController {
-  constructor(
-    @Inject(MicroserviceClientNameEnum.INVENTORY_SERVICE) private inventoryClient: ClientProxy,
-  ) {}
+  constructor(private readonly stockGetService: ProductStockGetService) {}
 
   @ApiOperation({
     summary: 'Get current stock levels for a product',
@@ -50,17 +42,6 @@ export class ProductController {
     @Param('productId') productId: string,
     @Query('storeIds') storeIds?: string,
   ): Promise<ProductStockDto> {
-    const data: IProductStockGet = { productId };
-
-    if (storeIds) {
-      data.storeIds = storeIds.split(',').map((s) => s.trim());
-    }
-
-    return await firstValueFrom(
-      this.inventoryClient.send<ProductStockDto, IProductStockGet>(
-        MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
-        data,
-      ),
-    );
+    return await this.stockGetService.execute(productId, storeIds);
   }
 }

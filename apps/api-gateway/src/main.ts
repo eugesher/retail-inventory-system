@@ -1,52 +1,51 @@
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 
+import { ConfigPropertyPathEnum } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    bufferLogs: true,
-  });
+((): void => {
+  const logger = new Logger('ApiGatewayBootstrap');
 
-  const configService = app.get(ConfigService);
-  const port = configService.get<number>('API_GATEWAY_PORT', 3000);
-  const useApiReference = configService.get<boolean>('api-gateway.use-api-reference');
-  const logger = new Logger('Bootstrap');
+  void (async (): Promise<void> => {
+    const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
-  app.setGlobalPrefix('api');
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
-
-  if (useApiReference) {
-    const documentConfig = new DocumentBuilder()
-      .setTitle('Retail Inventory System')
-      .addServer(`http://localhost:${port}`, 'Local')
-      .build();
-    const document = SwaggerModule.createDocument(app, documentConfig);
-
-    app.use(
-      '/reference',
-      apiReference({
-        content: document,
-      }),
+    const configService = app.get(ConfigService);
+    const apiPrefix = configService.get<string>('API_GATEWAY_PREFIX')!;
+    const port = configService.get<number>('API_GATEWAY_PORT')!;
+    const useApiReference = configService.get<boolean>(
+      ConfigPropertyPathEnum.API_GATEWAY_USE_API_REFERENCE,
     );
-  }
 
-  await app.listen(port);
+    app.setGlobalPrefix(apiPrefix);
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
+    );
 
-  logger.log(`API Gateway is running on port: ${port}`);
-}
+    if (useApiReference) {
+      const documentConfig = new DocumentBuilder()
+        .setTitle('Retail Inventory System API Gateway')
+        .addServer(`http://localhost:${port}`, 'Local')
+        .build();
+      const document = SwaggerModule.createDocument(app, documentConfig);
 
-void bootstrap().catch((err) => {
-  console.error('Bootstrap failed', err);
-  process.exit(1);
-});
+      app.use(
+        '/reference',
+        apiReference({
+          content: document,
+        }),
+      );
+    }
+
+    await app.listen(port);
+
+    logger.log(`API Gateway is running on port: ${port}`);
+  })().catch((e: Error) => {
+    logger.error(e.message, e.stack);
+
+    process.exit(1);
+  });
+})();
