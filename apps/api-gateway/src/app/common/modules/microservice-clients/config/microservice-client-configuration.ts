@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { ClientsProviderAsyncOptions, RmqOptions, Transport } from '@nestjs/microservices';
 
-import { MicroserviceClientNameEnum, MicroserviceQueueEnum } from '@retail-inventory/common';
+import { MicroserviceClientNameEnum, MicroserviceQueueEnum } from '@retail-inventory-system/common';
 
 export class MicroserviceClientConfiguration implements ClientsProviderAsyncOptions {
   public readonly useFactory: ClientsProviderAsyncOptions['useFactory'];

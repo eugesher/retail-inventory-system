@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ClientsModule } from '@nestjs/microservices';
 
-import { MicroserviceClientNameEnum, MicroserviceQueueEnum } from '@retail-inventory/common';
+import { MicroserviceClientNameEnum, MicroserviceQueueEnum } from '@retail-inventory-system/common';
 import { MicroserviceClientConfiguration } from './config';
 
 @Module({

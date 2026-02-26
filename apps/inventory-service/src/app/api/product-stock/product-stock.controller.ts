@@ -1,8 +1,8 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 
-import { MicroserviceMessagePatternEnum } from '@retail-inventory/common';
-import { IProductStockGet, ProductStockDto } from '@retail-inventory/inventory';
+import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/common';
+import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
 import { ProductStockGetService } from './services';
 
 @Controller()

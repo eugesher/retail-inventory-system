@@ -5,8 +5,8 @@ import { firstValueFrom } from 'rxjs';
 import {
   MicroserviceClientNameEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory/common';
-import { IProductStockGet, ProductStockDto } from '@retail-inventory/inventory';
+} from '@retail-inventory-system/common';
+import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
 
 @Injectable()
 export class ProductStockGetService {

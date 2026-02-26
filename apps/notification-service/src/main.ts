@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
-import { MicroserviceQueueEnum } from '@retail-inventory/common';
+import { MicroserviceQueueEnum } from '@retail-inventory-system/common';
 import { AppModule } from './app';
 
 ((): void => {

@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleAsyncOptions, TypeOrmModuleOptions } from '@nestjs/typeorm';
 
-import { ConfigPropertyPathEnum } from '@retail-inventory/config';
+import { ConfigPropertyPathEnum } from '@retail-inventory-system/config';
 
 export class TypeormModuleConfiguration implements TypeOrmModuleAsyncOptions {
   public readonly useFactory: TypeOrmModuleAsyncOptions['useFactory'];
