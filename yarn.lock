@@ -3362,9 +3362,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"inventory-service@workspace:apps/inventory-service":
+"inventory-microservice@workspace:apps/inventory-microservice":
   version: 0.0.0-use.local
-  resolution: "inventory-service@workspace:apps/inventory-service"
+  resolution: "inventory-microservice@workspace:apps/inventory-microservice"
   languageName: unknown
   linkType: soft
 
@@ -4069,9 +4069,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"notification-service@workspace:apps/notification-service":
+"notification-microservice@workspace:apps/notification-microservice":
   version: 0.0.0-use.local
-  resolution: "notification-service@workspace:apps/notification-service"
+  resolution: "notification-microservice@workspace:apps/notification-microservice"
   languageName: unknown
   linkType: soft
 
@@ -4155,12 +4155,6 @@ __metadata:
   checksum: 10c0/10ff14aace236d0e2f044193362b22edce4784add08b779eccc8f8ef97195cae1248db8ec1ec5f5ff076f91acbe573f5f42a98c19b78dba8c54eefff983cae85
   languageName: node
   linkType: hard
-
-"order-service@workspace:apps/order-service":
-  version: 0.0.0-use.local
-  resolution: "order-service@workspace:apps/order-service"
-  languageName: unknown
-  linkType: soft
 
 "p-limit@npm:^3.0.2":
   version: 3.1.0
@@ -4536,6 +4530,12 @@ __metadata:
     typescript-eslint: "npm:^8.55.0"
     webpack: "npm:^5.105.2"
     webpack-node-externals: "npm:^3.0.0"
+  languageName: unknown
+  linkType: soft
+
+"retail-microservice@workspace:apps/retail-microservice":
+  version: 0.0.0-use.local
+  resolution: "retail-microservice@workspace:apps/retail-microservice"
   languageName: unknown
   linkType: soft
 

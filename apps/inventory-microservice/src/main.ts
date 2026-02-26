@@ -7,7 +7,7 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/common';
 import { AppModule } from './app';
 
 ((): void => {
-  const logger = new Logger('OrderServiceBootstrap');
+  const logger = new Logger('InventoryMicroserviceBootstrap');
 
   void (async (): Promise<void> => {
     const configService = new ConfigService();
@@ -16,7 +16,7 @@ import { AppModule } from './app';
       transport: Transport.RMQ,
       options: {
         urls: [configService.get<string>('RABBITMQ_URL')!],
-        queue: MicroserviceQueueEnum.ORDER_QUEUE,
+        queue: MicroserviceQueueEnum.INVENTORY_QUEUE,
         queueOptions: { durable: true },
       },
     });

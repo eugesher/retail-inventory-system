@@ -10,7 +10,7 @@ import { MicroserviceClientConfiguration } from './config';
     ConfigModule,
     ClientsModule.registerAsync([
       new MicroserviceClientConfiguration(
-        MicroserviceClientNameEnum.INVENTORY_SERVICE,
+        MicroserviceClientNameEnum.INVENTORY_MICROSERVICE,
         MicroserviceQueueEnum.INVENTORY_QUEUE,
       ),
     ]),

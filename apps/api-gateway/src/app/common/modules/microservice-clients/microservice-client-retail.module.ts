@@ -10,11 +10,11 @@ import { MicroserviceClientConfiguration } from './config';
     ConfigModule,
     ClientsModule.registerAsync([
       new MicroserviceClientConfiguration(
-        MicroserviceClientNameEnum.ORDER_SERVICE,
-        MicroserviceQueueEnum.ORDER_QUEUE,
+        MicroserviceClientNameEnum.RETAIL_MICROSERVICE,
+        MicroserviceQueueEnum.RETAIL_QUEUE,
       ),
     ]),
   ],
   exports: [ClientsModule],
 })
-export class MicroserviceClientOrderModule {}
+export class MicroserviceClientRetailModule {}

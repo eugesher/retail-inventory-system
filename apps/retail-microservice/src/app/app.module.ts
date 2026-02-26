@@ -7,7 +7,7 @@ import { configObject } from '../config';
 @Module({
   imports: [
     ConfigModule.forRoot(
-      new ConfigModuleConfiguration(ConfigFactoryTokenEnum.NOTIFICATION_SERVICE, configObject),
+      new ConfigModuleConfiguration(ConfigFactoryTokenEnum.RETAIL_MICROSERVICE, configObject),
     ),
   ],
 })

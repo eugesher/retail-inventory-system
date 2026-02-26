@@ -24,31 +24,31 @@
         "tsConfigPath": "apps/api-gateway/tsconfig.app.json"
       }
     },
-    "inventory-service": {
+    "inventory-microservice": {
       "type": "application",
-      "root": "apps/inventory-service",
+      "root": "apps/inventory-microservice",
       "entryFile": "main",
-      "sourceRoot": "apps/inventory-service/src",
+      "sourceRoot": "apps/inventory-microservice/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/inventory-service/tsconfig.app.json"
+        "tsConfigPath": "apps/inventory-microservice/tsconfig.app.json"
       }
     },
-    "order-service": {
+    "retail-microservice": {
       "type": "application",
-      "root": "apps/order-service",
+      "root": "apps/retail-microservice",
       "entryFile": "main",
-      "sourceRoot": "apps/order-service/src",
+      "sourceRoot": "apps/retail-microservice/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/order-service/tsconfig.app.json"
+        "tsConfigPath": "apps/retail-microservice/tsconfig.app.json"
       }
     },
-    "notification-service": {
+    "notification-microservice": {
       "type": "application",
-      "root": "apps/notification-service",
+      "root": "apps/notification-microservice",
       "entryFile": "main",
-      "sourceRoot": "apps/notification-service/src",
+      "sourceRoot": "apps/notification-microservice/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/notification-service/tsconfig.app.json"
+        "tsConfigPath": "apps/notification-microservice/tsconfig.app.json"
       }
     }
   }

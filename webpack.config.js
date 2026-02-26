@@ -1,3 +1,4 @@
+const { Logger } = require('@nestjs/common');
 const path = require('path');
 const TerserWebpackPlugin = require('terser-webpack-plugin');
 const tsconfigPathsWebpackPlugin = require('tsconfig-paths-webpack-plugin');
@@ -6,18 +7,25 @@ const webpackNodeExternals = require('webpack-node-externals');
 
 module.exports = (options) => {
   const { entry, plugins, resolve } = options;
+  const logger = new Logger('Webpack');
 
-  let projectName = 'default';
+  let appName;
 
   if (entry && typeof entry === 'string') {
     const match = entry.match(/apps\/([^/]+)\/src\/main\.ts$/);
 
     if (match && match[1]) {
-      projectName = match[1];
+      appName = match[1];
     }
   }
 
-  console.log(`[Webpack] Building project: ${projectName}\n`);
+  if (appName) {
+    logger.log(`Building app: ${appName}`);
+  } else {
+    logger.error(`App build failed`);
+
+    process.exit(1);
+  }
 
   return {
     ...options,
@@ -27,7 +35,7 @@ module.exports = (options) => {
       }),
     ],
     output: {
-      path: path.resolve(process.cwd(), 'dist/apps', projectName),
+      path: path.resolve(process.cwd(), 'dist/apps', appName),
       filename: 'main.js',
       libraryTarget: 'commonjs2',
       clean: true,

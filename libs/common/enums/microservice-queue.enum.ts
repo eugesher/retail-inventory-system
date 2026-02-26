@@ -1,5 +1,5 @@
 export enum MicroserviceQueueEnum {
   INVENTORY_QUEUE = 'inventory_queue',
-  ORDER_QUEUE = 'order_queue',
+  RETAIL_QUEUE = 'retail_queue',
   NOTIFICATION_EVENTS = 'notification_events',
 }

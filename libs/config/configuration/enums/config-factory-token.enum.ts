@@ -1,7 +1,7 @@
 export enum ConfigFactoryTokenEnum {
   GLOBAL = 'global',
   API_GATEWAY = 'api-gateway',
-  INVENTORY_SERVICE = 'inventory-service',
-  ORDER_SERVICE = 'order-service',
-  NOTIFICATION_SERVICE = 'notification-service',
+  INVENTORY_MICROSERVICE = 'inventory-microservice',
+  RETAIL_MICROSERVICE = 'retail-microservice',
+  NOTIFICATION_MICROSERVICE = 'notification-microservice',
 }

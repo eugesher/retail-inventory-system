@@ -11,7 +11,7 @@ import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inve
 @Injectable()
 export class ProductStockGetService {
   constructor(
-    @Inject(MicroserviceClientNameEnum.INVENTORY_SERVICE)
+    @Inject(MicroserviceClientNameEnum.INVENTORY_MICROSERVICE)
     private readonly inventoryRmqClient: ClientProxy,
   ) {}
 

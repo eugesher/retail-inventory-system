@@ -75,11 +75,11 @@ services:
     networks:
       - backend
 
-  inventory-service:
+  inventory-microservice:
     build:
-      context: ./apps/inventory-service
+      context: apps/inventory-microservice
       dockerfile: Dockerfile
-    container_name: inventory-service
+    container_name: inventory-microservice
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -93,17 +93,17 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
-      - ./apps/inventory-service:/app
+      - ./apps/inventory-microservice:/app
       - /app/node_modules
     command: yarn start:dev
     networks:
       - backend
 
-  notification-service:
+  notification-microservice:
     build:
-      context: ./apps/notification-service
+      context: ./apps/notification-microservice
       dockerfile: Dockerfile
-    container_name: notification-service
+    container_name: notification-microservice
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -117,17 +117,17 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
-      - ./apps/notification-service:/app
+      - ./apps/notification-microservice:/app
       - /app/node_modules
     command: yarn start:dev
     networks:
       - backend
 
-  order-service:
+  retail-microservice:
     build:
-      context: ./apps/order-service
+      context: apps/retail-microservice
       dockerfile: Dockerfile
-    container_name: order-service
+    container_name: retail-microservice
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -141,7 +141,7 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
-      - ./apps/order-service:/app
+      - ./apps/retail-microservice:/app
       - /app/node_modules
     command: yarn start:dev
     networks:

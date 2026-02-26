@@ -10,7 +10,7 @@ import { MicroserviceClientConfiguration } from './config';
     ConfigModule,
     ClientsModule.registerAsync([
       new MicroserviceClientConfiguration(
-        MicroserviceClientNameEnum.NOTIFICATION_SERVICE,
+        MicroserviceClientNameEnum.NOTIFICATION_MICROSERVICE,
         MicroserviceQueueEnum.NOTIFICATION_EVENTS,
       ),
     ]),

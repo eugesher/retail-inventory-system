@@ -10,7 +10,7 @@ import { ProductStockModule } from './api';
 @Module({
   imports: [
     ConfigModule.forRoot(
-      new ConfigModuleConfiguration(ConfigFactoryTokenEnum.INVENTORY_SERVICE, configObject),
+      new ConfigModuleConfiguration(ConfigFactoryTokenEnum.INVENTORY_MICROSERVICE, configObject),
     ),
     TypeOrmModule.forRootAsync(new TypeormModuleConfiguration(entities)),
     ProductStockModule,
