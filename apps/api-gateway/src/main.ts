@@ -4,8 +4,8 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 
-import { AppModule } from './app';
 import { ConfigPropertyPathEnum } from '@retail-inventory-system/config';
+import { AppModule } from './app';
 
 ((): void => {
   const logger = new Logger('ApiGatewayBootstrap');
