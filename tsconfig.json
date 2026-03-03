@@ -20,7 +20,6 @@
       "@retail-inventory-system/common": ["libs/common"],
       "@retail-inventory-system/config": ["libs/config"],
       "@retail-inventory-system/inventory": ["libs/inventory"],
-      "@retail-inventory-system/microservices": ["libs/microservices"],
       "@retail-inventory-system/retail": ["libs/retail"]
     }
   }

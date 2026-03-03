@@ -4,7 +4,7 @@ import { EventPattern, MessagePattern, Payload } from '@nestjs/microservices';
 import {
   MicroserviceEventPatternEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/microservices';
+} from '@retail-inventory-system/common';
 import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
 import { IOrderCreatedEventPayload } from '@retail-inventory-system/retail';
 import { ProductStockGetService, ProductStockHandleOrderCreateService } from './providers';

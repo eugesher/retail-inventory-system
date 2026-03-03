@@ -6,7 +6,7 @@ import { Repository } from 'typeorm';
 import {
   MicroserviceClientTokenEnum,
   MicroserviceEventPatternEnum,
-} from '@retail-inventory-system/microservices';
+} from '@retail-inventory-system/common';
 import {
   OrderCreateDto,
   OrderCreateResponseDto,

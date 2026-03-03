@@ -10,11 +10,11 @@ import { MicroserviceClientTokenEnum, MicroserviceQueueEnum } from '../enums';
     ConfigModule,
     ClientsModule.registerAsync([
       new MicroserviceClientConfiguration(
-        MicroserviceClientTokenEnum.NOTIFICATION_MICROSERVICE,
-        MicroserviceQueueEnum.NOTIFICATION_EVENTS,
+        MicroserviceClientTokenEnum.RETAIL_MICROSERVICE,
+        MicroserviceQueueEnum.RETAIL_QUEUE,
       ),
     ]),
   ],
   exports: [ClientsModule],
 })
-export class NotificationMicroserviceClientModule {}
+export class MicroserviceClientRetailModule {}
