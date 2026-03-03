@@ -3,13 +3,17 @@ import { ConfigModule } from '@nestjs/config';
 
 import { ConfigFactoryTokenEnum, ConfigModuleConfiguration } from '@retail-inventory-system/config';
 import { configObject } from '../config';
-import { ProductModule } from './api';
+import { OrderModule, ProductModule } from './api';
 
 @Module({
   imports: [
     ConfigModule.forRoot(
-      new ConfigModuleConfiguration(ConfigFactoryTokenEnum.API_GATEWAY, configObject),
+      new ConfigModuleConfiguration({
+        token: ConfigFactoryTokenEnum.API_GATEWAY,
+        configObject,
+      }),
     ),
+    OrderModule,
     ProductModule,
   ],
 })
