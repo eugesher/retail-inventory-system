@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 
-import { MicroserviceClientInventoryModule } from '../../common/modules';
-import { ProductStockGetService } from './services';
+import { InventoryMicroserviceClientModule } from '@retail-inventory-system/microservices';
+import { ProductStockGetService } from './providers';
 import { ProductController } from './product.controller';
 
 @Module({
-  imports: [MicroserviceClientInventoryModule],
+  imports: [InventoryMicroserviceClientModule],
   controllers: [ProductController],
   providers: [ProductStockGetService],
 })

@@ -9,10 +9,10 @@ import {
 } from '@nestjs/swagger';
 
 import { ProductStockDto } from '@retail-inventory-system/inventory';
-import { ProductStockGetService } from './services';
+import { ProductStockGetService } from './providers';
 
 @ApiTags('Product')
-@Controller('products')
+@Controller('product')
 export class ProductController {
   constructor(private readonly stockGetService: ProductStockGetService) {}
 
