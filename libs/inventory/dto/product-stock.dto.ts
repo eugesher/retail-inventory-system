@@ -2,7 +2,7 @@ import { ApiResponseProperty } from '@nestjs/swagger';
 
 class ProductStockStockItemDto {
   @ApiResponseProperty()
-  public storeId: string;
+  public storageId: string;
 
   @ApiResponseProperty()
   public quantity: number;
@@ -13,7 +13,7 @@ class ProductStockStockItemDto {
 
 export class ProductStockDto {
   @ApiResponseProperty()
-  public productId: string;
+  public productId: number;
 
   @ApiResponseProperty()
   public quantity: number;

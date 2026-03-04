@@ -24,7 +24,7 @@ export class OrderItemDto {
   @ApiProperty({ example: 'store-001' })
   @IsString()
   @IsOptional()
-  public storeId?: string;
+  public storageId?: string;
 }
 
 export class OrderCreateDto {

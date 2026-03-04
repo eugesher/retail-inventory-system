@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
-import { CleanBootstrapLogger, MicroserviceQueueEnum } from '@retail-inventory-system/common';
+import { SystemLogger, MicroserviceQueueEnum } from '@retail-inventory-system/common';
 import { AppModule } from './app';
 
 ((): void => {
@@ -13,7 +13,7 @@ import { AppModule } from './app';
     const configService = new ConfigService();
 
     const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
-      logger: new CleanBootstrapLogger(),
+      logger: new SystemLogger(),
       transport: Transport.RMQ,
       options: {
         urls: [configService.get<string>('RABBITMQ_URL')!],

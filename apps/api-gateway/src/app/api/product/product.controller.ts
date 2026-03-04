@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
@@ -19,7 +19,7 @@ export class ProductController {
   @ApiOperation({
     summary: 'Get current stock levels for a product',
     description:
-      'Returns available quantity per store. If no storeIds provided → returns all stores.',
+      'Returns available quantity per store. If no storageIds provided → returns all stores.',
   })
   @ApiParam({
     name: 'productId',
@@ -27,7 +27,7 @@ export class ProductController {
     example: 'prod-001',
   })
   @ApiQuery({
-    name: 'storeIds',
+    name: 'storageIds',
     required: false,
     description: 'Comma-separated list of store IDs (optional)',
     example: 'store-001,store-002',
@@ -39,9 +39,9 @@ export class ProductController {
   @ApiProduces('application/json')
   @Get(':productId/stock')
   public async getProductStock(
-    @Param('productId') productId: string,
-    @Query('storeIds') storeIds?: string,
+    @Param('productId', ParseIntPipe) productId: number,
+    @Query('storageIds') storageIds?: string,
   ): Promise<ProductStockDto> {
-    return await this.stockGetService.execute(productId, storeIds);
+    return await this.stockGetService.execute(productId, storageIds);
   }
 }

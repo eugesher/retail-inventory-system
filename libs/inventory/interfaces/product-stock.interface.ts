@@ -1,4 +1,4 @@
 export interface IProductStockGet {
-  productId: string;
-  storeIds?: string[];
+  productId: number;
+  storageIds?: string[];
 }

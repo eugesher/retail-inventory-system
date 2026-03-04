@@ -10,7 +10,7 @@ export class Order {
   public customerId: string;
 
   @Column('json')
-  public items: { productId: string; quantity: number; storeId?: string }[];
+  public items: { productId: string; quantity: number; storageId?: string }[];
 
   @Column()
   public shippingAddress: string;

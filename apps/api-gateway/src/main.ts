@@ -4,7 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 
-import { CleanBootstrapLogger } from '@retail-inventory-system/common';
+import { SystemLogger } from '@retail-inventory-system/common';
 import { ConfigPropertyPathEnum } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 
@@ -13,7 +13,7 @@ import { AppModule } from './app';
 
   void (async (): Promise<void> => {
     const app = await NestFactory.create(AppModule, {
-      logger: new CleanBootstrapLogger(),
+      logger: new SystemLogger(),
       bufferLogs: true,
     });
 
@@ -36,12 +36,7 @@ import { AppModule } from './app';
         .build();
       const document = SwaggerModule.createDocument(app, documentConfig);
 
-      app.use(
-        '/reference',
-        apiReference({
-          content: document,
-        }),
-      );
+      app.use('/reference', apiReference({ content: document }));
     }
 
     await app.listen(port);
