@@ -18,8 +18,12 @@ export class Order {
   @Column({ default: 0 })
   public total: number;
 
-  @Column({ default: OrderStatusEnum.PENDING })
-  public status: string;
+  @Column({
+    type: 'enum',
+    enum: OrderStatusEnum,
+    default: OrderStatusEnum.PENDING,
+  })
+  public status: OrderStatusEnum;
 
   @CreateDateColumn()
   public createdAt: Date;
