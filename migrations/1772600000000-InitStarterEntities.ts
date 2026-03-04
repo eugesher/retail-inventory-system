@@ -62,6 +62,13 @@ export class InitStarterEntities1772600000000 implements MigrationInterface {
       );
     `);
 
+    await queryRunner.query('INSERT INTO order_status (id, name, color) VALUES ?;', [
+      [
+        ['pending', 'Pending', '44CCFF'],
+        ['confirmed', 'Confirmed', '35FF69'],
+      ],
+    ]);
+
     await queryRunner.query(`
       CREATE TABLE \`order\` (
         id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
