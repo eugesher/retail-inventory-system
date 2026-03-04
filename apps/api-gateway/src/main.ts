@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 
+import { CleanBootstrapLogger } from '@retail-inventory-system/common';
 import { ConfigPropertyPathEnum } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 
@@ -11,7 +12,10 @@ import { AppModule } from './app';
   const logger = new Logger('ApiGatewayBootstrap');
 
   void (async (): Promise<void> => {
-    const app = await NestFactory.create(AppModule, { bufferLogs: true });
+    const app = await NestFactory.create(AppModule, {
+      logger: new CleanBootstrapLogger(),
+      bufferLogs: true,
+    });
 
     const configService = app.get(ConfigService);
     const apiPrefix = configService.get<string>('API_GATEWAY_PREFIX')!;
