@@ -1,9 +1,7 @@
-import { OrderItemDto } from '../dto';
+import { OrderCreateProductDto } from '../dto';
 
-export interface IOrderCreatedEventPayload {
-  orderId: string;
-  customerId: string;
-  items: OrderItemDto[];
-  total: number;
-  createdAt: Date;
+export interface IOrderConfirmedEventPayload {
+  orderId: number;
+  customerId: number;
+  products: OrderCreateProductDto[];
 }

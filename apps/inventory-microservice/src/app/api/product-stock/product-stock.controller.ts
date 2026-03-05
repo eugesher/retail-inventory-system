@@ -4,16 +4,16 @@ import { EventPattern, MessagePattern, Payload } from '@nestjs/microservices';
 import {
   MicroserviceEventPatternEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/microservices';
+} from '@retail-inventory-system/common';
 import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
-import { IOrderCreatedEventPayload } from '@retail-inventory-system/retail';
-import { ProductStockGetService, ProductStockHandleOrderCreateService } from './providers';
+import { IOrderConfirmedEventPayload } from '@retail-inventory-system/retail';
+import { ProductStockGetService, ProductStockOrderConfirmedHandleService } from './providers';
 
 @Controller()
 export class ProductStockController {
   constructor(
     private readonly stockGetService: ProductStockGetService,
-    private readonly stockReserveService: ProductStockHandleOrderCreateService,
+    private readonly stockReserveService: ProductStockOrderConfirmedHandleService,
   ) {}
 
   @MessagePattern(MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET)
@@ -22,7 +22,7 @@ export class ProductStockController {
   }
 
   @EventPattern(MicroserviceEventPatternEnum.RETAIL_ORDER_CREATED)
-  public async handleOrderCreated(@Payload() event: IOrderCreatedEventPayload): Promise<void> {
+  public async handleOrderCreated(@Payload() event: IOrderConfirmedEventPayload): Promise<void> {
     await this.stockReserveService.execute(event);
   }
 }

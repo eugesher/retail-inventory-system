@@ -1,16 +1,19 @@
-import { Column, Entity, PrimaryColumn } from 'typeorm';
+import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('product_stock')
 export class ProductStock {
-  @PrimaryColumn()
-  public productId: string;
+  @PrimaryGeneratedColumn()
+  public id: number;
 
-  @PrimaryColumn()
-  public storeId: string;
+  @Column()
+  public productId: number;
+
+  @Column()
+  public storageId: string;
 
   @Column()
   public quantity: number;
 
   @Column()
-  public updatedAt: Date;
+  public createdAt: Date;
 }

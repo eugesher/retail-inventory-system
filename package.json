@@ -11,7 +11,7 @@
     "build:inventory-microservice": "nest build inventory-microservice",
     "build:retail-microservice": "nest build retail-microservice",
     "build:notification-microservice": "nest build notification-microservice",
-    "start:dev": "concurrently --names \"APIGATWY,INVTRYMS,RETAILMS,NTFCTNMS\" --prefix \"[{name}]\" --prefix-colors \"magenta,blue,cyan,yellow\" \"yarn start:dev:api-gateway\" \"yarn start:dev:inventory-microservice\" \"yarn start:dev:retail-microservice\" \"yarn start:dev:notification-microservice\"",
+    "start:dev": "concurrently --names \"API-GTWY,IVTRY-MS,RTAIL-MS,NFCTN-MS\" --prefix \"[{name}]\" --prefix-colors \"magenta,blue,cyan,yellow\" \"yarn start:dev:api-gateway\" \"yarn start:dev:inventory-microservice\" \"yarn start:dev:retail-microservice\" \"yarn start:dev:notification-microservice\"",
     "start:dev:api-gateway": "nest start api-gateway --watch",
     "start:dev:inventory-microservice": "nest start inventory-microservice --watch",
     "start:dev:retail-microservice": "nest start retail-microservice --watch",
@@ -53,6 +53,7 @@
     "ts-loader": "^9.5.4",
     "tsconfig-paths-webpack-plugin": "^4.2.0",
     "typeorm": "^0.3.28",
+    "typeorm-naming-strategies": "^4.1.0",
     "webpack": "^5.105.2",
     "webpack-node-externals": "^3.0.0"
   },

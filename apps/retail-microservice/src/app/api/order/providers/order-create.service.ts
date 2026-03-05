@@ -1,19 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DeepPartial, Repository } from 'typeorm';
 
 import {
   MicroserviceClientTokenEnum,
   MicroserviceEventPatternEnum,
-} from '@retail-inventory-system/microservices';
+} from '@retail-inventory-system/common';
 import {
   OrderCreateDto,
   OrderCreateResponseDto,
   OrderStatusEnum,
-  IOrderCreatedEventPayload,
+  IOrderConfirmedEventPayload,
+  OrderProductStatusEnum,
 } from '@retail-inventory-system/retail';
-import { Order } from '../../../common/entities';
+import { Order, OrderProduct } from '../../../common/entities';
 
 @Injectable()
 export class OrderCreateService {
@@ -25,27 +26,38 @@ export class OrderCreateService {
   ) {}
 
   public async execute(dto: OrderCreateDto): Promise<OrderCreateResponseDto> {
-    const total = dto.items.reduce((sum, item) => sum + item.quantity * 10, 0);
+    const { customerId, products } = dto;
+    const orderProducts: DeepPartial<OrderProduct>[] = [];
+
+    for (const product of products) {
+      const { productId, quantity } = product;
+
+      for (let i = 0; i < quantity; i++) {
+        orderProducts.push({
+          productId,
+          statusId: OrderProductStatusEnum.PENDING,
+        });
+      }
+    }
 
     const order = this.orderRepository.create({
-      customerId: dto.customerId,
-      items: dto.items,
-      shippingAddress: dto.shippingAddress,
-      total,
-      status: OrderStatusEnum.PENDING,
+      customerId,
+      products: orderProducts,
+      statusId: OrderStatusEnum.PENDING,
     });
 
     const saved = await this.orderRepository.save(order);
 
-    const event: IOrderCreatedEventPayload = {
+    const event: IOrderConfirmedEventPayload = {
       orderId: saved.id,
       customerId: saved.customerId,
-      items: saved.items,
-      total: saved.total,
-      createdAt: saved.createdAt,
+      products,
     };
 
-    this.inventoryMicroserviceClient.emit(MicroserviceEventPatternEnum.RETAIL_ORDER_CREATED, event);
+    this.inventoryMicroserviceClient.emit<void, IOrderConfirmedEventPayload>(
+      MicroserviceEventPatternEnum.RETAIL_ORDER_CREATED,
+      event,
+    );
 
     return {
       orderId: saved.id,

@@ -5,7 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/microservices';
+} from '@retail-inventory-system/common';
 import { OrderCreateDto, OrderCreateResponseDto } from '@retail-inventory-system/retail';
 
 @Injectable()

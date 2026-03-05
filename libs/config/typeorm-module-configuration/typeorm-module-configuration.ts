@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleAsyncOptions, TypeOrmModuleOptions } from '@nestjs/typeorm';
+import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
 
 import { ConfigPropertyPathEnum } from '../configuration/enums';
 
@@ -16,6 +17,7 @@ export class TypeormModuleConfiguration implements TypeOrmModuleAsyncOptions {
         type: 'mysql',
         synchronize: false,
         entities,
+        namingStrategy: new SnakeNamingStrategy(),
       };
     };
   }

@@ -14,19 +14,34 @@ export class ProductStockGetService {
   ) {}
 
   public async execute(data: IProductStockGet): Promise<ProductStockDto> {
-    const { productId, storeIds } = data;
+    interface IProductStockRaw {
+      storageId: string;
+      quantity: `${number}`;
+      updatedAt: Date;
+    }
+
+    const { productId, storageIds } = data;
 
     const builder = this.productStockRepository
       .createQueryBuilder('ProductStock')
-      .where('ProductStock.productId = :productId', { productId });
+      .select([
+        'ProductStock.storageId        AS storageId',
+        'SUM(ProductStock.quantity)  AS quantity',
+        'MAX(ProductStock.createdAt) AS updatedAt',
+      ])
+      .where('ProductStock.productId = :productId', { productId })
+      .groupBy('storageId');
 
-    if (storeIds && storeIds.length > 0) {
-      builder.andWhere('ProductStock.storeId IN (:...storeIds)', { storeIds });
+    if (storageIds && storageIds.length > 0) {
+      builder.andWhere('ProductStock.storeId IN (:...storageIds)', { storageIds });
     }
 
-    const stock = await builder.getMany();
-    const items = stock.map((item) => omit(item, 'productId'));
-    const quantity = sumBy(stock, 'quantity');
+    const stock = await builder.getRawMany<IProductStockRaw>();
+    const items = stock.map((item) => ({
+      ...omit(item, 'productId'),
+      quantity: Number(item.quantity),
+    }));
+    const quantity = sumBy(items, 'quantity');
     const updatedAt = maxBy(stock, 'updatedAt')?.updatedAt ?? new Date();
 
     return { productId, quantity, updatedAt, items };

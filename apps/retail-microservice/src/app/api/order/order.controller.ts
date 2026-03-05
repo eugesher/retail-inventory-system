@@ -1,7 +1,7 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 
-import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/microservices';
+import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/common';
 import { OrderCreateDto, OrderCreateResponseDto } from '@retail-inventory-system/retail';
 import { OrderCreateService } from './providers';
 

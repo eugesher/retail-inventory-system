@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { InventoryMicroserviceClientModule } from '@retail-inventory-system/microservices';
+import { MicroserviceClientInventoryModule } from '@retail-inventory-system/common';
 import { Order } from '../../common/entities';
 import { OrderCreateService } from './providers';
 import { OrderController } from './order.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Order]), InventoryMicroserviceClientModule],
+  imports: [TypeOrmModule.forFeature([Order]), MicroserviceClientInventoryModule],
   controllers: [OrderController],
   providers: [OrderCreateService],
 })

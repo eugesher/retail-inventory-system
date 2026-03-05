@@ -5,7 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/microservices';
+} from '@retail-inventory-system/common';
 import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
 
 @Injectable()
@@ -15,11 +15,11 @@ export class ProductStockGetService {
     private readonly inventoryMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(productId: string, storeIds?: string): Promise<ProductStockDto> {
+  public async execute(productId: number, storageIds?: string): Promise<ProductStockDto> {
     const data: IProductStockGet = { productId };
 
-    if (storeIds) {
-      data.storeIds = storeIds.split(',').map((s) => s.trim());
+    if (storageIds) {
+      data.storageIds = storageIds.split(',').map((s) => s.trim());
     }
 
     return await firstValueFrom(
