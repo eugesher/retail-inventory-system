@@ -40,8 +40,6 @@ export class InitStarterEntities1772600000000 implements MigrationInterface {
         action_id  VARCHAR(36)     NOT NULL,
         quantity   INT             NOT NULL,
         created_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP
-          ON UPDATE CURRENT_TIMESTAMP,
         CONSTRAINT FK_PRODUCT_STOCK_PRODUCT FOREIGN KEY (product_id)
           REFERENCES product (id),
         CONSTRAINT FK_PRODUCT_STOCK_STORAGE FOREIGN KEY (storage_id)
@@ -78,8 +76,8 @@ export class InitStarterEntities1772600000000 implements MigrationInterface {
     await queryRunner.query(`
       CREATE TABLE \`order\` (
         id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        status_id   VARCHAR(36)     NOT NULL,
         customer_id BIGINT UNSIGNED NOT NULL,
+        status_id   VARCHAR(36)     NOT NULL,
         created_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP
           ON UPDATE CURRENT_TIMESTAMP,
@@ -102,15 +100,22 @@ export class InitStarterEntities1772600000000 implements MigrationInterface {
     await queryRunner.query(`
       CREATE TABLE order_product (
         id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        status_id  VARCHAR(36)     NOT NULL,
+        product_id BIGINT UNSIGNED NOT NULL,
         order_id   BIGINT UNSIGNED NOT NULL,
+        status_id  VARCHAR(36)     NOT NULL,
         created_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP
           ON UPDATE CURRENT_TIMESTAMP,
         CONSTRAINT FK_ORDER_PRODUCT_ORDER FOREIGN KEY (order_id)
+          REFERENCES \`order\` (id),
+        CONSTRAINT FK_ORDER_PRODUCT_PRODUCT FOREIGN KEY (order_id)
           REFERENCES \`order\` (id)
       );
     `);
+
+    await queryRunner.query('INSERT INTO storage (id, name) VALUES (?);', [
+      ['head-warehouse', 'Head Warehouse'],
+    ]);
 
     await queryRunner.query('INSERT INTO order_status (id, name, color) VALUES ?;', [
       [

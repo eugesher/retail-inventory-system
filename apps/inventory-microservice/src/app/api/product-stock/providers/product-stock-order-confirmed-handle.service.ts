@@ -2,11 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { IOrderCreatedEventPayload } from '@retail-inventory-system/retail';
+import { IOrderConfirmedEventPayload } from '@retail-inventory-system/retail';
 import { ProductStock } from '../../../common/entities';
 
 @Injectable()
-export class ProductStockHandleOrderCreateService {
+export class ProductStockOrderConfirmedHandleService {
   constructor(
     @InjectRepository(ProductStock)
     private readonly productStockRepository: Repository<ProductStock>,
@@ -14,7 +14,7 @@ export class ProductStockHandleOrderCreateService {
   ) {}
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  public async execute(event: IOrderCreatedEventPayload): Promise<void> {
+  public async execute(event: IOrderConfirmedEventPayload): Promise<void> {
     // TODO: RIS-13 Implement order-confirmed event
   }
 }

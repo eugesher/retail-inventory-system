@@ -1,30 +1,35 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToMany,
+} from 'typeorm';
+
 import { OrderStatusEnum } from '@retail-inventory-system/retail';
+import { OrderProduct } from './order-product.entity';
 
 @Entity('order')
 export class Order {
-  @PrimaryGeneratedColumn('uuid')
-  public id: string;
+  @PrimaryGeneratedColumn()
+  public id: number;
 
   @Column()
-  public customerId: string;
-
-  @Column('json')
-  public items: { productId: string; quantity: number; storageId?: string }[];
-
-  @Column()
-  public shippingAddress: string;
-
-  @Column({ default: 0 })
-  public total: number;
+  public customerId: number;
 
   @Column({
     type: 'enum',
     enum: OrderStatusEnum,
-    default: OrderStatusEnum.PENDING,
   })
-  public status: OrderStatusEnum;
+  public statusId: OrderStatusEnum;
+
+  @OneToMany(() => OrderProduct, ({ order }) => order, { cascade: ['insert'] })
+  public products: OrderProduct[];
 
   @CreateDateColumn()
   public createdAt: Date;
+
+  @UpdateDateColumn()
+  public updatedAt: Date;
 }

@@ -3,7 +3,7 @@ import { OrderStatusEnum } from '../enums';
 
 export class OrderCreateResponseDto {
   @ApiResponseProperty()
-  public orderId: string;
+  public orderId: number;
 
   @ApiResponseProperty({ enum: OrderStatusEnum })
   public status: OrderStatusEnum;
