@@ -6,20 +6,20 @@ import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
-import { OrderCreateDto, OrderResponseDto } from '@retail-inventory-system/retail';
+import { OrderResponseDto } from '@retail-inventory-system/retail';
 
 @Injectable()
-export class OrderCreateService {
+export class OrderConfirmService {
   constructor(
     @Inject(MicroserviceClientTokenEnum.RETAIL_MICROSERVICE)
     private readonly retailMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(dto: OrderCreateDto): Promise<OrderResponseDto> {
+  public async execute(id: number): Promise<OrderResponseDto> {
     return await firstValueFrom(
-      this.retailMicroserviceClient.send<OrderResponseDto, OrderCreateDto>(
-        MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATE,
-        dto,
+      this.retailMicroserviceClient.send<OrderResponseDto, number>(
+        MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRM,
+        id,
       ),
     );
   }

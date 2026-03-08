@@ -9,7 +9,7 @@ import {
 } from '@retail-inventory-system/common';
 import {
   OrderCreateDto,
-  OrderCreateResponseDto,
+  OrderResponseDto,
   OrderStatusEnum,
   IOrderConfirmedEventPayload,
   OrderProductStatusEnum,
@@ -25,7 +25,7 @@ export class OrderCreateService {
     private readonly inventoryMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(dto: OrderCreateDto): Promise<OrderCreateResponseDto> {
+  public async execute(dto: OrderCreateDto): Promise<OrderResponseDto> {
     const { customerId, products } = dto;
     const orderProducts: DeepPartial<OrderProduct>[] = [];
 
@@ -62,6 +62,7 @@ export class OrderCreateService {
     return {
       orderId: saved.id,
       status: OrderStatusEnum.PENDING,
+      message: 'Order successfully created',
     };
   }
 }

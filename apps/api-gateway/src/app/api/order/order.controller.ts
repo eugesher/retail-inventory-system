@@ -1,33 +1,46 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Param, Post, Put } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiCreatedResponse,
-  ApiBadRequestResponse,
   ApiProduces,
+  ApiOkResponse,
 } from '@nestjs/swagger';
 
-import { OrderCreateDto, OrderCreateResponseDto } from '@retail-inventory-system/retail';
-import { OrderCreateService } from './providers';
+import { OrderCreateDto, OrderResponseDto } from '@retail-inventory-system/retail';
+import { OrderConfirmService, OrderCreateService } from './providers';
 
 @ApiTags('Order')
 @Controller('orders')
 export class OrderController {
-  constructor(private readonly orderCreateService: OrderCreateService) {}
+  constructor(
+    private readonly orderCreateService: OrderCreateService,
+    private readonly orderConfirmService: OrderConfirmService,
+  ) {}
 
   @ApiOperation({
     summary: 'Create a new order',
   })
   @ApiCreatedResponse({
     description: 'Order created successfully',
-    type: OrderCreateResponseDto,
-  })
-  @ApiBadRequestResponse({
-    description: 'Invalid input or stock issues',
+    type: OrderResponseDto,
   })
   @ApiProduces('application/json')
   @Post()
-  public async createOrder(@Body() dto: OrderCreateDto): Promise<OrderCreateResponseDto> {
-    return this.orderCreateService.execute(dto);
+  public async createOrder(@Body() dto: OrderCreateDto): Promise<OrderResponseDto> {
+    return await this.orderCreateService.execute(dto);
+  }
+
+  @ApiOperation({
+    summary: 'Confirm order',
+  })
+  @ApiOkResponse({
+    description: 'Order successfully confirmed',
+    type: OrderResponseDto,
+  })
+  @ApiProduces('application/json')
+  @Put(':id/confirm')
+  public async confirmOrder(@Param('id') id: number): Promise<OrderResponseDto> {
+    return await this.orderConfirmService.execute(id);
   }
 }
