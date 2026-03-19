@@ -16,7 +16,7 @@ import {
 import { OrderCreateDto, OrderResponseDto } from '@retail-inventory-system/retail';
 
 @ApiTags('Order')
-@Controller('orders')
+@Controller('order')
 export class OrderController {
   constructor(
     @Inject(MicroserviceClientTokenEnum.RETAIL_MICROSERVICE)

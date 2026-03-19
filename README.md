@@ -16,8 +16,8 @@ The system handles order lifecycle management and product stock tracking across 
 ┌─────────────────────────────▼─────────────────────────────┐
 │                  API Gateway port: 3000                   │
 │                                                           │
-│  POST  /api/orders                                        │
-│  PUT   /api/orders/:id/confirm                            │
+│  POST  /api/order                                         │
+│  PUT   /api/order/:id/confirm                             │
 │  GET   /product/:productId/stock                          │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
@@ -68,8 +68,8 @@ yarn start:dev
 ### Orders
 
 ```
-POST /api/orders
-PUT  /api/orders/:id/confirm
+POST /api/order
+PUT  /api/order/:id/confirm
 ```
 
 ### Stock

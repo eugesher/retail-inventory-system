@@ -1,4 +1,4 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('product_stock')
 export class ProductStock {
@@ -12,8 +12,11 @@ export class ProductStock {
   public storageId: string;
 
   @Column()
-  public quantity: number;
+  public actionId: string;
 
   @Column()
+  public quantity: number;
+
+  @CreateDateColumn()
   public createdAt: Date;
 }
