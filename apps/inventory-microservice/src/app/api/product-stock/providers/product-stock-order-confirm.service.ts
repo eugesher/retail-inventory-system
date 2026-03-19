@@ -6,7 +6,7 @@ import { IOrderConfirmedEventPayload } from '@retail-inventory-system/retail';
 import { ProductStock } from '../../../common/entities';
 
 @Injectable()
-export class ProductStockOrderConfirmedHandleService {
+export class ProductStockOrderConfirmService {
   constructor(
     @InjectRepository(ProductStock)
     private readonly productStockRepository: Repository<ProductStock>,

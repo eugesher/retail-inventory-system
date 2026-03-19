@@ -1,4 +1,5 @@
-import { Body, Controller, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Inject, Param, Post, Put } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import {
   ApiTags,
   ApiOperation,
@@ -6,16 +7,20 @@ import {
   ApiProduces,
   ApiOkResponse,
 } from '@nestjs/swagger';
+import { firstValueFrom } from 'rxjs';
 
+import {
+  MicroserviceClientTokenEnum,
+  MicroserviceMessagePatternEnum,
+} from '@retail-inventory-system/common';
 import { OrderCreateDto, OrderResponseDto } from '@retail-inventory-system/retail';
-import { OrderConfirmService, OrderCreateService } from './providers';
 
 @ApiTags('Order')
 @Controller('orders')
 export class OrderController {
   constructor(
-    private readonly orderCreateService: OrderCreateService,
-    private readonly orderConfirmService: OrderConfirmService,
+    @Inject(MicroserviceClientTokenEnum.RETAIL_MICROSERVICE)
+    private readonly retailMicroserviceClient: ClientProxy,
   ) {}
 
   @ApiOperation({
@@ -28,7 +33,12 @@ export class OrderController {
   @ApiProduces('application/json')
   @Post()
   public async createOrder(@Body() dto: OrderCreateDto): Promise<OrderResponseDto> {
-    return await this.orderCreateService.execute(dto);
+    return await firstValueFrom(
+      this.retailMicroserviceClient.send<OrderResponseDto, OrderCreateDto>(
+        MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATE,
+        dto,
+      ),
+    );
   }
 
   @ApiOperation({
@@ -41,6 +51,11 @@ export class OrderController {
   @ApiProduces('application/json')
   @Put(':id/confirm')
   public async confirmOrder(@Param('id') id: number): Promise<OrderResponseDto> {
-    return await this.orderConfirmService.execute(id);
+    return await firstValueFrom(
+      this.retailMicroserviceClient.send<OrderResponseDto, number>(
+        MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRM,
+        id,
+      ),
+    );
   }
 }
