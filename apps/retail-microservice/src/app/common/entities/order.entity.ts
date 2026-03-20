@@ -24,7 +24,7 @@ export class Order {
   })
   public statusId: OrderStatusEnum;
 
-  @OneToMany(() => OrderProduct, ({ order }) => order, { cascade: ['insert'] })
+  @OneToMany(() => OrderProduct, ({ order }) => order, { cascade: ['insert', 'update'] })
   public products: OrderProduct[];
 
   @CreateDateColumn()

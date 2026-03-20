@@ -33,7 +33,7 @@ export class ProductStockGetService {
       .groupBy('storageId');
 
     if (storageIds && storageIds.length > 0) {
-      builder.andWhere('ProductStock.storeId IN (:...storageIds)', { storageIds });
+      builder.andWhere('ProductStock.storageId IN (:...storageIds)', { storageIds });
     }
 
     const stock = await builder.getRawMany<IProductStockRaw>();

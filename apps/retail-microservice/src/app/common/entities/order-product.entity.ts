@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  JoinColumn,
   ManyToOne,
 } from 'typeorm';
 
@@ -29,6 +30,7 @@ export class OrderProduct {
   public statusId: OrderProductStatusEnum;
 
   @ManyToOne(() => Order, ({ products }) => products)
+  @JoinColumn({ name: 'order_id' })
   public order: Order;
 
   @CreateDateColumn()
