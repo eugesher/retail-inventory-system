@@ -3,7 +3,6 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 
 import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/common';
 import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
-import { IOrderConfirmedEventPayload } from '@retail-inventory-system/retail';
 import { ProductStockGetService, ProductStockOrderConfirmService } from './providers';
 
 @Controller()
@@ -19,7 +18,7 @@ export class ProductStockController {
   }
 
   @MessagePattern(MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM)
-  public async handleOrderCreated(@Payload() event: IOrderConfirmedEventPayload): Promise<void> {
-    await this.productStockOrderConfirmService.execute(event);
+  public async handleOrderConfirmed(@Payload() data: unknown): Promise<void> {
+    await this.productStockOrderConfirmService.execute(data);
   }
 }
