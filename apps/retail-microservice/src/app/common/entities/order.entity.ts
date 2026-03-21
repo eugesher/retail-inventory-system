@@ -4,11 +4,14 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
 } from 'typeorm';
 
 import { OrderStatusEnum } from '@retail-inventory-system/retail';
 import { OrderProduct } from './order-product.entity';
+import { OrderStatus } from './order-status.entity';
 
 @Entity('order')
 export class Order {
@@ -24,7 +27,11 @@ export class Order {
   })
   public statusId: OrderStatusEnum;
 
-  @OneToMany(() => OrderProduct, ({ order }) => order, { cascade: ['insert'] })
+  @ManyToOne(() => OrderStatus)
+  @JoinColumn({ name: 'status_id' })
+  public status: OrderStatus;
+
+  @OneToMany(() => OrderProduct, ({ order }) => order, { cascade: ['insert', 'update'] })
   public products: OrderProduct[];
 
   @CreateDateColumn()

@@ -1,28 +1,25 @@
 import { Controller } from '@nestjs/common';
-import { EventPattern, MessagePattern, Payload } from '@nestjs/microservices';
+import { MessagePattern, Payload } from '@nestjs/microservices';
 
-import {
-  MicroserviceEventPatternEnum,
-  MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/common';
+import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/common';
 import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
-import { IOrderConfirmedEventPayload } from '@retail-inventory-system/retail';
-import { ProductStockGetService, ProductStockOrderConfirmedHandleService } from './providers';
+import { IOrderProductConfirmItem } from '@retail-inventory-system/retail';
+import { ProductStockGetService, ProductStockOrderConfirmService } from './providers';
 
 @Controller()
 export class ProductStockController {
   constructor(
-    private readonly stockGetService: ProductStockGetService,
-    private readonly stockReserveService: ProductStockOrderConfirmedHandleService,
+    private readonly productStockGetService: ProductStockGetService,
+    private readonly productStockOrderConfirmService: ProductStockOrderConfirmService,
   ) {}
 
   @MessagePattern(MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET)
   public async getProductStock(@Payload() data: IProductStockGet): Promise<ProductStockDto> {
-    return this.stockGetService.execute(data);
+    return this.productStockGetService.execute(data);
   }
 
-  @EventPattern(MicroserviceEventPatternEnum.RETAIL_ORDER_CREATED)
-  public async handleOrderCreated(@Payload() event: IOrderConfirmedEventPayload): Promise<void> {
-    await this.stockReserveService.execute(event);
+  @MessagePattern(MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM)
+  public async handleOrderConfirm(@Payload() data: IOrderProductConfirmItem[]): Promise<number[]> {
+    return this.productStockOrderConfirmService.execute(data);
   }
 }

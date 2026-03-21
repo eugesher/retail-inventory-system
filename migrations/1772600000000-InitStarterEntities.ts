@@ -108,8 +108,8 @@ export class InitStarterEntities1772600000000 implements MigrationInterface {
           ON UPDATE CURRENT_TIMESTAMP,
         CONSTRAINT FK_ORDER_PRODUCT_ORDER FOREIGN KEY (order_id)
           REFERENCES \`order\` (id),
-        CONSTRAINT FK_ORDER_PRODUCT_PRODUCT FOREIGN KEY (order_id)
-          REFERENCES \`order\` (id)
+        CONSTRAINT FK_ORDER_PRODUCT_PRODUCT FOREIGN KEY (product_id)
+          REFERENCES product (id)
       );
     `);
 
