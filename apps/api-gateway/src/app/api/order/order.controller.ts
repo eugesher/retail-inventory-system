@@ -13,7 +13,12 @@ import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
-import { OrderCreateDto, OrderResponseDto } from '@retail-inventory-system/retail';
+import {
+  OrderConfirmResponseDto,
+  OrderCreateDto,
+  OrderResponseDto,
+} from '@retail-inventory-system/retail';
+import { OrderConfirmPipe } from './pipes';
 
 @ApiTags('Order')
 @Controller('order')
@@ -46,13 +51,15 @@ export class OrderController {
   })
   @ApiOkResponse({
     description: 'Order successfully confirmed',
-    type: OrderResponseDto,
+    type: OrderConfirmResponseDto,
   })
   @ApiProduces('application/json')
   @Put(':id/confirm')
-  public async confirmOrder(@Param('id') id: number): Promise<OrderResponseDto> {
+  public async confirmOrder(
+    @Param('id', OrderConfirmPipe) id: number,
+  ): Promise<OrderConfirmResponseDto> {
     return await firstValueFrom(
-      this.retailMicroserviceClient.send<OrderResponseDto, number>(
+      this.retailMicroserviceClient.send<OrderConfirmResponseDto, number>(
         MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRM,
         id,
       ),

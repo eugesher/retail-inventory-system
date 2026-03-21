@@ -1,15 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { firstValueFrom } from 'rxjs';
+import { In, Repository } from 'typeorm';
 
-import { MicroserviceClientTokenEnum } from '@retail-inventory-system/common';
 import {
+  MicroserviceClientTokenEnum,
+  MicroserviceMessagePatternEnum,
+} from '@retail-inventory-system/common';
+import {
+  IOrderProductConfirmItem,
+  OrderConfirmResponseDto,
   OrderProductStatusEnum,
-  OrderResponseDto,
   OrderStatusEnum,
 } from '@retail-inventory-system/retail';
-import { Order } from '../../../common/entities';
+import { Order, OrderProduct } from '../../../common/entities';
 
 @Injectable()
 export class OrderConfirmService {
@@ -20,24 +25,61 @@ export class OrderConfirmService {
     private readonly inventoryMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(id: number): Promise<OrderResponseDto> {
+  public async execute(id: number): Promise<OrderConfirmResponseDto> {
     const order = (await this.orderRepository.findOne({
       where: { id },
       relations: ['products'],
     }))!;
 
-    order.statusId = OrderStatusEnum.CONFIRMED;
+    const payload: IOrderProductConfirmItem[] = order.products.map(
+      ({ id: productRowId, productId, statusId }) => ({
+        id: productRowId,
+        productId,
+        statusId,
+      }),
+    );
 
-    for (const orderProduct of order.products) {
-      orderProduct.statusId = OrderProductStatusEnum.CONFIRMED;
-    }
+    // Step 4.1: Call inventory BEFORE opening the transaction
+    const confirmedIds = await firstValueFrom(
+      this.inventoryMicroserviceClient.send<number[], IOrderProductConfirmItem[]>(
+        MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
+        payload,
+      ),
+    );
 
-    await this.orderRepository.save(order);
+    // Step 4.2–4.4: Database transaction
+    await this.orderRepository.manager.transaction(async (manager) => {
+      if (confirmedIds.length > 0) {
+        await manager.update(
+          OrderProduct,
+          { id: In(confirmedIds) },
+          { statusId: OrderProductStatusEnum.CONFIRMED },
+        );
+      }
+
+      const allConfirmed = order.products.every(
+        (p) => confirmedIds.includes(p.id) || p.statusId === OrderProductStatusEnum.CONFIRMED,
+      );
+
+      if (allConfirmed) {
+        await manager.update(Order, { id }, { statusId: OrderStatusEnum.CONFIRMED });
+      }
+    });
+
+    // Step 4.5: Re-fetch with full relations for response
+    const updatedOrder = (await this.orderRepository.findOne({
+      where: { id },
+      relations: ['status', 'products', 'products.status'],
+    }))!;
 
     return {
-      orderId: id,
-      status: OrderStatusEnum.CONFIRMED,
-      message: 'Order successfully confirmed',
+      id: updatedOrder.id,
+      status: updatedOrder.status,
+      products: updatedOrder.products.map(({ id: pid, productId, status }) => ({
+        id: pid,
+        productId,
+        status,
+      })),
     };
   }
 }

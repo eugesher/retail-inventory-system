@@ -1,4 +1,4 @@
-import { Logger, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { ProductStock } from '../../common/entities';
@@ -7,7 +7,7 @@ import { ProductStockController } from './product-stock.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([ProductStock])],
-  providers: [ProductStockGetService, ProductStockOrderConfirmService, Logger],
+  providers: [ProductStockGetService, ProductStockOrderConfirmService],
   controllers: [ProductStockController],
 })
 export class ProductStockModule {}
