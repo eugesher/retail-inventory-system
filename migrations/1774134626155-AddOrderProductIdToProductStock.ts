@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddOrderProductIdToProductStock1772700000000 implements MigrationInterface {
+export class AddOrderProductIdToProductStock1774134626155 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE product_stock

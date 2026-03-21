@@ -17,20 +17,17 @@ export class ProductStockOrderConfirmService {
   ) {}
 
   public async execute(items: IOrderProductConfirmItem[]): Promise<number[]> {
-    // 3.2: Keep only PENDING items
     const pendingItems = items.filter((item) => item.statusId === OrderProductStatusEnum.PENDING);
 
     if (pendingItems.length === 0) {
       return [];
     }
 
-    // 3.3: Collect unique productIds for the balance query
     const productIds = [...new Set(pendingItems.map((i) => i.productId))];
     const confirmedIds: number[] = [];
 
-    await this.productStockRepository.manager.transaction(async (manager) => {
-      // 3.3: Single query — current balance per productId
-      const stockBalances: { productId: string; totalQuantity: string }[] = await manager
+    await this.productStockRepository.manager.transaction(async (entityManager) => {
+      const stockBalances: { productId: string; totalQuantity: string }[] = await entityManager
         .createQueryBuilder(ProductStock, 'ps')
         .select('ps.productId', 'productId')
         .addSelect('SUM(ps.quantity)', 'totalQuantity')
@@ -38,7 +35,6 @@ export class ProductStockOrderConfirmService {
         .groupBy('ps.productId')
         .getRawMany();
 
-      // Mutable stock map for partial-fulfillment tracking
       const stockMap = new Map<number, number>(
         stockBalances.map(({ productId, totalQuantity }) => [
           Number(productId),
@@ -46,12 +42,11 @@ export class ProductStockOrderConfirmService {
         ]),
       );
 
-      // 3.4: Process one by one in insertion order
       for (const item of pendingItems) {
         const available = stockMap.get(item.productId) ?? 0;
 
         if (available > 0) {
-          const stockRecord = manager.create(ProductStock, {
+          const stockRecord = entityManager.create(ProductStock, {
             productId: item.productId,
             storageId: INVENTORY_DEFAULT_STORAGE,
             actionId: ProductStockActionEnum.ORDER_PRODUCT_CONFIRM,
@@ -59,7 +54,7 @@ export class ProductStockOrderConfirmService {
             orderProductId: item.id,
           });
 
-          await manager.save(ProductStock, stockRecord);
+          await entityManager.save(ProductStock, stockRecord);
           stockMap.set(item.productId, available - 1);
           confirmedIds.push(item.id);
         }

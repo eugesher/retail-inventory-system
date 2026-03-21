@@ -25,13 +25,13 @@ export class OrderConfirmService {
     private readonly inventoryMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(id: number): Promise<OrderConfirmResponseDto> {
+  public async execute(id: Order['id']): Promise<OrderConfirmResponseDto> {
     const order = (await this.orderRepository.findOne({
       where: { id },
       relations: ['products'],
     }))!;
 
-    const payload: IOrderProductConfirmItem[] = order.products.map(
+    const inventoryOrderConfirmPayload: IOrderProductConfirmItem[] = order.products.map(
       ({ id: productRowId, productId, statusId }) => ({
         id: productRowId,
         productId,
@@ -39,18 +39,16 @@ export class OrderConfirmService {
       }),
     );
 
-    // Step 4.1: Call inventory BEFORE opening the transaction
     const confirmedIds = await firstValueFrom(
       this.inventoryMicroserviceClient.send<number[], IOrderProductConfirmItem[]>(
         MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
-        payload,
+        inventoryOrderConfirmPayload,
       ),
     );
 
-    // Step 4.2–4.4: Database transaction
-    await this.orderRepository.manager.transaction(async (manager) => {
+    await this.orderRepository.manager.transaction(async (entityManager) => {
       if (confirmedIds.length > 0) {
-        await manager.update(
+        await entityManager.update(
           OrderProduct,
           { id: In(confirmedIds) },
           { statusId: OrderProductStatusEnum.CONFIRMED },
@@ -62,11 +60,10 @@ export class OrderConfirmService {
       );
 
       if (allConfirmed) {
-        await manager.update(Order, { id }, { statusId: OrderStatusEnum.CONFIRMED });
+        await entityManager.update(Order, { id }, { statusId: OrderStatusEnum.CONFIRMED });
       }
     });
 
-    // Step 4.5: Re-fetch with full relations for response
     const updatedOrder = (await this.orderRepository.findOne({
       where: { id },
       relations: ['status', 'products', 'products.status'],
