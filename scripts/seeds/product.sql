@@ -1,4 +1,5 @@
-INSERT INTO product (name) VALUES ('Product Alpha'); -- id=1
-INSERT INTO product (name) VALUES ('Product Beta');  -- id=2
-INSERT INTO product (name) VALUES ('Product Gamma'); -- id=3
-INSERT INTO product (name) VALUES ('Product Delta'); -- id=4
+INSERT INTO product (id, name)
+VALUES (1, 'Product Alpha'),
+       (2, 'Product Beta'),
+       (3, 'Product Gamma'),
+       (4, 'Product Delta');

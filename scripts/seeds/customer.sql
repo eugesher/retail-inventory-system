@@ -1,1 +1,2 @@
-INSERT INTO customer (email) VALUES ('test@example.com'); -- id=1
+INSERT INTO customer (id, email)
+VALUES (1, 'test@example.com');
