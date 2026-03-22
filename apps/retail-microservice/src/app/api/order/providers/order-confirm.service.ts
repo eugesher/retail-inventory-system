@@ -64,19 +64,24 @@ export class OrderConfirmService {
       }
     });
 
-    const updatedOrder = (await this.orderRepository.findOne({
-      where: { id },
-      relations: ['status', 'products', 'products.status'],
-    }))!;
+    const builder = this.orderRepository
+      .createQueryBuilder('Order')
+      .leftJoin('Order.status', 'OrderStatus')
+      .leftJoin('Order.products', 'OrderProduct')
+      .leftJoin('OrderProduct.status', 'OrderProductStatus')
+      .select([
+        'Order.id',
+        'OrderStatus.id',
+        'OrderStatus.name',
+        'OrderStatus.color',
+        'OrderProduct.id',
+        'OrderProduct.productId',
+        'OrderProductStatus.id',
+        'OrderProductStatus.name',
+        'OrderProductStatus.color',
+      ])
+      .where('Order.id = :id', { id });
 
-    return {
-      id: updatedOrder.id,
-      status: updatedOrder.status,
-      products: updatedOrder.products.map(({ id: pid, productId, status }) => ({
-        id: pid,
-        productId,
-        status,
-      })),
-    };
+    return (await builder.getOne())!;
   }
 }

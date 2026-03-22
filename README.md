@@ -65,11 +65,11 @@ yarn start:dev
 
 ## Scripts
 
-| Script          | Description                                                                                                                                                        |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `yarn seed`     | Populate the database with deterministic test fixtures (products, orders, stock records) defined in `scripts/seeds/*.sql`                                          |
-| `yarn infra:up` | Reset and reprovision the full local environment: tears down existing containers and volumes, starts MySQL/Redis/RabbitMQ, runs migrations, and seeds the database |
-| `yarn test:e2e` | Run `infra:up` then execute the E2E test suite against a clean database                                                                                            |
+| Script                   | Description                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `yarn test:seed`         | Populate the database with deterministic test fixtures (products, orders, stock records) defined in `scripts/seeds/*.sql`                                          |
+| `yarn test:infra:reload` | Reset and reprovision the full local environment: tears down existing containers and volumes, starts MySQL/Redis/RabbitMQ, runs migrations, and seeds the database |
+| `yarn test:e2e`          | Run `test:infra:reload` then execute the E2E test suite against a clean database                                                                                   |
 
 ## API
 

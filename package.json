@@ -11,7 +11,7 @@
     "build:inventory-microservice": "nest build inventory-microservice",
     "build:retail-microservice": "nest build retail-microservice",
     "build:notification-microservice": "nest build notification-microservice",
-    "start:dev": "concurrently --names \"API-GTWY,IVTRY-MS,RTAIL-MS,NFCTN-MS\" --prefix \"[{name}]\" --prefix-colors \"magenta,blue,cyan,yellow\" \"yarn start:dev:api-gateway\" \"yarn start:dev:inventory-microservice\" \"yarn start:dev:retail-microservice\" \"yarn start:dev:notification-microservice\"",
+    "start:dev": "concurrently --names \"API-GTWAY,INVTRY-MS,RETAIL-MS,NTFCTN-MS\" --prefix \"[{name}]\" --prefix-colors \"magenta,blue,cyan,yellow\" \"yarn start:dev:api-gateway\" \"yarn start:dev:inventory-microservice\" \"yarn start:dev:retail-microservice\" \"yarn start:dev:notification-microservice\"",
     "start:dev:api-gateway": "nest start api-gateway --watch",
     "start:dev:inventory-microservice": "nest start inventory-microservice --watch",
     "start:dev:retail-microservice": "nest start retail-microservice --watch",
@@ -30,9 +30,12 @@
     "migration:run": "yarn typeorm:migration-cli migration:run",
     "migration:revert": "yarn typeorm:migration-cli migration:revert",
     "migration:show": "yarn typeorm:migration-cli migration:show",
-    "seed": "ts-node -r tsconfig-paths/register scripts/seed.ts",
-    "infra:up": "docker compose down -v --remove-orphans && docker compose up mysql redis rabbitmq --wait && yarn migration:run && yarn seed",
-    "test:e2e": "yarn infra:up && jest --config jest.e2e.config.js --runInBand --forceExit"
+    "test:seed": "ts-node -r tsconfig-paths/register scripts/test-db-seed.ts",
+    "test:infra:up": "docker compose up mysql redis rabbitmq --wait",
+    "test:infra:down": "docker compose down -v --remove-orphans",
+    "test:infra:reload": "yarn test:infra:down && yarn test:infra:up && yarn migration:run && yarn test:seed",
+    "test:e2e:run": "jest --config jest.e2e.config.js --runInBand --forceExit",
+    "test:e2e": "yarn test:infra:reload && yarn test:e2e:run"
   },
   "dependencies": {
     "@nestjs/cli": "^11.0.16",
