@@ -11,10 +11,10 @@ export class OrderGetService {
     private readonly orderRepository: Repository<Order>,
   ) {}
 
-  public async findById(id: number): Promise<Order> {
-    return (await this.orderRepository.findOne({
+  public async findById(id: number): Promise<Order | null> {
+    return this.orderRepository.findOne({
       where: { id },
       relations: ['products'],
-    }))!;
+    });
   }
 }

@@ -29,7 +29,7 @@ export class OrderController {
   }
 
   @MessagePattern(MicroserviceMessagePatternEnum.RETAIL_ORDER_GET)
-  public async getById(@Payload() id: number): Promise<Order> {
+  public async getById(@Payload() id: number): Promise<Order | null> {
     return await this.orderGetService.findById(id);
   }
 }

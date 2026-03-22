@@ -21,6 +21,7 @@
       "@retail-inventory-system/config": ["libs/config"],
       "@retail-inventory-system/inventory": ["libs/inventory"],
       "@retail-inventory-system/retail": ["libs/retail"]
-    }
+    },
+    "allowSyntheticDefaultImports": true
   }
 }
