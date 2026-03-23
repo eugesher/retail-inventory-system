@@ -12,9 +12,6 @@ export class OrderGetService {
   ) {}
 
   public async findById(id: number): Promise<Order | null> {
-    return this.orderRepository.findOne({
-      where: { id },
-      relations: ['products'],
-    });
+    return this.orderRepository.findOne({ where: { id } });
   }
 }

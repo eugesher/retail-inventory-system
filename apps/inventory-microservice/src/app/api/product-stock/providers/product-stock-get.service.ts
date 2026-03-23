@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { maxBy, omit, sumBy } from 'lodash';
 import { Repository } from 'typeorm';
 
 import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
 import { ProductStock } from '../../../common/entities';
+import { IProductStockGetRawResult } from '../interfaces';
 
 @Injectable()
 export class ProductStockGetService {
@@ -14,12 +14,6 @@ export class ProductStockGetService {
   ) {}
 
   public async execute(data: IProductStockGet): Promise<ProductStockDto> {
-    interface IProductStockRaw {
-      storageId: string;
-      quantity: `${number}`;
-      updatedAt: Date;
-    }
-
     const { productId, storageIds } = data;
 
     const builder = this.productStockRepository
@@ -36,14 +30,19 @@ export class ProductStockGetService {
       builder.andWhere('ProductStock.storageId IN (:...storageIds)', { storageIds });
     }
 
-    const stock = await builder.getRawMany<IProductStockRaw>();
-    const items = stock.map((item) => ({
-      ...omit(item, 'productId'),
-      quantity: Number(item.quantity),
-    }));
-    const quantity = sumBy(items, 'quantity');
-    const updatedAt = maxBy(stock, 'updatedAt')?.updatedAt ?? new Date();
+    const stock = await builder.getRawMany<IProductStockGetRawResult>();
 
-    return { productId, quantity, updatedAt, items };
+    let totalQuantity = 0;
+    let latestDate = new Date(0);
+
+    const items = stock.map((item) => {
+      const quantity = Number(item.quantity);
+      totalQuantity += quantity;
+      if (item.updatedAt > latestDate) latestDate = item.updatedAt;
+      return { storageId: item.storageId, quantity, updatedAt: item.updatedAt };
+    });
+    const updatedAt = stock.length > 0 ? latestDate : new Date();
+
+    return { productId, quantity: totalQuantity, updatedAt, items };
   }
 }

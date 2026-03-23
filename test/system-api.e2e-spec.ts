@@ -34,7 +34,6 @@ describe('Retail Inventory System API', () => {
         },
       },
     );
-    await retailMicroservice.listen();
 
     inventoryMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
       InventoryAppModule,
@@ -48,7 +47,8 @@ describe('Retail Inventory System API', () => {
         },
       },
     );
-    await inventoryMicroservice.listen();
+
+    await Promise.all([retailMicroservice.listen(), inventoryMicroservice.listen()]);
 
     apiGatewayApp = await NestFactory.create(ApiGatewayAppModule, { logger: false });
     apiGatewayApp.setGlobalPrefix('api');
@@ -70,6 +70,18 @@ describe('Retail Inventory System API', () => {
   describe('PUT /api/order/:id/confirm', () => {
     const apiHref = (orderId: number) => `/api/order/${orderId}/confirm`;
 
+    const getProductStockByOrderId = async (orderId: number) => {
+      const [rows] = (await db.execute(
+        `SELECT ps.order_product_id, ps.quantity
+         FROM product_stock ps
+         JOIN order_product op ON ps.order_product_id = op.id
+         WHERE op.order_id = ?
+         ORDER BY ps.id ASC`,
+        [orderId],
+      )) as SelectQueryResult;
+      return rows;
+    };
+
     it('confirms all products and the order when every product has sufficient stock', async () => {
       const orderId = 1;
 
@@ -82,9 +94,7 @@ describe('Retail Inventory System API', () => {
         'SELECT id, status_id FROM order_product WHERE order_id = ? ORDER BY id ASC',
         [orderId],
       )) as SelectQueryResult;
-      const [productStockRows] = (await db.execute(
-        'SELECT order_product_id, quantity FROM product_stock WHERE order_product_id IN (1, 2, 3) ORDER BY id ASC', // TODO: Get by orderId
-      )) as SelectQueryResult;
+      const productStockRows = await getProductStockByOrderId(orderId);
 
       expect(status).toBe(HttpStatus.OK);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');
@@ -105,9 +115,7 @@ describe('Retail Inventory System API', () => {
         'SELECT id, status_id FROM order_product WHERE order_id = ? ORDER BY id ASC',
         [orderId],
       )) as SelectQueryResult;
-      const [productStockRows] = (await db.execute(
-        'SELECT order_product_id, quantity FROM product_stock WHERE order_product_id IN (4, 5, 6) ORDER BY id ASC', // TODO: Get by orderId
-      )) as SelectQueryResult;
+      const productStockRows = await getProductStockByOrderId(orderId);
 
       expect(status).toBe(HttpStatus.OK);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');
@@ -128,9 +136,7 @@ describe('Retail Inventory System API', () => {
         'SELECT id, status_id FROM order_product WHERE order_id = ? ORDER BY id ASC',
         [orderId],
       )) as SelectQueryResult;
-      const [productStockRows] = (await db.execute(
-        'SELECT order_product_id, quantity FROM product_stock WHERE order_product_id = 7 ORDER BY id ASC', // TODO: Get by orderId
-      )) as SelectQueryResult;
+      const productStockRows = await getProductStockByOrderId(orderId);
 
       expect(status).toBe(HttpStatus.OK);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');
@@ -151,9 +157,7 @@ describe('Retail Inventory System API', () => {
         'SELECT id, status_id FROM order_product WHERE order_id = ? ORDER BY id ASC',
         [orderId],
       )) as SelectQueryResult;
-      const [productStockRows] = (await db.execute(
-        'SELECT order_product_id, quantity FROM product_stock WHERE order_product_id = 8 ORDER BY id ASC', // TODO: Get by orderId
-      )) as SelectQueryResult;
+      const productStockRows = await getProductStockByOrderId(orderId);
 
       expect(status).toBe(HttpStatus.BAD_REQUEST);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');

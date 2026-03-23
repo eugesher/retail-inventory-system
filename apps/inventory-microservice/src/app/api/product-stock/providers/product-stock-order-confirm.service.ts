@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DeepPartial, Repository } from 'typeorm';
 
 import {
   INVENTORY_DEFAULT_STORAGE,
@@ -42,22 +42,26 @@ export class ProductStockOrderConfirmService {
         ]),
       );
 
+      const records: DeepPartial<ProductStock>[] = [];
+
       for (const item of pendingItems) {
         const available = stockMap.get(item.productId) ?? 0;
 
         if (available > 0) {
-          const stockRecord = entityManager.create(ProductStock, {
+          records.push({
             productId: item.productId,
             storageId: INVENTORY_DEFAULT_STORAGE,
             actionId: ProductStockActionEnum.ORDER_PRODUCT_CONFIRM,
             quantity: -1,
             orderProductId: item.id,
           });
-
-          await entityManager.save(ProductStock, stockRecord);
           stockMap.set(item.productId, available - 1);
           confirmedIds.push(item.id);
         }
+      }
+
+      if (records.length > 0) {
+        await entityManager.insert(ProductStock, records);
       }
     });
 

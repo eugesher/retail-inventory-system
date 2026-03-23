@@ -31,18 +31,14 @@ export class OrderConfirmService {
       relations: ['products'],
     }))!;
 
-    const inventoryOrderConfirmPayload: IOrderProductConfirmItem[] = order.products.map(
-      ({ id: productRowId, productId, statusId }) => ({
-        id: productRowId,
-        productId,
-        statusId,
-      }),
+    const payload: IOrderProductConfirmItem[] = order.products.map(
+      ({ id: productRowId, productId, statusId }) => ({ id: productRowId, productId, statusId }),
     );
 
     const confirmedIds = await firstValueFrom(
       this.inventoryMicroserviceClient.send<number[], IOrderProductConfirmItem[]>(
         MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
-        inventoryOrderConfirmPayload,
+        payload,
       ),
     );
 
@@ -55,8 +51,9 @@ export class OrderConfirmService {
         );
       }
 
+      const confirmedSet = new Set(confirmedIds);
       const allConfirmed = order.products.every(
-        (p) => confirmedIds.includes(p.id) || p.statusId === OrderProductStatusEnum.CONFIRMED,
+        (p) => confirmedSet.has(p.id) || p.statusId === OrderProductStatusEnum.CONFIRMED,
       );
 
       if (allConfirmed) {
