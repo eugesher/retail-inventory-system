@@ -2,12 +2,13 @@ import { HttpStatus, INestApplication, INestMicroservice, ValidationPipe } from 
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { Connection, createConnection } from 'mysql2/promise';
-import supertest = require('supertest');
+import * as supertest from 'supertest';
+import { ObjectLiteral } from 'typeorm';
 
+import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
+import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
+import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/common';
-import { AppModule as ApiGatewayAppModule } from '../apps/api-gateway/src/app';
-import { AppModule as InventoryAppModule } from '../apps/inventory-microservice/src/app';
-import { AppModule as RetailAppModule } from '../apps/retail-microservice/src/app';
 
 describe('Retail Inventory System API', () => {
   type SelectQueryResult = [any[], any[]];
@@ -23,7 +24,7 @@ describe('Retail Inventory System API', () => {
     const rmqUrl = process.env.RABBITMQ_URL!;
 
     retailMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
-      RetailAppModule,
+      RetailMicroserviceAppModule,
       {
         logger: false,
         transport: Transport.RMQ,
@@ -36,7 +37,7 @@ describe('Retail Inventory System API', () => {
     );
 
     inventoryMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
-      InventoryAppModule,
+      InventoryMicroserviceAppModule,
       {
         logger: false,
         transport: Transport.RMQ,
@@ -68,18 +69,26 @@ describe('Retail Inventory System API', () => {
   });
 
   describe('GET /api/product/:productId/stock', () => {
-    const apiHref = (productId: number) => `/api/product/${productId}/stock`;
+    const apiHref = (productId: number | string) => `/api/product/${productId}/stock`;
+    const cleanupResponseBody = (body: any): void => {
+      body = body as ObjectLiteral;
+
+      delete body.updatedAt;
+
+      for (const item of body.items) {
+        delete item.updatedAt;
+      }
+    };
 
     it('returns aggregated stock for all storages when storageIds is omitted', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(1));
 
-      expect(status).toBe(HttpStatus.OK);
-      expect(body.productId).toBe(1);
-      expect(body.quantity).toBeGreaterThan(0);
       expect(body.updatedAt).toBeDefined();
-      expect(body.items).toHaveLength(1);
-      expect(body.items[0].storageId).toBe('head-warehouse');
-      expect(body.items[0].quantity).toBeGreaterThan(0);
+
+      cleanupResponseBody(body);
+
+      expect(status).toBe(HttpStatus.OK);
+      expect(body).toMatchSnapshot();
     });
 
     it('returns stock filtered by matching storageIds', async () => {
@@ -87,11 +96,12 @@ describe('Retail Inventory System API', () => {
         .get(apiHref(1))
         .query({ storageIds: '["head-warehouse"]' });
 
+      expect(body.updatedAt).toBeDefined();
+
+      cleanupResponseBody(body);
+
       expect(status).toBe(HttpStatus.OK);
-      expect(body.productId).toBe(1);
-      expect(body.quantity).toBeGreaterThan(0);
-      expect(body.items).toHaveLength(1);
-      expect(body.items[0].storageId).toBe('head-warehouse');
+      expect(body).toMatchSnapshot();
     });
 
     it('returns empty items and zero quantity when storageIds filter matches no storage', async () => {
@@ -99,68 +109,85 @@ describe('Retail Inventory System API', () => {
         .get(apiHref(1))
         .query({ storageIds: '["non-existent-storage"]' });
 
-      expect(status).toBe(HttpStatus.OK);
-      expect(body.productId).toBe(1);
-      expect(body.quantity).toBe(0);
       expect(body.updatedAt).toBeDefined();
-      expect(body.items).toHaveLength(0);
+
+      cleanupResponseBody(body);
+
+      expect(status).toBe(HttpStatus.OK);
+      expect(body).toMatchSnapshot();
     });
 
     it('returns 400 when storageIds is not valid JSON', async () => {
-      const { status } = await supertest(apiGatewayApp.getHttpServer())
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .get(apiHref(1))
         .query({ storageIds: 'not-valid-json' });
 
       expect(status).toBe(HttpStatus.BAD_REQUEST);
+      expect(body).toMatchSnapshot();
     });
 
     it('returns empty items and zero quantity when product has no stock', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(0));
 
-      expect(status).toBe(HttpStatus.OK);
-      expect(body.productId).toBe(0);
-      expect(body.quantity).toBe(0);
       expect(body.updatedAt).toBeNull();
-      expect(body.items).toHaveLength(0);
+
+      cleanupResponseBody(body);
+
+      expect(status).toBe(HttpStatus.OK);
+      expect(body).toMatchSnapshot();
     });
 
     it('returns 400 when productId is not a number', async () => {
-      const { status } = await supertest(apiGatewayApp.getHttpServer()).get(
-        '/api/product/abc/stock',
-      );
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref('abc'));
 
       expect(status).toBe(HttpStatus.BAD_REQUEST);
+      expect(body).toMatchSnapshot();
     });
   });
 
   describe('PUT /api/order/:id/confirm', () => {
     const apiHref = (orderId: number) => `/api/order/${orderId}/confirm`;
 
-    const getProductStockByOrderId = async (orderId: number) => {
-      const [rows] = (await db.execute(
-        `SELECT ps.order_product_id, ps.quantity
-         FROM product_stock ps
-         JOIN order_product op ON ps.order_product_id = op.id
-         WHERE op.order_id = ?
-         ORDER BY ps.id ASC`,
-        [orderId],
-      )) as SelectQueryResult;
-      return rows;
+    const getDataToBeAsserted = async (
+      orderId: number,
+    ): Promise<{
+      orderRows: any[];
+      orderProductRows: any[];
+      productStockRows: any[];
+    }> => {
+      const orderQuery = `
+        SELECT status_id
+        FROM \`order\`
+        WHERE id = ?;
+      `;
+      const orderProductQuery = `
+        SELECT id, status_id
+        FROM order_product
+        WHERE order_id = ?
+        ORDER BY id;
+      `;
+      const productStockQuery = `
+        SELECT ps.order_product_id, ps.quantity
+        FROM product_stock ps
+          JOIN order_product op ON ps.order_product_id = op.id
+        WHERE op.order_id = ?
+        ORDER BY ps.id;
+      `;
+
+      const [[orderRows], [orderProductRows], [productStockRows]] = (await Promise.all([
+        db.execute(orderQuery, [orderId]),
+        db.execute(orderProductQuery, [orderId]),
+        db.execute(productStockQuery, [orderId]),
+      ])) as SelectQueryResult[];
+
+      return { orderRows, orderProductRows, productStockRows };
     };
 
     it('confirms all products and the order when every product has sufficient stock', async () => {
       const orderId = 1;
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-
-      const [orderRows] = (await db.execute('SELECT status_id FROM `order` WHERE id = ?', [
-        orderId,
-      ])) as SelectQueryResult;
-      const [orderProductRows] = (await db.execute(
-        'SELECT id, status_id FROM order_product WHERE order_id = ? ORDER BY id ASC',
-        [orderId],
-      )) as SelectQueryResult;
-      const productStockRows = await getProductStockByOrderId(orderId);
+      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.OK);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');
@@ -173,15 +200,7 @@ describe('Retail Inventory System API', () => {
       const orderId = 2;
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-
-      const [orderRows] = (await db.execute('SELECT status_id FROM `order` WHERE id = ?', [
-        orderId,
-      ])) as SelectQueryResult;
-      const [orderProductRows] = (await db.execute(
-        'SELECT id, status_id FROM order_product WHERE order_id = ? ORDER BY id ASC',
-        [orderId],
-      )) as SelectQueryResult;
-      const productStockRows = await getProductStockByOrderId(orderId);
+      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.OK);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');
@@ -194,15 +213,7 @@ describe('Retail Inventory System API', () => {
       const orderId = 3;
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-
-      const [orderRows] = (await db.execute('SELECT status_id FROM `order` WHERE id = ?', [
-        orderId,
-      ])) as SelectQueryResult;
-      const [orderProductRows] = (await db.execute(
-        'SELECT id, status_id FROM order_product WHERE order_id = ? ORDER BY id ASC',
-        [orderId],
-      )) as SelectQueryResult;
-      const productStockRows = await getProductStockByOrderId(orderId);
+      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.OK);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');
@@ -215,15 +226,7 @@ describe('Retail Inventory System API', () => {
       const orderId = 4;
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-
-      const [orderRows] = (await db.execute('SELECT status_id FROM `order` WHERE id = ?', [
-        orderId,
-      ])) as SelectQueryResult;
-      const [orderProductRows] = (await db.execute(
-        'SELECT id, status_id FROM order_product WHERE order_id = ? ORDER BY id ASC',
-        [orderId],
-      )) as SelectQueryResult;
-      const productStockRows = await getProductStockByOrderId(orderId);
+      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.BAD_REQUEST);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');
@@ -236,9 +239,13 @@ describe('Retail Inventory System API', () => {
       const orderId = 0;
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
+      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.NOT_FOUND);
       expect(body).toMatchSnapshot('0_RESPONSE_BODY');
+      expect(orderRows).toMatchSnapshot('1_ORDERS');
+      expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
+      expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
     });
   });
 });
