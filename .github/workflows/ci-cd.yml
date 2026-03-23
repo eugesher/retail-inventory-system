@@ -29,3 +29,75 @@ jobs:
 
       - name: Build
         run: yarn build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: lint-and-build
+
+    env:
+      DATABASE_URL: mysql://retail:retailpass@localhost:3306/retail_db
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672
+      REDIS_URL: redis://localhost:6379
+
+    services:
+      mysql:
+        image: mysql:8.4.8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: retail_db
+          MYSQL_USER: retail
+          MYSQL_PASSWORD: retailpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      rabbitmq:
+        image: rabbitmq:4.2.3-management
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics -q ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      redis:
+        image: redis:8.6.0-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=3s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.1
+          cache: 'yarn'
+
+      - name: Install Yarn
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Run migrations
+        run: yarn migration:run
+
+      - name: Seed database
+        run: yarn test:seed
+
+      - name: Run E2E tests
+        run: yarn test:e2e:run
