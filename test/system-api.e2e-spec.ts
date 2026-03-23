@@ -67,6 +67,72 @@ describe('Retail Inventory System API', () => {
     await db?.end();
   });
 
+  describe('GET /api/product/:productId/stock', () => {
+    const apiHref = (productId: number) => `/api/product/${productId}/stock`;
+
+    it('returns aggregated stock for all storages when storageIds is omitted', async () => {
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(1));
+
+      expect(status).toBe(HttpStatus.OK);
+      expect(body.productId).toBe(1);
+      expect(body.quantity).toBeGreaterThan(0);
+      expect(body.updatedAt).toBeDefined();
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0].storageId).toBe('head-warehouse');
+      expect(body.items[0].quantity).toBeGreaterThan(0);
+    });
+
+    it('returns stock filtered by matching storageIds', async () => {
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        .get(apiHref(1))
+        .query({ storageIds: '["head-warehouse"]' });
+
+      expect(status).toBe(HttpStatus.OK);
+      expect(body.productId).toBe(1);
+      expect(body.quantity).toBeGreaterThan(0);
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0].storageId).toBe('head-warehouse');
+    });
+
+    it('returns empty items and zero quantity when storageIds filter matches no storage', async () => {
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        .get(apiHref(1))
+        .query({ storageIds: '["non-existent-storage"]' });
+
+      expect(status).toBe(HttpStatus.OK);
+      expect(body.productId).toBe(1);
+      expect(body.quantity).toBe(0);
+      expect(body.updatedAt).toBeDefined();
+      expect(body.items).toHaveLength(0);
+    });
+
+    it('returns 400 when storageIds is not valid JSON', async () => {
+      const { status } = await supertest(apiGatewayApp.getHttpServer())
+        .get(apiHref(1))
+        .query({ storageIds: 'not-valid-json' });
+
+      expect(status).toBe(HttpStatus.BAD_REQUEST);
+    });
+
+    it('returns empty items and zero quantity when product has no stock', async () => {
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(0));
+
+      expect(status).toBe(HttpStatus.OK);
+      expect(body.productId).toBe(0);
+      expect(body.quantity).toBe(0);
+      expect(body.updatedAt).toBeNull();
+      expect(body.items).toHaveLength(0);
+    });
+
+    it('returns 400 when productId is not a number', async () => {
+      const { status } = await supertest(apiGatewayApp.getHttpServer()).get(
+        '/api/product/abc/stock',
+      );
+
+      expect(status).toBe(HttpStatus.BAD_REQUEST);
+    });
+  });
+
   describe('PUT /api/order/:id/confirm', () => {
     const apiHref = (orderId: number) => `/api/order/${orderId}/confirm`;
 

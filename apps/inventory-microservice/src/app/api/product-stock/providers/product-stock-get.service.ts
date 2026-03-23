@@ -41,7 +41,7 @@ export class ProductStockGetService {
       if (item.updatedAt > latestDate) latestDate = item.updatedAt;
       return { storageId: item.storageId, quantity, updatedAt: item.updatedAt };
     });
-    const updatedAt = stock.length > 0 ? latestDate : new Date();
+    const updatedAt = stock.length > 0 ? latestDate : null;
 
     return { productId, quantity: totalQuantity, updatedAt, items };
   }
