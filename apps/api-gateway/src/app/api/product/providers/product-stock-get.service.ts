@@ -15,12 +15,8 @@ export class ProductStockGetService {
     private readonly inventoryMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(productId: number, storageIds?: string): Promise<ProductStockDto> {
-    const data: IProductStockGet = { productId };
-
-    if (storageIds) {
-      data.storageIds = storageIds.split(',').map((s) => s.trim());
-    }
+  public async execute(productId: number, storageIds?: string[]): Promise<ProductStockDto> {
+    const data: IProductStockGet = { productId, storageIds };
 
     return await firstValueFrom(
       this.inventoryMicroserviceClient.send<ProductStockDto, IProductStockGet>(

@@ -8,7 +8,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
-import { ProductStockDto } from '@retail-inventory-system/inventory';
+import { ProductStockDto, ProductStockGetDto } from '@retail-inventory-system/inventory';
 import { ProductStockGetService } from './providers';
 
 @ApiTags('Product')
@@ -29,8 +29,8 @@ export class ProductController {
   @ApiQuery({
     name: 'storageIds',
     required: false,
-    description: 'Comma-separated list of store IDs (optional)',
-    example: 'store-001,store-002',
+    description: 'JSON array of store IDs (optional)',
+    example: '["head-warehouse","storage-alpha"]',
   })
   @ApiOkResponse({
     description: 'Stock information successfully retrieved',
@@ -40,8 +40,8 @@ export class ProductController {
   @Get(':productId/stock')
   public async getProductStock(
     @Param('productId', ParseIntPipe) productId: number,
-    @Query('storageIds') storageIds?: string,
+    @Query() dto: ProductStockGetDto,
   ): Promise<ProductStockDto> {
-    return await this.stockGetService.execute(productId, storageIds);
+    return await this.stockGetService.execute(productId, dto.storageIds);
   }
 }
