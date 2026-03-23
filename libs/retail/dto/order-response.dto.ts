@@ -9,5 +9,5 @@ export class OrderResponseDto {
   public status: OrderStatusEnum;
 
   @ApiResponseProperty()
-  public message?: string;
+  public message: string;
 }

@@ -17,7 +17,7 @@ export class ProductStock {
   @Column()
   public quantity: number;
 
-  @Column({ nullable: true, type: 'int' })
+  @Column({ nullable: true, type: 'bigint' })
   public orderProductId: number | null;
 
   @CreateDateColumn()

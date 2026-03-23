@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, PipeTransform } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  PipeTransform,
+} from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
@@ -19,11 +25,15 @@ export class OrderConfirmPipe implements PipeTransform<string, Promise<number>> 
     const id = Number(value);
 
     const order = await firstValueFrom(
-      this.retailMicroserviceClient.send<{ statusId: OrderStatusEnum }, number>(
+      this.retailMicroserviceClient.send<{ statusId: OrderStatusEnum } | null, number>(
         MicroserviceMessagePatternEnum.RETAIL_ORDER_GET,
         id,
       ),
     );
+
+    if (!order) {
+      throw new NotFoundException(`Order #${id} not found`);
+    }
 
     if (order.statusId !== OrderStatusEnum.PENDING) {
       throw new BadRequestException(

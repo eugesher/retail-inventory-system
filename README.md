@@ -46,12 +46,12 @@ The system handles order lifecycle management and product stock tracking across 
 
 ## Services
 
-| Service | Transport | Responsibility |
-|---|---|---|
-| `api-gateway` | HTTP (port 3000) | Single entry point; routes requests to microservices |
-| `retail-microservice` | RabbitMQ (`retail_queue`) | Order creation and confirmation |
-| `inventory-microservice` | RabbitMQ (`inventory_queue`) | Stock queries and reservation |
-| `notification-microservice` | RabbitMQ (`notification_queue`) | Stub (not yet implemented) |
+| Service                     | Transport                       | Responsibility                                       |
+| --------------------------- | ------------------------------- | ---------------------------------------------------- |
+| `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
+| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
+| `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
+| `notification-microservice` | RabbitMQ (`notification_queue`) | Stub (not yet implemented)                           |
 
 ## Getting Started
 
@@ -62,6 +62,14 @@ docker-compose up -d mysql redis rabbitmq
 yarn migration:run
 yarn start:dev
 ```
+
+## Scripts
+
+| Script                   | Description                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `yarn test:seed`         | Populate the database with deterministic test fixtures (products, orders, stock records) defined in `scripts/seeds/*.sql`                                          |
+| `yarn test:infra:reload` | Reset and reprovision the full local environment: tears down existing containers and volumes, starts MySQL/Redis/RabbitMQ, runs migrations, and seeds the database |
+| `yarn test:e2e`          | Run `test:infra:reload` then execute the E2E test suite against a clean database                                                                                   |
 
 ## API
 
