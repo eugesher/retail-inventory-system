@@ -19,7 +19,7 @@ export class ProductStockDto {
   public quantity: number;
 
   @ApiResponseProperty()
-  public updatedAt: Date;
+  public updatedAt: Date | null;
 
   @ApiResponseProperty({
     type: [ProductStockStockItemDto],

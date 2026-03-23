@@ -17,6 +17,16 @@
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
+      "@retail-inventory-system/apps/api-gateway": ["apps/api-gateway/src/app/app.module"],
+      "@retail-inventory-system/apps/inventory-microservice": [
+        "apps/inventory-microservice/src/app/app.module"
+      ],
+      "@retail-inventory-system/apps/notification-microservice": [
+        "apps/notification-microservice/src/app/app.module"
+      ],
+      "@retail-inventory-system/apps/retail-microservice": [
+        "apps/retail-microservice/src/app/app.module"
+      ],
       "@retail-inventory-system/common": ["libs/common"],
       "@retail-inventory-system/config": ["libs/config"],
       "@retail-inventory-system/inventory": ["libs/inventory"],

@@ -1,5 +1,65 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
+exports[`Retail Inventory System API GET /api/product/:productId/stock returns 400 when productId is not a number 1`] = `
+{
+  "error": "Bad Request",
+  "message": "Validation failed (numeric string is expected)",
+  "statusCode": 400,
+}
+`;
+
+exports[`Retail Inventory System API GET /api/product/:productId/stock returns 400 when storageIds is not valid JSON 1`] = `
+{
+  "error": "Bad Request",
+  "message": [
+    "storageIds must be an array",
+  ],
+  "statusCode": 400,
+}
+`;
+
+exports[`Retail Inventory System API GET /api/product/:productId/stock returns aggregated stock for all storages when storageIds is omitted 1`] = `
+{
+  "items": [
+    {
+      "quantity": 5,
+      "storageId": "head-warehouse",
+    },
+  ],
+  "productId": 1,
+  "quantity": 5,
+}
+`;
+
+exports[`Retail Inventory System API GET /api/product/:productId/stock returns empty items and zero quantity when product has no stock 1`] = `
+{
+  "items": [],
+  "productId": 0,
+  "quantity": 0,
+}
+`;
+
+exports[`Retail Inventory System API GET /api/product/:productId/stock returns empty items and zero quantity when storageIds filter matches no storage 1`] = `
+{
+  "items": [],
+  "productId": 1,
+  "quantity": 0,
+}
+`;
+
+exports[`Retail Inventory System API GET /api/product/:productId/stock returns stock filtered by matching storageIds 1`] = `
+{
+  "items": [
+    {
+      "quantity": 5,
+      "storageId": "head-warehouse",
+    },
+  ],
+  "productId": 1,
+  "quantity": 5,
+}
+`;
+
 exports[`Retail Inventory System API PUT /api/order/:id/confirm confirms all products and the order when every product has sufficient stock: 0_RESPONSE_BODY 1`] = `
 {
   "id": 1,
@@ -235,3 +295,9 @@ exports[`Retail Inventory System API PUT /api/order/:id/confirm returns 404 when
   "statusCode": 404,
 }
 `;
+
+exports[`Retail Inventory System API PUT /api/order/:id/confirm returns 404 when the order does not exist: 1_ORDERS 1`] = `[]`;
+
+exports[`Retail Inventory System API PUT /api/order/:id/confirm returns 404 when the order does not exist: 2_ORDER_PRODUCTS 1`] = `[]`;
+
+exports[`Retail Inventory System API PUT /api/order/:id/confirm returns 404 when the order does not exist: 3_PRODUCT_STOCK 1`] = `[]`;
