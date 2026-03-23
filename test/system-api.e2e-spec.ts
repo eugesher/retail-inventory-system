@@ -70,25 +70,25 @@ describe('Retail Inventory System API', () => {
 
   describe('GET /api/product/:productId/stock', () => {
     const apiHref = (productId: number | string) => `/api/product/${productId}/stock`;
-    const cleanupResponseBody = (body: any): void => {
+    const assertData = (body: any) => {
       body = body as ObjectLiteral;
+
+      expect(body.updatedAt).toBeDefined();
 
       delete body.updatedAt;
 
       for (const item of body.items) {
         delete item.updatedAt;
       }
+
+      expect(body).toMatchSnapshot();
     };
 
     it('returns aggregated stock for all storages when storageIds is omitted', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(1));
 
-      expect(body.updatedAt).toBeDefined();
-
-      cleanupResponseBody(body);
-
       expect(status).toBe(HttpStatus.OK);
-      expect(body).toMatchSnapshot();
+      assertData(body);
     });
 
     it('returns stock filtered by matching storageIds', async () => {
@@ -96,12 +96,8 @@ describe('Retail Inventory System API', () => {
         .get(apiHref(1))
         .query({ storageIds: '["head-warehouse"]' });
 
-      expect(body.updatedAt).toBeDefined();
-
-      cleanupResponseBody(body);
-
       expect(status).toBe(HttpStatus.OK);
-      expect(body).toMatchSnapshot();
+      assertData(body);
     });
 
     it('returns empty items and zero quantity when storageIds filter matches no storage', async () => {
@@ -109,12 +105,15 @@ describe('Retail Inventory System API', () => {
         .get(apiHref(1))
         .query({ storageIds: '["non-existent-storage"]' });
 
-      expect(body.updatedAt).toBeDefined();
+      expect(status).toBe(HttpStatus.OK);
+      assertData(body);
+    });
 
-      cleanupResponseBody(body);
+    it('returns empty items and zero quantity when product has no stock', async () => {
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(0));
 
       expect(status).toBe(HttpStatus.OK);
-      expect(body).toMatchSnapshot();
+      assertData(body);
     });
 
     it('returns 400 when storageIds is not valid JSON', async () => {
@@ -123,17 +122,6 @@ describe('Retail Inventory System API', () => {
         .query({ storageIds: 'not-valid-json' });
 
       expect(status).toBe(HttpStatus.BAD_REQUEST);
-      expect(body).toMatchSnapshot();
-    });
-
-    it('returns empty items and zero quantity when product has no stock', async () => {
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(0));
-
-      expect(body.updatedAt).toBeNull();
-
-      cleanupResponseBody(body);
-
-      expect(status).toBe(HttpStatus.OK);
       expect(body).toMatchSnapshot();
     });
 
@@ -183,6 +171,18 @@ describe('Retail Inventory System API', () => {
       return { orderRows, orderProductRows, productStockRows };
     };
 
+    const assertData = (
+      body: any,
+      orderRows: any[],
+      orderProductRows: any[],
+      productStockRows: any[],
+    ) => {
+      expect(body).toMatchSnapshot('0_RESPONSE_BODY');
+      expect(orderRows).toMatchSnapshot('1_ORDERS');
+      expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
+      expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
+    };
+
     it('confirms all products and the order when every product has sufficient stock', async () => {
       const orderId = 1;
 
@@ -190,10 +190,7 @@ describe('Retail Inventory System API', () => {
       const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.OK);
-      expect(body).toMatchSnapshot('0_RESPONSE_BODY');
-      expect(orderRows).toMatchSnapshot('1_ORDERS');
-      expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
-      expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
+      assertData(body, orderRows, orderProductRows, productStockRows);
     });
 
     it('confirms only products with available stock and leaves the order pending', async () => {
@@ -203,10 +200,7 @@ describe('Retail Inventory System API', () => {
       const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.OK);
-      expect(body).toMatchSnapshot('0_RESPONSE_BODY');
-      expect(orderRows).toMatchSnapshot('1_ORDERS');
-      expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
-      expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
+      assertData(body, orderRows, orderProductRows, productStockRows);
     });
 
     it('leaves everything pending when there is no stock for any product', async () => {
@@ -216,10 +210,7 @@ describe('Retail Inventory System API', () => {
       const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.OK);
-      expect(body).toMatchSnapshot('0_RESPONSE_BODY');
-      expect(orderRows).toMatchSnapshot('1_ORDERS');
-      expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
-      expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
+      assertData(body, orderRows, orderProductRows, productStockRows);
     });
 
     it('returns 400 when the order is already confirmed', async () => {
@@ -229,10 +220,7 @@ describe('Retail Inventory System API', () => {
       const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.BAD_REQUEST);
-      expect(body).toMatchSnapshot('0_RESPONSE_BODY');
-      expect(orderRows).toMatchSnapshot('1_ORDERS');
-      expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
-      expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
+      assertData(body, orderRows, orderProductRows, productStockRows);
     });
 
     it('returns 404 when the order does not exist', async () => {
@@ -242,10 +230,7 @@ describe('Retail Inventory System API', () => {
       const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
 
       expect(status).toBe(HttpStatus.NOT_FOUND);
-      expect(body).toMatchSnapshot('0_RESPONSE_BODY');
-      expect(orderRows).toMatchSnapshot('1_ORDERS');
-      expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
-      expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
+      assertData(body, orderRows, orderProductRows, productStockRows);
     });
   });
 });
