@@ -1,4 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
@@ -16,11 +23,22 @@ export class OrderCreateService {
   ) {}
 
   public async execute(dto: OrderCreateDto): Promise<OrderResponseDto> {
-    return firstValueFrom(
-      this.retailMicroserviceClient.send<OrderResponseDto, OrderCreateDto>(
-        MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATE,
-        dto,
-      ),
-    );
+    try {
+      return await firstValueFrom(
+        this.retailMicroserviceClient.send<OrderResponseDto, OrderCreateDto>(
+          MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATE,
+          dto,
+        ),
+      );
+    } catch (error) {
+      const { statusCode, message } = error as Record<string, unknown>;
+      const code = Number(statusCode);
+      const msg = typeof message === 'string' ? message : undefined;
+
+      if (code === (HttpStatus.NOT_FOUND as number)) throw new NotFoundException(msg);
+      if (code === (HttpStatus.BAD_REQUEST as number)) throw new BadRequestException(msg);
+
+      throw new InternalServerErrorException();
+    }
   }
 }

@@ -38,6 +38,19 @@ export default typescriptEslint.config(
         { overrides: { constructors: 'off' } },
       ],
 
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@retail-inventory-system/apps/*'],
+              message:
+                'AppModule imports are reserved for the E2E test entry point (test/system-api.e2e-spec.ts).',
+            },
+          ],
+        },
+      ],
+
       '@typescript-eslint/naming-convention': [
         'error',
         {
@@ -71,6 +84,7 @@ export default typescriptEslint.config(
   {
     files: ['test/**/*.ts'],
     rules: {
+      'no-restricted-imports': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
