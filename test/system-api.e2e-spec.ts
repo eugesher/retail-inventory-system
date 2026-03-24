@@ -2,32 +2,21 @@ import { HttpStatus, INestApplication, INestMicroservice, ValidationPipe } from 
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import * as supertest from 'supertest';
-import { DataSource, ObjectLiteral } from 'typeorm';
+import { ObjectLiteral } from 'typeorm';
 
 import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
 import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/common';
+import { SystemApiE2ESpecDataSource } from './data-source';
 
 describe('Retail Inventory System API', () => {
   const timeout = 60_000;
 
-  const orderByIdQuery = `
-    SELECT customer_id, status_id
-    FROM \`order\`
-    WHERE id = ?;
-  `;
-  const orderProductByOrderIdQuery = `
-    SELECT id, product_id, status_id
-    FROM order_product
-    WHERE order_id = ?
-    ORDER BY id;
-  `;
-
   let apiGatewayApp: INestApplication;
   let retailMicroservice: INestMicroservice;
   let inventoryMicroservice: INestMicroservice;
-  let dataSource: DataSource;
+  let dataSource: SystemApiE2ESpecDataSource;
 
   beforeAll(async () => {
     const rmqUrl = process.env.RABBITMQ_URL!;
@@ -65,9 +54,11 @@ describe('Retail Inventory System API', () => {
     apiGatewayApp.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
     );
+
     await apiGatewayApp.init();
 
-    dataSource = new DataSource({ type: 'mysql', url: process.env.DATABASE_URL! });
+    dataSource = new SystemApiE2ESpecDataSource({ type: 'mysql', url: process.env.DATABASE_URL! });
+
     await dataSource.initialize();
   }, timeout);
 
@@ -151,8 +142,8 @@ describe('Retail Inventory System API', () => {
 
       const getDataToBeAsserted = async (orderId: number) => {
         const [orderRows, orderProductRows] = await Promise.all([
-          dataSource.query(orderByIdQuery, [orderId]),
-          dataSource.query(orderProductByOrderIdQuery, [orderId]),
+          dataSource.getOrderRowsByOrderId(orderId),
+          dataSource.getOrderProductRowsByOrderId(orderId),
         ]);
 
         return { orderRows, orderProductRows };
@@ -279,19 +270,6 @@ describe('Retail Inventory System API', () => {
     describe('PUT /api/order/:id/confirm', () => {
       const apiHref = (orderId: number) => `/api/order/${orderId}/confirm`;
 
-      const productStockByOrderIdQuery = `
-        SELECT ps.id               AS id,
-               ps.product_id       AS product_id,
-               ps.storage_id       AS storage_id,
-               ps.action_id        AS action_id,
-               ps.quantity         AS quantity,
-               ps.order_product_id AS order_product_id
-        FROM product_stock ps
-          JOIN order_product op ON ps.order_product_id = op.id
-        WHERE op.order_id = ?
-        ORDER BY ps.id;
-      `;
-
       const getDataToBeAsserted = async (
         orderId: number,
       ): Promise<{
@@ -300,9 +278,9 @@ describe('Retail Inventory System API', () => {
         productStockRows: any[];
       }> => {
         const [orderRows, orderProductRows, productStockRows] = await Promise.all([
-          dataSource.query(orderByIdQuery, [orderId]),
-          dataSource.query(orderProductByOrderIdQuery, [orderId]),
-          dataSource.query(productStockByOrderIdQuery, [orderId]),
+          dataSource.getOrderRowsByOrderId(orderId),
+          dataSource.getOrderProductRowsByOrderId(orderId),
+          dataSource.getProductStockRowsByOrderId(orderId),
         ]);
 
         return { orderRows, orderProductRows, productStockRows };
