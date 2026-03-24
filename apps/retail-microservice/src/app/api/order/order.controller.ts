@@ -8,6 +8,7 @@ import {
   OrderResponseDto,
 } from '@retail-inventory-system/retail';
 import { Order } from '../../common/entities';
+import { OrderCreatePipe } from './pipes';
 import { OrderConfirmService, OrderCreateService, OrderGetService } from './providers';
 
 @Controller()
@@ -19,7 +20,7 @@ export class OrderController {
   ) {}
 
   @MessagePattern(MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATE)
-  public async create(@Payload() data: OrderCreateDto): Promise<OrderResponseDto> {
+  public async create(@Payload(OrderCreatePipe) data: OrderCreateDto): Promise<OrderResponseDto> {
     return await this.orderCreateService.execute(data);
   }
 

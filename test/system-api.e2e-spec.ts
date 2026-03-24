@@ -1,9 +1,8 @@
 import { HttpStatus, INestApplication, INestMicroservice, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { Connection, createConnection } from 'mysql2/promise';
 import * as supertest from 'supertest';
-import { ObjectLiteral } from 'typeorm';
+import { DataSource, ObjectLiteral } from 'typeorm';
 
 import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
 import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
@@ -11,14 +10,24 @@ import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-syst
 import { MicroserviceQueueEnum } from '@retail-inventory-system/common';
 
 describe('Retail Inventory System API', () => {
-  type SelectQueryResult = [any[], any[]];
-
   const timeout = 60_000;
+
+  const orderByIdQuery = `
+    SELECT customer_id, status_id
+    FROM \`order\`
+    WHERE id = ?;
+  `;
+  const orderProductByOrderIdQuery = `
+    SELECT id, product_id, status_id
+    FROM order_product
+    WHERE order_id = ?
+    ORDER BY id;
+  `;
 
   let apiGatewayApp: INestApplication;
   let retailMicroservice: INestMicroservice;
   let inventoryMicroservice: INestMicroservice;
-  let db: Connection;
+  let dataSource: DataSource;
 
   beforeAll(async () => {
     const rmqUrl = process.env.RABBITMQ_URL!;
@@ -58,179 +67,325 @@ describe('Retail Inventory System API', () => {
     );
     await apiGatewayApp.init();
 
-    db = await createConnection(process.env.DATABASE_URL!);
+    dataSource = new DataSource({ type: 'mysql', url: process.env.DATABASE_URL! });
+    await dataSource.initialize();
   }, timeout);
 
   afterAll(async () => {
     await apiGatewayApp?.close();
     await retailMicroservice?.close();
     await inventoryMicroservice?.close();
-    await db?.end();
+    await dataSource?.destroy();
   });
 
-  describe('GET /api/product/:productId/stock', () => {
-    const apiHref = (productId: number | string) => `/api/product/${productId}/stock`;
-    const assertData = (body: any) => {
-      body = body as ObjectLiteral;
+  describe('Product', () => {
+    describe('GET /api/product/:productId/stock', () => {
+      const apiHref = (productId: number | string) => `/api/product/${productId}/stock`;
+      const assertData = (data: { body: any }) => {
+        const body = data.body as ObjectLiteral;
 
-      expect(body.updatedAt).toBeDefined();
+        delete body.updatedAt;
 
-      delete body.updatedAt;
+        for (const item of body.items) {
+          expect(item.updatedAt).toBeDefined();
 
-      for (const item of body.items) {
-        delete item.updatedAt;
-      }
+          delete item.updatedAt;
+        }
 
-      expect(body).toMatchSnapshot();
-    };
+        expect(body).toMatchSnapshot();
+      };
 
-    it('returns aggregated stock for all storages when storageIds is omitted', async () => {
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(1));
+      it('returns aggregated stock for all storages when storageIds is omitted', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(1));
 
-      expect(status).toBe(HttpStatus.OK);
-      assertData(body);
-    });
+        expect(status).toBe(HttpStatus.OK);
+        assertData({ body });
+      });
 
-    it('returns stock filtered by matching storageIds', async () => {
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .get(apiHref(1))
-        .query({ storageIds: '["head-warehouse"]' });
+      it('returns stock filtered by matching storageIds', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .get(apiHref(1))
+          .query({ storageIds: '["head-warehouse"]' });
 
-      expect(status).toBe(HttpStatus.OK);
-      assertData(body);
-    });
+        expect(status).toBe(HttpStatus.OK);
+        assertData({ body });
+      });
 
-    it('returns empty items and zero quantity when storageIds filter matches no storage', async () => {
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .get(apiHref(1))
-        .query({ storageIds: '["non-existent-storage"]' });
+      it('returns empty items and zero quantity when storageIds filter matches no storage', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .get(apiHref(1))
+          .query({ storageIds: '["non-existent-storage"]' });
 
-      expect(status).toBe(HttpStatus.OK);
-      assertData(body);
-    });
+        expect(status).toBe(HttpStatus.OK);
+        assertData({ body });
+      });
 
-    it('returns empty items and zero quantity when product has no stock', async () => {
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(0));
+      it('returns empty items and zero quantity when product has no stock', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(0));
 
-      expect(status).toBe(HttpStatus.OK);
-      assertData(body);
-    });
+        expect(status).toBe(HttpStatus.OK);
+        assertData({ body });
+      });
 
-    it('returns 400 when storageIds is not valid JSON', async () => {
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .get(apiHref(1))
-        .query({ storageIds: 'not-valid-json' });
+      it('returns 400 when storageIds is not valid JSON', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .get(apiHref(1))
+          .query({ storageIds: 'not-valid-json' });
 
-      expect(status).toBe(HttpStatus.BAD_REQUEST);
-      expect(body).toMatchSnapshot();
-    });
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
 
-    it('returns 400 when productId is not a number', async () => {
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref('abc'));
+      it('returns 400 when productId is not a number', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref('abc'));
 
-      expect(status).toBe(HttpStatus.BAD_REQUEST);
-      expect(body).toMatchSnapshot();
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
     });
   });
 
-  describe('PUT /api/order/:id/confirm', () => {
-    const apiHref = (orderId: number) => `/api/order/${orderId}/confirm`;
+  describe('Order', () => {
+    describe('POST /api/order', () => {
+      const apiHref = '/api/order';
 
-    const getDataToBeAsserted = async (
-      orderId: number,
-    ): Promise<{
-      orderRows: any[];
-      orderProductRows: any[];
-      productStockRows: any[];
-    }> => {
-      const orderQuery = `
-        SELECT status_id
-        FROM \`order\`
-        WHERE id = ?;
-      `;
-      const orderProductQuery = `
-        SELECT id, status_id
-        FROM order_product
-        WHERE order_id = ?
-        ORDER BY id;
-      `;
-      const productStockQuery = `
-        SELECT ps.order_product_id, ps.quantity
+      const getDataToBeAsserted = async (orderId: number) => {
+        const [orderRows, orderProductRows] = await Promise.all([
+          dataSource.query(orderByIdQuery, [orderId]),
+          dataSource.query(orderProductByOrderIdQuery, [orderId]),
+        ]);
+
+        return { orderRows, orderProductRows };
+      };
+
+      const assertData = (data: { body: any; orderRows: any[]; orderProductRows: any[] }) => {
+        const { body, orderRows, orderProductRows } = data;
+
+        expect(body).toMatchSnapshot('0_RESPONSE_BODY');
+        expect(orderRows).toMatchSnapshot('1_ORDERS');
+        expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
+      };
+
+      it('creates an order with a single product', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 1, products: [{ productId: 1, quantity: 1 }] });
+
+        const { orderRows, orderProductRows } = await getDataToBeAsserted(body.orderId);
+
+        expect(status).toBe(HttpStatus.CREATED);
+        assertData({ body, orderRows, orderProductRows });
+      });
+
+      it('creates an order expanding each product quantity into individual order_product rows', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({
+            customerId: 1,
+            products: [
+              { productId: 1, quantity: 2 },
+              { productId: 2, quantity: 1 },
+            ],
+          });
+
+        const { orderRows, orderProductRows } = await getDataToBeAsserted(body.orderId);
+
+        expect(status).toBe(HttpStatus.CREATED);
+        assertData({ body, orderRows, orderProductRows });
+      });
+
+      it('returns 404 when customerId does not exist', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 9999, products: [{ productId: 1, quantity: 1 }] });
+
+        expect(status).toBe(HttpStatus.NOT_FOUND);
+        expect(body).toMatchSnapshot();
+      });
+
+      it('returns 400 when productId does not exist', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 1, products: [{ productId: 9999, quantity: 1 }] });
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
+
+      it('returns 400 when products array is empty', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 1, products: [] });
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
+
+      it('returns 400 when customerId is missing', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ products: [{ productId: 1, quantity: 1 }] });
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
+
+      it('returns 400 when customerId is not a positive integer', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 0, products: [{ productId: 1, quantity: 1 }] });
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
+
+      it('returns 400 when products is missing', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 1 });
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
+
+      it('returns 400 when products[].productId is not a positive integer', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 1, products: [{ productId: 0, quantity: 1 }] });
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
+
+      it('returns 400 when products[].quantity is not a positive integer', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 1, products: [{ productId: 1, quantity: 0 }] });
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
+
+      it('returns 400 when the request body contains an unknown field', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+          .post(apiHref)
+          .send({ customerId: 1, products: [{ productId: 1, quantity: 1 }], unknownField: 'x' });
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
+    });
+
+    describe('PUT /api/order/:id/confirm', () => {
+      const apiHref = (orderId: number) => `/api/order/${orderId}/confirm`;
+
+      const productStockByOrderIdQuery = `
+        SELECT ps.id               AS id,
+               ps.product_id       AS product_id,
+               ps.storage_id       AS storage_id,
+               ps.action_id        AS action_id,
+               ps.quantity         AS quantity,
+               ps.order_product_id AS order_product_id
         FROM product_stock ps
           JOIN order_product op ON ps.order_product_id = op.id
         WHERE op.order_id = ?
         ORDER BY ps.id;
       `;
 
-      const [[orderRows], [orderProductRows], [productStockRows]] = (await Promise.all([
-        db.execute(orderQuery, [orderId]),
-        db.execute(orderProductQuery, [orderId]),
-        db.execute(productStockQuery, [orderId]),
-      ])) as SelectQueryResult[];
+      const getDataToBeAsserted = async (
+        orderId: number,
+      ): Promise<{
+        orderRows: any[];
+        orderProductRows: any[];
+        productStockRows: any[];
+      }> => {
+        const [orderRows, orderProductRows, productStockRows] = await Promise.all([
+          dataSource.query(orderByIdQuery, [orderId]),
+          dataSource.query(orderProductByOrderIdQuery, [orderId]),
+          dataSource.query(productStockByOrderIdQuery, [orderId]),
+        ]);
 
-      return { orderRows, orderProductRows, productStockRows };
-    };
+        return { orderRows, orderProductRows, productStockRows };
+      };
 
-    const assertData = (
-      body: any,
-      orderRows: any[],
-      orderProductRows: any[],
-      productStockRows: any[],
-    ) => {
-      expect(body).toMatchSnapshot('0_RESPONSE_BODY');
-      expect(orderRows).toMatchSnapshot('1_ORDERS');
-      expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
-      expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
-    };
+      const assertData = (data: {
+        body: any;
+        orderRows: any[];
+        orderProductRows: any[];
+        productStockRows: any[];
+      }) => {
+        const { body, orderRows, orderProductRows, productStockRows } = data;
 
-    it('confirms all products and the order when every product has sufficient stock', async () => {
-      const orderId = 1;
+        expect(body).toMatchSnapshot('0_RESPONSE_BODY');
+        expect(orderRows).toMatchSnapshot('1_ORDERS');
+        expect(orderProductRows).toMatchSnapshot('2_ORDER_PRODUCTS');
+        expect(productStockRows).toMatchSnapshot('3_PRODUCT_STOCK');
+      };
 
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
+      it('confirms all products and the order when every product has sufficient stock', async () => {
+        const orderId = 1;
 
-      expect(status).toBe(HttpStatus.OK);
-      assertData(body, orderRows, orderProductRows, productStockRows);
-    });
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+          apiHref(orderId),
+        );
+        const { orderRows, orderProductRows, productStockRows } =
+          await getDataToBeAsserted(orderId);
 
-    it('confirms only products with available stock and leaves the order pending', async () => {
-      const orderId = 2;
+        expect(status).toBe(HttpStatus.OK);
+        assertData({ body, orderRows, orderProductRows, productStockRows });
+      });
 
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
+      it('confirms only products with available stock and leaves the order pending', async () => {
+        const orderId = 2;
 
-      expect(status).toBe(HttpStatus.OK);
-      assertData(body, orderRows, orderProductRows, productStockRows);
-    });
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+          apiHref(orderId),
+        );
+        const { orderRows, orderProductRows, productStockRows } =
+          await getDataToBeAsserted(orderId);
 
-    it('leaves everything pending when there is no stock for any product', async () => {
-      const orderId = 3;
+        expect(status).toBe(HttpStatus.OK);
+        assertData({ body, orderRows, orderProductRows, productStockRows });
+      });
 
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
+      it('leaves everything pending when there is no stock for any product', async () => {
+        const orderId = 3;
 
-      expect(status).toBe(HttpStatus.OK);
-      assertData(body, orderRows, orderProductRows, productStockRows);
-    });
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+          apiHref(orderId),
+        );
+        const { orderRows, orderProductRows, productStockRows } =
+          await getDataToBeAsserted(orderId);
 
-    it('returns 400 when the order is already confirmed', async () => {
-      const orderId = 4;
+        expect(status).toBe(HttpStatus.OK);
+        assertData({ body, orderRows, orderProductRows, productStockRows });
+      });
 
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
+      it('returns 400 when the order is already confirmed', async () => {
+        const orderId = 4;
 
-      expect(status).toBe(HttpStatus.BAD_REQUEST);
-      assertData(body, orderRows, orderProductRows, productStockRows);
-    });
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+          apiHref(orderId),
+        );
+        const { orderRows, orderProductRows, productStockRows } =
+          await getDataToBeAsserted(orderId);
 
-    it('returns 404 when the order does not exist', async () => {
-      const orderId = 0;
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        assertData({ body, orderRows, orderProductRows, productStockRows });
+      });
 
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(apiHref(orderId));
-      const { orderRows, orderProductRows, productStockRows } = await getDataToBeAsserted(orderId);
+      it('returns 404 when the order does not exist', async () => {
+        const orderId = 0;
 
-      expect(status).toBe(HttpStatus.NOT_FOUND);
-      assertData(body, orderRows, orderProductRows, productStockRows);
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+          apiHref(orderId),
+        );
+        const { orderRows, orderProductRows, productStockRows } =
+          await getDataToBeAsserted(orderId);
+
+        expect(status).toBe(HttpStatus.NOT_FOUND);
+        assertData({ body, orderRows, orderProductRows, productStockRows });
+      });
     });
   });
 });

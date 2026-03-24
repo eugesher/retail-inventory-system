@@ -1,12 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { RpcException } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, Repository } from 'typeorm';
+import { DeepPartial, QueryFailedError, Repository } from 'typeorm';
 
 import {
   OrderCreateDto,
+  OrderProductStatusEnum,
   OrderResponseDto,
   OrderStatusEnum,
-  OrderProductStatusEnum,
 } from '@retail-inventory-system/retail';
 import { Order, OrderProduct } from '../../../common/entities';
 
@@ -38,12 +39,26 @@ export class OrderCreateService {
       statusId: OrderStatusEnum.PENDING,
     });
 
-    const saved = await this.orderRepository.save(order);
+    try {
+      const saved = await this.orderRepository.save(order);
 
-    return {
-      orderId: saved.id,
-      status: OrderStatusEnum.PENDING,
-      message: 'Order successfully created',
-    };
+      return {
+        orderId: saved.id,
+        status: OrderStatusEnum.PENDING,
+        message: 'Order successfully created',
+      };
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error.driverError as { code?: string }).code === 'ER_NO_REFERENCED_ROW_2'
+      ) {
+        throw new RpcException({
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'One or more product IDs are invalid',
+        });
+      }
+
+      throw error;
+    }
   }
 }

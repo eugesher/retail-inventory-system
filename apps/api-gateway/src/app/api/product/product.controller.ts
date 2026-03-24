@@ -1,14 +1,8 @@
 import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
-import {
-  ApiOkResponse,
-  ApiOperation,
-  ApiParam,
-  ApiProduces,
-  ApiQuery,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@nestjs/swagger';
 
-import { ProductStockDto, ProductStockGetDto } from '@retail-inventory-system/inventory';
+import { ProductStockDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetDto } from './dto';
 import { ProductStockGetService } from './providers';
 
 @ApiTags('Product')
@@ -25,12 +19,6 @@ export class ProductController {
     name: 'productId',
     description: 'Unique product identifier (e.g. prod-001)',
     example: 'prod-001',
-  })
-  @ApiQuery({
-    name: 'storageIds',
-    required: false,
-    description: 'JSON array of store IDs (optional)',
-    example: '["head-warehouse","storage-alpha"]',
   })
   @ApiOkResponse({
     description: 'Stock information successfully retrieved',
