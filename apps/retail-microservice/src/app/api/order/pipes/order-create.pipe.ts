@@ -14,9 +14,9 @@ export class OrderCreatePipe implements PipeTransform<OrderCreateDto, Promise<Or
   ) {}
 
   public async transform(dto: OrderCreateDto): Promise<OrderCreateDto> {
-    const customer = await this.customerRepository.findOne({ where: { id: dto.customerId } });
+    const exists = await this.customerRepository.existsBy({ id: dto.customerId });
 
-    if (!customer) {
+    if (!exists) {
       throw new RpcException({
         statusCode: HttpStatus.NOT_FOUND,
         message: `Customer #${dto.customerId} not found`,
