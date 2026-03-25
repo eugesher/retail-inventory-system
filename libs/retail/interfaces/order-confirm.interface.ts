@@ -5,3 +5,8 @@ export interface IOrderProductConfirmItem {
   productId: number;
   statusId: OrderProductStatusEnum;
 }
+
+export interface IOrderConfirm {
+  id: number;
+  products: IOrderProductConfirmItem[];
+}

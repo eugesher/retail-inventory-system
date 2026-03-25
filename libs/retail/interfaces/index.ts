@@ -1,1 +1,1 @@
-export * from './order-product-confirm-item.interface';
+export * from './order-confirm.interface';

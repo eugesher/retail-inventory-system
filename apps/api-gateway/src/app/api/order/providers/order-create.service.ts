@@ -38,7 +38,7 @@ export class OrderCreateService {
       if (code === (HttpStatus.NOT_FOUND as number)) throw new NotFoundException(msg);
       if (code === (HttpStatus.BAD_REQUEST as number)) throw new BadRequestException(msg);
 
-      throw new InternalServerErrorException();
+      throw new InternalServerErrorException(msg);
     }
   }
 }
