@@ -1,10 +1,4 @@
-import {
-  HttpStatus,
-  Inject,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
@@ -13,6 +7,7 @@ import {
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
 import { OrderConfirmResponseDto } from '@retail-inventory-system/retail';
+import { throwRpcError } from '../../../common/rpc-error.util';
 
 @Injectable()
 export class OrderConfirmService {
@@ -30,13 +25,7 @@ export class OrderConfirmService {
         ),
       );
     } catch (error) {
-      const { statusCode, message } = error as Record<string, unknown>;
-      const code = Number(statusCode);
-      const msg = typeof message === 'string' ? message : undefined;
-
-      if (code === (HttpStatus.NOT_FOUND as number)) throw new NotFoundException(msg);
-
-      throw new InternalServerErrorException(msg);
+      throwRpcError(error);
     }
   }
 }
