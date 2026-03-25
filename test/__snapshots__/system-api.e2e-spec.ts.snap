@@ -383,6 +383,14 @@ exports[`Retail Inventory System API Order PUT /api/order/:id/confirm leaves eve
 
 exports[`Retail Inventory System API Order PUT /api/order/:id/confirm leaves everything pending when there is no stock for any product: 3_PRODUCT_STOCK 1`] = `[]`;
 
+exports[`Retail Inventory System API Order PUT /api/order/:id/confirm returns 400 when orderId is not a number 1`] = `
+{
+  "error": "Bad Request",
+  "message": "Validation failed (numeric string is expected)",
+  "statusCode": 400,
+}
+`;
+
 exports[`Retail Inventory System API Order PUT /api/order/:id/confirm returns 400 when the order is already confirmed: 0_RESPONSE_BODY 1`] = `
 {
   "error": "Bad Request",

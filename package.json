@@ -34,6 +34,7 @@
     "test:infra:up": "docker compose up mysql redis rabbitmq --wait",
     "test:infra:down": "docker compose down -v --remove-orphans",
     "test:infra:reload": "yarn test:infra:down && yarn test:infra:up && yarn migration:run && yarn test:seed",
+    "test:unit": "jest --config jest.unit.config.js",
     "test:e2e:run": "jest --config jest.e2e.config.js --runInBand --forceExit",
     "test:e2e": "yarn test:infra:reload && yarn test:e2e:run"
   },

@@ -24,6 +24,10 @@ export class OrderConfirmPipe implements PipeTransform<string, Promise<number>> 
   public async transform(value: string): Promise<number> {
     const id = Number(value);
 
+    if (isNaN(id)) {
+      throw new BadRequestException('Validation failed (numeric string is expected)');
+    }
+
     const order = await firstValueFrom(
       this.retailMicroserviceClient.send<{ statusId: OrderStatusEnum } | null, number>(
         MicroserviceMessagePatternEnum.RETAIL_ORDER_GET,

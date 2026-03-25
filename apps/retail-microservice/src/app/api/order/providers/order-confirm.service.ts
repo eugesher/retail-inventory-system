@@ -9,12 +9,14 @@ import {
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
 import {
+  IOrderConfirm,
   IOrderProductConfirmItem,
   OrderConfirmResponseDto,
   OrderProductStatusEnum,
   OrderStatusEnum,
 } from '@retail-inventory-system/retail';
 import { Order, OrderProduct } from '../../../common/entities';
+import { OrderConfirmDomain } from '../domain';
 
 @Injectable()
 export class OrderConfirmService {
@@ -25,42 +27,40 @@ export class OrderConfirmService {
     private readonly inventoryMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(id: Order['id']): Promise<OrderConfirmResponseDto> {
-    const order = (await this.orderRepository.findOne({
-      where: { id },
-      relations: ['products'],
-    }))!;
+  public async execute(order: IOrderConfirm): Promise<OrderConfirmResponseDto> {
+    const { id, products } = order;
 
-    const payload: IOrderProductConfirmItem[] = order.products.map(
-      ({ id: productRowId, productId, statusId }) => ({ id: productRowId, productId, statusId }),
-    );
-
-    const confirmedIds = await firstValueFrom(
+    const confirmedOrderProductIds = await firstValueFrom(
       this.inventoryMicroserviceClient.send<number[], IOrderProductConfirmItem[]>(
         MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
-        payload,
+        products,
       ),
     );
 
+    const result = new OrderConfirmDomain(order, confirmedOrderProductIds);
+
+    if (result.skipUpdate) {
+      return await this.getOrder(id);
+    }
+
     await this.orderRepository.manager.transaction(async (entityManager) => {
-      if (confirmedIds.length > 0) {
+      if (result.someProductsConfirmed) {
         await entityManager.update(
           OrderProduct,
-          { id: In(confirmedIds) },
+          { id: In(confirmedOrderProductIds) },
           { statusId: OrderProductStatusEnum.CONFIRMED },
         );
       }
 
-      const confirmedSet = new Set(confirmedIds);
-      const allConfirmed = order.products.every(
-        (p) => confirmedSet.has(p.id) || p.statusId === OrderProductStatusEnum.CONFIRMED,
-      );
-
-      if (allConfirmed) {
+      if (result.allProductsConfirmed) {
         await entityManager.update(Order, { id }, { statusId: OrderStatusEnum.CONFIRMED });
       }
     });
 
+    return await this.getOrder(id);
+  }
+
+  private async getOrder(id: number): Promise<OrderConfirmResponseDto> {
     const builder = this.orderRepository
       .createQueryBuilder('Order')
       .leftJoin('Order.status', 'OrderStatus')
