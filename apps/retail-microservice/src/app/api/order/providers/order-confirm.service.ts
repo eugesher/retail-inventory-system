@@ -39,8 +39,6 @@ export class OrderConfirmService {
 
     const model = new OrderConfirmModel(order, confirmedOrderProductIds);
 
-    model.execute();
-
     if (model.skipUpdate) {
       return await this.getOrder(id);
     }
