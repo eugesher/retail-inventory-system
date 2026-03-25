@@ -4,7 +4,7 @@ import {
   OrderProductStatusEnum,
 } from '@retail-inventory-system/retail';
 
-export class OrderConfirmModel {
+export class OrderConfirmDomain {
   public readonly someProductsConfirmed: boolean;
   public readonly allProductsConfirmed: boolean;
   public readonly skipUpdate: boolean;

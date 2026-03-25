@@ -16,7 +16,7 @@ import {
   OrderStatusEnum,
 } from '@retail-inventory-system/retail';
 import { Order, OrderProduct } from '../../../common/entities';
-import { OrderConfirmModel } from '../models';
+import { OrderConfirmDomain } from '../domain';
 
 @Injectable()
 export class OrderConfirmService {
@@ -37,14 +37,14 @@ export class OrderConfirmService {
       ),
     );
 
-    const model = new OrderConfirmModel(order, confirmedOrderProductIds);
+    const result = new OrderConfirmDomain(order, confirmedOrderProductIds);
 
-    if (model.skipUpdate) {
+    if (result.skipUpdate) {
       return await this.getOrder(id);
     }
 
     await this.orderRepository.manager.transaction(async (entityManager) => {
-      if (model.someProductsConfirmed) {
+      if (result.someProductsConfirmed) {
         await entityManager.update(
           OrderProduct,
           { id: In(confirmedOrderProductIds) },
@@ -52,7 +52,7 @@ export class OrderConfirmService {
         );
       }
 
-      if (model.allProductsConfirmed) {
+      if (result.allProductsConfirmed) {
         await entityManager.update(Order, { id }, { statusId: OrderStatusEnum.CONFIRMED });
       }
     });

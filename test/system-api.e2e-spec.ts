@@ -364,6 +364,15 @@ describe('Retail Inventory System API', () => {
         expect(status).toBe(HttpStatus.NOT_FOUND);
         assertData({ body, orderRows, orderProductRows, productStockRows });
       });
+
+      it('returns 400 when orderId is not a number', async () => {
+        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+          apiHref('abc' as unknown as number),
+        );
+
+        expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body).toMatchSnapshot();
+      });
     });
   });
 });
