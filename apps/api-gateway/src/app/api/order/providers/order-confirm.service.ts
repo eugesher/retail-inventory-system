@@ -6,7 +6,7 @@ import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
-import { OrderConfirmResponseDto } from '@retail-inventory-system/retail';
+import { IOrderConfirmPayload, OrderConfirmResponseDto } from '@retail-inventory-system/retail';
 import { throwRpcError } from '../../../common/rpc-error.util';
 
 @Injectable()
@@ -16,12 +16,12 @@ export class OrderConfirmService {
     private readonly retailMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(id: number): Promise<OrderConfirmResponseDto> {
+  public async execute(id: number, correlationId: string): Promise<OrderConfirmResponseDto> {
     try {
       return await firstValueFrom(
-        this.retailMicroserviceClient.send<OrderConfirmResponseDto, number>(
+        this.retailMicroserviceClient.send<OrderConfirmResponseDto, IOrderConfirmPayload>(
           MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRM,
-          id,
+          { id, correlationId },
         ),
       );
     } catch (error) {

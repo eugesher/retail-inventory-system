@@ -6,7 +6,8 @@ import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
-import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
+import { IProductStockGetPayload, ProductStockDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetDto } from '../dto';
 
 @Injectable()
 export class ProductStockGetService {
@@ -15,11 +16,16 @@ export class ProductStockGetService {
     private readonly inventoryMicroserviceClient: ClientProxy,
   ) {}
 
-  public async execute(productId: number, storageIds?: string[]): Promise<ProductStockDto> {
-    const data: IProductStockGet = { productId, storageIds };
+  public async execute(
+    productId: number,
+    dto: ProductStockGetDto,
+    correlationId: string,
+  ): Promise<ProductStockDto> {
+    const { storageIds } = dto;
+    const data: IProductStockGetPayload = { productId, storageIds, correlationId };
 
     return await firstValueFrom(
-      this.inventoryMicroserviceClient.send<ProductStockDto, IProductStockGet>(
+      this.inventoryMicroserviceClient.send<ProductStockDto, IProductStockGetPayload>(
         MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
         data,
       ),

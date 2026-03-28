@@ -1,6 +1,7 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
+import { CorrelationMiddleware } from '@retail-inventory-system/common';
 import { ConfigFactoryTokenEnum, ConfigModuleConfiguration } from '@retail-inventory-system/config';
 import { configObject } from '../config';
 import { OrderModule, ProductModule } from './api';
@@ -17,4 +18,8 @@ import { OrderModule, ProductModule } from './api';
     ProductModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  public configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(CorrelationMiddleware).forRoutes('*');
+  }
+}

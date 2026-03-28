@@ -8,9 +8,9 @@ import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
+import { IProductStockOrderConfirmPayload } from '@retail-inventory-system/inventory';
 import {
   IOrderConfirm,
-  IOrderProductConfirmItem,
   OrderConfirmResponseDto,
   OrderProductStatusEnum,
   OrderStatusEnum,
@@ -28,12 +28,12 @@ export class OrderConfirmService {
   ) {}
 
   public async execute(order: IOrderConfirm): Promise<OrderConfirmResponseDto> {
-    const { id, products } = order;
+    const { id, products, correlationId } = order;
 
     const confirmedOrderProductIds = await firstValueFrom(
-      this.inventoryMicroserviceClient.send<number[], IOrderProductConfirmItem[]>(
+      this.inventoryMicroserviceClient.send<number[], IProductStockOrderConfirmPayload>(
         MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
-        products,
+        { products, correlationId },
       ),
     );
 

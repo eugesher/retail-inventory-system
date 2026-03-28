@@ -3,26 +3,29 @@ import { RpcException } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { OrderCreateDto } from '@retail-inventory-system/retail';
+import { IOrderCreatePayload } from '@retail-inventory-system/retail';
 import { Customer } from '../../../common/entities';
 
 @Injectable()
-export class OrderCreatePipe implements PipeTransform<OrderCreateDto, Promise<OrderCreateDto>> {
+export class OrderCreatePipe implements PipeTransform<
+  IOrderCreatePayload,
+  Promise<IOrderCreatePayload>
+> {
   constructor(
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
   ) {}
 
-  public async transform(dto: OrderCreateDto): Promise<OrderCreateDto> {
-    const exists = await this.customerRepository.existsBy({ id: dto.customerId });
+  public async transform(payload: IOrderCreatePayload): Promise<IOrderCreatePayload> {
+    const exists = await this.customerRepository.existsBy({ id: payload.customerId });
 
     if (!exists) {
       throw new RpcException({
         statusCode: HttpStatus.NOT_FOUND,
-        message: `Customer #${dto.customerId} not found`,
+        message: `Customer #${payload.customerId} not found`,
       });
     }
 
-    return dto;
+    return payload;
   }
 }

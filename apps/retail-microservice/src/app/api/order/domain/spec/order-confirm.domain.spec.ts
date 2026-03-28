@@ -1,4 +1,4 @@
-import { IOrderProductConfirmItem, OrderProductStatusEnum } from '@retail-inventory-system/retail';
+import { IOrderProductConfirm, OrderProductStatusEnum } from '@retail-inventory-system/retail';
 
 import { OrderConfirmDomain } from '../order-confirm.domain';
 
@@ -6,7 +6,7 @@ describe('OrderConfirmDomain', () => {
   const makeProduct = (
     id: number,
     statusId = OrderProductStatusEnum.PENDING,
-  ): IOrderProductConfirmItem => ({
+  ): IOrderProductConfirm => ({
     id,
     productId: id * 10,
     statusId,

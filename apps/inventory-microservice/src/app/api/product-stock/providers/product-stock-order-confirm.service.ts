@@ -4,9 +4,10 @@ import { DeepPartial, Repository } from 'typeorm';
 
 import {
   INVENTORY_DEFAULT_STORAGE,
+  IProductStockOrderConfirmPayload,
   ProductStockActionEnum,
 } from '@retail-inventory-system/inventory';
-import { IOrderProductConfirmItem, OrderProductStatusEnum } from '@retail-inventory-system/retail';
+import { OrderProductStatusEnum } from '@retail-inventory-system/retail';
 import { ProductStock } from '../../../common/entities';
 
 @Injectable()
@@ -16,8 +17,11 @@ export class ProductStockOrderConfirmService {
     private readonly productStockRepository: Repository<ProductStock>,
   ) {}
 
-  public async execute(items: IOrderProductConfirmItem[]): Promise<number[]> {
-    const pendingItems = items.filter((item) => item.statusId === OrderProductStatusEnum.PENDING);
+  public async execute(payload: IProductStockOrderConfirmPayload): Promise<number[]> {
+    const { products } = payload;
+    const pendingItems = products.filter(
+      (item) => item.statusId === OrderProductStatusEnum.PENDING,
+    );
 
     if (pendingItems.length === 0) {
       return [];

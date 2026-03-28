@@ -1,6 +1,6 @@
 import {
   IOrderConfirm,
-  IOrderProductConfirmItem,
+  IOrderProductConfirm,
   OrderProductStatusEnum,
 } from '@retail-inventory-system/retail';
 
@@ -9,9 +9,9 @@ export class OrderConfirmDomain {
   public readonly allProductsConfirmed: boolean;
   public readonly skipUpdate: boolean;
 
-  constructor(order: IOrderConfirm, confirmedOrderProductIds: number[]) {
+  constructor(order: Omit<IOrderConfirm, 'correlationId'>, confirmedOrderProductIds: number[]) {
     const confirmedOrderProductIdSet = new Set(confirmedOrderProductIds);
-    const isConfirmed = (orderProduct: IOrderProductConfirmItem): boolean =>
+    const isConfirmed = (orderProduct: IOrderProductConfirm): boolean =>
       confirmedOrderProductIdSet.has(orderProduct.id) ||
       orderProduct.statusId === OrderProductStatusEnum.CONFIRMED;
 

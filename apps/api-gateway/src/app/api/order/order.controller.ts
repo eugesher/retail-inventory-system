@@ -7,6 +7,7 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 
+import { CorrelationId } from '@retail-inventory-system/common';
 import {
   OrderConfirmResponseDto,
   OrderCreateDto,
@@ -27,8 +28,11 @@ export class OrderController {
   @ApiCreatedResponse({ description: 'Order created successfully', type: OrderResponseDto })
   @ApiProduces('application/json')
   @Post()
-  public async createOrder(@Body() dto: OrderCreateDto): Promise<OrderResponseDto> {
-    return this.orderCreateService.execute(dto);
+  public async createOrder(
+    @Body() dto: OrderCreateDto,
+    @CorrelationId() correlationId: string,
+  ): Promise<OrderResponseDto> {
+    return this.orderCreateService.execute(dto, correlationId);
   }
 
   @ApiOperation({ summary: 'Confirm order' })
@@ -37,7 +41,8 @@ export class OrderController {
   @Put(':id/confirm')
   public async confirmOrder(
     @Param('id', OrderConfirmPipe) id: number,
+    @CorrelationId() correlationId: string,
   ): Promise<OrderConfirmResponseDto> {
-    return this.orderConfirmService.execute(id);
+    return this.orderConfirmService.execute(id, correlationId);
   }
 }

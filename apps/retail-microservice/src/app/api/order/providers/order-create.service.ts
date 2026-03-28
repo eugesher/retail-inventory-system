@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DeepPartial, QueryFailedError, Repository } from 'typeorm';
 
 import {
-  OrderCreateDto,
+  IOrderCreatePayload,
   OrderProductStatusEnum,
   OrderResponseDto,
   OrderStatusEnum,
@@ -18,7 +18,7 @@ export class OrderCreateService {
     private readonly orderRepository: Repository<Order>,
   ) {}
 
-  public async execute(dto: OrderCreateDto): Promise<OrderResponseDto> {
+  public async execute(dto: IOrderCreatePayload): Promise<OrderResponseDto> {
     const { customerId, products } = dto;
     const orderProducts: DeepPartial<OrderProduct>[] = [];
 

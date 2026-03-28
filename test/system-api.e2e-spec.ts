@@ -7,7 +7,7 @@ import { ObjectLiteral } from 'typeorm';
 import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
 import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
-import { MicroserviceQueueEnum } from '@retail-inventory-system/common';
+import { CORRELATION_ID_HEADER, MicroserviceQueueEnum } from '@retail-inventory-system/common';
 import { SystemApiE2ESpecDataSource } from './data-source';
 
 describe('Retail Inventory System API', () => {
@@ -87,49 +87,61 @@ describe('Retail Inventory System API', () => {
       };
 
       it('returns aggregated stock for all storages when storageIds is omitted', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(1));
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).get(
+          apiHref(1),
+        );
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
         assertData({ body });
       });
 
       it('returns stock filtered by matching storageIds', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .get(apiHref(1))
           .query({ storageIds: '["head-warehouse"]' });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
         assertData({ body });
       });
 
       it('returns empty items and zero quantity when storageIds filter matches no storage', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .get(apiHref(1))
           .query({ storageIds: '["non-existent-storage"]' });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
         assertData({ body });
       });
 
       it('returns empty items and zero quantity when product has no stock', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref(0));
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).get(
+          apiHref(0),
+        );
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
         assertData({ body });
       });
 
       it('returns 400 when storageIds is not valid JSON', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .get(apiHref(1))
           .query({ storageIds: 'not-valid-json' });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when productId is not a number', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(apiHref('abc'));
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).get(
+          apiHref('abc'),
+        );
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
@@ -158,18 +170,19 @@ describe('Retail Inventory System API', () => {
       };
 
       it('creates an order with a single product', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 1, products: [{ productId: 1, quantity: 1 }] });
 
         const { orderRows, orderProductRows } = await getDataToBeAsserted(body.orderId);
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.CREATED);
         assertData({ body, orderRows, orderProductRows });
       });
 
       it('creates an order expanding each product quantity into individual order_product rows', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({
             customerId: 1,
@@ -181,87 +194,97 @@ describe('Retail Inventory System API', () => {
 
         const { orderRows, orderProductRows } = await getDataToBeAsserted(body.orderId);
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.CREATED);
         assertData({ body, orderRows, orderProductRows });
       });
 
       it('returns 404 when customerId does not exist', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 9999, products: [{ productId: 1, quantity: 1 }] });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.NOT_FOUND);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when productId does not exist', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 1, products: [{ productId: 9999, quantity: 1 }] });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when products array is empty', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 1, products: [] });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when customerId is missing', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ products: [{ productId: 1, quantity: 1 }] });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when customerId is not a positive integer', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 0, products: [{ productId: 1, quantity: 1 }] });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when products is missing', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 1 });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when products[].productId is not a positive integer', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 1, products: [{ productId: 0, quantity: 1 }] });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when products[].quantity is not a positive integer', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 1, products: [{ productId: 1, quantity: 0 }] });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
 
       it('returns 400 when the request body contains an unknown field', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer())
           .post(apiHref)
           .send({ customerId: 1, products: [{ productId: 1, quantity: 1 }], unknownField: 'x' });
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });
@@ -303,12 +326,13 @@ describe('Retail Inventory System API', () => {
       it('confirms all products and the order when every product has sufficient stock', async () => {
         const orderId = 1;
 
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).put(
           apiHref(orderId),
         );
         const { orderRows, orderProductRows, productStockRows } =
           await getDataToBeAsserted(orderId);
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
         assertData({ body, orderRows, orderProductRows, productStockRows });
       });
@@ -316,12 +340,13 @@ describe('Retail Inventory System API', () => {
       it('confirms only products with available stock and leaves the order pending', async () => {
         const orderId = 2;
 
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).put(
           apiHref(orderId),
         );
         const { orderRows, orderProductRows, productStockRows } =
           await getDataToBeAsserted(orderId);
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
         assertData({ body, orderRows, orderProductRows, productStockRows });
       });
@@ -329,12 +354,13 @@ describe('Retail Inventory System API', () => {
       it('leaves everything pending when there is no stock for any product', async () => {
         const orderId = 3;
 
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).put(
           apiHref(orderId),
         );
         const { orderRows, orderProductRows, productStockRows } =
           await getDataToBeAsserted(orderId);
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
         assertData({ body, orderRows, orderProductRows, productStockRows });
       });
@@ -342,12 +368,13 @@ describe('Retail Inventory System API', () => {
       it('returns 400 when the order is already confirmed', async () => {
         const orderId = 4;
 
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).put(
           apiHref(orderId),
         );
         const { orderRows, orderProductRows, productStockRows } =
           await getDataToBeAsserted(orderId);
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         assertData({ body, orderRows, orderProductRows, productStockRows });
       });
@@ -355,21 +382,23 @@ describe('Retail Inventory System API', () => {
       it('returns 404 when the order does not exist', async () => {
         const orderId = 0;
 
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).put(
           apiHref(orderId),
         );
         const { orderRows, orderProductRows, productStockRows } =
           await getDataToBeAsserted(orderId);
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.NOT_FOUND);
         assertData({ body, orderRows, orderProductRows, productStockRows });
       });
 
       it('returns 400 when orderId is not a number', async () => {
-        const { status, body } = await supertest(apiGatewayApp.getHttpServer()).put(
+        const { status, body, headers } = await supertest(apiGatewayApp.getHttpServer()).put(
           apiHref('abc' as unknown as number),
         );
 
+        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
         expect(body).toMatchSnapshot();
       });

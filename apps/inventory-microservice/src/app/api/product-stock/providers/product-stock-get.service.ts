@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
+import { IProductStockGetPayload, ProductStockDto } from '@retail-inventory-system/inventory';
 import { ProductStock } from '../../../common/entities';
 import { IProductStockGetRawResult } from '../interfaces';
 
@@ -13,7 +13,7 @@ export class ProductStockGetService {
     private readonly productStockRepository: Repository<ProductStock>,
   ) {}
 
-  public async execute(data: IProductStockGet): Promise<ProductStockDto> {
+  public async execute(data: IProductStockGetPayload): Promise<ProductStockDto> {
     const { productId, storageIds } = data;
 
     const builder = this.productStockRepository
