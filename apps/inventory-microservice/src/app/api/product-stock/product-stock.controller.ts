@@ -5,7 +5,7 @@ import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/common'
 import {
   IProductStockGetPayload,
   IProductStockOrderConfirmPayload,
-  ProductStockDto,
+  ProductStockGetResponseDto,
 } from '@retail-inventory-system/inventory';
 import { ProductStockGetService, ProductStockOrderConfirmService } from './providers';
 
@@ -19,7 +19,7 @@ export class ProductStockController {
   @MessagePattern(MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET)
   public async getProductStock(
     @Payload() payload: IProductStockGetPayload,
-  ): Promise<ProductStockDto> {
+  ): Promise<ProductStockGetResponseDto> {
     return this.productStockGetService.execute(payload);
   }
 

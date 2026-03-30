@@ -2,7 +2,7 @@ import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@nestjs/swagger';
 
 import { CorrelationId } from '@retail-inventory-system/common';
-import { ProductStockDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
 import { ProductStockGetDto } from './dto';
 import { ProductStockGetService } from './providers';
 
@@ -23,7 +23,7 @@ export class ProductController {
   })
   @ApiOkResponse({
     description: 'Stock information successfully retrieved',
-    type: ProductStockDto,
+    type: ProductStockGetResponseDto,
   })
   @ApiProduces('application/json')
   @Get(':productId/stock')
@@ -31,7 +31,7 @@ export class ProductController {
     @Param('productId', ParseIntPipe) productId: number,
     @Query() dto: ProductStockGetDto,
     @CorrelationId() correlationId: string,
-  ): Promise<ProductStockDto> {
+  ): Promise<ProductStockGetResponseDto> {
     return await this.stockGetService.execute(productId, dto, correlationId);
   }
 }

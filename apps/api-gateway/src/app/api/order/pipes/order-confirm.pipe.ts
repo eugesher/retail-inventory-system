@@ -21,8 +21,8 @@ export class OrderConfirmPipe implements PipeTransform<string, Promise<number>> 
     private readonly retailMicroserviceClient: ClientProxy,
   ) {}
 
-  public async transform(value: string): Promise<number> {
-    const id = Number(value);
+  public async transform(param: string): Promise<number> {
+    const id = Number(param);
 
     if (isNaN(id)) {
       throw new BadRequestException('Validation failed (numeric string is expected)');

@@ -3,7 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Repository } from 'typeorm';
 
-import { IProductStockGetPayload, ProductStockDto } from '@retail-inventory-system/inventory';
+import {
+  IProductStockGetPayload,
+  ProductStockGetResponseDto,
+} from '@retail-inventory-system/inventory';
 import { ProductStock } from '../../../common/entities';
 import { IProductStockGetRawResult } from '../interfaces';
 
@@ -16,7 +19,7 @@ export class ProductStockGetService {
     private readonly logger: PinoLogger,
   ) {}
 
-  public async execute(data: IProductStockGetPayload): Promise<ProductStockDto> {
+  public async execute(data: IProductStockGetPayload): Promise<ProductStockGetResponseDto> {
     const { productId, storageIds, correlationId } = data;
 
     try {

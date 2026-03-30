@@ -7,9 +7,12 @@ import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
-import { IProductStockGetPayload, ProductStockDto } from '@retail-inventory-system/inventory';
+import {
+  IProductStockGetPayload,
+  ProductStockGetResponseDto,
+} from '@retail-inventory-system/inventory';
+import { throwRpcError } from '../../../common/utils';
 import { ProductStockGetDto } from '../dto';
-import { throwRpcError } from '../../../common/rpc-error.util';
 
 @Injectable()
 export class ProductStockGetService {
@@ -24,7 +27,7 @@ export class ProductStockGetService {
     productId: number,
     dto: ProductStockGetDto,
     correlationId: string,
-  ): Promise<ProductStockDto> {
+  ): Promise<ProductStockGetResponseDto> {
     const { storageIds } = dto;
 
     this.logger.assign({ correlationId });
@@ -37,7 +40,7 @@ export class ProductStockGetService {
       );
 
       const productStock = await firstValueFrom(
-        this.inventoryMicroserviceClient.send<ProductStockDto, IProductStockGetPayload>(
+        this.inventoryMicroserviceClient.send<ProductStockGetResponseDto, IProductStockGetPayload>(
           MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
           { productId, storageIds, correlationId },
         ),

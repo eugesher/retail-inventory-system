@@ -12,7 +12,7 @@ import {
   OrderCreateDto,
   OrderCreateResponseDto,
 } from '@retail-inventory-system/retail';
-import { throwRpcError } from '../../../common/rpc-error.util';
+import { throwRpcError } from '../../../common/utils';
 
 @Injectable()
 export class OrderCreateService {

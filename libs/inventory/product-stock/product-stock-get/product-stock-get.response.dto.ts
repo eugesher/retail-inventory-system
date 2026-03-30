@@ -11,7 +11,7 @@ class ProductStockStockItemDto {
   public updatedAt: Date;
 }
 
-export class ProductStockDto {
+export class ProductStockGetResponseDto {
   @ApiResponseProperty()
   public productId: number;
 
