@@ -1,19 +1,21 @@
-import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import { Logger, PinoLogger } from 'nestjs-pino';
 
-import { SystemLogger, MicroserviceQueueEnum } from '@retail-inventory-system/common';
+import { MicroserviceQueueEnum, AppNameEnum } from '@retail-inventory-system/common';
+import { LoggerConfig } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 
 ((): void => {
-  const logger = new Logger('RetailMicroserviceBootstrap');
+  const logger = new Logger(new PinoLogger(new LoggerConfig(AppNameEnum.RETAIL_MICROSERVICE)), {});
+  const loggerContext = 'RetailMicroserviceBootstrap';
 
   void (async (): Promise<void> => {
     const configService = new ConfigService();
 
     const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
-      logger: new SystemLogger(),
+      logger,
       transport: Transport.RMQ,
       options: {
         urls: [configService.get<string>('RABBITMQ_URL')!],
@@ -22,11 +24,13 @@ import { AppModule } from './app';
       },
     });
 
+    app.useLogger(app.get(Logger));
+
     await app.listen();
 
-    logger.log('Microservice is listening for messages');
+    logger.log({ context: loggerContext, message: 'Microservice is listening for messages' });
   })().catch((e: Error) => {
-    logger.error(e.message, e.stack);
+    logger.error({ context: loggerContext, message: e.message, stack: e.stack });
 
     process.exit(1);
   });

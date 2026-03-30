@@ -1,4 +1,3 @@
-const { Logger } = require('@nestjs/common');
 const path = require('path');
 const TerserWebpackPlugin = require('terser-webpack-plugin');
 const tsconfigPathsWebpackPlugin = require('tsconfig-paths-webpack-plugin');
@@ -7,7 +6,6 @@ const webpackNodeExternals = require('webpack-node-externals');
 
 module.exports = (options) => {
   const { entry, plugins, resolve } = options;
-  const logger = new Logger('Webpack');
 
   let appName;
 
@@ -19,10 +17,8 @@ module.exports = (options) => {
     }
   }
 
-  if (appName) {
-    logger.log(`Building app: ${appName}`);
-  } else {
-    logger.error(`App build failed`);
+  if (!appName) {
+    console.error(`App build failed`);
 
     process.exit(1);
   }
