@@ -1,5 +1,4 @@
+import { ICorrelationPayload } from '../../common';
 import { OrderCreateDto } from '../dto';
 
-export interface IOrderCreatePayload extends OrderCreateDto {
-  correlationId: string;
-}
+export interface IOrderCreatePayload extends ICorrelationPayload, OrderCreateDto {}

@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable, PipeTransform } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Repository } from 'typeorm';
 
 import { IOrderConfirm, IOrderConfirmPayload } from '@retail-inventory-system/retail';
@@ -14,6 +15,8 @@ export class OrderConfirmPipe implements PipeTransform<
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectPinoLogger(OrderConfirmPipe.name)
+    private readonly logger: PinoLogger,
   ) {}
 
   public async transform(payload: IOrderConfirmPayload): Promise<IOrderConfirm> {
@@ -27,6 +30,10 @@ export class OrderConfirmPipe implements PipeTransform<
       .getOne();
 
     if (!order) {
+      this.logger.warn(
+        { correlationId, orderId: id },
+        'Order not found, rejecting confirm request',
+      );
       throw new RpcException({
         statusCode: HttpStatus.NOT_FOUND,
         message: `Order #${id} not found`,

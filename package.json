@@ -11,7 +11,7 @@
     "build:inventory-microservice": "nest build inventory-microservice",
     "build:retail-microservice": "nest build retail-microservice",
     "build:notification-microservice": "nest build notification-microservice",
-    "start:dev": "concurrently --names \"API-GTWAY,INVTRY-MS,RETAIL-MS,NTFCTN-MS\" --prefix \"[{name}]\" --prefix-colors \"magenta,blue,cyan,yellow\" \"yarn start:dev:api-gateway\" \"yarn start:dev:inventory-microservice\" \"yarn start:dev:retail-microservice\" \"yarn start:dev:notification-microservice\"",
+    "start:dev": "bash scripts/bash/start-dev.sh",
     "start:dev:api-gateway": "nest start api-gateway --watch",
     "start:dev:inventory-microservice": "nest start inventory-microservice --watch",
     "start:dev:retail-microservice": "nest start retail-microservice --watch",

@@ -44,18 +44,19 @@ export class LoggerConfig implements Params {
           method.apply(this, inputArgs);
         },
       },
+      ...(isProduction
+        ? {}
+        : {
+            transport: {
+              target: 'pino-pretty',
+              options: {
+                colorize: true,
+                singleLine: false,
+                translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
+                ignore: 'pid,hostname',
+              },
+            },
+          }),
     };
-
-    if (!isProduction) {
-      this.pinoHttp.transport = {
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-          singleLine: false,
-          translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
-          ignore: 'pid,hostname',
-        },
-      };
-    }
   }
 }

@@ -36,7 +36,7 @@ import { AppModule } from './app';
         .build();
       const document = SwaggerModule.createDocument(app, documentConfig);
 
-      app.use('/reference', apiReference({ content: document }));
+      app.use('/api/reference', apiReference({ content: document }));
     }
 
     await app.listen(port);

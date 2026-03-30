@@ -1,12 +1,12 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
-import { RpcException } from '@nestjs/microservices';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, QueryFailedError, Repository } from 'typeorm';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { DeepPartial, Repository } from 'typeorm';
 
 import {
   IOrderCreatePayload,
+  OrderCreateResponseDto,
   OrderProductStatusEnum,
-  OrderResponseDto,
   OrderStatusEnum,
 } from '@retail-inventory-system/retail';
 import { Order, OrderProduct } from '../../../common/entities';
@@ -16,10 +16,18 @@ export class OrderCreateService {
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectPinoLogger(OrderCreateService.name)
+    private readonly logger: PinoLogger,
   ) {}
 
-  public async execute(dto: IOrderCreatePayload): Promise<OrderResponseDto> {
-    const { customerId, products } = dto;
+  public async execute(dto: IOrderCreatePayload): Promise<OrderCreateResponseDto> {
+    const { customerId, products, correlationId } = dto;
+
+    this.logger.info(
+      { correlationId, customerId, productCount: products.length },
+      'Received RPC: create order',
+    );
+
     const orderProducts: DeepPartial<OrderProduct>[] = [];
 
     for (const product of products) {
@@ -42,22 +50,15 @@ export class OrderCreateService {
     try {
       const saved = await this.orderRepository.save(order);
 
+      this.logger.info({ correlationId, orderId: saved.id, customerId }, 'Order created');
+
       return {
         orderId: saved.id,
         status: OrderStatusEnum.PENDING,
         message: 'Order successfully created',
       };
     } catch (error) {
-      if (
-        error instanceof QueryFailedError &&
-        (error.driverError as { code?: string }).code === 'ER_NO_REFERENCED_ROW_2'
-      ) {
-        throw new RpcException({
-          statusCode: HttpStatus.BAD_REQUEST,
-          message: 'One or more product IDs are invalid',
-        });
-      }
-
+      this.logger.error(error, 'Error creating order');
       throw error;
     }
   }
