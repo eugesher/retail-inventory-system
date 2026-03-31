@@ -1,28 +1,61 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { firstValueFrom } from 'rxjs';
 
 import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
 } from '@retail-inventory-system/common';
-import { IProductStockGet, ProductStockDto } from '@retail-inventory-system/inventory';
+import {
+  IProductStockGetPayload,
+  ProductStockGetResponseDto,
+} from '@retail-inventory-system/inventory';
+import { throwRpcError } from '../../../common/utils';
+import { ProductStockGetDto } from '../dto';
 
 @Injectable()
 export class ProductStockGetService {
   constructor(
     @Inject(MicroserviceClientTokenEnum.INVENTORY_MICROSERVICE)
     private readonly inventoryMicroserviceClient: ClientProxy,
+    @InjectPinoLogger(ProductStockGetService.name)
+    private readonly logger: PinoLogger,
   ) {}
 
-  public async execute(productId: number, storageIds?: string[]): Promise<ProductStockDto> {
-    const data: IProductStockGet = { productId, storageIds };
+  public async execute(
+    productId: number,
+    dto: ProductStockGetDto,
+    correlationId: string,
+  ): Promise<ProductStockGetResponseDto> {
+    const { storageIds } = dto;
 
-    return await firstValueFrom(
-      this.inventoryMicroserviceClient.send<ProductStockDto, IProductStockGet>(
-        MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
-        data,
-      ),
-    );
+    this.logger.assign({ correlationId });
+
+    try {
+      this.logger.info({ productId, storageIds }, 'Retrieving product stock data');
+      this.logger.info(
+        { pattern: MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET },
+        'Sending RPC to inventory service',
+      );
+
+      const productStock = await firstValueFrom(
+        this.inventoryMicroserviceClient.send<ProductStockGetResponseDto, IProductStockGetPayload>(
+          MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
+          { productId, storageIds, correlationId },
+        ),
+      );
+
+      this.logger.info(
+        { productId, quantity: productStock.quantity },
+        'Product stock data retrieved',
+      );
+
+      return productStock;
+    } catch (error) {
+      this.logger.error(error, 'Error retrieving product stock data');
+
+      throwRpcError(error);
+    }
   }
 }

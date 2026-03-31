@@ -1,8 +1,10 @@
 import { ApiResponseProperty } from '@nestjs/swagger';
 
-class OrderStatusResponseDto {
+import { OrderProductStatusEnum, OrderStatusEnum } from '../enums';
+
+class OrderConfirmProductStatusResponseDto {
   @ApiResponseProperty()
-  public id: string;
+  public id: OrderProductStatusEnum;
 
   @ApiResponseProperty()
   public name: string;
@@ -18,16 +20,27 @@ class OrderConfirmProductResponseDto {
   @ApiResponseProperty()
   public productId: number;
 
-  @ApiResponseProperty({ type: OrderStatusResponseDto })
-  public status: OrderStatusResponseDto;
+  @ApiResponseProperty({ type: OrderConfirmProductStatusResponseDto })
+  public status: OrderConfirmProductStatusResponseDto;
+}
+
+class OrderConfirmStatusResponseDto {
+  @ApiResponseProperty()
+  public id: OrderStatusEnum;
+
+  @ApiResponseProperty()
+  public name: string;
+
+  @ApiResponseProperty()
+  public color: string;
 }
 
 export class OrderConfirmResponseDto {
   @ApiResponseProperty()
   public id: number;
 
-  @ApiResponseProperty({ type: OrderStatusResponseDto })
-  public status: OrderStatusResponseDto;
+  @ApiResponseProperty({ type: OrderConfirmStatusResponseDto })
+  public status: OrderConfirmStatusResponseDto;
 
   @ApiResponseProperty({ type: [OrderConfirmProductResponseDto] })
   public products: OrderConfirmProductResponseDto[];

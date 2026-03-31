@@ -1,12 +1,16 @@
+import { ICorrelationPayload } from '../../common';
 import { OrderProductStatusEnum } from '../enums';
 
-export interface IOrderProductConfirmItem {
+export interface IOrderConfirmPayload extends ICorrelationPayload {
+  id: number;
+}
+
+export interface IOrderProductConfirm {
   id: number;
   productId: number;
   statusId: OrderProductStatusEnum;
 }
 
-export interface IOrderConfirm {
-  id: number;
-  products: IOrderProductConfirmItem[];
+export interface IOrderConfirm extends IOrderConfirmPayload {
+  products: IOrderProductConfirm[];
 }

@@ -1,7 +1,7 @@
 import { ApiResponseProperty } from '@nestjs/swagger';
 import { OrderStatusEnum } from '../enums';
 
-export class OrderResponseDto {
+export class OrderCreateResponseDto {
   @ApiResponseProperty()
   public orderId: number;
 

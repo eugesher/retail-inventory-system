@@ -4,9 +4,9 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/common';
 import {
   IOrderConfirm,
+  IOrderCreatePayload,
   OrderConfirmResponseDto,
-  OrderCreateDto,
-  OrderResponseDto,
+  OrderCreateResponseDto,
 } from '@retail-inventory-system/retail';
 import { Order } from '../../common/entities';
 import { OrderConfirmPipe, OrderCreatePipe } from './pipes';
@@ -21,8 +21,10 @@ export class OrderController {
   ) {}
 
   @MessagePattern(MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATE)
-  public async create(@Payload(OrderCreatePipe) data: OrderCreateDto): Promise<OrderResponseDto> {
-    return await this.orderCreateService.execute(data);
+  public async create(
+    @Payload(OrderCreatePipe) payload: IOrderCreatePayload,
+  ): Promise<OrderCreateResponseDto> {
+    return await this.orderCreateService.execute(payload);
   }
 
   @MessagePattern(MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRM)

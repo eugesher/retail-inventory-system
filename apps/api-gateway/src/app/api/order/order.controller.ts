@@ -7,10 +7,11 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 
+import { CorrelationId } from '@retail-inventory-system/common';
 import {
   OrderConfirmResponseDto,
   OrderCreateDto,
-  OrderResponseDto,
+  OrderCreateResponseDto,
 } from '@retail-inventory-system/retail';
 import { OrderConfirmPipe } from './pipes';
 import { OrderConfirmService, OrderCreateService } from './providers';
@@ -24,11 +25,14 @@ export class OrderController {
   ) {}
 
   @ApiOperation({ summary: 'Create a new order' })
-  @ApiCreatedResponse({ description: 'Order created successfully', type: OrderResponseDto })
+  @ApiCreatedResponse({ description: 'Order successfully created', type: OrderCreateResponseDto })
   @ApiProduces('application/json')
   @Post()
-  public async createOrder(@Body() dto: OrderCreateDto): Promise<OrderResponseDto> {
-    return this.orderCreateService.execute(dto);
+  public async createOrder(
+    @Body() dto: OrderCreateDto,
+    @CorrelationId() correlationId: string,
+  ): Promise<OrderCreateResponseDto> {
+    return this.orderCreateService.execute(dto, correlationId);
   }
 
   @ApiOperation({ summary: 'Confirm order' })
@@ -37,7 +41,8 @@ export class OrderController {
   @Put(':id/confirm')
   public async confirmOrder(
     @Param('id', OrderConfirmPipe) id: number,
+    @CorrelationId() correlationId: string,
   ): Promise<OrderConfirmResponseDto> {
-    return this.orderConfirmService.execute(id);
+    return this.orderConfirmService.execute(id, correlationId);
   }
 }
