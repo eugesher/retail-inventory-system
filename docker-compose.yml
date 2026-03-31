@@ -51,8 +51,10 @@ services:
 
   api-gateway:
     build:
-      context: ./apps/api-gateway
+      context: .
       dockerfile: Dockerfile
+      args:
+        APP_NAME: api-gateway
     container_name: api-gateway
     ports:
       - '3000:3000'
@@ -69,16 +71,19 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
-      - ./apps/api-gateway:/app
+      - .:/app
       - /app/node_modules
-    command: yarn start:dev
+      - /app/.yarn
+    command: yarn start:dev:api-gateway
     networks:
       - backend
 
   inventory-microservice:
     build:
-      context: apps/inventory-microservice
+      context: .
       dockerfile: Dockerfile
+      args:
+        APP_NAME: inventory-microservice
     container_name: inventory-microservice
     depends_on:
       rabbitmq:
@@ -93,16 +98,19 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
-      - ./apps/inventory-microservice:/app
+      - .:/app
       - /app/node_modules
-    command: yarn start:dev
+      - /app/.yarn
+    command: yarn start:dev:inventory-microservice
     networks:
       - backend
 
   notification-microservice:
     build:
-      context: ./apps/notification-microservice
+      context: .
       dockerfile: Dockerfile
+      args:
+        APP_NAME: notification-microservice
     container_name: notification-microservice
     depends_on:
       rabbitmq:
@@ -117,16 +125,19 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
-      - ./apps/notification-microservice:/app
+      - .:/app
       - /app/node_modules
-    command: yarn start:dev
+      - /app/.yarn
+    command: yarn start:dev:notification-microservice
     networks:
       - backend
 
   retail-microservice:
     build:
-      context: apps/retail-microservice
+      context: .
       dockerfile: Dockerfile
+      args:
+        APP_NAME: retail-microservice
     container_name: retail-microservice
     depends_on:
       rabbitmq:
@@ -141,9 +152,10 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
-      - ./apps/retail-microservice:/app
+      - .:/app
       - /app/node_modules
-    command: yarn start:dev
+      - /app/.yarn
+    command: yarn start:dev:retail-microservice
     networks:
       - backend
 
