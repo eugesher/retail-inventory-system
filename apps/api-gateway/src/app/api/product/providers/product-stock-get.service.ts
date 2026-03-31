@@ -12,7 +12,7 @@ import {
   ProductStockGetResponseDto,
 } from '@retail-inventory-system/inventory';
 import { throwRpcError } from '../../../common/utils';
-import { ProductStockGetDto } from '../dto';
+import { ProductStockGetQueryDto } from '../dto';
 
 @Injectable()
 export class ProductStockGetService {
@@ -25,7 +25,7 @@ export class ProductStockGetService {
 
   public async execute(
     productId: number,
-    dto: ProductStockGetDto,
+    dto: ProductStockGetQueryDto,
     correlationId: string,
   ): Promise<ProductStockGetResponseDto> {
     const { storageIds } = dto;

@@ -25,7 +25,7 @@
     "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
     "format:check": "prettier --check \"apps/**/*.ts\" \"libs/**/*.ts\"",
     "prepare": "husky",
-    "typeorm:migration-cli": "ts-node --project tsconfig.json -r tsconfig-paths/register ./node_modules/typeorm/cli.js -d /migrations/config/data-source.ts",
+    "typeorm:migration-cli": "ts-node --project tsconfig.json -r tsconfig-paths/register ./node_modules/typeorm/cli.js -d ./migrations/config/data-source.ts",
     "migration:create": "ts-node ./scripts/migration-create.ts",
     "migration:run": "yarn typeorm:migration-cli migration:run",
     "migration:revert": "yarn typeorm:migration-cli migration:revert",
@@ -39,7 +39,6 @@
     "test:e2e": "yarn test:infra:reload && yarn test:e2e:run"
   },
   "dependencies": {
-    "@nestjs/cli": "^11.0.16",
     "@nestjs/common": "^11.1.17",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.1.17",
@@ -61,16 +60,13 @@
     "pino-http": "^11.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "ts-loader": "^9.5.4",
-    "tsconfig-paths-webpack-plugin": "^4.2.0",
     "typeorm": "^0.3.28",
-    "typeorm-naming-strategies": "^4.1.0",
-    "webpack": "^5.105.4",
-    "webpack-node-externals": "^3.0.0"
+    "typeorm-naming-strategies": "^4.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^9.39.4",
+    "@nestjs/cli": "^11.0.16",
     "@types/amqplib": "^0",
     "@types/express": "^5.0.6",
     "@types/jest": "^29.5.14",
@@ -95,9 +91,13 @@
     "supertest": "^7.0.0",
     "terser-webpack-plugin": "^5.4.0",
     "ts-jest": "^29.3.4",
+    "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
+    "tsconfig-paths-webpack-plugin": "^4.2.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.2"
+    "typescript-eslint": "^8.57.2",
+    "webpack": "^5.105.4",
+    "webpack-node-externals": "^3.0.0"
   },
   "packageManager": "yarn@4.12.0"
 }

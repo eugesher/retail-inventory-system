@@ -3,7 +3,7 @@ import { ApiOkResponse, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@ne
 
 import { CorrelationId } from '@retail-inventory-system/common';
 import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
-import { ProductStockGetDto } from './dto';
+import { ProductStockGetQueryDto } from './dto';
 import { ProductStockGetService } from './providers';
 
 @ApiTags('Product')
@@ -29,7 +29,7 @@ export class ProductController {
   @Get(':productId/stock')
   public async getProductStock(
     @Param('productId', ParseIntPipe) productId: number,
-    @Query() dto: ProductStockGetDto,
+    @Query() dto: ProductStockGetQueryDto,
     @CorrelationId() correlationId: string,
   ): Promise<ProductStockGetResponseDto> {
     return await this.stockGetService.execute(productId, dto, correlationId);
