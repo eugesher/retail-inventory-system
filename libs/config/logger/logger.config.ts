@@ -26,6 +26,7 @@ export class LoggerConfig implements Params {
     this.forRoutes = [{ path: '*path', method: RequestMethod.ALL }];
 
     this.pinoHttp = {
+      msgPrefix: `[${appName}] `,
       level: process.env.LOG_LEVEL ?? (isProduction ? 'info' : 'debug'),
       customProps: (): { app: AppNameEnum } => customProps,
       redact: {

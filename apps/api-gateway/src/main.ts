@@ -10,8 +10,7 @@ import { ConfigPropertyPathEnum, LoggerConfig } from '@retail-inventory-system/c
 import { AppModule } from './app';
 
 ((): void => {
-  const logger = new Logger(new PinoLogger(new LoggerConfig(AppNameEnum.API_GATEWAY)), {});
-  const loggerContext = 'ApiGatewayBootstrap';
+  const logger = new PinoLogger(new LoggerConfig(AppNameEnum.API_GATEWAY));
 
   void (async (): Promise<void> => {
     const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -41,9 +40,9 @@ import { AppModule } from './app';
 
     await app.listen(port);
 
-    logger.log({ context: loggerContext, message: `API Gateway is running on port: ${port}` });
+    logger.info(`API Gateway is running on port: ${port}`);
   })().catch((e: Error) => {
-    logger.error({ context: loggerContext, message: e.message, stack: e.stack });
+    logger.error(e, 'API Gateway bootstrap error');
 
     process.exit(1);
   });

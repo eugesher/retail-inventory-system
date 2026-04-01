@@ -8,14 +8,13 @@ import { LoggerConfig } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 
 ((): void => {
-  const logger = new Logger(new PinoLogger(new LoggerConfig(AppNameEnum.RETAIL_MICROSERVICE)), {});
-  const loggerContext = 'RetailMicroserviceBootstrap';
+  const logger = new PinoLogger(new LoggerConfig(AppNameEnum.RETAIL_MICROSERVICE));
 
   void (async (): Promise<void> => {
     const configService = new ConfigService();
 
     const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
-      logger,
+      bufferLogs: true,
       transport: Transport.RMQ,
       options: {
         urls: [configService.get<string>('RABBITMQ_URL')!],
@@ -28,9 +27,9 @@ import { AppModule } from './app';
 
     await app.listen();
 
-    logger.log({ context: loggerContext, message: 'Microservice is listening for messages' });
+    logger.info('Retail Microservice is listening for messages');
   })().catch((e: Error) => {
-    logger.error({ context: loggerContext, message: e.message, stack: e.stack });
+    logger.error(e, 'Retail Microservice bootstrap error');
 
     process.exit(1);
   });
