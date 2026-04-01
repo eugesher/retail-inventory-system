@@ -73,7 +73,6 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-      - /app/.yarn
     command: yarn start:dev:api-gateway
     networks:
       - backend
@@ -100,7 +99,6 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-      - /app/.yarn
     command: yarn start:dev:inventory-microservice
     networks:
       - backend
@@ -127,7 +125,6 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-      - /app/.yarn
     command: yarn start:dev:notification-microservice
     networks:
       - backend
@@ -154,7 +151,6 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-      - /app/.yarn
     command: yarn start:dev:retail-microservice
     networks:
       - backend
