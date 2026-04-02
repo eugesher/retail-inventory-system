@@ -3,12 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { DeepPartial, Repository } from 'typeorm';
 
+// REVIEW-FIX: ARCH-001 — import OrderProductStatusEnum from common instead of retail
+import { OrderProductStatusEnum } from '@retail-inventory-system/common';
 import {
   INVENTORY_DEFAULT_STORAGE,
   IProductStockOrderConfirmPayload,
   ProductStockActionEnum,
 } from '@retail-inventory-system/inventory';
-import { OrderProductStatusEnum } from '@retail-inventory-system/retail';
 import { ProductStock } from '../../../common/entities';
 
 @Injectable()
@@ -42,12 +43,14 @@ export class ProductStockOrderConfirmService {
 
     try {
       await this.productStockRepository.manager.transaction(async (entityManager) => {
+        // REVIEW-FIX: BUG-001 — pessimistic lock prevents concurrent overselling
         const stockBalances: { productId: string; totalQuantity: string }[] = await entityManager
           .createQueryBuilder(ProductStock, 'ps')
           .select('ps.productId', 'productId')
           .addSelect('SUM(ps.quantity)', 'totalQuantity')
           .where('ps.productId IN (:...productIds)', { productIds })
           .groupBy('ps.productId')
+          .setLock('pessimistic_write')
           .getRawMany();
 
         this.logger.debug(

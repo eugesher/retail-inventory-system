@@ -3,7 +3,7 @@ import { Transform } from 'class-transformer';
 import { IsArray, IsOptional, IsString } from 'class-validator';
 import { isNil } from 'lodash';
 
-export class ProductStockGetDto {
+export class ProductStockGetQueryDto {
   @ApiPropertyOptional({
     description: 'JSON array of store IDs (optional)',
     example: '["head-warehouse","storage-alpha"]',

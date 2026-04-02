@@ -98,8 +98,9 @@ export class OrderConfirmService {
     }
   }
 
+  // REVIEW-FIX: BUG-004 — replaced non-null assertion with explicit null check
   private async getOrder(id: number): Promise<OrderConfirmResponseDto> {
-    const builder = this.orderRepository
+    const order = await this.orderRepository
       .createQueryBuilder('Order')
       .leftJoin('Order.status', 'OrderStatus')
       .leftJoin('Order.products', 'OrderProduct')
@@ -115,8 +116,13 @@ export class OrderConfirmService {
         'OrderProductStatus.name',
         'OrderProductStatus.color',
       ])
-      .where('Order.id = :id', { id });
+      .where('Order.id = :id', { id })
+      .getOne();
 
-    return (await builder.getOne())!;
+    if (!order) {
+      throw new Error(`Order #${id} not found after confirmation`);
+    }
+
+    return order;
   }
 }

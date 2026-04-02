@@ -1,14 +1,10 @@
-import { ICorrelationPayload } from '../../common';
-import { OrderProductStatusEnum } from '../enums';
+import { ICorrelationPayload, IOrderProductConfirm } from '../../common';
+
+// REVIEW-FIX: ARCH-001 — re-export IOrderProductConfirm from common for backward compatibility
+export { IOrderProductConfirm } from '../../common';
 
 export interface IOrderConfirmPayload extends ICorrelationPayload {
   id: number;
-}
-
-export interface IOrderProductConfirm {
-  id: number;
-  productId: number;
-  statusId: OrderProductStatusEnum;
 }
 
 export interface IOrderConfirm extends IOrderConfirmPayload {

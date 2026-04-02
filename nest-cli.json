@@ -9,7 +9,7 @@
     "webpackConfigPath": "webpack.config.js",
     "deleteOutDir": true,
     "assets": ["**/*.proto", "**/*.json"],
-    "tsConfigPath": "tsconfig.build.json",
+    "tsConfigPath": "tsconfig.json",
     "generateOptions": {
       "flat": false
     }

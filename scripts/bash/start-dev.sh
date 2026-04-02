@@ -20,7 +20,7 @@ if [[ "$reload" == true ]]; then
 fi
 
 concurrently \
-  --names "API-GTWAY,INVTRY-MS,RETAIL-MS,NTFCTN-MS" \
+  --names "API,INV,RET,NOT" \
   --prefix "[{name}]" \
   --prefix-colors "magenta,blue,cyan,yellow" \
   "yarn start:dev:api-gateway" \

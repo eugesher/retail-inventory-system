@@ -1,1 +1,1 @@
-export * from './product-stock-get.dto';
+export * from './product-stock-get-query.dto';

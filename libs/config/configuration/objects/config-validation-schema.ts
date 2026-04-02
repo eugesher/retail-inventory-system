@@ -9,6 +9,9 @@ export const configValidationSchema = Joi.object({
   DATABASE_URL: Joi.string().uri({ scheme: 'mysql' }).required(),
   DATABASE_LOGGING: Joi.boolean().optional(),
 
+  // REVIEW-FIX: CONF-007 — validate LOG_LEVEL used by logger.config.ts
+  LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace').optional(),
+
   RABBITMQ_URL: Joi.string().uri({ scheme: 'amqp' }).required(),
 
   REDIS_URL: Joi.string().uri({ scheme: 'redis' }).required(),
