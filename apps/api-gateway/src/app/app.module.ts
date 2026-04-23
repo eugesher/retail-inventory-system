@@ -5,8 +5,8 @@ import { LoggerModule } from 'nestjs-pino';
 import { AppNameEnum, CorrelationMiddleware } from '@retail-inventory-system/common';
 import {
   ConfigFactoryTokenEnum,
-  ConfigModuleConfiguration,
-  LoggerConfig,
+  ConfigModuleConfig,
+  LoggerModuleConfig,
 } from '@retail-inventory-system/config';
 import { configObject } from '../config';
 import { OrderModule, ProductModule } from './api';
@@ -14,12 +14,12 @@ import { OrderModule, ProductModule } from './api';
 @Module({
   imports: [
     ConfigModule.forRoot(
-      new ConfigModuleConfiguration({
+      new ConfigModuleConfig({
         token: ConfigFactoryTokenEnum.API_GATEWAY,
         configObject,
       }),
     ),
-    LoggerModule.forRoot(new LoggerConfig(AppNameEnum.API_GATEWAY)),
+    LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.API_GATEWAY)),
     OrderModule,
     ProductModule,
   ],

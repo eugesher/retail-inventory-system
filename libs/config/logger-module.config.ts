@@ -4,7 +4,7 @@ import { Params } from 'nestjs-pino';
 import { levels, LogFn } from 'pino';
 import { Options } from 'pino-http';
 
-import { AppNameEnum } from '../../common';
+import { AppNameEnum } from '../common';
 
 const NOISY_CONTEXTS = new Set<string>([
   'InstanceLoader',
@@ -15,7 +15,7 @@ const NOISY_CONTEXTS = new Set<string>([
   'RoutesResolver',
 ]);
 
-export class LoggerConfig implements Params {
+export class LoggerModuleConfig implements Params {
   public readonly pinoHttp: Options;
   public readonly forRoutes: Parameters<MiddlewareConfigProxy['forRoutes']>;
 

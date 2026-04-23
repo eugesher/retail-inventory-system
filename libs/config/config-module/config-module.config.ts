@@ -4,7 +4,7 @@ import { ConfigFactoryTokenEnum } from './enums';
 import { IConfigModuleConfigurationOptions } from './interfaces';
 import { configObjectGlobal, configValidationSchema } from './objects';
 
-export class ConfigModuleConfiguration implements ConfigModuleOptions {
+export class ConfigModuleConfig implements ConfigModuleOptions {
   public readonly load: ConfigModuleOptions['load'];
 
   public readonly validationSchema = configValidationSchema;
