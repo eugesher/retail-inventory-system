@@ -1,10 +1,11 @@
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { isDefined } from 'class-validator';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Repository } from 'typeorm';
 
-import { CacheKeys } from '@retail-inventory-system/common';
+import { CacheHelper } from '@retail-inventory-system/common';
 import {
   IProductStockGetPayload,
   ProductStockGetResponseDto,
@@ -23,45 +24,30 @@ export class ProductStockGetService {
     private readonly logger: PinoLogger,
   ) {}
 
-  public async execute(data: IProductStockGetPayload): Promise<ProductStockGetResponseDto> {
+  public async execute(payload: IProductStockGetPayload): Promise<ProductStockGetResponseDto> {
     try {
-      const { productId, storageIds, correlationId } = data;
+      this.logger.info(payload, 'Received RPC: get product stock');
 
-      this.logger.info(data, 'Received RPC: get product stock');
-
-      const cacheKey = CacheKeys.productStock(productId, storageIds);
-      const cached = await this.cache.get<ProductStockGetResponseDto>(cacheKey);
+      const cached = await this.getCache(payload);
 
       if (cached) {
-        this.logger.debug(
-          { correlationId, productId, cacheKey, hit: true },
-          'Cache hit for stock query',
-        );
-
         return cached;
       }
 
-      this.logger.debug(
-        { correlationId, productId, cacheKey, hit: false },
-        'Cache miss for stock query',
-      );
+      const data = await this.getData(payload);
 
-      const productStock = await this.getProductStock(data);
-      const STOCK_CACHE_TTL = 60 * 1000; // TODO: Move
+      await this.setCache(payload, data);
 
-      await this.cache.set(cacheKey, productStock, STOCK_CACHE_TTL);
-
-      return productStock;
+      return data;
     } catch (error) {
-      this.logger.error(error, 'Error retrieving product stock');
+      this.logger.error({ ...payload, ...error }, 'Error retrieving product stock');
+
       throw error;
     }
   }
 
-  private async getProductStock(
-    data: IProductStockGetPayload,
-  ): Promise<ProductStockGetResponseDto> {
-    const { productId, storageIds, correlationId } = data;
+  private async getData(payload: IProductStockGetPayload): Promise<ProductStockGetResponseDto> {
+    const { productId, storageIds, correlationId } = payload;
 
     const builder = this.productStockRepository
       .createQueryBuilder('ProductStock')
@@ -84,17 +70,72 @@ export class ProductStockGetService {
       'Stock rows retrieved from DB',
     );
 
-    let totalQuantity = 0;
+    let quantity = 0;
     let latestDate = new Date(0);
 
     const items = stock.map((item) => {
-      const quantity = Number(item.quantity);
-      totalQuantity += quantity;
-      if (item.updatedAt > latestDate) latestDate = item.updatedAt;
-      return { storageId: item.storageId, quantity, updatedAt: item.updatedAt };
+      const itemQuantity = Number(item.quantity);
+
+      quantity += itemQuantity;
+
+      if (item.updatedAt > latestDate) {
+        latestDate = item.updatedAt;
+      }
+
+      return { storageId: item.storageId, quantity: itemQuantity, updatedAt: item.updatedAt };
     });
     const updatedAt = stock.length > 0 ? latestDate : null;
 
-    return { productId, quantity: totalQuantity, updatedAt, items };
+    return { productId, quantity, updatedAt, items };
+  }
+
+  private async getCache(
+    payload: IProductStockGetPayload,
+  ): Promise<ProductStockGetResponseDto | undefined> {
+    const { productId, storageIds, correlationId } = payload;
+    const cacheKey = CacheHelper.keys.productStock(productId, storageIds);
+
+    try {
+      const cached = await this.cache.get<ProductStockGetResponseDto>(cacheKey);
+      const cacheHit = isDefined(cached);
+
+      if (cacheHit) {
+        this.logger.debug(
+          { correlationId, productId, cacheKey, cacheHit },
+          'Cache hit for stock query',
+        );
+      } else {
+        this.logger.debug(
+          { correlationId, productId, cacheKey, cacheHit },
+          'Cache miss for stock query',
+        );
+      }
+
+      return cached;
+    } catch (error) {
+      this.logger.warn(
+        { correlationId, productId, cacheKey, ...error },
+        'Failed to read from cache',
+      );
+    }
+  }
+
+  private async setCache(
+    payload: IProductStockGetPayload,
+    data: ProductStockGetResponseDto,
+  ): Promise<void> {
+    const { productId, storageIds, correlationId } = payload;
+    const cacheKey = CacheHelper.keys.productStock(productId, storageIds);
+
+    try {
+      const ttl = CacheHelper.ttlValues.productStock;
+
+      await this.cache.set(cacheKey, data, ttl);
+    } catch (error) {
+      this.logger.warn(
+        { correlationId, productId, cacheKey, ...error },
+        'Failed to write to cache',
+      );
+    }
   }
 }
