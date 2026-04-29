@@ -1,6 +1,8 @@
 export class CacheKeys {
-  public static productStock(productId: number, storageIds?: number[]): string {
-    const storageKey = storageIds ? [...storageIds].sort((a, b) => a - b).join(',') : '*';
+  public static productStock(productId: number, storageIds?: string[]): string {
+    const storageKey = storageIds
+      ? [...storageIds].sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0)).join(',')
+      : '*';
 
     return `stock:${productId}:${storageKey}`;
   }
