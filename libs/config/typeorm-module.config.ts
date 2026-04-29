@@ -2,9 +2,9 @@ import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleAsyncOptions, TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
 
-import { ConfigPropertyPathEnum } from '../configuration/enums';
+import { ConfigPropertyPathEnum } from './config-module';
 
-export class TypeormModuleConfiguration implements TypeOrmModuleAsyncOptions {
+export class TypeormModuleConfig implements TypeOrmModuleAsyncOptions {
   public readonly useFactory: TypeOrmModuleAsyncOptions['useFactory'];
 
   public readonly inject = [ConfigService];

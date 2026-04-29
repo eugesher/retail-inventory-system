@@ -6,9 +6,9 @@ import { LoggerModule } from 'nestjs-pino';
 import { AppNameEnum } from '@retail-inventory-system/common';
 import {
   ConfigFactoryTokenEnum,
-  ConfigModuleConfiguration,
-  LoggerConfig,
-  TypeormModuleConfiguration,
+  ConfigModuleConfig,
+  LoggerModuleConfig,
+  TypeormModuleConfig,
 } from '@retail-inventory-system/config';
 import { configObject } from '../config';
 import { entities } from './common';
@@ -17,13 +17,13 @@ import { OrderModule } from './api';
 @Module({
   imports: [
     ConfigModule.forRoot(
-      new ConfigModuleConfiguration({
+      new ConfigModuleConfig({
         token: ConfigFactoryTokenEnum.RETAIL_MICROSERVICE,
         configObject,
       }),
     ),
-    LoggerModule.forRoot(new LoggerConfig(AppNameEnum.RETAIL_MICROSERVICE)),
-    TypeOrmModule.forRootAsync(new TypeormModuleConfiguration(entities)),
+    LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.RETAIL_MICROSERVICE)),
+    TypeOrmModule.forRootAsync(new TypeormModuleConfig(entities)),
     OrderModule,
   ],
 })

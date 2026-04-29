@@ -1,6 +1,6 @@
-export * from './configuration/enums';
-export * from './configuration/config-module-configuration';
+export * from './config-module/enums';
+export * from './config-module/config-module.config';
 
-export * from './logger/logger.config';
-
-export * from './typeorm-module-configuration/typeorm-module-configuration';
+export * from './cache-module.config';
+export * from './logger-module.config';
+export * from './typeorm-module.config';

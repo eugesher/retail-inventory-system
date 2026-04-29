@@ -5,20 +5,20 @@ import { LoggerModule } from 'nestjs-pino';
 import { AppNameEnum } from '@retail-inventory-system/common';
 import {
   ConfigFactoryTokenEnum,
-  ConfigModuleConfiguration,
-  LoggerConfig,
+  ConfigModuleConfig,
+  LoggerModuleConfig,
 } from '@retail-inventory-system/config';
 import { configObject } from '../config';
 
 @Module({
   imports: [
     ConfigModule.forRoot(
-      new ConfigModuleConfiguration({
+      new ConfigModuleConfig({
         token: ConfigFactoryTokenEnum.NOTIFICATION_MICROSERVICE,
         configObject,
       }),
     ),
-    LoggerModule.forRoot(new LoggerConfig(AppNameEnum.NOTIFICATION_MICROSERVICE)),
+    LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.NOTIFICATION_MICROSERVICE)),
   ],
 })
 export class AppModule {}

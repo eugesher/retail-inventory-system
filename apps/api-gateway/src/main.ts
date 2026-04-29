@@ -6,11 +6,11 @@ import { apiReference } from '@scalar/nestjs-api-reference';
 import { Logger, PinoLogger } from 'nestjs-pino';
 
 import { AppNameEnum } from '@retail-inventory-system/common';
-import { ConfigPropertyPathEnum, LoggerConfig } from '@retail-inventory-system/config';
+import { ConfigPropertyPathEnum, LoggerModuleConfig } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 
 ((): void => {
-  const logger = new PinoLogger(new LoggerConfig(AppNameEnum.API_GATEWAY));
+  const logger = new PinoLogger(new LoggerModuleConfig(AppNameEnum.API_GATEWAY));
 
   void (async (): Promise<void> => {
     const app = await NestFactory.create(AppModule, { bufferLogs: true });
