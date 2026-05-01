@@ -1,9 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepPartial, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
-// REVIEW-FIX: ARCH-001 — import OrderProductStatusEnum from common instead of retail
 import { OrderProductStatusEnum } from '@retail-inventory-system/common';
 import {
   INVENTORY_DEFAULT_STORAGE,
@@ -11,12 +10,14 @@ import {
   ProductStockActionEnum,
 } from '@retail-inventory-system/inventory';
 import { ProductStock } from '../../../common/entities';
+import { IProductStockCommonAddItem, ProductStockCommonService } from '../../../common/modules';
 
 @Injectable()
 export class ProductStockOrderConfirmService {
   constructor(
     @InjectRepository(ProductStock)
     private readonly productStockRepository: Repository<ProductStock>,
+    private readonly productStockCommonService: ProductStockCommonService,
     @InjectPinoLogger(ProductStockOrderConfirmService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -65,13 +66,13 @@ export class ProductStockOrderConfirmService {
           ]),
         );
 
-        const records: DeepPartial<ProductStock>[] = [];
+        const items: IProductStockCommonAddItem[] = [];
 
         for (const item of pendingItems) {
           const available = stockMap.get(item.productId) ?? 0;
 
           if (available > 0) {
-            records.push({
+            items.push({
               productId: item.productId,
               storageId: INVENTORY_DEFAULT_STORAGE,
               actionId: ProductStockActionEnum.ORDER_PRODUCT_CONFIRM,
@@ -83,8 +84,9 @@ export class ProductStockOrderConfirmService {
           }
         }
 
-        if (records.length > 0) {
-          await entityManager.insert(ProductStock, records);
+        if (items.length > 0) {
+          await this.productStockCommonService.add({ items, correlationId }, entityManager);
+
           this.logger.info(
             {
               correlationId,
@@ -101,7 +103,11 @@ export class ProductStockOrderConfirmService {
         }
       });
     } catch (error) {
-      this.logger.error(error, 'Error reserving stock for order products');
+      this.logger.error(
+        { ...error, correlationId, productIds, pendingCount: pendingItems.length },
+        'Error reserving stock for order products',
+      );
+
       throw error;
     }
 
