@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Repository } from 'typeorm';
 
-import { OrderProductStatusEnum } from '@retail-inventory-system/common';
+import { OrderProductStatusEnum } from '@retail-inventory-system/retail';
 import {
   INVENTORY_DEFAULT_STORAGE,
   IProductStockOrderConfirmPayload,
@@ -44,7 +44,6 @@ export class ProductStockOrderConfirmService {
 
     try {
       await this.productStockRepository.manager.transaction(async (entityManager) => {
-        // REVIEW-FIX: BUG-001 — pessimistic lock prevents concurrent overselling
         const stockBalances: { productId: string; totalQuantity: string }[] = await entityManager
           .createQueryBuilder(ProductStock, 'ps')
           .select('ps.productId', 'productId')

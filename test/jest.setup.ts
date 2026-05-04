@@ -1,4 +1,3 @@
-// REVIEW-FIX: CONF-008 — load from .env.local instead of duplicating values
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 
