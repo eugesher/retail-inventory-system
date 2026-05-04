@@ -40,16 +40,9 @@ export class ProductStockOrderConfirmService {
 
     const productIds = [...new Set(pendingItems.map((i) => i.productId))];
     const confirmedIds: number[] = [];
+    const mutatedItems: IProductStockCommonAddItem[] = [];
 
     try {
-      // RISK FLAG #1: cache-invalidation hole.
-      // This service mutates product stock (inserts negative-quantity ledger
-      // rows) but never invalidates the `stock:<productId>:*` cache entries
-      // produced by ProductStockCommonService.get(). With the current 60s TTL,
-      // a stock query right after a successful reservation can return stale
-      // data for up to a minute. To fix, expose an invalidate(productId)
-      // method on ProductStockCommonCacheService and call it here for every
-      // confirmedId after the transaction commits. Left unfixed by request.
       await this.entityManager.transaction(async (entityManager) => {
         const stockMap = await this.productStockCommonService.getMapLocked(
           { productIds, correlationId },
@@ -76,6 +69,7 @@ export class ProductStockOrderConfirmService {
 
         if (items.length > 0) {
           await this.productStockCommonService.add({ items, correlationId }, entityManager);
+          mutatedItems.push(...items);
 
           this.logger.info(
             {
@@ -99,6 +93,23 @@ export class ProductStockOrderConfirmService {
       );
 
       throw error;
+    }
+
+    // Post-commit: invalidate cached stock for every (productId, storageId)
+    // pair we just mutated. Must run after the transaction commits — calling
+    // invalidate inside the callback would race with concurrent readers that
+    // could re-populate the cache from uncommitted state.
+    if (mutatedItems.length > 0) {
+      const invalidateItems = mutatedItems
+        .filter((item): item is typeof item & { storageId: string } => !!item.storageId)
+        .map(({ productId, storageId }) => ({ productId, storageId }));
+
+      if (invalidateItems.length > 0) {
+        await this.productStockCommonService.invalidate({
+          items: invalidateItems,
+          correlationId,
+        });
+      }
     }
 
     return confirmedIds;

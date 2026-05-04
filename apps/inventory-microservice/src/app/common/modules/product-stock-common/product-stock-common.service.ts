@@ -5,6 +5,7 @@ import { EntityManager } from 'typeorm';
 import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
 import {
   IProductStockCommonAdd,
+  IProductStockCommonCacheInvalidate,
   IProductStockCommonGet,
   IProductStockCommonGetOptions,
   IProductStockCommonMapGetLocked,
@@ -83,5 +84,18 @@ export class ProductStockCommonService {
     this.logger.debug(payload, 'Delegating to ProductStockCommonAddService');
 
     return this.productStockCommonGetService.getMapLocked(payload, entityManager);
+  }
+
+  // Invalidate cached stock entries for the given (productId, storageId) pairs.
+  // Callers running inside a transaction MUST invoke this only after a successful
+  // commit — invalidating mid-transaction can race with concurrent readers and
+  // re-populate the cache with pre-commit (uncommitted) data.
+  public async invalidate(payload: IProductStockCommonCacheInvalidate): Promise<void> {
+    this.logger.debug(
+      { correlationId: payload.correlationId, itemCount: payload.items.length },
+      'Delegating to ProductStockCommonCacheService.invalidate',
+    );
+
+    return this.productStockCommonCacheService.invalidate(payload);
   }
 }
