@@ -1,22 +1,21 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectEntityManager } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { Repository } from 'typeorm';
+import { EntityManager } from 'typeorm';
 
-import { OrderProductStatusEnum } from '@retail-inventory-system/retail';
 import {
   INVENTORY_DEFAULT_STORAGE,
   IProductStockOrderConfirmPayload,
   ProductStockActionEnum,
 } from '@retail-inventory-system/inventory';
-import { ProductStock } from '../../../common/entities';
+import { OrderProductStatusEnum } from '@retail-inventory-system/retail';
 import { IProductStockCommonAddItem, ProductStockCommonService } from '../../../common/modules';
 
 @Injectable()
 export class ProductStockOrderConfirmService {
   constructor(
-    @InjectRepository(ProductStock)
-    private readonly productStockRepository: Repository<ProductStock>,
+    @InjectEntityManager()
+    private readonly entityManager: EntityManager,
     private readonly productStockCommonService: ProductStockCommonService,
     @InjectPinoLogger(ProductStockOrderConfirmService.name)
     private readonly logger: PinoLogger,
@@ -43,26 +42,18 @@ export class ProductStockOrderConfirmService {
     const confirmedIds: number[] = [];
 
     try {
-      await this.productStockRepository.manager.transaction(async (entityManager) => {
-        const stockBalances: { productId: string; totalQuantity: string }[] = await entityManager
-          .createQueryBuilder(ProductStock, 'ps')
-          .select('ps.productId', 'productId')
-          .addSelect('SUM(ps.quantity)', 'totalQuantity')
-          .where('ps.productId IN (:...productIds)', { productIds })
-          .groupBy('ps.productId')
-          .setLock('pessimistic_write')
-          .getRawMany();
-
-        this.logger.debug(
-          { correlationId, productIds, stockBalanceCount: stockBalances.length },
-          'Stock balances loaded from DB',
-        );
-
-        const stockMap = new Map<number, number>(
-          stockBalances.map(({ productId, totalQuantity }) => [
-            Number(productId),
-            Number(totalQuantity),
-          ]),
+      // RISK FLAG #1: cache-invalidation hole.
+      // This service mutates product stock (inserts negative-quantity ledger
+      // rows) but never invalidates the `stock:<productId>:*` cache entries
+      // produced by ProductStockCommonService.get(). With the current 60s TTL,
+      // a stock query right after a successful reservation can return stale
+      // data for up to a minute. To fix, expose an invalidate(productId)
+      // method on ProductStockCommonCacheService and call it here for every
+      // confirmedId after the transaction commits. Left unfixed by request.
+      await this.entityManager.transaction(async (entityManager) => {
+        const stockMap = await this.productStockCommonService.getMapLocked(
+          { productIds, correlationId },
+          entityManager,
         );
 
         const items: IProductStockCommonAddItem[] = [];
