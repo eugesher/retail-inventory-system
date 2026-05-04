@@ -11,12 +11,3 @@ export interface IProductStockCommonCacheSet extends ICorrelationPayload {
   storageIds?: string[];
   data: ProductStockGetResponseDto;
 }
-
-export interface IProductStockCommonCacheInvalidateItem {
-  productId: number;
-  storageId: string;
-}
-
-export interface IProductStockCommonCacheInvalidate extends ICorrelationPayload {
-  items: IProductStockCommonCacheInvalidateItem[];
-}
