@@ -25,19 +25,22 @@ interface IRedisScanClient {
   unlink(keys: string[]): Promise<number>;
 }
 
-// FOLLOW-UP (AR5): TTL has no jitter — all entries written together expire on
-// the same wall-clock band, risking a thundering herd at the boundary. A
-// ±10% multiplier on `ttl` in `set` would smooth it. Not applied today.
+// TTL has no jitter — all entries written together expire on the same
+// wall-clock band, risking a thundering herd at the boundary. A ±10%
+// multiplier on `ttl` in `set` would smooth it. Not applied today.
+// AUDIT-2026-05-08 [CACHE-004]
 //
-// FOLLOW-UP (B7): when Redis is unavailable, `get` warn-logs once, the façade
-// falls through to DB, then `set` warn-logs again on the same outage. Net
-// behavior is correct (request succeeds), but the log volume doubles. Could
-// short-circuit with a brief in-process unavailability flag. Not applied today.
+// When Redis is unavailable, `get` warn-logs once, the façade falls through
+// to DB, then `set` warn-logs again on the same outage. Net behavior is
+// correct (request succeeds), but the log volume doubles. Could short-
+// circuit with a brief in-process unavailability flag. Not applied today.
+// AUDIT-2026-05-08 [CACHE-005]
 //
-// FOLLOW-UP (AR6): the SCAN path reaches through Cache → Cacheable.primary →
-// store → KeyvRedis → adapter.client. Defensive guards are in place, but a
-// `cacheable` major version bump may break this. Pin the major in package.json
-// before next dep refresh.
+// The SCAN path reaches through Cache → Cacheable.primary → store →
+// KeyvRedis → adapter.client. Defensive guards are in place, but a
+// `cacheable` major version bump may break this. Pin the major in
+// package.json before next dep refresh.
+// AUDIT-2026-05-08 [CACHE-006]
 @Injectable()
 export class ProductStockCommonCacheService {
   constructor(
@@ -206,6 +209,13 @@ export class ProductStockCommonCacheService {
     return store instanceof KeyvRedis ? (store as KeyvRedis<unknown>) : undefined;
   }
 
+  // AUDIT-2026-05-08 [CACHE-012] bug
+  // This fallback enumerates only `stock:<productId>:*` and the single
+  // `stock:<productId>:<storageId>` key per item. Multi-storage combo keys
+  // (e.g. `stock:1:storage-a,storage-b`) survive until TTL on non-Redis
+  // backends. Either accept-and-document as best-effort (the call site at
+  // line ~111 already says "best-effort"), or enumerate combo keys via the
+  // in-memory adapter's iterator interface.
   private async invalidateNamedKeys(
     items: IProductStockCommonCacheInvalidate['items'],
     correlationId?: string,

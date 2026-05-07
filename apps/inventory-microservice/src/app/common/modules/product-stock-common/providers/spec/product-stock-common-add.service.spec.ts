@@ -23,10 +23,11 @@ const items: IProductStockCommonAddItem[] = [
   },
 ];
 
-// FU17 / FU18: this LoggerMock type + makeLogger factory is duplicated across
-// all six inventory-microservice product-stock specs and should be hoisted into
-// a shared spec-helper. See product-stock-common-cache.service.spec.ts header
-// for the full convention rationale and follow-up details.
+// LoggerMock factory duplication: this LoggerMock type + makeLogger factory
+// is duplicated across all six inventory-microservice product-stock specs and
+// should be hoisted into a shared spec-helper. See
+// product-stock-common-cache.service.spec.ts header for the full convention
+// rationale.
 type LoggerMock = Record<'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'trace', jest.Mock>;
 
 const makeLogger = (): LoggerMock => ({

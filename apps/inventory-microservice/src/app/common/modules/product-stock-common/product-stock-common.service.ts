@@ -70,10 +70,11 @@ export class ProductStockCommonService {
       return cached;
     }
 
-    // FOLLOW-UP (B8 / AR4): cache-aside read/write race window — between this
-    // miss and the cache.set below, a concurrent writer could commit + SCAN-
-    // invalidate, then we'd write the now-stale DB result back to the cache.
-    // No single-flight / version stamp here today; tracked for a future pass.
+    // Cache-aside read/write race window — between this miss and the
+    // cache.set below, a concurrent writer could commit + SCAN-invalidate,
+    // then we'd write the now-stale DB result back to the cache. No
+    // single-flight / version stamp here today; tracked for a future pass.
+    // AUDIT-2026-05-08 [CACHE-001]
     const data = await this.productStockCommonGetService.execute(payload, entityManager);
 
     await this.productStockCommonCacheService.set({ productId, storageIds, data, correlationId });
@@ -95,10 +96,11 @@ export class ProductStockCommonService {
   // commit — invalidating mid-transaction can race with concurrent readers and
   // re-populate the cache with pre-commit (uncommitted) data.
   //
-  // FOLLOW-UP (B11 / AR9): the post-commit-only contract is enforced by comment,
-  // not by the type system. A safer abstraction would register an afterCommit
-  // hook on the EntityManager (or expose addAndInvalidate that does both). Out of
-  // scope for the cache-correctness pass — flagged for a future refactor.
+  // The post-commit-only contract is enforced by comment, not by the type
+  // system. A safer abstraction would register an afterCommit hook on the
+  // EntityManager (or expose addAndInvalidate that does both). Out of scope
+  // for the cache-correctness pass — flagged for a future refactor.
+  // AUDIT-2026-05-08 [CACHE-002]
   public async invalidate(payload: IProductStockCommonCacheInvalidate): Promise<void> {
     this.logger.debug(
       { correlationId: payload.correlationId, itemCount: payload.items.length },

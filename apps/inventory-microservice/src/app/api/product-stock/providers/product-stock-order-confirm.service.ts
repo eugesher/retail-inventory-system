@@ -103,25 +103,25 @@ export class ProductStockOrderConfirmService {
     // the response correctness does not depend on invalidation completing
     // before reply (a brief stale-read window already exists for any reader
     // that fetched DB state before our commit but writes cache after — see
-    // FOLLOW-UP B8/AR4). Awaiting would only add SCAN+UNLINK latency to every
+    // CACHE-001). Awaiting would only add SCAN+UNLINK latency to every
     // confirm RPC. The .catch is for unexpected programming errors only.
     if (items.length > 0) {
-      // FOLLOW-UP (FU16): the !!item.storageId predicate is unreachable today.
-      // Every entry pushed into `items` above is constructed with
-      // `storageId: INVENTORY_DEFAULT_STORAGE` (a non-empty string literal), so
-      // the filter always returns true and the type guard always narrows. The
-      // filter exists for a forward-looking state where some ledger writes may
-      // target a NULL storage column (e.g. cross-storage adjustments) — those
-      // rows must be excluded from invalidation because we cannot point SCAN
-      // at a specific (productId, storageId) pair without a storageId.
+      // The !!item.storageId predicate is unreachable today. Every entry
+      // pushed into `items` above is constructed with `storageId:
+      // INVENTORY_DEFAULT_STORAGE` (a non-empty string literal), so the
+      // filter always returns true and the type guard always narrows. The
+      // filter exists for a forward-looking state where some ledger writes
+      // may target a NULL storage column (e.g. cross-storage adjustments)
+      // — those rows must be excluded from invalidation because we cannot
+      // point SCAN at a specific (productId, storageId) pair without a
+      // storageId.
       //
-      // Removing it now is not a pure dead-code deletion: the type narrowing
-      // it produces (`item.storageId: string`) is what lets the next .map()
-      // emit a `{ storageId: string }` shape that matches
-      // IProductStockCommonCacheInvalidateItem. A simpler `.map(...)` without
-      // the guard would surface a `string | undefined` type error.
-      //
-      // Recorded as FU16 in docs/audits/cache-audit-2026-05-07.md section J.6.
+      // Removing it now is not a pure dead-code deletion: the type
+      // narrowing it produces (`item.storageId: string`) is what lets the
+      // next .map() emit a `{ storageId: string }` shape that matches
+      // IProductStockCommonCacheInvalidateItem. A simpler `.map(...)`
+      // without the guard would surface a `string | undefined` type error.
+      // AUDIT-2026-05-08 [CODE-001]
       const invalidateItems = items
         .filter((item): item is typeof item & { storageId: string } => !!item.storageId)
         .map(({ productId, storageId }) => ({ productId, storageId }));

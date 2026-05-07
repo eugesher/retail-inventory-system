@@ -1,5 +1,5 @@
 // =============================================================================
-// inventory-microservice unit-test conventions — canonical reference (FU18)
+// inventory-microservice unit-test conventions — canonical reference
 // =============================================================================
 // Before this audit pass the inventory-microservice had ZERO unit specs (only
 // `apps/retail-microservice` had one, a pure-domain spec without DI). The six
@@ -8,8 +8,7 @@
 // the canonical example; the other five product-stock specs follow the same
 // shape with smaller surface areas.
 //
-// Conventions (recorded in docs/audits/cache-audit-2026-05-07.md sections I.1
-// and J.6):
+// Conventions:
 //
 //   1. Spec location: `spec/` sibling folder next to the production file,
 //      mirroring the production basename with a `.spec.ts` suffix. Jest's
@@ -43,16 +42,16 @@
 //      the production cache contract, not implementation detail.
 //
 // -----------------------------------------------------------------------------
-// FU17: shared LoggerMock factory opportunity
+// Shared LoggerMock factory opportunity
 // -----------------------------------------------------------------------------
 // The `LoggerMock` type alias and `makeLogger()` factory below are duplicated
 // verbatim across all six product-stock specs (~10 lines per file). A future
 // pass should hoist them into a shared helper module — e.g.
 // `apps/inventory-microservice/src/app/common/spec-helpers/logger-mock.ts` —
-// and have each spec import it. Held out of this audit pass because the
-// Phase 2 brief required flag-and-approve before adding new test utilities;
-// the duplication was accepted as a deliberate trade-off to keep the scope
-// test-only. See FU17 in docs/audits/cache-audit-2026-05-07.md section J.6.
+// and have each spec import it. Held out of the prior audit pass because the
+// brief required flag-and-approve before adding new test utilities; the
+// duplication was accepted as a deliberate trade-off to keep the scope test-
+// only.
 // =============================================================================
 
 import { Cache } from '@nestjs/cache-manager';
