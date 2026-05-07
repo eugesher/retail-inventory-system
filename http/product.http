@@ -1,0 +1,35 @@
+# Product endpoints (apps/api-gateway/src/app/api/product/product.controller.ts)
+#
+# The product domain in the API Gateway currently exposes a single read
+# endpoint that proxies INVENTORY_PRODUCT_STOCK_GET to the inventory
+# microservice. There are no write endpoints on /product yet.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name getProductStockAllStores
+# GET /api/product/:productId/stock
+# Returns stock levels for the given product across every storage location.
+# Path params:
+#   productId: positive int (parsed via ParseIntPipe)
+# Query params:
+#   storageIds: omitted → returns all stores (controller comment in
+#               product.controller.ts:17)
+# Expected response: ProductStockGetResponseDto containing one entry per
+# storage location with its available quantity.
+GET {{baseUrl}}/product/1/stock
+
+###
+
+# @name getProductStockFiltered
+# GET /api/product/:productId/stock?storageIds=...
+# Same endpoint, but restricted to a subset of storage locations.
+# Note on the query value: storageIds arrives on the wire as a STRING, then
+# the DTO @Transform calls JSON.parse on it
+# (apps/api-gateway/src/app/api/product/dto/product-stock-get-query.dto.ts).
+# That means the value MUST be a JSON-encoded array literal, URL-encoded:
+#   ["head-warehouse","storage-alpha"]   →   %5B%22head-warehouse%22%2C%22storage-alpha%22%5D
+# Repeating ?storageIds=a&storageIds=b will NOT work — the DTO expects a
+# single string and parses it as JSON.
+GET {{baseUrl}}/product/1/stock?storageIds=%5B%22head-warehouse%22%2C%22storage-alpha%22%5D
