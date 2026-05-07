@@ -88,7 +88,7 @@ export class ProductStockOrderConfirmService {
       });
     } catch (error) {
       this.logger.error(
-        { ...error, correlationId, productIds, pendingCount: pendingItems.length },
+        { err: error as Error, correlationId, productIds, pendingCount: pendingItems.length },
         'Error reserving stock for order products',
       );
 

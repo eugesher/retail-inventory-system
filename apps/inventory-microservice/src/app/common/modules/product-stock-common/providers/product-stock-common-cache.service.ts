@@ -24,6 +24,19 @@ interface IRedisScanClient {
   unlink(keys: string[]): Promise<number>;
 }
 
+// FOLLOW-UP (AR5): TTL has no jitter — all entries written together expire on
+// the same wall-clock band, risking a thundering herd at the boundary. A
+// ±10% multiplier on `ttl` in `set` would smooth it. Not applied today.
+//
+// FOLLOW-UP (B7): when Redis is unavailable, `get` warn-logs once, the façade
+// falls through to DB, then `set` warn-logs again on the same outage. Net
+// behavior is correct (request succeeds), but the log volume doubles. Could
+// short-circuit with a brief in-process unavailability flag. Not applied today.
+//
+// FOLLOW-UP (AR6): the SCAN path reaches through Cache → Cacheable.primary →
+// store → KeyvRedis → adapter.client. Defensive guards are in place, but a
+// `cacheable` major version bump may break this. Pin the major in package.json
+// before next dep refresh.
 @Injectable()
 export class ProductStockCommonCacheService {
   constructor(
@@ -52,7 +65,7 @@ export class ProductStockCommonCacheService {
       return cached;
     } catch (error) {
       this.logger.warn(
-        { correlationId, productId, cacheKey, ...error },
+        { err: error as Error, correlationId, productId, cacheKey },
         'Failed to read from cache',
       );
     }
@@ -70,7 +83,7 @@ export class ProductStockCommonCacheService {
       this.logger.debug({ correlationId, productId, cacheKey, ttl }, 'Cache write for stock query');
     } catch (error) {
       this.logger.warn(
-        { correlationId, productId, cacheKey, ...error },
+        { err: error as Error, correlationId, productId, cacheKey },
         'Failed to write to cache',
       );
     }
@@ -138,7 +151,7 @@ export class ProductStockCommonCacheService {
       }
     } catch (error) {
       this.logger.warn(
-        { correlationId, productIds, ...error },
+        { err: error as Error, correlationId, productIds },
         'SCAN failed during stock cache invalidation',
       );
       return;
@@ -169,7 +182,7 @@ export class ProductStockCommonCacheService {
       );
     } catch (error) {
       this.logger.warn(
-        { correlationId, productIds, keyCount: matchedKeys.size, ...error },
+        { err: error as Error, correlationId, productIds, keyCount: matchedKeys.size },
         'UNLINK failed during stock cache invalidation',
       );
     }
@@ -206,7 +219,7 @@ export class ProductStockCommonCacheService {
       );
     } catch (error) {
       this.logger.warn(
-        { correlationId, itemCount: items.length, ...error },
+        { err: error as Error, correlationId, itemCount: items.length },
         'Failed to invalidate stock cache (fallback path)',
       );
     }

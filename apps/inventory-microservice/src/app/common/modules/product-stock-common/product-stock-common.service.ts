@@ -54,9 +54,18 @@ export class ProductStockCommonService {
         correlationId,
       });
 
-      if (cached) {
+      // Strict undefined check matches the cache service's miss/error contract:
+      // both miss and read-error return undefined. A truthy check would also work
+      // today (response DTOs are always non-null objects), but couples to that
+      // invariant — explicit undefined avoids the coupling.
+      if (cached !== undefined) {
         return cached;
       }
+
+      // FOLLOW-UP (B8 / AR4): cache-aside read/write race window — between this
+      // miss and the cache.set below, a concurrent writer could commit + SCAN-
+      // invalidate, then we'd write the now-stale DB result back to the cache.
+      // No single-flight / version stamp here today; tracked for a future pass.
     } else {
       this.logger.debug(
         {
@@ -90,6 +99,11 @@ export class ProductStockCommonService {
   // Callers running inside a transaction MUST invoke this only after a successful
   // commit — invalidating mid-transaction can race with concurrent readers and
   // re-populate the cache with pre-commit (uncommitted) data.
+  //
+  // FOLLOW-UP (B11 / AR9): the post-commit-only contract is enforced by comment,
+  // not by the type system. A safer abstraction would register an afterCommit
+  // hook on the EntityManager (or expose addAndInvalidate that does both). Out of
+  // scope for the cache-correctness pass — flagged for a future refactor.
   public async invalidate(payload: IProductStockCommonCacheInvalidate): Promise<void> {
     this.logger.debug(
       { correlationId: payload.correlationId, itemCount: payload.items.length },

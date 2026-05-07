@@ -49,7 +49,7 @@ export class ProductStockCommonGetService {
       stock = await builder.getRawMany<IProductStockCommonGetRawResult>();
     } catch (error) {
       this.logger.error(
-        { ...error, correlationId, productId, storageIds },
+        { err: error as Error, correlationId, productId, storageIds },
         'Failed to aggregate product stock by storage',
       );
 
@@ -103,7 +103,7 @@ export class ProductStockCommonGetService {
         .getRawMany();
     } catch (error) {
       this.logger.error(
-        { ...error, correlationId, productIds },
+        { err: error as Error, correlationId, productIds },
         'Failed to load locked stock totals',
       );
 

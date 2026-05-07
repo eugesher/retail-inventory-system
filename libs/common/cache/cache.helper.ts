@@ -1,3 +1,9 @@
+// FOLLOW-UP (AR3): cache values are typed at compile time only. If
+// ProductStockGetResponseDto's shape changes, in-flight cache entries from the
+// old shape will deserialize without runtime validation and may surface as
+// silently-wrong responses for one TTL window. Mitigation: include a schema
+// version segment in the key (e.g. `stock:v2:<productId>:...`) and bump it on
+// breaking shape changes. Not applied today; recorded for a future pass.
 export class CacheHelper {
   public static ttlValues = {
     productStock: 60_000,

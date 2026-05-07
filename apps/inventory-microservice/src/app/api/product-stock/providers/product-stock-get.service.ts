@@ -21,7 +21,7 @@ export class ProductStockGetService {
 
       return await this.productStockCommonService.get(payload);
     } catch (error) {
-      this.logger.error({ ...payload, ...error }, 'Error retrieving product stock');
+      this.logger.error({ err: error as Error, ...payload }, 'Error retrieving product stock');
 
       throw error;
     }

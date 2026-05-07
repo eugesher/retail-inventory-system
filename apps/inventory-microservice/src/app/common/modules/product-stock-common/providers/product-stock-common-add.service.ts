@@ -35,7 +35,7 @@ export class ProductStockCommonAddService {
       await repository.insert(items);
     } catch (error) {
       this.logger.error(
-        { ...error, correlationId, itemCount },
+        { err: error as Error, correlationId, itemCount },
         'Failed to insert product stock ledger rows',
       );
 
