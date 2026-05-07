@@ -6,7 +6,7 @@ export const cacheModuleConfig: CacheModuleAsyncOptions = {
   inject: [ConfigService],
   useFactory: (configService: ConfigService) => ({
     stores: [new KeyvRedis(configService.get<string>('REDIS_URL') ?? 'redis://localhost:6379')],
-    ttl: 60_000,
+    ttl: configService.get<number>('CACHE_TTL_MS_DEFAULT'),
   }),
   isGlobal: true,
 };

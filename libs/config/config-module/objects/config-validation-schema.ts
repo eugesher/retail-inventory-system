@@ -14,4 +14,7 @@ export const configValidationSchema = Joi.object({
   RABBITMQ_URL: Joi.string().uri({ scheme: 'amqp' }).required(),
 
   REDIS_URL: Joi.string().uri({ scheme: 'redis' }).required(),
+
+  CACHE_TTL_MS_DEFAULT: Joi.number().integer().positive().default(60000),
+  CACHE_TTL_MS_PRODUCT_STOCK: Joi.number().integer().positive().default(60000),
 }).options({ allowUnknown: true, abortEarly: false });

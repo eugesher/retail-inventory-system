@@ -56,10 +56,10 @@
 // =============================================================================
 
 import { Cache } from '@nestjs/cache-manager';
+import { ConfigService } from '@nestjs/config';
 import KeyvRedis from '@keyv/redis';
 import { PinoLogger } from 'nestjs-pino';
 
-import { CacheHelper } from '@retail-inventory-system/common';
 import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
 import { ProductStockCommonCacheService } from '../product-stock-common-cache.service';
 
@@ -141,8 +141,10 @@ describe('ProductStockCommonCacheService', () => {
     jest.resetAllMocks();
     cache = makeCache();
     logger = makeLogger();
+    const config = { get: jest.fn().mockReturnValue(60000) };
     service = new ProductStockCommonCacheService(
       cache as unknown as Cache,
+      config as unknown as ConfigService,
       logger as unknown as PinoLogger,
     );
   });
@@ -201,17 +203,13 @@ describe('ProductStockCommonCacheService', () => {
 
       await service.set({ productId: 42, data: sampleDto, correlationId });
 
-      expect(cache.set).toHaveBeenCalledWith(
-        'stock:42:*',
-        sampleDto,
-        CacheHelper.ttlValues.productStock,
-      );
+      expect(cache.set).toHaveBeenCalledWith('stock:42:*', sampleDto, 60000);
       expect(logger.debug).toHaveBeenCalledWith(
         {
           correlationId,
           productId: 42,
           cacheKey: 'stock:42:*',
-          ttl: CacheHelper.ttlValues.productStock,
+          ttl: 60000,
         },
         'Cache write for stock query',
       );

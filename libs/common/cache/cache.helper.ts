@@ -5,10 +5,6 @@
 // version segment in the key (e.g. `stock:v2:<productId>:...`) and bump it on
 // breaking shape changes. Not applied today; recorded for a future pass.
 export class CacheHelper {
-  public static ttlValues = {
-    productStock: 60_000,
-  };
-
   public static keyPrefixes = {
     // RISK FLAG #2: tenant collision.
     // Cache keys are namespaced only by productId. There is no tenant/store

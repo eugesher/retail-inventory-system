@@ -1,5 +1,6 @@
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import KeyvRedis from '@keyv/redis';
 import { Cacheable } from 'cacheable';
 import { isDefined } from 'class-validator';
@@ -42,6 +43,7 @@ export class ProductStockCommonCacheService {
   constructor(
     @Inject(CACHE_MANAGER)
     private readonly cache: Cache,
+    private readonly configService: ConfigService,
     @InjectPinoLogger(ProductStockCommonCacheService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -75,7 +77,7 @@ export class ProductStockCommonCacheService {
     const { productId, storageIds, data, correlationId } = payload;
 
     const cacheKey = CacheHelper.keys.productStock(productId, storageIds);
-    const ttl = CacheHelper.ttlValues.productStock;
+    const ttl = this.configService.get<number>('CACHE_TTL_MS_PRODUCT_STOCK');
 
     try {
       await this.cache.set(cacheKey, data, ttl);

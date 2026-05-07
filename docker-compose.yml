@@ -70,6 +70,7 @@ services:
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
     volumes:
       - .:/app
       - /app/node_modules
@@ -96,6 +97,8 @@ services:
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
+      CACHE_TTL_MS_PRODUCT_STOCK: 60000
     volumes:
       - .:/app
       - /app/node_modules
@@ -122,6 +125,7 @@ services:
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
     volumes:
       - .:/app
       - /app/node_modules
@@ -148,6 +152,7 @@ services:
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
     volumes:
       - .:/app
       - /app/node_modules
