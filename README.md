@@ -159,3 +159,74 @@ The following shows the full log output for a `PUT /api/order/1/confirm` request
 ```
 
 See [ADR-001](docs/adr/001-structured-logging-with-pino.md) for the rationale behind this design.
+
+## Caching
+
+The product stock query (`GET /product/:productId/stock`) reads from an append-only `product_stock` ledger. Each row records a delta (positive or negative) against a `(productId, storageId)` pair, so producing a current balance requires a `SUM(quantity) ... GROUP BY storageId` aggregation. Aggregation cost grows linearly with the row count, while the read pattern is heavy and the write pattern is comparatively light — a good fit for caching.
+
+The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. Cache logic lives in `ProductStockCommonService` (façade) and `ProductStockCommonCacheService` (Redis I/O); the HTTP-facing `ProductStockGetService` is unaware of the cache.
+
+### Read flow
+
+```
+1. Client request                → ProductStockCommonService.get()
+2. cache.get(key)                → hit?  return cached DTO, done
+                                 → miss? continue
+3. ProductStockCommonGetService  → SUM/GROUP BY against product_stock
+4. cache.set(key, data, TTL)     → populate cache
+5. Return DTO                    → reply to client
+```
+
+Reads inside a caller-owned `EntityManager` (i.e., inside an open transaction) bypass the cache to avoid persisting uncommitted state.
+
+### Cache key
+
+```
+stock:<productId>:<storageIds-joined-by-comma>   # e.g. stock:42:storage-a,storage-b
+stock:<productId>:*                              # when no storageIds filter is supplied
+```
+
+Built by `CacheHelper.keys.productStock(productId, storageIds)` in `libs/common/cache/cache.helper.ts`.
+
+### TTL
+
+| Env var                     | Default (ms) | Role                                                                 |
+| --------------------------- | ------------ | -------------------------------------------------------------------- |
+| `CACHE_TTL_MS_DEFAULT`      | `60000`      | Global default applied by the Cache module to any unscoped `set()`.  |
+| `CACHE_TTL_MS_PRODUCT_STOCK`| `60000`      | TTL applied explicitly when caching a stock query response.          |
+
+TTL is a safety net, not the primary freshness mechanism — explicit invalidation is.
+
+### Invalidation
+
+When `ProductStockOrderConfirmService` reserves stock for a confirmed order, it inserts ledger rows inside a transaction and — **after the transaction commits** — fires a fire-and-forget invalidation for every `(productId, storageId)` pair that was written.
+
+Invalidation runs `SCAN MATCH stock:<productId>:*` per affected `productId` in parallel and `UNLINK`s every matching key. `UNLINK` (vs `DEL`) frees memory asynchronously on the Redis side, avoiding a blocking O(N) delete on Redis's main thread. Calling invalidation before commit would race with concurrent readers and let them re-populate the cache from uncommitted state.
+
+### Graceful degradation
+
+Every cache operation is wrapped in a `try/catch` that logs a `warn` and swallows the error:
+
+- **Read failure** → returns `undefined` (the same contract as a miss); the façade falls through to the DB and the request succeeds.
+- **Write failure** → swallowed; the response is still returned to the client.
+- **Invalidation failure** → swallowed; the entry remains until its TTL expires.
+
+A Redis outage degrades latency, never correctness — no path throws to the client because the cache is unavailable.
+
+### Inspecting the cache
+
+```bash
+# List every cached stock entry across all products
+redis-cli --scan --pattern 'stock:*'
+
+# Read a specific entry (replace 42 and the storage list with real values)
+redis-cli GET 'stock:42:*'
+
+# Check remaining TTL (in ms) for a key
+redis-cli PTTL 'stock:42:*'
+
+# Manually invalidate every cached entry for a single product
+redis-cli --scan --pattern 'stock:42:*' | xargs -r redis-cli UNLINK
+```
+
+See [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md) for the rationale behind this design.
