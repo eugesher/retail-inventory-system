@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-// REVIEW-FIX: QUAL-001 — added type guard before destructuring
 export function throwRpcError(error: unknown): never {
   if (typeof error === 'object' && error !== null) {
     const record = error as Record<string, unknown>;

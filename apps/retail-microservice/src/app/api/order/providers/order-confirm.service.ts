@@ -98,7 +98,6 @@ export class OrderConfirmService {
     }
   }
 
-  // REVIEW-FIX: BUG-004 — replaced non-null assertion with explicit null check
   private async getOrder(id: number): Promise<OrderConfirmResponseDto> {
     const order = await this.orderRepository
       .createQueryBuilder('Order')

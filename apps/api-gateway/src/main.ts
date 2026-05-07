@@ -6,11 +6,11 @@ import { apiReference } from '@scalar/nestjs-api-reference';
 import { Logger, PinoLogger } from 'nestjs-pino';
 
 import { AppNameEnum } from '@retail-inventory-system/common';
-import { ConfigPropertyPathEnum, LoggerConfig } from '@retail-inventory-system/config';
+import { LoggerModuleConfig } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 
 ((): void => {
-  const logger = new PinoLogger(new LoggerConfig(AppNameEnum.API_GATEWAY));
+  const logger = new PinoLogger(new LoggerModuleConfig(AppNameEnum.API_GATEWAY));
 
   void (async (): Promise<void> => {
     const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -18,9 +18,7 @@ import { AppModule } from './app';
     const configService = app.get(ConfigService);
     const apiPrefix = configService.get<string>('API_GATEWAY_PREFIX')!;
     const port = configService.get<number>('API_GATEWAY_PORT')!;
-    const useApiReference = configService.get<boolean>(
-      ConfigPropertyPathEnum.API_GATEWAY_USE_API_REFERENCE,
-    );
+    const useApiReference = configService.get<boolean>('API_GATEWAY_USE_API_REFERENCE');
 
     app.useLogger(app.get(Logger));
     app.setGlobalPrefix(apiPrefix);

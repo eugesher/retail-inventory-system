@@ -3,23 +3,13 @@ import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 
 import { AppNameEnum, CorrelationMiddleware } from '@retail-inventory-system/common';
-import {
-  ConfigFactoryTokenEnum,
-  ConfigModuleConfiguration,
-  LoggerConfig,
-} from '@retail-inventory-system/config';
-import { configObject } from '../config';
+import { configModuleConfig, LoggerModuleConfig } from '@retail-inventory-system/config';
 import { OrderModule, ProductModule } from './api';
 
 @Module({
   imports: [
-    ConfigModule.forRoot(
-      new ConfigModuleConfiguration({
-        token: ConfigFactoryTokenEnum.API_GATEWAY,
-        configObject,
-      }),
-    ),
-    LoggerModule.forRoot(new LoggerConfig(AppNameEnum.API_GATEWAY)),
+    ConfigModule.forRoot(configModuleConfig),
+    LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.API_GATEWAY)),
     OrderModule,
     ProductModule,
   ],

@@ -1,7 +1,5 @@
-import { ICorrelationPayload, IOrderProductConfirm } from '../../common';
-
-// REVIEW-FIX: ARCH-001 — re-export IOrderProductConfirm from common for backward compatibility
-export { IOrderProductConfirm } from '../../common';
+import { ICorrelationPayload } from '../../common';
+import { IOrderProductConfirm } from './order-product-confirm.interface';
 
 export interface IOrderConfirmPayload extends ICorrelationPayload {
   id: number;
