@@ -45,43 +45,38 @@ export class ProductStockCommonService {
     const { entityManager, ignoreCache = false } = options;
     // A read inside a caller-owned transaction can see uncommitted rows; caching
     // that data would corrupt the shared cache for other callers.
-    const skipCache = ignoreCache || !!entityManager;
+    const skipReason = entityManager ? 'entityManager' : ignoreCache ? 'ignoreCache' : null;
 
-    if (!skipCache) {
-      const cached = await this.productStockCommonCacheService.get({
-        productId,
-        storageIds,
-        correlationId,
-      });
-
-      // Strict undefined check matches the cache service's miss/error contract:
-      // both miss and read-error return undefined. A truthy check would also work
-      // today (response DTOs are always non-null objects), but couples to that
-      // invariant — explicit undefined avoids the coupling.
-      if (cached !== undefined) {
-        return cached;
-      }
-
-      // FOLLOW-UP (B8 / AR4): cache-aside read/write race window — between this
-      // miss and the cache.set below, a concurrent writer could commit + SCAN-
-      // invalidate, then we'd write the now-stale DB result back to the cache.
-      // No single-flight / version stamp here today; tracked for a future pass.
-    } else {
+    if (skipReason !== null) {
       this.logger.debug(
-        {
-          correlationId,
-          productId,
-          reason: entityManager ? 'entityManager' : 'ignoreCache',
-        },
+        { correlationId, productId, reason: skipReason },
         'Cache skipped for stock query',
       );
+
+      return this.productStockCommonGetService.execute(payload, entityManager);
     }
 
+    const cached = await this.productStockCommonCacheService.get({
+      productId,
+      storageIds,
+      correlationId,
+    });
+
+    // Strict undefined check matches the cache service's miss/error contract:
+    // both miss and read-error return undefined. A truthy check would also work
+    // today (response DTOs are always non-null objects), but couples to that
+    // invariant — explicit undefined avoids the coupling.
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    // FOLLOW-UP (B8 / AR4): cache-aside read/write race window — between this
+    // miss and the cache.set below, a concurrent writer could commit + SCAN-
+    // invalidate, then we'd write the now-stale DB result back to the cache.
+    // No single-flight / version stamp here today; tracked for a future pass.
     const data = await this.productStockCommonGetService.execute(payload, entityManager);
 
-    if (!skipCache) {
-      await this.productStockCommonCacheService.set({ productId, storageIds, data, correlationId });
-    }
+    await this.productStockCommonCacheService.set({ productId, storageIds, data, correlationId });
 
     return data;
   }
@@ -90,7 +85,7 @@ export class ProductStockCommonService {
     payload: IProductStockCommonMapGetLocked,
     entityManager: EntityManager,
   ): Promise<Map<number, number>> {
-    this.logger.debug(payload, 'Delegating to ProductStockCommonAddService');
+    this.logger.debug(payload, 'Delegating to ProductStockCommonGetService.getMapLocked');
 
     return this.productStockCommonGetService.getMapLocked(payload, entityManager);
   }

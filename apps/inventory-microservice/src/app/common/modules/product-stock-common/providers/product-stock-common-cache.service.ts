@@ -137,18 +137,23 @@ export class ProductStockCommonCacheService {
     const matchedKeys = new Set<string>();
 
     try {
-      for (const productId of productIds) {
-        const pattern = `${keyPrefix}${CacheHelper.keyPrefixes.productStock(productId)}*`;
+      // Per-productId SCANs run in parallel — they share no state (each writes
+      // into the same Set, but JS's single-threaded event loop makes that safe)
+      // and avoid stacking SCAN-cycle latency for multi-product invalidations.
+      // scanIterator yields BATCHES of keys (string[]) per SCAN cycle on
+      // @redis/client v5. Deduplicate via Set — SCAN can return the same
+      // key in different cycles under concurrent rehash conditions.
+      await Promise.all(
+        productIds.map(async (productId) => {
+          const pattern = `${keyPrefix}${CacheHelper.keyPrefixes.productStock(productId)}*`;
 
-        // scanIterator yields BATCHES of keys (string[]) per SCAN cycle on
-        // @redis/client v5. Deduplicate via Set — SCAN can return the same
-        // key in different cycles under concurrent rehash conditions.
-        for await (const batch of client.scanIterator({ MATCH: pattern, COUNT: 100 })) {
-          for (const key of batch) {
-            matchedKeys.add(key);
+          for await (const batch of client.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+            for (const key of batch) {
+              matchedKeys.add(key);
+            }
           }
-        }
-      }
+        }),
+      );
     } catch (error) {
       this.logger.warn(
         { err: error as Error, correlationId, productIds },

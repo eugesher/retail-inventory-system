@@ -40,7 +40,9 @@ export class ProductStockOrderConfirmService {
 
     const productIds = [...new Set(pendingItems.map((i) => i.productId))];
     const confirmedIds: number[] = [];
-    const mutatedItems: IProductStockCommonAddItem[] = [];
+    // Hoisted so the post-commit invalidate can read it without a separate
+    // mirror array. Mutated only inside the transaction callback below.
+    const items: IProductStockCommonAddItem[] = [];
 
     try {
       await this.entityManager.transaction(async (entityManager) => {
@@ -48,8 +50,6 @@ export class ProductStockOrderConfirmService {
           { productIds, correlationId },
           entityManager,
         );
-
-        const items: IProductStockCommonAddItem[] = [];
 
         for (const item of pendingItems) {
           const available = stockMap.get(item.productId) ?? 0;
@@ -69,7 +69,6 @@ export class ProductStockOrderConfirmService {
 
         if (items.length > 0) {
           await this.productStockCommonService.add({ items, correlationId }, entityManager);
-          mutatedItems.push(...items);
 
           this.logger.info(
             {
@@ -99,9 +98,16 @@ export class ProductStockOrderConfirmService {
     // pair we just mutated. Must run after the transaction commits — calling
     // invalidate inside the callback would race with concurrent readers that
     // could re-populate the cache from uncommitted state.
-    if (mutatedItems.length > 0) {
+    //
+    // Fire-and-forget: the cache service swallows Redis errors internally, and
+    // the response correctness does not depend on invalidation completing
+    // before reply (a brief stale-read window already exists for any reader
+    // that fetched DB state before our commit but writes cache after — see
+    // FOLLOW-UP B8/AR4). Awaiting would only add SCAN+UNLINK latency to every
+    // confirm RPC. The .catch is for unexpected programming errors only.
+    if (items.length > 0) {
       // FOLLOW-UP (FU16): the !!item.storageId predicate is unreachable today.
-      // Every entry pushed into `mutatedItems` above is constructed with
+      // Every entry pushed into `items` above is constructed with
       // `storageId: INVENTORY_DEFAULT_STORAGE` (a non-empty string literal), so
       // the filter always returns true and the type guard always narrows. The
       // filter exists for a forward-looking state where some ledger writes may
@@ -116,15 +122,19 @@ export class ProductStockOrderConfirmService {
       // the guard would surface a `string | undefined` type error.
       //
       // Recorded as FU16 in docs/audits/cache-audit-2026-05-07.md section J.6.
-      const invalidateItems = mutatedItems
+      const invalidateItems = items
         .filter((item): item is typeof item & { storageId: string } => !!item.storageId)
         .map(({ productId, storageId }) => ({ productId, storageId }));
 
       if (invalidateItems.length > 0) {
-        await this.productStockCommonService.invalidate({
-          items: invalidateItems,
-          correlationId,
-        });
+        void this.productStockCommonService
+          .invalidate({ items: invalidateItems, correlationId })
+          .catch((err) =>
+            this.logger.error(
+              { err: err as Error, correlationId },
+              'Background cache invalidation rejected unexpectedly',
+            ),
+          );
       }
     }
 

@@ -149,7 +149,7 @@ describe('ProductStockCommonService', () => {
       );
     });
 
-    it('reports reason:entityManager when both em and ignoreCache are set (em wins ternary)', async () => {
+    it('prefers reason:entityManager when both options are set', async () => {
       const em = {} as EntityManager;
       getService.execute.mockResolvedValue(sampleDto);
 
