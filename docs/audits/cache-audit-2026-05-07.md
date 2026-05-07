@@ -384,6 +384,244 @@ None encountered. Spotted no in-scope typos, dead code, missing-await, or lint-o
 | E2E tests refined | 7 / 7 | All four GET-stock happy-path tests + three confirm tests now assert cache state. `assertData` (mutating) replaced with `assertSnapshot` (non-mutating). |
 | New E2E tests added | 1 / 1 | G2 cache-hit test ("serves cached value on subsequent calls without re-querying the DB") via sentinel mutation. |
 | Test smells resolved | 3 / 7 | S1 (no cache reset) — fixed via `beforeEach`. S3 (mutating `assertData`) — fixed. S5 — already clean. S2/S4/S7 deferred (FU9/FU10). |
-| Follow-up items recorded | 15 | FU1–FU15. |
+| Follow-up items recorded | 15 |
+
+## I. Unit test plan (Phase 1 of follow-on task)
+
+### I.1 Project test conventions (confirmed)
+
+| Item | Finding |
+|------|---------|
+| Spec folder layout | `spec/` sibling next to production file. Confirmed by the only existing spec at `apps/retail-microservice/src/app/api/order/domain/spec/order-confirm.domain.spec.ts`. |
+| Spec naming | `<production-filename>.spec.ts`. Existing example uses `.domain.spec.ts` because the file under test is `order-confirm.domain.ts` — naming is "production basename + `.spec.ts`". For our targets that yields `<service>.service.spec.ts`. |
+| Test framework | Jest. `describe` / `it` / `expect`. ts-jest transform. |
+| Jest unit config picks up `spec/` folders | **Yes** — `testMatch: ['<rootDir>/**/*.spec.ts']` in `jest.unit.config.js` matches `**/spec/*.spec.ts` without changes. No config tweak needed. |
+| `tsconfig` `rootDir` | None set; relative imports `../foo.service` resolve cleanly from `spec/`. |
+| Path aliases | `@retail-inventory-system/{common,config,inventory,retail}` mapped in `moduleNameMapper`. |
+| Mocking style | Existing spec is a pure-domain test with no DI mocks. **No project precedent** for mocking PinoLogger / TypeORM / Cache — convention will be set by this pass. Plan: typed `jest.Mocked<T>` mocks, plain object literals for `PinoLogger`. |
+| Mock lifecycle | No `clearMocks` / `resetAllMocks` in Jest config. Plan: `jest.resetAllMocks()` in each spec's `beforeEach`. |
+| Existing fixtures / helpers | None observed in inventory microservice. Each spec stands alone (no shared helper file). |
+
+**Convention inconsistency / follow-up:** the one existing spec lives under `apps/retail-microservice/src/app/api/order/domain/spec/`. The inventory microservice has zero specs to date — this pass sets the convention there. Recorded as informational, no action.
+
+### I.2 Existing unit coverage check
+
+| Production file | Existing spec? | Action |
+|-----------------|----------------|--------|
+| `product-stock-get.service.ts` | No | New spec |
+| `product-stock-order-confirm.service.ts` | No | New spec |
+| `product-stock-common.service.ts` | No | New spec |
+| `product-stock-common-add.service.ts` | No | New spec |
+| `product-stock-common-cache.service.ts` | No | New spec |
+| `product-stock-common-get.service.ts` | No | New spec |
+
+**6 new spec files; 0 to extend.**
+
+### I.3 Branch reconciliation (E2E vs unit)
+
+| Branch | E2E asserts | Unit asserts |
+|--------|-------------|--------------|
+| G1 GET miss → DB → cache write | HTTP 200 + cache key populated | façade calls cache.get → (miss) → getService.execute → cache.set with `CacheHelper.keys.productStock` and `CacheHelper.ttlValues.productStock`; debug log `cacheHit:false` from cache service |
+| G2 GET hit → no DB read | Sentinel surfaces in HTTP body | façade returns cached value; getService.execute NOT called; cache.set NOT called; debug log `cacheHit:true` |
+| G3 GET with storageIds | Per-storage key populated, unfiltered absent | cache.get called with `stock:1:head-warehouse` exact string; cache.set called with same |
+| G4 GET empty product | Empty DTO cached | empty DTO `{quantity:0, items:[], updatedAt:null}` is the value passed to cache.set |
+| G5 GET non-existent storage | Empty DTO cached at per-storage key | same shape assertion |
+| G6 cache.get throws | (not in E2E — fault injection) | **unit only**: returns DB result; warn log with `err` field |
+| G7 entityManager skip | (domain) | **unit only**: cache.get NOT called; cache.set NOT called; debug log `reason:'entityManager'`; getService.execute called with the em |
+| G8 ignoreCache skip | (domain) | **unit only**: same as G7 with `reason:'ignoreCache'` |
+| C1 confirm wipes all keys | All keys gone post-PUT | order-confirm calls `productStockCommonService.add(...em)` then `productStockCommonService.invalidate(...)` AFTER the transaction returns; mutatedItems carries the (productId, storageId) pairs |
+| C2 confirm with no stock | Cache survives | order-confirm: when no items confirmable, `add` NOT called and `invalidate` NOT called; warn log "No stock available…" |
+| C3 mixed confirm | Only mutated keys gone | invalidateItems contains only the mutated productIds |
+| C4 transaction throws | (domain) | **unit only**: error log + rethrow; invalidate NOT called |
+| C5 SCAN scope | Both unfiltered + per-storage keys gone | cache service: SCAN MATCH pattern equals `stock:<id>:*` exactly; UNLINK called with the deduped match set |
+
+E2E continues to own observable HTTP outcomes; unit tests own collaborator interactions, log fields, key/TTL exact values, and ordering.
+
+### I.4 Per-file unit test plan
+
+#### I.4.1 `product-stock-common-cache.service.ts`
+
+| Method | Branch / scenario | Mocked behavior | Assertions |
+|--------|-------------------|-----------------|-----------|
+| `get` | hit | `cache.get` resolves a DTO | returns DTO; `cache.get` called with exact key `stock:42:*`; debug log `{correlationId, productId, cacheKey, cacheHit:true}` and message "Cache hit for stock query" |
+| `get` | miss | `cache.get` resolves `undefined` | returns `undefined`; debug log `cacheHit:false` and message "Cache miss for stock query" |
+| `get` | with storageIds | `cache.get` resolves DTO | called with `stock:42:head-warehouse` (single storage) |
+| `get` | error | `cache.get` rejects | returns `undefined`; warn log includes `err` field; no rethrow |
+| `set` | happy | `cache.set` resolves | called with key + DTO + TTL=`60_000`; debug log `{correlationId, productId, cacheKey, ttl}` |
+| `set` | error | `cache.set` rejects | warn log with `err` field; no rethrow |
+| `invalidate` | empty items | n/a | early return; `cache.del` and any redis client method NOT called |
+| `invalidate` | non-Redis store (fallback) | `(cache as Cacheable).primary.store` is `{}` | calls `cache.del` for both `stock:<id>:*` and `stock:<id>:<storageId>`; debug log "Stock cache invalidated via named-key fallback" |
+| `invalidate` | non-Redis store, del rejects | `cache.del` rejects | warn log with `err` field |
+| `invalidate` | Redis but no scanIterator | store has `KeyvRedis.prototype` but `client` lacks `scanIterator` | warn log "scanIterator…falling back…"; falls through to named-key fallback |
+| `invalidate` | Redis happy path | store has `KeyvRedis.prototype`; client provides `scanIterator` (yields batches) and `unlink` | SCAN pattern is `stock:<id>:*` (no namespace); `unlink` called once with deduped key set; debug log "Stock cache invalidated via SCAN+UNLINK" with `keyCount` |
+| `invalidate` | with namespace | adapter has `namespace='ns'`, `keyPrefixSeparator='::'` | SCAN pattern is `ns::stock:<id>:*` |
+| `invalidate` | dedup across SCAN cycles | scanIterator yields overlapping batches | UNLINK receives unique keys only |
+| `invalidate` | scanIterator throws | iterator rejects mid-iteration | warn log "SCAN failed…"; UNLINK NOT called; early return |
+| `invalidate` | no matched keys | scanIterator yields empty batches | debug log "No matching stock cache keys to invalidate"; UNLINK NOT called |
+| `invalidate` | unlink throws | unlink rejects | warn log "UNLINK failed…" with `err` field |
+| `invalidate` | multiple productIds | items spans 2 productIds | scanIterator called twice with each `stock:<id>:*` pattern; UNLINK called once with combined deduped set |
+
+**Tests:** ~16
+
+#### I.4.2 `product-stock-common-add.service.ts`
+
+| Method | Scenario | Mocked | Assertions |
+|--------|----------|--------|-----------|
+| `execute` | no em, happy | injected `Repository.insert` resolves | calls injected repository's `insert(items)`; debug log `{correlationId, itemCount, withinTransaction:false}`; info log `{correlationId, itemCount, productIds}` |
+| `execute` | with em, happy | `em.getRepository(ProductStock).insert` resolves | uses em-derived repo, NOT the injected one; debug log `withinTransaction:true` |
+| `execute` | repo.insert throws | rejects | error log `{err, correlationId, itemCount}`; rethrows; info "inserted" log NOT called |
+
+**Tests:** 3
+
+#### I.4.3 `product-stock-common-get.service.ts`
+
+| Method | Scenario | Mocked | Assertions |
+|--------|----------|--------|-----------|
+| `execute` | no storageIds, non-empty rows | QueryBuilder chain returns 2 raw rows | returns `{productId, quantity:sum, items:[…], updatedAt:max}`; `andWhere` NOT called |
+| `execute` | with storageIds | rows returned | `andWhere('ProductStock.storageId IN (:...storageIds)', {storageIds})` called |
+| `execute` | with em | em provides repo | uses `em.getRepository(ProductStock)`, not injected |
+| `execute` | empty result | getRawMany resolves `[]` | returns `{quantity:0, items:[], updatedAt:null}` |
+| `execute` | getRawMany throws | rejects | error log; rethrows |
+| `getMapLocked` | empty productIds | n/a | returns empty Map; **no DB call** (em.createQueryBuilder NOT invoked) |
+| `getMapLocked` | non-empty, happy | em chain returns 2 rows | result Map has expected entries; `setLock('pessimistic_write')` invoked |
+| `getMapLocked` | non-empty, throws | em chain rejects | error log; rethrows |
+
+**Tests:** 8
+
+#### I.4.4 `product-stock-common.service.ts` (façade)
+
+| Method | Scenario | Mocked | Assertions |
+|--------|----------|--------|-----------|
+| `add` | delegate w/o em | addService.execute resolves | called with `(payload, undefined)`; debug log `withinTransaction:false` |
+| `add` | delegate w/ em | resolves | called with `(payload, em)`; debug log `withinTransaction:true` |
+| `get` | cache hit | cacheService.get resolves DTO | returns DTO; getService.execute NOT called; cacheService.set NOT called |
+| `get` | cache miss | cacheService.get resolves undefined; getService.execute resolves DTO | returns DTO; cacheService.set called with `{productId, storageIds, data, correlationId}` |
+| `get` | cache miss + DB throws | getService.execute rejects | rethrows; cacheService.set NOT called |
+| `get` | skipCache via em | options has em | cacheService.get NOT called; cacheService.set NOT called; debug log `reason:'entityManager'`; getService.execute called with em |
+| `get` | skipCache via ignoreCache | options has ignoreCache:true | cacheService.get NOT called; cacheService.set NOT called; debug log `reason:'ignoreCache'` |
+| `get` | em + ignoreCache both | both set | cacheService.get NOT called; reason='entityManager' (em wins ternary) |
+| `get` | call ordering | cache miss path | cache.get → getService.execute → cache.set in that order (assert via `mock.invocationCallOrder`) |
+| `getMapLocked` | delegate | getService.getMapLocked resolves | called with `(payload, em)` |
+| `invalidate` | delegate | cacheService.invalidate resolves | called with `payload`; debug log |
+
+**Tests:** ~11
+
+#### I.4.5 `product-stock-get.service.ts` (top layer)
+
+| Method | Scenario | Mocked | Assertions |
+|--------|----------|--------|-----------|
+| `execute` | happy | commonService.get resolves DTO | returns DTO; info log "Received RPC: get product stock" with payload fields |
+| `execute` | downstream throws | commonService.get rejects | error log `{err, ...payload}`; rethrows |
+
+**Tests:** 2
+
+#### I.4.6 `product-stock-order-confirm.service.ts` (top layer)
+
+| Method | Scenario | Mocked | Assertions |
+|--------|----------|--------|-----------|
+| `execute` | no pending | products all CONFIRMED | returns `[]`; info log "No pending products to reserve…"; entityManager.transaction NOT called |
+| `execute` | all confirmable | em.transaction calls callback; getMapLocked returns sufficient stock; add resolves | returns confirmedIds for all pending; commonService.add called once with all items inside the tx; commonService.invalidate called AFTER tx with `mutatedItems` mapped to `{productId, storageId}` |
+| `execute` | none confirmable | getMapLocked returns 0 for every productId | warn log "No stock available…"; commonService.add NOT called; commonService.invalidate NOT called |
+| `execute` | mixed | partial stock | add called with subset; invalidate called only with the mutated subset |
+| `execute` | transaction throws | em.transaction rejects | error log `{err, correlationId, productIds, pendingCount}`; rethrows; invalidate NOT called |
+| `execute` | invalidate post-commit ordering | happy path | assert `add` invocation precedes `invalidate` invocation (via `mock.invocationCallOrder`) |
+
+**Tests:** 6
+
+### I.5 Summary
+
+- **6 new specs**; 0 extended.
+- **~46 test cases planned**.
+- **Jest config matches** — no edits needed.
+- **No new helpers, no new dependencies, no production changes.**
+- **Dead-code / unreachable findings**:
+  - `product-stock-order-confirm.service.ts:103-105` — the `.filter((item): item is typeof item & { storageId: string } => !!item.storageId)` defensive filter is unreachable today (every constructed item has `storageId: INVENTORY_DEFAULT_STORAGE`). Recorded as **FU16** — not removed in this pass (production file is out of scope here).
+- **Newly discovered bugs while planning**: none beyond what audit recorded.
+- **Test-helper opportunities** (recorded for follow-up, not built here):
+  - **FU17** — A small `makePinoLoggerMock()` factory would deduplicate `{ info, debug, warn, error, fatal, trace, ...} as unknown as PinoLogger` across all six specs. This pass writes the mock inline in each file to follow the "no new helpers without flag-and-approve" rule.
+
+**Phase 1 complete. Unit test plan appended to `docs/audits/cache-audit-2026-05-07.md` as section I. Awaiting approval to execute.**
+
+## J. Unit test execution log (Phase 2 + 3)
+
+### J.1 Spec files created
+
+| Spec path | Tests | Lines |
+|-----------|------:|------:|
+| `apps/inventory-microservice/src/app/common/modules/product-stock-common/providers/spec/product-stock-common-cache.service.spec.ts` | 17 | 327 |
+| `apps/inventory-microservice/src/app/common/modules/product-stock-common/providers/spec/product-stock-common-add.service.spec.ts` | 3 | 86 |
+| `apps/inventory-microservice/src/app/common/modules/product-stock-common/providers/spec/product-stock-common-get.service.spec.ts` | 8 | 197 |
+| `apps/inventory-microservice/src/app/common/modules/product-stock-common/spec/product-stock-common.service.spec.ts` | 11 | 207 |
+| `apps/inventory-microservice/src/app/api/product-stock/providers/spec/product-stock-get.service.spec.ts` | 2 | 65 |
+| `apps/inventory-microservice/src/app/api/product-stock/providers/spec/product-stock-order-confirm.service.spec.ts` | 7 | 252 |
+
+**Total: 6 specs, 48 tests** (+2 vs. plan: one additional cache-service test for the per-storage key construction; one additional order-confirm test to cover the `Map.get(productId) ?? 0` branch — see J.4).
+
+### J.2 Coverage (from `npx jest --coverage --collectCoverageFrom=…product-stock*.service.ts`)
+
+| File | Stmts | Branch | Funcs | Lines |
+|------|------:|-------:|------:|------:|
+| `product-stock-get.service.ts` | 100% | 100% | 100% | 100% |
+| `product-stock-order-confirm.service.ts` | 100% | 100% | 100% | 100% |
+| `product-stock-common.service.ts` | 100% | 100% | 100% | 100% |
+| `product-stock-common-add.service.ts` | 100% | 100% | 100% | 100% |
+| `product-stock-common-cache.service.ts` | 100% | 100% | 100% | 100% |
+| `product-stock-common-get.service.ts` | 100% | 100% | 100% | 100% |
+| **All six files** | **100%** | **100%** | **100%** | **100%** |
+
+### J.3 Verification checklist
+
+| Check | Result |
+|-------|--------|
+| All new spec files lint clean (`yarn lint`, `--max-warnings 0`) | ✅ |
+| `yarn test:unit` passes | ✅ 7 suites / 59 tests |
+| All six specs in `spec/` sibling folders (verified by `ls`) | ✅ |
+| Inventory microservice unit suite passes | ✅ |
+| E2E suite still passes (no production drift) | ✅ 24/24 tests, 42/42 snapshots after `yarn test:e2e` |
+| 100% statements + 100% branches on each of the six files | ✅ |
+| No `it.skip` / `xit` / `it.todo` / `describe.skip` introduced | ✅ (grep clean) |
+| No `console.log` in specs | ✅ (grep clean) |
+| Every Phase 1 plan row maps to ≥1 `it` block | ✅ |
+| Frontmatter `status` preserved as `completed` | ✅ |
+
+### J.4 Plan-to-spec deltas (with reasons)
+
+| Delta | Reason |
+|-------|--------|
+| +1 cache-service test "builds the per-storage key when storageIds is provided" | Plan named storageIds branch but folded it into the hit/miss test. Split into a focused test targeting the cache-key string. |
+| +1 order-confirm test "treats a missing stockMap entry as zero available (?? 0 branch)" | Initial run reported branch coverage 87.5% on `order-confirm.service.ts` line 55 (`stockMap.get(item.productId) ?? 0`). Added a test passing `new Map()` to exercise the nullish-coalescing path. |
+| Logger-mock factory (FU17) inlined per file | Plan said "no new helpers without flag-and-approve." Each spec defines its own `LoggerMock` type alias + `makeLogger` factory. Future pass can hoist these into a shared helper. |
+
+### J.5 Lint frictions encountered (resolved)
+
+| Friction | Resolution |
+|----------|------------|
+| `KeyvRedis` constructor opens a real Redis connection | `Object.create(KeyvRedis.prototype)` + `Object.defineProperty` to set `client`/`namespace`/`keyPrefixSeparator` without triggering setters. |
+| `@typescript-eslint/no-unsafe-assignment` on `err: error` (catch binds `any`) | Already cast as `error as Error` in production; in specs the `err` field receives a real `Error` instance directly. |
+| `@typescript-eslint/require-await` on async generators with no `await` | Added `await Promise.resolve()` no-op at top of each generator. |
+| `@typescript-eslint/unbound-method` when asserting on `entityManager.getRepository` | Stored the `jest.fn` in a local variable and asserted on that, instead of accessing the method via the structural `EntityManager` type. |
+| `@typescript-eslint/consistent-type-definitions` on object-literal `type CacheMock` | Converted to `interface ICacheMock` (also satisfies the `I[A-Z]` naming convention). |
+| `replace_all CacheMock → ICacheMock` accidentally produced `IICacheMock` | Followed up with a targeted `replace_all IICacheMock → ICacheMock`. |
+| `@typescript-eslint/explicit-function-return-type` on factory helpers | Added explicit return types: `LoggerMock` / `ICacheMock` / `AsyncIterable<string[]>` / `KeyvRedis<unknown>` / etc. |
+
+### J.6 Findings recorded (no production changes made)
+
+| ID | Finding | Source |
+|----|---------|--------|
+| FU16 | Defensive filter in `product-stock-order-confirm.service.ts:103-105` (`!!item.storageId`) is unreachable today — every item built in this code path carries `storageId: INVENTORY_DEFAULT_STORAGE`. Recorded only; not removed (test-only pass). | Phase 1 spec audit |
+| FU17 | `makePinoLoggerMock()` factory would dedupe ~6 lines across all six specs. | Phase 1 + Phase 2 |
+| FU18 | Convention inconsistency: `apps/retail-microservice` had one spec; `apps/inventory-microservice` had zero before this pass. New convention (typed `jest.Mocked<T>`, plain `LoggerMock`, `jest.resetAllMocks()` in `beforeEach`) established here. | Phase 1 |
+
+### J.7 Final summary
+
+| File | Spec path | Status | Tests | Stmts % | Branch % | Notes |
+|------|-----------|--------|------:|--------:|---------:|-------|
+| `product-stock-get.service.ts` | `…/api/product-stock/providers/spec/product-stock-get.service.spec.ts` | new | 2 | 100 | 100 | — |
+| `product-stock-order-confirm.service.ts` | `…/api/product-stock/providers/spec/product-stock-order-confirm.service.spec.ts` | new | 7 | 100 | 100 | +1 over plan for the `?? 0` branch. |
+| `product-stock-common.service.ts` | `…/common/modules/product-stock-common/spec/product-stock-common.service.spec.ts` | new | 11 | 100 | 100 | Includes call-order assertion via `mock.invocationCallOrder`. |
+| `product-stock-common-add.service.ts` | `…/providers/spec/product-stock-common-add.service.spec.ts` | new | 3 | 100 | 100 | — |
+| `product-stock-common-cache.service.ts` | `…/providers/spec/product-stock-common-cache.service.spec.ts` | new | 17 | 100 | 100 | KeyvRedis prototype-injection pattern. |
+| `product-stock-common-get.service.ts` | `…/providers/spec/product-stock-common-get.service.spec.ts` | new | 8 | 100 | 100 | — |
+ FU1–FU15. |
 
 
