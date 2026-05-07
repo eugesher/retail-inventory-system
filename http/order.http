@@ -1,0 +1,45 @@
+# Order endpoints (apps/api-gateway/src/app/api/order/order.controller.ts)
+#
+# Routes here cover the lifecycle of an order as exposed by the API Gateway:
+#   1. Create a draft order (POST)
+#   2. Confirm a created order, triggering stock reservation (PUT)
+#
+# Both endpoints sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name createOrder
+# POST /api/order
+# Creates a new order with at least one product line.
+# Body shape (OrderCreateDto, libs/retail/dto/order-create.dto.ts):
+#   customerId: positive int
+#   products:   non-empty array of { productId: positive int, quantity: positive int }
+# Expected response: OrderCreateResponseDto with the persisted order's id
+# and product lines (status defaults to PENDING in the retail microservice).
+POST {{baseUrl}}/order
+Content-Type: application/json
+
+{
+  "customerId": 1,
+  "products": [
+    { "productId": 1, "quantity": 2 },
+    { "productId": 2, "quantity": 1 }
+  ]
+}
+
+###
+
+# @name confirmOrder
+# PUT /api/order/:id/confirm
+# Confirms a previously created order. The retail microservice publishes an
+# INVENTORY_ORDER_CONFIRM message to the inventory microservice to reserve
+# stock for each product line.
+# Path params:
+#   id: positive int — the order id returned by createOrder
+# Expected response: OrderConfirmResponseDto with order status, product
+# statuses (e.g. RESERVED / OUT_OF_STOCK), and per-line ids.
+PUT {{baseUrl}}/order/1/confirm
