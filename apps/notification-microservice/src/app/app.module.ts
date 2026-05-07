@@ -3,11 +3,11 @@ import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 
 import { AppNameEnum } from '@retail-inventory-system/common';
-import { ConfigModuleConfig, LoggerModuleConfig } from '@retail-inventory-system/config';
+import { configModuleConfig, LoggerModuleConfig } from '@retail-inventory-system/config';
 
 @Module({
   imports: [
-    ConfigModule.forRoot(new ConfigModuleConfig()),
+    ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.NOTIFICATION_MICROSERVICE)),
   ],
 })

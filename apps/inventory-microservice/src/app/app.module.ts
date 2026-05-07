@@ -7,7 +7,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { AppNameEnum } from '@retail-inventory-system/common';
 import {
   cacheModuleConfig,
-  ConfigModuleConfig,
+  configModuleConfig,
   LoggerModuleConfig,
   TypeormModuleConfig,
 } from '@retail-inventory-system/config';
@@ -16,7 +16,7 @@ import { ProductStockModule } from './api';
 
 @Module({
   imports: [
-    ConfigModule.forRoot(new ConfigModuleConfig()),
+    ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.INVENTORY_MICROSERVICE)),
     TypeOrmModule.forRootAsync(new TypeormModuleConfig(entities)),
     CacheModule.registerAsync(cacheModuleConfig),
