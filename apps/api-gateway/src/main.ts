@@ -6,7 +6,7 @@ import { apiReference } from '@scalar/nestjs-api-reference';
 import { Logger, PinoLogger } from 'nestjs-pino';
 
 import { AppNameEnum } from '@retail-inventory-system/common';
-import { ConfigPropertyPathEnum, LoggerModuleConfig } from '@retail-inventory-system/config';
+import { LoggerModuleConfig } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 
 ((): void => {
@@ -18,9 +18,7 @@ import { AppModule } from './app';
     const configService = app.get(ConfigService);
     const apiPrefix = configService.get<string>('API_GATEWAY_PREFIX')!;
     const port = configService.get<number>('API_GATEWAY_PORT')!;
-    const useApiReference = configService.get<boolean>(
-      ConfigPropertyPathEnum.API_GATEWAY_USE_API_REFERENCE,
-    );
+    const useApiReference = configService.get<boolean>('API_GATEWAY_USE_API_REFERENCE');
 
     app.useLogger(app.get(Logger));
     app.setGlobalPrefix(apiPrefix);

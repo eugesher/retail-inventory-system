@@ -5,9 +5,10 @@ export const configValidationSchema = Joi.object({
 
   API_GATEWAY_PORT: Joi.number().required().port(),
   API_GATEWAY_PREFIX: Joi.string().optional(),
+  API_GATEWAY_USE_API_REFERENCE: Joi.boolean().default(process.env.NODE_ENV !== 'production'),
 
   DATABASE_URL: Joi.string().uri({ scheme: 'mysql' }).required(),
-  DATABASE_LOGGING: Joi.boolean().optional(),
+  DATABASE_LOGGING: Joi.boolean().default(process.env.NODE_ENV !== 'production'),
 
   LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace').optional(),
 

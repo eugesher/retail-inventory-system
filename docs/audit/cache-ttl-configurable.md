@@ -155,3 +155,28 @@ Any architectural unification (e.g. promoting all raw env vars into `ConfigPrope
 4. **`apps/inventory-microservice/src/app/common/modules/product-stock-common/providers/spec/product-stock-common-cache.service.spec.ts:207, 214` — test couples to helper constant.** Severity: **low**. Once `CacheHelper.ttlValues` is removed, these two assertions will need a literal `60000`. The convention recorded in the file's preamble ("cache-key assertions use exact string equality … part of the production cache contract") supports literals here.
 5. **`docker-compose.yml` — none of the four service definitions enumerate `CACHE_TTL_MS_*`.** Severity: **low**. Once we add the variables, only the cache-using service (`inventory-microservice`) strictly needs them, but precedent is to enumerate every cross-cutting var in every service block (`NODE_ENV`, `DATABASE_URL`, `REDIS_URL`, `RABBITMQ_URL` appear in all four). Recommended fix: enumerate `CACHE_TTL_MS_DEFAULT` and `CACHE_TTL_MS_PRODUCT_STOCK` in the `inventory-microservice` block at minimum; whether to repeat them in the other three blocks is a stylistic call (the audit recommends keeping the existing "repeat everywhere" convention to avoid drift).
 6. **No `.env.example`/`.env.template` exists.** Severity: **low–medium**. The project has only `.env.local` (a developer-local file, gitignored or near-gitignored — needs verification). Without a tracked example file, contributors cannot discover the required env-var contract without reading the Joi schema. Recommended fix: out of scope; the task brief says "*(or equivalent example/template file if it exists)*", which acknowledges the absence. Update `.env.local` directly as the closest equivalent in this repo.
+
+## 7. Resolution log
+
+All audit-detected issues have now been resolved as of the cache-TTL change set. Notes per issue:
+
+1. **§6.1 — `cache-module.config.ts` redundant `REDIS_URL` fallback.** Resolved. The `?? 'redis://localhost:6379'` literal was dropped. The Joi schema (`Joi.string().uri({ scheme: 'redis' }).required()`) is now the single contract for the variable; `KeyvRedis`'s constructor accepts the value directly without runtime substitution.
+2. **§6.2 — Hardcoded TTL in `cache-module.config.ts`.** Resolved. `ttl` now reads `CACHE_TTL_MS_DEFAULT` from `ConfigService`; default lives in the Joi schema.
+3. **§6.3 — Static TTL constant in `CacheHelper`.** Resolved. `CacheHelper.ttlValues` removed; consumers read from `ConfigService` via DI.
+4. **§6.4 — Spec coupled to `CacheHelper.ttlValues`.** Resolved. The unit spec uses the literal `60000` per the task brief's "test-only context" guidance, and constructs the service with an inline `ConfigService` mock returning `60000`.
+5. **§6.5 — `docker-compose.yml` did not declare TTL vars.** Resolved. `CACHE_TTL_MS_DEFAULT` declared in all four service blocks (matches the existing `REDIS_URL` / `RABBITMQ_URL` repeat-everywhere convention); `CACHE_TTL_MS_PRODUCT_STOCK` declared only in `inventory-microservice` (sole consumer).
+6. **§6.6 — No `.env.example`.** Closed by determination, not by file creation. `.gitignore` line 41 contains `!.env.local`, explicitly tracking `.env.local` as the project's example/manifest file. Creating a duplicate `.env.example` would only fragment the source of truth. The two new TTL vars are present in `.env.local` and will appear to any contributor cloning the repo.
+
+### Architectural unification (follow-on directive)
+
+The audit's §5 noted that "any architectural unification (e.g. promoting all raw env vars into `ConfigPropertyPathEnum`) is a worthwhile follow-up but should be scoped as its own task." That follow-up has now been executed in the opposite direction: namespaced access via `ConfigPropertyPathEnum` was **removed entirely** in favor of direct env-var key access. Specific changes:
+
+- `ConfigPropertyPathEnum`, `ConfigPropertyKeyEnum`, `ConfigFactoryTokenEnum`, `IConfigModuleConfigurationOptions`, `configObjectGlobal`, and the four per-app `configObject` files were deleted (no remaining consumers after the migration).
+- Two derived values that previously lived in `configObjectGlobal` / api-gateway's `configObject` were promoted to direct env vars with Joi `.default()` expressions:
+  - `DATABASE_LOGGING: Joi.boolean().default(process.env.NODE_ENV !== 'production')` (preserved the previous derive-from-NODE_ENV behavior).
+  - `API_GATEWAY_USE_API_REFERENCE: Joi.boolean().default(process.env.NODE_ENV !== 'production')` (new env var; preserves the previous behavior).
+- `ConfigModuleConfig` no longer takes a constructor argument; it just wires `validationSchema`, `envFilePath`, `isGlobal`. All four `app.module.ts` call sites updated to `new ConfigModuleConfig()`.
+- `typeorm-module.config.ts` now reads `'DATABASE_LOGGING'` directly; `apps/api-gateway/src/main.ts` now reads `'API_GATEWAY_USE_API_REFERENCE'` directly.
+- The `objects/`, `enums/`, and `interfaces/` subdirectories of `libs/config/config-module/` are gone; the module now contains only `config-module.config.ts`, `config-validation-schema.ts`, and `index.ts`.
+
+Net effect: every `ConfigService.get(...)` call site in the monorepo now uses a string env-var name (`'DATABASE_URL'`, `'REDIS_URL'`, `'API_GATEWAY_PORT'`, `'CACHE_TTL_MS_DEFAULT'`, etc.). The two access patterns identified in §1 are now collapsed into one.

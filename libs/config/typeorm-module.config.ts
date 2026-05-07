@@ -2,8 +2,6 @@ import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleAsyncOptions, TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
 
-import { ConfigPropertyPathEnum } from './config-module';
-
 export class TypeormModuleConfig implements TypeOrmModuleAsyncOptions {
   public readonly useFactory: TypeOrmModuleAsyncOptions['useFactory'];
 
@@ -13,7 +11,7 @@ export class TypeormModuleConfig implements TypeOrmModuleAsyncOptions {
     this.useFactory = (configService: ConfigService): TypeOrmModuleOptions => {
       return {
         url: configService.get<string>('DATABASE_URL'),
-        logging: configService.get<boolean>(ConfigPropertyPathEnum.GLOBAL_DATABASE_LOGGING),
+        logging: configService.get<boolean>('DATABASE_LOGGING'),
         type: 'mysql',
         synchronize: false,
         entities,
