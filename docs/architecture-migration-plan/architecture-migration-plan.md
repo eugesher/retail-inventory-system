@@ -1,5 +1,3 @@
-[//]: # (architecture-migration-plan.md)
-
 # Retail Inventory System — Architecture Research & Migration Plan
 
 ## TL;DR
