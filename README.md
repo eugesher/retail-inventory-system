@@ -2,6 +2,16 @@
 
 A microservices-based retail inventory management API built with NestJS, RabbitMQ, and MySQL.
 
+## Architecture migration in progress
+
+This branch (`RIS-25-Architecture-migration`) is migrating the codebase to a per-module hexagonal layout (Brocoders-style ports & adapters) per service. The migration plan, the per-task scripts, and the carryover files all live under [`docs/architecture-migration-plan/`](docs/architecture-migration-plan/).
+
+- Plan overview: [`docs/architecture-migration-plan/architecture-migration-plan.md`](docs/architecture-migration-plan/architecture-migration-plan.md)
+- Task queue: [`docs/architecture-migration-plan/tasks/`](docs/architecture-migration-plan/tasks/) — `task-01` is the reconciliation step; tasks `02`–`14` execute the migration in order.
+- Each task produces a `_carryover-NN.md` next to it. The next task reads it as its first action.
+
+The `tasks/` folder and every `_carryover-NN.md` are **scratch** for the migration and **will be deleted before this branch merges into `main`**. The durable architectural artefacts are this `README.md`, [`CLAUDE.md`](CLAUDE.md), and the ADRs under [`docs/adr/`](docs/adr/).
+
 ## Overview
 
 The system handles order lifecycle management and product stock tracking across a distributed architecture. Clients interact with a single HTTP API gateway, which delegates work to specialized microservices over RabbitMQ.

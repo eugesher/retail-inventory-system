@@ -10,7 +10,17 @@
 
 ---
 
-> **Important note on Phase 1 (audit).** The repository `https://github.com/eugesher/retail-inventory-system` could not be retrieved by the fetcher in this session (the URL was not reachable from the search index, and the raw `nest-cli.json`, `package.json`, and `docker-compose.yml` could not be fetched). The audit below is therefore reconstructed from the user's brief — i.e. it describes the project **as the user described it** (NestJS monorepo, four apps: API Gateway / Retail / Inventory / Notification, TypeORM+MySQL, RabbitMQ, Redis, Docker Compose, GitHub Actions, Pino, JWT+RBAC, with Redis cache-aside, OpenTelemetry/Jaeger, and ADRs planned). Items marked **(assumed)** should be verified by Eugene against the live tree before executing the checklist. The recommendation, comparison, and checklist are not affected — they are stack-driven, not file-content-driven.
+> **Note on the audit (resolved 2026-05-08).** The audit was originally
+> reconstructed from a written brief because the fetcher could not access
+> the repository in the research session. `task-01-review-project-and-update-plan.md`
+> reconciled the audit against the live tree on `RIS-25-Architecture-migration`.
+> All `(assumed)` tags have been resolved in `parts/project-audit.md`;
+> several claims (JWT/RBAC implemented, single mega-`libs/common`, "fat
+> services", Redis unused) were refuted and rewritten. Conventions used
+> throughout the plan are recorded in
+> `tasks/_carryover-01.md`: `-microservice` suffix kept, path-alias
+> prefix `@retail-inventory-system/<name>`, 3-digit ADR padding,
+> `libs/auth` built fresh in task-06, no `docs/architecture/` folder.
 
 ---
 
@@ -48,3 +58,16 @@
   none of them is the final choice.
 - **No existing project files have been changed** by this research session;
   this is the planning/recommendation deliverable only.
+
+---
+
+## Plan Revisions
+
+A running log of edits to the plan files. Each entry: `<path> — <one-line rationale>`.
+
+### 2026-05-08 (task-01)
+
+- `parts/project-audit.md` — Replaced reconstructed Section 1 stack snapshot, Section 2 directory tree, Section 3 strengths, Section 4 weaknesses, Section 6 planned work with verified facts from the live tree on `RIS-25-Architecture-migration`. All `(assumed)` tags removed; resolved claims marked verified 2026-05-08. JWT/RBAC removed (not implemented); fat-services critique softened (per-action services exist); cache-aside marked done per ADR-002; auth scoped as task-06 future work.
+- `parts/recommendation.md` — Adjusted target tree to use `-microservice` suffix on app folders; switched all path aliases to `@retail-inventory-system/<name>`; switched ADR padding to 3-digit; relocated `libs/auth` from Phase 1 to task-06 (built fresh); removed `docs/architecture/` from the target structure; added `libs/config` to the preserved list since the Joi config wrapper stays as-is; added eslint naming-convention preservation note.
+- `parts/migration-checklist.md` — Re-scoped each phase to the actual starting state. Phase 1 split into task-03 (foundation) and task-04 (integration) since 4 libs already exist. Phase 3 redefined as "build auth from scratch" (task-06). Phase 4 (notification) now task-07 in the renumbered queue. Phase 7 (cross-cutting) lists the new task numbers. Removed Redis cache-aside line items already covered by ADR-002; added cache generalization for non-stock read paths.
+- `architecture-migration-plan.md` — Replaced the "repository inaccessible" caveat with a 2026-05-08 reconciliation note pointing at `tasks/_carryover-01.md`. Added this changelog section.
