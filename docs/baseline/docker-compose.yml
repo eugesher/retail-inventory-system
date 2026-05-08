@@ -1,0 +1,169 @@
+# Pre-migration baseline captured 2026-05-09 from commit 04713bb. Read-only snapshot — do not edit.
+services:
+  rabbitmq:
+    image: rabbitmq:4.2.3-management
+    container_name: rabbitmq
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  mysql:
+    image: mysql:8.4.8
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: retail_db
+      MYSQL_USER: retail
+      MYSQL_PASSWORD: retailpass
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  redis:
+    image: redis:8.6.0-alpine
+    container_name: redis
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - backend
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: api-gateway
+    container_name: api-gateway
+    ports:
+      - '3000:3000'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: yarn start:dev:api-gateway
+    networks:
+      - backend
+
+  inventory-microservice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: inventory-microservice
+    container_name: inventory-microservice
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
+      CACHE_TTL_MS_PRODUCT_STOCK: 60000
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: yarn start:dev:inventory-microservice
+    networks:
+      - backend
+
+  notification-microservice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: notification-microservice
+    container_name: notification-microservice
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: yarn start:dev:notification-microservice
+    networks:
+      - backend
+
+  retail-microservice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: retail-microservice
+    container_name: retail-microservice
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: yarn start:dev:retail-microservice
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  mysql-data:

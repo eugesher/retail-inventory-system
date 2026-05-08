@@ -1,3 +1,5 @@
+# Pre-migration baseline captured 2026-05-09 from commit 04713bb. Read-only snapshot — do not edit.
+# Source path: .github/workflows/ci-cd.yml
 name: CI / CD
 
 on:
@@ -9,12 +11,6 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    # Today this job runs `yarn lint` only. Task-12 of the architecture
-    # migration adds a sibling `yarn lint:architecture` step that enforces
-    # the hexagonal layer rules (domain → application → infrastructure /
-    # presentation) via `eslint-plugin-boundaries`. The plugin is already
-    # installed (see task-02 / ADR-004) but intentionally not wired into
-    # eslint.config.mjs until services have reached the target shape.
     steps:
       - uses: actions/checkout@v4
 
