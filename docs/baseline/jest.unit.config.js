@@ -1,9 +1,9 @@
+// Pre-migration baseline captured 2026-05-09 from commit 04713bb. Read-only snapshot — do not edit.
 /** @type {import('jest').Config} */
 module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
   testMatch: ['<rootDir>/**/*.spec.ts'],
-  modulePathIgnorePatterns: ['<rootDir>/docs/baseline/'],
   transform: {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
   },

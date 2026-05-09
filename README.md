@@ -12,6 +12,10 @@ This branch (`RIS-25-Architecture-migration`) is migrating the codebase to a per
 
 The `tasks/` folder and every `_carryover-NN.md` are **scratch** for the migration and **will be deleted before this branch merges into `main`**. The durable architectural artefacts are this `README.md`, [`CLAUDE.md`](CLAUDE.md), and the ADRs under [`docs/adr/`](docs/adr/).
 
+### Migration baseline
+
+[`docs/baseline/`](docs/baseline/) holds frozen copies of the configuration files, test-coverage report, and workspace listing as they were at the start of the migration (commit `04713bb`, captured 2026-05-09). This folder is **read-only** — captured as the pre-migration snapshot so later phases can diff against it. Do not edit these files; if a config drifts from baseline, that drift is the diff the migration is producing.
+
 ## Overview
 
 The system handles order lifecycle management and product stock tracking across a distributed architecture. Clients interact with a single HTTP API gateway, which delegates work to specialized microservices over RabbitMQ.

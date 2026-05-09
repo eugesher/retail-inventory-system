@@ -1,3 +1,4 @@
+// Pre-migration baseline captured 2026-05-09 from commit 04713bb. Read-only snapshot — do not edit.
 import eslint from '@eslint/js';
 import eslintPluginPrettier from 'eslint-plugin-prettier';
 import typescriptEslint from 'typescript-eslint';
@@ -11,7 +12,6 @@ export default typescriptEslint.config(
       '.yarn/**',
       'coverage/**',
       'dist/**',
-      'docs/baseline/**',
       'migrations/config/**',
     ],
   },
