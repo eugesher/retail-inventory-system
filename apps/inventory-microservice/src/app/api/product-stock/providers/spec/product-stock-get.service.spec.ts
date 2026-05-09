@@ -1,6 +1,6 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import { ProductStockCommonService } from '../../../../common/modules';
 import { ProductStockGetService } from '../product-stock-get.service';
 

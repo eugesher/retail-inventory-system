@@ -1,5 +1,5 @@
 import { ICorrelationPayload } from '@retail-inventory-system/common';
-import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 
 export interface IProductStockCommonCacheGet extends ICorrelationPayload {
   productId: number;

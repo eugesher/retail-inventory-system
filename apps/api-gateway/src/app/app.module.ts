@@ -2,8 +2,9 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 
-import { AppNameEnum, CorrelationMiddleware } from '@retail-inventory-system/common';
+import { CorrelationMiddleware } from '@retail-inventory-system/common';
 import { configModuleConfig, LoggerModuleConfig } from '@retail-inventory-system/config';
+import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { OrderModule, ProductModule } from './api';
 
 @Module({

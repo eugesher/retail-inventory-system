@@ -9,7 +9,7 @@ import {
   OneToMany,
 } from 'typeorm';
 
-import { OrderStatusEnum } from '@retail-inventory-system/retail';
+import { OrderStatusEnum } from '@retail-inventory-system/contracts';
 import { OrderProduct } from './order-product.entity';
 import { OrderStatus } from './order-status.entity';
 

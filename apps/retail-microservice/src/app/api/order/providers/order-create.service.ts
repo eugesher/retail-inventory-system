@@ -8,7 +8,7 @@ import {
   OrderCreateResponseDto,
   OrderProductStatusEnum,
   OrderStatusEnum,
-} from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
 import { Order, OrderProduct } from '../../../common/entities';
 
 @Injectable()

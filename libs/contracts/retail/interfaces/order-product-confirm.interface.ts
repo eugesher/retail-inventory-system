@@ -1,4 +1,4 @@
-import { OrderProductStatusEnum } from '../../retail';
+import { OrderProductStatusEnum } from '../enums';
 
 export interface IOrderProductConfirm {
   id: number;

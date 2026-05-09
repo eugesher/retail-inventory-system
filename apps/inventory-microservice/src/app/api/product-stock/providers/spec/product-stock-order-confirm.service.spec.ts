@@ -5,8 +5,8 @@ import {
   INVENTORY_DEFAULT_STORAGE,
   IProductStockOrderConfirmPayload,
   ProductStockActionEnum,
-} from '@retail-inventory-system/inventory';
-import { IOrderProductConfirm, OrderProductStatusEnum } from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
+import { IOrderProductConfirm, OrderProductStatusEnum } from '@retail-inventory-system/contracts';
 import { ProductStockCommonService } from '../../../../common/modules';
 import { ProductStockOrderConfirmService } from '../product-stock-order-confirm.service';
 

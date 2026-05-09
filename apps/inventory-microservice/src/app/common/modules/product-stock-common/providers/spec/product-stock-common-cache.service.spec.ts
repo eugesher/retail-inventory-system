@@ -59,7 +59,7 @@ import { ConfigService } from '@nestjs/config';
 import KeyvRedis from '@keyv/redis';
 import { PinoLogger } from 'nestjs-pino';
 
-import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import { ProductStockCommonCacheService } from '../product-stock-common-cache.service';
 
 const correlationId = 'corr-1';

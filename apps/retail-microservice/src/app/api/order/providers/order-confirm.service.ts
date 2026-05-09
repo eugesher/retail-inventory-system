@@ -8,14 +8,14 @@ import { In, Repository } from 'typeorm';
 import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/common';
-import { IProductStockOrderConfirmPayload } from '@retail-inventory-system/inventory';
+} from '@retail-inventory-system/contracts';
+import { IProductStockOrderConfirmPayload } from '@retail-inventory-system/contracts';
 import {
   IOrderConfirm,
   OrderConfirmResponseDto,
   OrderProductStatusEnum,
   OrderStatusEnum,
-} from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
 import { Order, OrderProduct } from '../../../common/entities';
 import { OrderConfirmDomain } from '../domain';
 

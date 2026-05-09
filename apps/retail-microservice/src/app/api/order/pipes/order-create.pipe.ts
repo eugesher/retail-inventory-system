@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { DataSource, Repository } from 'typeorm';
 
-import { IOrderCreatePayload } from '@retail-inventory-system/retail';
+import { IOrderCreatePayload } from '@retail-inventory-system/contracts';
 import { Customer } from '../../../common/entities';
 
 @Injectable()

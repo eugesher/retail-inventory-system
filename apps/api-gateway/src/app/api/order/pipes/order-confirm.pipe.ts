@@ -11,8 +11,8 @@ import { firstValueFrom } from 'rxjs';
 import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/common';
-import { OrderStatusEnum } from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
+import { OrderStatusEnum } from '@retail-inventory-system/contracts';
 
 @Injectable()
 export class OrderConfirmPipe implements PipeTransform<string, Promise<number>> {

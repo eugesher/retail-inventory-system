@@ -29,6 +29,8 @@
       ],
       "@retail-inventory-system/common": ["libs/common"],
       "@retail-inventory-system/config": ["libs/config"],
+      "@retail-inventory-system/contracts": ["libs/contracts"],
+      "@retail-inventory-system/database": ["libs/database"],
       "@retail-inventory-system/inventory": ["libs/inventory"],
       "@retail-inventory-system/retail": ["libs/retail"]
     },
