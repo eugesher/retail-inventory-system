@@ -51,11 +51,15 @@ apps/
   retail-microservice/      # Orders
   notification-microservice # Stub (not yet implemented)
 libs/
-  common/                   # Slimmed framework-free utilities (result, exceptions, pagination, types) plus shims for things deferred to task-04
-  config/                   # ConfigModuleConfiguration wrapper (kept "as-is")
+  cache/                    # CachePort + RedisCacheAdapter + @Cacheable + cache-keys registry
+  common/                   # Slimmed framework-free utilities (result, exceptions, pagination, types); the cache/correlation/modules subfolders are now shims
+  config/                   # ConfigModuleConfiguration wrapper; logger/cache/typeorm config files are shims pointing at the new homes
   contracts/                # Cross-service message and DTO contracts (microservices, retail, inventory)
   database/                 # TypeORM base entity/repository, snake-naming strategy, DatabaseModule
+  ddd/                      # Framework-free domain building blocks (Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort)
   inventory/                # Shim re-export of @retail-inventory-system/contracts (removed in task-14)
+  messaging/                # RabbitMQ wiring — MessagingModule, MicroserviceClient*Module, MicroserviceClientConfiguration, RabbitmqClientFactory, ROUTING_KEYS, EXCHANGES
+  observability/            # Pino LoggerModuleConfig + correlation middleware/decorator/types + OTel tracer.ts shell + TraceContextInterceptor + MetricsModule
   retail/                   # Shim re-export of @retail-inventory-system/contracts (removed in task-14)
 migrations/                 # TypeORM migrations + data-source config
 ```
@@ -64,12 +68,12 @@ migrations/                 # TypeORM migrations + data-source config
 
 **RabbitMQ queues:** `retail_queue`, `inventory_queue`, `notification_events`
 
-**Message patterns (RPC, defined in libs/contracts/microservices):**
-- `RETAIL_ORDER_CREATE` — create order (API Gateway → Retail)
-- `RETAIL_ORDER_CONFIRM` — confirm order (API Gateway → Retail → Inventory)
-- `RETAIL_ORDER_GET` — get order by id (API Gateway → Retail)
-- `INVENTORY_PRODUCT_STOCK_GET` — query stock levels (API Gateway → Inventory)
-- `INVENTORY_ORDER_CONFIRM` — reserve stock for confirmed order products (Retail → Inventory)
+**Message patterns (RPC, defined in libs/contracts/microservices and mirrored as `ROUTING_KEYS` in libs/messaging — wire format is dotted `<service>.<aggregate>.<action>`, see ADR-008):**
+- `retail.order.create` — create order (API Gateway → Retail)
+- `retail.order.confirm` — confirm order (API Gateway → Retail → Inventory)
+- `retail.order.get` — get order by id (API Gateway → Retail)
+- `inventory.product-stock.get` — query stock levels (API Gateway → Inventory)
+- `inventory.order.confirm` — reserve stock for confirmed order products (Retail → Inventory)
 
 ## Service Structure
 
@@ -95,13 +99,19 @@ The API Gateway uses HTTP controllers that delegate to microservices via `Client
 ## Shared Libraries
 
 Import via path aliases defined in `tsconfig.json`:
-- `@retail-inventory-system/contracts` — cross-service message and DTO contracts (plain TypeScript, no Nest decorators outside of `class-validator`/Swagger metadata on DTOs). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums), `retail/` (Order DTOs, enums, interfaces), `inventory/` (product-stock DTOs, types, constants).
+- `@retail-inventory-system/contracts` — cross-service message and DTO contracts (plain TypeScript, no Nest decorators outside of `class-validator`/Swagger metadata on DTOs). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/` (Order DTOs, enums, interfaces), `inventory/` (product-stock DTOs, types, constants).
 - `@retail-inventory-system/database` — TypeORM base. Exports `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy` (re-export of `typeorm-naming-strategies`), and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. App modules call `DatabaseModule.forRoot(entities)` instead of constructing `TypeormModuleConfig` directly.
-- `@retail-inventory-system/common` — slimmed to framework-free utilities: `Result<T, E>`, `DomainException`, pagination types, utility types. Currently also still hosts `cache/`, `correlation/`, and the `MicroserviceClient*Module` modules; those move out to `libs/cache`, `libs/observability`, and `libs/messaging` in task-04.
-- `@retail-inventory-system/config` — `configModuleConfig` (Joi schema), `LoggerModuleConfig`, `cacheModuleConfig`, plus a deprecated `TypeormModuleConfig` shim (use `DatabaseModule.forRoot()` instead — shim removed in task-14).
+- `@retail-inventory-system/messaging` — RabbitMQ wiring: `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` (dotted routing keys), `EXCHANGES` (reserved exchange names). Re-exports `MicroserviceQueueEnum` / `MicroserviceClientTokenEnum` from contracts.
+- `@retail-inventory-system/cache` — Redis cache abstraction: `ICachePort` (the abstraction domain code depends on), `CACHE_PORT` (DI token), `RedisCacheAdapter` (concrete `@nestjs/cache-manager` + `@keyv/redis` implementation), `CacheModule` (Nest module that binds the port to the adapter), `@Cacheable()` decorator, `CACHE_KEYS` registry, plus `CacheHelper` for backwards-compat. ADR-002 cache-aside contract preserved verbatim.
+- `@retail-inventory-system/observability` — Pino logger + correlation: `LoggerModuleConfig` (Pino setup with redaction and transport split), `CorrelationMiddleware`, `CorrelationId` decorator, `CORRELATION_ID_HEADER` constant, `ICorrelationPayload` (re-exported from contracts), OTel `tracer.ts` (side-effect import — fill in task-10), `TraceContextInterceptor` (stub — body in task-10), `MetricsModule` (placeholder).
+- `@retail-inventory-system/ddd` — framework-free domain building blocks: `Entity<TId>`, `AggregateRoot<TId>` (with `pullDomainEvents()`), `ValueObject<TProps>`, `DomainEvent<TAggregateId>`, `IRepositoryPort<TAggregate, TId>`. **No `@nestjs/*`, no TypeORM imports** — domain code is the consumer.
+- `@retail-inventory-system/common` — slimmed to framework-free utilities: `Result<T, E>`, `DomainException`, pagination types, utility types. The `cache/`, `correlation/`, and `modules/` subfolders are now one-release shims pointing at the new lib homes; removed in task-14.
+- `@retail-inventory-system/config` — `configModuleConfig` (Joi schema). `LoggerModuleConfig`, `cacheModuleConfig`, and `TypeormModuleConfig` are now shims pointing at `libs/observability`, `libs/cache`, and `DatabaseModule.forRoot()` respectively; all three removed in task-14.
 - `@retail-inventory-system/inventory`, `@retail-inventory-system/retail` — one-release shims that re-export `@retail-inventory-system/contracts`. Removed in task-14.
 
-Forward pointer: `messaging`, `cache`, `observability`, and `ddd` libraries are added in task-04. `auth` is added in task-06.
+**Forbidden imports.** Domain code (under `apps/*/src/.../domain/` and inside `libs/ddd`) MUST NOT import from `@retail-inventory-system/messaging`, `@retail-inventory-system/cache`, `@retail-inventory-system/observability`, `@retail-inventory-system/database`, or any `@nestjs/*` package. Reach those concerns via ports defined in `libs/ddd` (e.g. `IRepositoryPort`) or app-side ports. The boundary will be enforced via `eslint-plugin-boundaries` in task-12; until then it is by code review.
+
+Forward pointer: `auth` is added in task-06.
 
 ## Database
 
@@ -117,7 +127,7 @@ The codebase is mid-migration on branch `RIS-25-Architecture-migration` toward a
 
 ### Architecture rules location
 
-Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `005-…`); the next free number is `006`.
+Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `008-…`); the next free number is `009`.
 
 ### No-Git-ops rule for migration tasks
 

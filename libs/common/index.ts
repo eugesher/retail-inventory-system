@@ -4,7 +4,8 @@ export * from './pagination';
 export * from './result';
 export * from './types';
 
-// Deferred to task-04 (libs/cache, libs/messaging, libs/observability).
+// One-release shims — moved to libs/{cache,messaging,observability} in task-04.
+// Removed in task-14.
 export * from './cache';
 export * from './correlation';
 export * from './modules';

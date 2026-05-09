@@ -7,12 +7,12 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 
-import { CorrelationId } from '@retail-inventory-system/common';
 import {
   OrderConfirmResponseDto,
   OrderCreateDto,
   OrderCreateResponseDto,
 } from '@retail-inventory-system/contracts';
+import { CorrelationId } from '@retail-inventory-system/observability';
 import { OrderConfirmPipe } from './pipes';
 import { OrderConfirmService, OrderCreateService } from './providers';
 

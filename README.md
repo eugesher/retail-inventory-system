@@ -64,13 +64,17 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 
 | Library | Purpose |
 | ------- | ------- |
-| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums), `retail/`, `inventory/`. |
+| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/`, `inventory/`. |
 | `database` | TypeORM base — `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. |
-| `common` | Slimmed framework-free utilities (`Result`, `DomainException`, pagination types, utility types). Currently still hosts `cache/`, `correlation/`, and the `MicroserviceClient*Module` modules; those move out in task-04. |
-| `config` | `configModuleConfig` (Joi env schema), `LoggerModuleConfig`, `cacheModuleConfig`. `TypeormModuleConfig` is kept as a deprecated shim for one release — use `DatabaseModule.forRoot()` instead. |
+| `messaging` | RabbitMQ wiring — `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` and `EXCHANGES` constants. |
+| `cache` | Cache port + Redis adapter — `ICachePort`, `RedisCacheAdapter`, `CacheModule`, `@Cacheable()` decorator, `CACHE_KEYS` registry. Existing `CacheHelper` is re-exported here for compatibility. |
+| `observability` | Pino logger + correlation-ID middleware/decorator/types, OTel `tracer.ts` shell (filled in task-10), `MetricsModule` placeholder, `TraceContextInterceptor` stub. |
+| `ddd` | Framework-free domain building blocks — `Entity`, `AggregateRoot`, `ValueObject`, `DomainEvent`, `IRepositoryPort`. No `@nestjs/*` or TypeORM imports. |
+| `common` | Slimmed framework-free utilities (`Result`, `DomainException`, pagination types, utility types). The `cache/`, `correlation/`, and `modules/` subfolders are now one-release shims pointing at `libs/{cache,observability,messaging}`. Removed in task-14. |
+| `config` | `configModuleConfig` (Joi env schema). `LoggerModuleConfig` and `cacheModuleConfig` are now shims pointing at `libs/observability` and `libs/cache` respectively; `TypeormModuleConfig` is also a shim — use `DatabaseModule.forRoot()` instead. All three shims are removed in task-14. |
 | `inventory`, `retail` | One-release shims that re-export `@retail-inventory-system/contracts`. Removed in task-14. |
 
-Forward pointer: `messaging`, `cache`, `observability`, and `ddd` libraries are added in task-04 of the architecture migration; `auth` is added in task-06.
+Forward pointer: `auth` is added in task-06 of the architecture migration.
 
 ## Services
 

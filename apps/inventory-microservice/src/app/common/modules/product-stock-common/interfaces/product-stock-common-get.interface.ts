@@ -1,6 +1,6 @@
 import { EntityManager } from 'typeorm';
 
-import { ICorrelationPayload } from '@retail-inventory-system/common';
+import { ICorrelationPayload } from '@retail-inventory-system/observability';
 
 export interface IProductStockCommonGet extends ICorrelationPayload {
   productId: number;

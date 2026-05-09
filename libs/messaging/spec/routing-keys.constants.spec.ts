@@ -1,0 +1,31 @@
+import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/contracts';
+
+import { ROUTING_KEYS } from '../routing-keys.constants';
+
+// Wire-format alignment: the `ROUTING_KEYS` constants in `libs/messaging` and
+// the `MicroserviceMessagePatternEnum` values in `libs/contracts` must agree
+// — both libraries are imported by gateway and microservices and a drift
+// would silently route messages to the wrong queue.
+describe('ROUTING_KEYS', () => {
+  it('matches MicroserviceMessagePatternEnum values', () => {
+    expect(ROUTING_KEYS.RETAIL_ORDER_CREATE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATE,
+    );
+    expect(ROUTING_KEYS.RETAIL_ORDER_CONFIRM).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRM,
+    );
+    expect(ROUTING_KEYS.RETAIL_ORDER_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_ORDER_GET);
+    expect(ROUTING_KEYS.INVENTORY_PRODUCT_STOCK_GET).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
+    );
+    expect(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
+    );
+  });
+
+  it('uses dotted naming convention', () => {
+    for (const value of Object.values(ROUTING_KEYS)) {
+      expect(value).toMatch(/^[a-z]+(\.[a-z-]+)+$/);
+    }
+  });
+});

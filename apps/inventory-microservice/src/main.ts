@@ -4,7 +4,7 @@ import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { Logger, PinoLogger } from 'nestjs-pino';
 
 import { MicroserviceQueueEnum, AppNameEnum } from '@retail-inventory-system/contracts';
-import { LoggerModuleConfig } from '@retail-inventory-system/config';
+import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 import { AppModule } from './app';
 
 ((): void => {

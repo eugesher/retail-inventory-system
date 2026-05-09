@@ -1,9 +1,2 @@
-import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { Request } from 'express';
-
-import { CORRELATION_ID_HEADER } from './correlation.constants';
-
-export const CorrelationId = createParamDecorator(
-  (_, ctx: ExecutionContext): string =>
-    ctx.switchToHttp().getRequest<Request>().headers[CORRELATION_ID_HEADER] as string,
-);
+// Shim — relocated to libs/observability in task-04. Removed in task-14.
+export { CorrelationId } from '@retail-inventory-system/observability';
