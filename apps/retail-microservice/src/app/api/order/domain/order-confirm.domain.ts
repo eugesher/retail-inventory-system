@@ -2,7 +2,7 @@ import {
   IOrderConfirm,
   IOrderProductConfirm,
   OrderProductStatusEnum,
-} from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
 
 export class OrderConfirmDomain {
   public readonly someProductsConfirmed: boolean;

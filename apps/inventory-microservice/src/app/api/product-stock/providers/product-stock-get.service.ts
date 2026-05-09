@@ -4,7 +4,7 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import {
   IProductStockGetPayload,
   ProductStockGetResponseDto,
-} from '@retail-inventory-system/inventory';
+} from '@retail-inventory-system/contracts';
 import { ProductStockCommonService } from '../../../common/modules';
 
 @Injectable()

@@ -6,11 +6,11 @@ import { firstValueFrom } from 'rxjs';
 import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/common';
+} from '@retail-inventory-system/contracts';
 import {
   IProductStockGetPayload,
   ProductStockGetResponseDto,
-} from '@retail-inventory-system/inventory';
+} from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../common/utils';
 import { ProductStockGetQueryDto } from '../dto';
 

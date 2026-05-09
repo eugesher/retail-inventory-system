@@ -5,7 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import { Logger, PinoLogger } from 'nestjs-pino';
 
-import { AppNameEnum } from '@retail-inventory-system/common';
+import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { LoggerModuleConfig } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 

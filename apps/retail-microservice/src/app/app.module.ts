@@ -1,14 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { LoggerModule } from 'nestjs-pino';
 
-import { AppNameEnum } from '@retail-inventory-system/common';
-import {
-  configModuleConfig,
-  LoggerModuleConfig,
-  TypeormModuleConfig,
-} from '@retail-inventory-system/config';
+import { configModuleConfig, LoggerModuleConfig } from '@retail-inventory-system/config';
+import { AppNameEnum } from '@retail-inventory-system/contracts';
+import { DatabaseModule } from '@retail-inventory-system/database';
+
 import { entities } from './common';
 import { OrderModule } from './api';
 
@@ -16,7 +13,7 @@ import { OrderModule } from './api';
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.RETAIL_MICROSERVICE)),
-    TypeOrmModule.forRootAsync(new TypeormModuleConfig(entities)),
+    DatabaseModule.forRoot(entities),
     OrderModule,
   ],
 })

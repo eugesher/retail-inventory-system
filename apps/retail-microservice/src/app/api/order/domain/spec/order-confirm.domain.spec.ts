@@ -1,4 +1,4 @@
-import { IOrderProductConfirm, OrderProductStatusEnum } from '@retail-inventory-system/retail';
+import { IOrderProductConfirm, OrderProductStatusEnum } from '@retail-inventory-system/contracts';
 
 import { OrderConfirmDomain } from '../order-confirm.domain';
 

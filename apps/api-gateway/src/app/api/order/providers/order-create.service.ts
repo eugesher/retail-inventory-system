@@ -6,12 +6,12 @@ import { firstValueFrom } from 'rxjs';
 import {
   MicroserviceClientTokenEnum,
   MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/common';
+} from '@retail-inventory-system/contracts';
 import {
   IOrderCreatePayload,
   OrderCreateDto,
   OrderCreateResponseDto,
-} from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../common/utils';
 
 @Injectable()

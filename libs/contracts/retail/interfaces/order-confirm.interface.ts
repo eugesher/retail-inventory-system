@@ -1,4 +1,5 @@
-import { ICorrelationPayload } from '../../common';
+import { ICorrelationPayload } from '@retail-inventory-system/common';
+
 import { IOrderProductConfirm } from './order-product-confirm.interface';
 
 export interface IOrderConfirmPayload extends ICorrelationPayload {

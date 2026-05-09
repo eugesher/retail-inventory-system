@@ -12,7 +12,7 @@ import {
   OrderConfirmResponseDto,
   OrderCreateDto,
   OrderCreateResponseDto,
-} from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
 import { OrderConfirmPipe } from './pipes';
 import { OrderConfirmService, OrderCreateService } from './providers';
 

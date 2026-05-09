@@ -8,7 +8,7 @@ import {
   ManyToOne,
 } from 'typeorm';
 
-import { OrderProductStatusEnum } from '@retail-inventory-system/retail';
+import { OrderProductStatusEnum } from '@retail-inventory-system/contracts';
 import { Order } from './order.entity';
 import { OrderProductStatus } from './order-product-status.entity';
 

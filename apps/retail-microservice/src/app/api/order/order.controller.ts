@@ -1,13 +1,13 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 
-import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/common';
+import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/contracts';
 import {
   IOrderConfirm,
   IOrderCreatePayload,
   OrderConfirmResponseDto,
   OrderCreateResponseDto,
-} from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
 import { Order } from '../../common/entities';
 import { OrderConfirmPipe, OrderCreatePipe } from './pipes';
 import { OrderConfirmService, OrderCreateService, OrderGetService } from './providers';

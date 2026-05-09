@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { Logger, PinoLogger } from 'nestjs-pino';
 
-import { MicroserviceQueueEnum, AppNameEnum } from '@retail-inventory-system/common';
+import { MicroserviceQueueEnum, AppNameEnum } from '@retail-inventory-system/contracts';
 import { LoggerModuleConfig } from '@retail-inventory-system/config';
 import { AppModule } from './app';
 

@@ -7,8 +7,8 @@ import {
   INVENTORY_DEFAULT_STORAGE,
   IProductStockOrderConfirmPayload,
   ProductStockActionEnum,
-} from '@retail-inventory-system/inventory';
-import { OrderProductStatusEnum } from '@retail-inventory-system/retail';
+} from '@retail-inventory-system/contracts';
+import { OrderProductStatusEnum } from '@retail-inventory-system/contracts';
 import { IProductStockCommonAddItem, ProductStockCommonService } from '../../../common/modules';
 
 @Injectable()

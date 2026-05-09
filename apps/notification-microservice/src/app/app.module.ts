@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 
-import { AppNameEnum } from '@retail-inventory-system/common';
+import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { configModuleConfig, LoggerModuleConfig } from '@retail-inventory-system/config';
 
 @Module({

@@ -58,6 +58,20 @@ The system handles order lifecycle management and product stock tracking across 
 └───────────────────────────────────────────────────────────┘
 ```
 
+## Shared libraries
+
+Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-system/<name>`:
+
+| Library | Purpose |
+| ------- | ------- |
+| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums), `retail/`, `inventory/`. |
+| `database` | TypeORM base — `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. |
+| `common` | Slimmed framework-free utilities (`Result`, `DomainException`, pagination types, utility types). Currently still hosts `cache/`, `correlation/`, and the `MicroserviceClient*Module` modules; those move out in task-04. |
+| `config` | `configModuleConfig` (Joi env schema), `LoggerModuleConfig`, `cacheModuleConfig`. `TypeormModuleConfig` is kept as a deprecated shim for one release — use `DatabaseModule.forRoot()` instead. |
+| `inventory`, `retail` | One-release shims that re-export `@retail-inventory-system/contracts`. Removed in task-14. |
+
+Forward pointer: `messaging`, `cache`, `observability`, and `ddd` libraries are added in task-04 of the architecture migration; `auth` is added in task-06.
+
 ## Services
 
 | Service                     | Transport                       | Responsibility                                       |

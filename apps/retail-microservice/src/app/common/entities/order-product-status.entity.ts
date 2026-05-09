@@ -1,5 +1,5 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
-import { OrderProductStatusEnum } from '@retail-inventory-system/retail';
+import { OrderProductStatusEnum } from '@retail-inventory-system/contracts';
 
 @Entity('order_product_status')
 export class OrderProductStatus {

@@ -1,7 +1,7 @@
 import { PinoLogger } from 'nestjs-pino';
 import { EntityManager } from 'typeorm';
 
-import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import {
   ProductStockCommonAddService,
   ProductStockCommonCacheService,

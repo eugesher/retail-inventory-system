@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { EntityManager, Repository } from 'typeorm';
 
-import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
+import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import { ProductStock } from '../../../entities';
 import {
   IProductStockCommonGet,

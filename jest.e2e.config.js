@@ -17,6 +17,8 @@ module.exports = {
       '<rootDir>/apps/retail-microservice/src/app/app.module',
     '^@retail-inventory-system/common$': '<rootDir>/libs/common',
     '^@retail-inventory-system/config$': '<rootDir>/libs/config',
+    '^@retail-inventory-system/contracts$': '<rootDir>/libs/contracts',
+    '^@retail-inventory-system/database$': '<rootDir>/libs/database',
     '^@retail-inventory-system/inventory$': '<rootDir>/libs/inventory',
     '^@retail-inventory-system/retail$': '<rootDir>/libs/retail',
   },
