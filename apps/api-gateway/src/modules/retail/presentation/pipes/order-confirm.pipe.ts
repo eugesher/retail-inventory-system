@@ -5,20 +5,16 @@ import {
   NotFoundException,
   PipeTransform,
 } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
-import { firstValueFrom } from 'rxjs';
 
-import {
-  MicroserviceClientTokenEnum,
-  MicroserviceMessagePatternEnum,
-} from '@retail-inventory-system/contracts';
 import { OrderStatusEnum } from '@retail-inventory-system/contracts';
+
+import { IRetailGatewayPort, RETAIL_GATEWAY_PORT } from '../../application/ports';
 
 @Injectable()
 export class OrderConfirmPipe implements PipeTransform<string, Promise<number>> {
   constructor(
-    @Inject(MicroserviceClientTokenEnum.RETAIL_MICROSERVICE)
-    private readonly retailMicroserviceClient: ClientProxy,
+    @Inject(RETAIL_GATEWAY_PORT)
+    private readonly retailGateway: IRetailGatewayPort,
   ) {}
 
   public async transform(param: string): Promise<number> {
@@ -28,12 +24,7 @@ export class OrderConfirmPipe implements PipeTransform<string, Promise<number>> 
       throw new BadRequestException('Validation failed (numeric string is expected)');
     }
 
-    const order = await firstValueFrom(
-      this.retailMicroserviceClient.send<{ statusId: OrderStatusEnum } | null, number>(
-        MicroserviceMessagePatternEnum.RETAIL_ORDER_GET,
-        id,
-      ),
-    );
+    const order = await this.retailGateway.getOrderStatus(id);
 
     if (!order) {
       throw new NotFoundException(`Order #${id} not found`);

@@ -77,7 +77,45 @@ migrations/                 # TypeORM migrations + data-source config
 
 ## Service Structure
 
-Each service follows this layout:
+The API Gateway is on the per-module hexagonal layout (ADR-009). Microservices are still on the legacy flat layout — they migrate in tasks 07–09.
+
+### API Gateway (`apps/api-gateway/src/`)
+
+```
+src/
+  app/app.module.ts            # top-level Nest module + CorrelationMiddleware wiring
+  common/utils/                # shared utilities (e.g. throwRpcError)
+  main.ts                      # first import: '@retail-inventory-system/observability/tracer'
+  modules/
+    retail/
+      application/
+        ports/                 # IRetailGatewayPort + RETAIL_GATEWAY_PORT (DI symbol)
+        use-cases/             # CreateOrderUseCase, ConfirmOrderUseCase
+      infrastructure/
+        messaging/             # RetailRabbitmqAdapter (only place that holds ClientProxy)
+        retail.module.ts       # binds RETAIL_GATEWAY_PORT -> RetailRabbitmqAdapter
+      presentation/
+        order.controller.ts    # POST /api/order, PUT /api/order/:id/confirm
+        pipes/                 # OrderConfirmPipe — injects the port, not ClientProxy
+    inventory/
+      application/
+        ports/                 # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
+        use-cases/             # GetProductStockUseCase
+      infrastructure/
+        messaging/             # InventoryRabbitmqAdapter
+        inventory.module.ts
+      presentation/
+        product.controller.ts  # GET /api/product/:productId/stock
+        dto/                   # ProductStockGetQueryDto
+```
+
+The gateway has **no `domain/` aggregate of its own** — it is presentation plus an outbound transport adapter. Task-06 will add `modules/auth/` with a real `domain/` (User, Role).
+
+**Boundary rule:** `ClientProxy` from `@nestjs/microservices` is allowed only inside `infrastructure/messaging/*-rabbitmq.adapter.ts`. Controllers, use-cases, and pipes inject the port symbol instead. Adapters use `ROUTING_KEYS` from `@retail-inventory-system/messaging` (the dotted constants, not the legacy `MicroserviceMessagePatternEnum`).
+
+### Microservices (legacy layout)
+
+Each microservice today still follows:
 
 ```
 app/
@@ -94,7 +132,7 @@ config/
   config-object.ts             # Joi-validated env config
 ```
 
-The API Gateway uses HTTP controllers that delegate to microservices via `ClientProxy` (injected from `MicroserviceClientRetailModule` / `MicroserviceClientInventoryModule`).
+These migrate to the per-module hexagonal layout in tasks 07 (notification), 08 (inventory), and 09 (retail).
 
 ## Shared Libraries
 
@@ -127,7 +165,7 @@ The codebase is mid-migration on branch `RIS-25-Architecture-migration` toward a
 
 ### Architecture rules location
 
-Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `008-…`); the next free number is `009`.
+Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `009-…`); the next free number is `010`.
 
 ### No-Git-ops rule for migration tasks
 

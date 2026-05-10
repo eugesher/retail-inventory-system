@@ -1,10 +1,10 @@
 import { Body, Controller, Param, Post, Put } from '@nestjs/common';
 import {
-  ApiTags,
-  ApiOperation,
   ApiCreatedResponse,
-  ApiProduces,
   ApiOkResponse,
+  ApiOperation,
+  ApiProduces,
+  ApiTags,
 } from '@nestjs/swagger';
 
 import {
@@ -13,15 +13,16 @@ import {
   OrderCreateResponseDto,
 } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
+
+import { ConfirmOrderUseCase, CreateOrderUseCase } from '../application/use-cases';
 import { OrderConfirmPipe } from './pipes';
-import { OrderConfirmService, OrderCreateService } from './providers';
 
 @ApiTags('Order')
 @Controller('order')
 export class OrderController {
   constructor(
-    private readonly orderCreateService: OrderCreateService,
-    private readonly orderConfirmService: OrderConfirmService,
+    private readonly createOrderUseCase: CreateOrderUseCase,
+    private readonly confirmOrderUseCase: ConfirmOrderUseCase,
   ) {}
 
   @ApiOperation({ summary: 'Create a new order' })
@@ -32,7 +33,7 @@ export class OrderController {
     @Body() dto: OrderCreateDto,
     @CorrelationId() correlationId: string,
   ): Promise<OrderCreateResponseDto> {
-    return this.orderCreateService.execute(dto, correlationId);
+    return this.createOrderUseCase.execute(dto, correlationId);
   }
 
   @ApiOperation({ summary: 'Confirm order' })
@@ -43,6 +44,6 @@ export class OrderController {
     @Param('id', OrderConfirmPipe) id: number,
     @CorrelationId() correlationId: string,
   ): Promise<OrderConfirmResponseDto> {
-    return this.orderConfirmService.execute(id, correlationId);
+    return this.confirmOrderUseCase.execute(id, correlationId);
   }
 }
