@@ -85,6 +85,40 @@ Forward pointer: `auth` is added in task-06 of the architecture migration.
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
 | `notification-microservice` | RabbitMQ (`notification_queue`) | Stub (not yet implemented)                           |
 
+### API Gateway layout
+
+The API Gateway is on the per-module hexagonal layout introduced in [ADR-009](docs/adr/009-port-adapter-at-the-gateway.md). Microservices remain on the legacy flat layout until tasks 07–09 of the migration:
+
+```
+apps/api-gateway/src/
+├── app/app.module.ts
+├── common/utils/                              # throwRpcError, etc.
+├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
+└── modules/
+    ├── retail/                                # talks to retail-microservice
+    │   ├── application/
+    │   │   ├── ports/retail-gateway.port.ts   # IRetailGatewayPort + RETAIL_GATEWAY_PORT
+    │   │   └── use-cases/                     # CreateOrderUseCase, ConfirmOrderUseCase
+    │   ├── infrastructure/
+    │   │   ├── messaging/retail-rabbitmq.adapter.ts
+    │   │   └── retail.module.ts
+    │   └── presentation/
+    │       ├── order.controller.ts            # POST/PUT /api/order…
+    │       └── pipes/order-confirm.pipe.ts
+    └── inventory/                             # talks to inventory-microservice
+        ├── application/
+        │   ├── ports/inventory-gateway.port.ts
+        │   └── use-cases/get-product-stock.use-case.ts
+        ├── infrastructure/
+        │   ├── messaging/inventory-rabbitmq.adapter.ts
+        │   └── inventory.module.ts
+        └── presentation/
+            ├── product.controller.ts          # GET /api/product/:id/stock
+            └── dto/product-stock-get-query.dto.ts
+```
+
+The gateway has no `domain/` of its own — task-06 will add `modules/auth/` with a real `domain/` (User, Role). `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol.
+
 ## Getting Started
 
 Start the infrastructure and all services:

@@ -3,13 +3,14 @@ import { ApiOkResponse, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@ne
 
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
+
+import { GetProductStockUseCase } from '../application/use-cases';
 import { ProductStockGetQueryDto } from './dto';
-import { ProductStockGetService } from './providers';
 
 @ApiTags('Product')
 @Controller('product')
 export class ProductController {
-  constructor(private readonly stockGetService: ProductStockGetService) {}
+  constructor(private readonly getProductStockUseCase: GetProductStockUseCase) {}
 
   @ApiOperation({
     summary: 'Get current stock levels for a product',
@@ -32,6 +33,6 @@ export class ProductController {
     @Query() dto: ProductStockGetQueryDto,
     @CorrelationId() correlationId: string,
   ): Promise<ProductStockGetResponseDto> {
-    return await this.stockGetService.execute(productId, dto, correlationId);
+    return await this.getProductStockUseCase.execute(productId, dto, correlationId);
   }
 }
