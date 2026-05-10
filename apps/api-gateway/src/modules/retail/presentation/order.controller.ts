@@ -1,5 +1,6 @@
 import { Body, Controller, Param, Post, Put } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -7,6 +8,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { RoleEnum, Roles } from '@retail-inventory-system/auth';
 import {
   OrderConfirmResponseDto,
   OrderCreateDto,
@@ -18,6 +20,8 @@ import { ConfirmOrderUseCase, CreateOrderUseCase } from '../application/use-case
 import { OrderConfirmPipe } from './pipes';
 
 @ApiTags('Order')
+@ApiBearerAuth()
+@Roles(RoleEnum.CUSTOMER, RoleEnum.ADMIN)
 @Controller('order')
 export class OrderController {
   constructor(

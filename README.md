@@ -73,8 +73,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `common` | Slimmed framework-free utilities (`Result`, `DomainException`, pagination types, utility types). The `cache/`, `correlation/`, and `modules/` subfolders are now one-release shims pointing at `libs/{cache,observability,messaging}`. Removed in task-14. |
 | `config` | `configModuleConfig` (Joi env schema). `LoggerModuleConfig` and `cacheModuleConfig` are now shims pointing at `libs/observability` and `libs/cache` respectively; `TypeormModuleConfig` is also a shim — use `DatabaseModule.forRoot()` instead. All three shims are removed in task-14. |
 | `inventory`, `retail` | One-release shims that re-export `@retail-inventory-system/contracts`. Removed in task-14. |
-
-Forward pointer: `auth` is added in task-06 of the architecture migration.
+| `auth` | Framework-glue for JWT + RBAC: `AuthModule.forRootAsync()`, `JwtStrategy`, `JwtAuthGuard`, `RolesGuard`, `@Public()`, `@Roles()`, `@CurrentUser()`. The `RoleEnum` (`admin`, `customer`) is re-exported from `@retail-inventory-system/contracts/auth` (the source of truth — framework-free). |
 
 ## Services
 
@@ -152,7 +151,77 @@ PUT  /api/order/:id/confirm
 GET /product/:productId/stock
 ```
 
+### Auth
+
+```
+POST /api/auth/login         # public
+POST /api/auth/refresh       # public
+POST /api/auth/logout        # bearer
+GET  /api/auth/me            # bearer
+GET  /api/auth/admin/ping    # bearer + admin role (smoke endpoint)
+```
+
 Interactive API reference is available at `http://localhost:3000/api/reference` when the gateway is running.
+
+## Authentication
+
+Every gateway route is **protected by default** by a global `JwtAuthGuard`. Routes opt out with `@Public()` (currently only `/auth/login` and `/auth/refresh`). Role-based authorization is layered on top via `@Roles(RoleEnum.X, …)` on controllers or methods, evaluated by a global `RolesGuard`. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the rationale.
+
+### Login + refresh flow
+
+```
+1. POST /api/auth/login { email, password }
+   ↳ verify password (argon2id)
+   ↳ issue access JWT      (HS256, 15m by default, secret = JWT_ACCESS_SECRET)
+   ↳ issue refresh JWT     (HS256, 7d  by default, secret = JWT_REFRESH_SECRET)
+   ↳ store argon2id hash of refresh JWT on the user row
+   ↳ return { accessToken, refreshToken, expiresIn }
+
+2. POST /api/auth/refresh { refreshToken }
+   ↳ verify signature + expiry
+   ↳ argon2.verify(stored hash, presented token)
+       ↳ mismatch ⇒ rotation reuse: clear the stored hash + 401
+   ↳ issue new access + refresh JWTs
+   ↳ store new hash on the user row
+   ↳ return { accessToken, refreshToken, expiresIn }
+
+3. POST /api/auth/logout (bearer)
+   ↳ clear the user's refresh-hash; subsequent /auth/refresh fails 401.
+```
+
+Refresh tokens **rotate on every successful refresh** — the old token is invalidated by hash replacement, and reuse trips a circuit-breaker that clears the live hash entirely.
+
+### Roles
+
+Two seeded roles, defined as the `RoleEnum` in [`libs/contracts/auth/role.enum.ts`](libs/contracts/auth/role.enum.ts):
+
+| Role | Description |
+| ---- | ----------- |
+| `customer` | Default role. May `POST /api/order`, `PUT /api/order/:id/confirm`, `GET /product/:id/stock`. |
+| `admin` | Inherits customer access (admins seed with both roles). May additionally hit any route guarded by `@Roles(RoleEnum.ADMIN)` (today only the smoke endpoint `GET /api/auth/admin/ping`). |
+
+### Required environment variables
+
+| Variable | Default | Notes |
+| -------- | ------- | ----- |
+| `JWT_ACCESS_SECRET` | _(required, ≥ 32 chars)_ | HS256 signing key for access tokens. |
+| `JWT_ACCESS_EXPIRES_IN` | `15m` | Lifetime as a `ms`-style string (`15m`, `2h`, `30s`). |
+| `JWT_REFRESH_SECRET` | _(required, ≥ 32 chars; must differ from access)_ | HS256 signing key for refresh tokens. Distinct so it can be rotated independently. |
+| `JWT_REFRESH_EXPIRES_IN` | `7d` | Lifetime of the refresh JWT. |
+| `AUTH_ARGON2_MEMORY_COST` | `19456` (kib) | OWASP 2024 minimum for argon2id. |
+| `AUTH_ARGON2_TIME_COST` | `2` | Iteration count. |
+| `AUTH_ARGON2_PARALLELISM` | `1` | Threads. |
+
+### Local development
+
+`yarn test:seed` (or `yarn test:infra:reload`) inserts two argon2id-hashed users:
+
+| Email | Password | Roles |
+| ----- | -------- | ----- |
+| `admin@example.com` | `admin1234` | `admin`, `customer` |
+| `customer@example.com` | `customer1234` | `customer` |
+
+Auth events (`UserLoggedIn`, `LoginFailed`, `RefreshTokenRotated`, `LogoutPerformed`) emit Pino log lines with `userId` and `correlationId`. They are not fanned out to RabbitMQ today; task-07 wires the notification microservice if those events become consumer-driven.
 
 ## Logging & Observability
 

@@ -51,10 +51,11 @@ apps/
   retail-microservice/      # Orders
   notification-microservice # Stub (not yet implemented)
 libs/
+  auth/                     # JWT + RBAC framework-glue (AuthModule.forRootAsync, JwtStrategy, JwtAuthGuard, RolesGuard, @Public/@Roles/@CurrentUser, RoleEnum re-export)
   cache/                    # CachePort + RedisCacheAdapter + @Cacheable + cache-keys registry
   common/                   # Slimmed framework-free utilities (result, exceptions, pagination, types); the cache/correlation/modules subfolders are now shims
   config/                   # ConfigModuleConfiguration wrapper; logger/cache/typeorm config files are shims pointing at the new homes
-  contracts/                # Cross-service message and DTO contracts (microservices, retail, inventory)
+  contracts/                # Cross-service message and DTO contracts (auth, microservices, retail, inventory)
   database/                 # TypeORM base entity/repository, snake-naming strategy, DatabaseModule
   ddd/                      # Framework-free domain building blocks (Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort)
   inventory/                # Shim re-export of @retail-inventory-system/contracts (removed in task-14)
@@ -64,7 +65,7 @@ libs/
 migrations/                 # TypeORM migrations + data-source config
 ```
 
-**Request flow:** HTTP → API Gateway → RabbitMQ (request-response) → Microservice → MySQL
+**Request flow:** HTTP → API Gateway (auth + global guards) → RabbitMQ (request-response) → Microservice → MySQL
 
 **RabbitMQ queues:** `retail_queue`, `inventory_queue`, `notification_events`
 
@@ -109,9 +110,32 @@ src/
         dto/                   # ProductStockGetQueryDto
 ```
 
-The gateway has **no `domain/` aggregate of its own** — it is presentation plus an outbound transport adapter. Task-06 will add `modules/auth/` with a real `domain/` (User, Role).
+The gateway also has `modules/auth/` (added in task-06). It is the first gateway module with a real `domain/` (User aggregate, Role value object) and the only gateway module that owns DB state. See ADR-010.
+
+```
+modules/auth/
+  domain/
+    user.model.ts            # User aggregate (string id, email, passwordHash, roles, refreshTokenHash)
+    role.model.ts            # RoleVO wrapping RoleEnum
+    events/                  # UserRegistered, UserLoggedIn (audit-only today)
+  application/
+    ports/                   # IUserRepositoryPort, ITokenPort, IPasswordPort + DI symbols
+    use-cases/               # Login, Refresh, Logout, Register, ValidateUser (consumed by libs/auth JwtStrategy)
+    dto/                     # ILoginCommand, IRefreshCommand, ICurrentUserView
+  infrastructure/
+    persistence/             # UserEntity (TypeORM), UserMapper, UserTypeormRepository
+    jwt/jwt-token.adapter.ts # ITokenPort impl using @nestjs/jwt
+    argon2/argon2-password.adapter.ts
+    auth.module.ts           # imports AuthLibModule.forRootAsync({ AUTH_USER_VALIDATOR -> ValidateUserUseCase })
+  presentation/
+    auth.controller.ts       # POST /auth/login, /auth/refresh, /auth/logout; GET /auth/me
+    auth-admin.controller.ts # GET /auth/admin/ping (admin-only smoke endpoint)
+    dto/                     # Login/Refresh/Token/CurrentUser DTOs (class-validator + Swagger)
+```
 
 **Boundary rule:** `ClientProxy` from `@nestjs/microservices` is allowed only inside `infrastructure/messaging/*-rabbitmq.adapter.ts`. Controllers, use-cases, and pipes inject the port symbol instead. Adapters use `ROUTING_KEYS` from `@retail-inventory-system/messaging` (the dotted constants, not the legacy `MicroserviceMessagePatternEnum`).
+
+**Authentication conventions (gateway).** Every HTTP route is protected by default — global `JwtAuthGuard` and `RolesGuard` are wired in `app.module.ts` via `APP_GUARD`. Public routes opt out with `@Public()` from `@retail-inventory-system/auth`. Role-based authorization uses `@Roles(RoleEnum.X, …)`; controllers may also annotate themselves at the class level. Inject the authenticated user with `@CurrentUser()` (returns `ICurrentUser` from `@retail-inventory-system/contracts`). Passwords are hashed with **argon2id** (OWASP 2024 cost defaults — 19,456 KiB memory, 2 iterations, 1 thread; tunable via `AUTH_ARGON2_*` env). Refresh tokens are **rotated on every successful refresh**, with a hash of the live token persisted on the user row; reuse of a stale refresh token clears the live hash and returns 401. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md).
 
 ### Microservices (legacy layout)
 
@@ -137,7 +161,8 @@ These migrate to the per-module hexagonal layout in tasks 07 (notification), 08 
 ## Shared Libraries
 
 Import via path aliases defined in `tsconfig.json`:
-- `@retail-inventory-system/contracts` — cross-service message and DTO contracts (plain TypeScript, no Nest decorators outside of `class-validator`/Swagger metadata on DTOs). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/` (Order DTOs, enums, interfaces), `inventory/` (product-stock DTOs, types, constants).
+- `@retail-inventory-system/contracts` — cross-service message and DTO contracts (plain TypeScript, no Nest decorators outside of `class-validator`/Swagger metadata on DTOs). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/` (Order DTOs, enums, interfaces), `inventory/` (product-stock DTOs, types, constants), `auth/` (`RoleEnum`, `ICurrentUser`, `IJwtAccessPayload`, `IJwtRefreshPayload` — framework-free; future microservices that validate tokens off-gateway depend on these).
+- `@retail-inventory-system/auth` — Nest-aware framework glue for JWT + RBAC: `AuthModule.forRootAsync({ imports, providers, exports })` (registers `PassportModule` + `JwtModule` + `JwtStrategy` + `JwtAuthGuard` + `RolesGuard`, global), `AUTH_USER_VALIDATOR` port (apps bind a `IAuthUserValidator` here so the strategy can resolve a request user), decorators (`@Public`, `@Roles`, `@CurrentUser`), runtime `RoleEnum` re-export.
 - `@retail-inventory-system/database` — TypeORM base. Exports `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy` (re-export of `typeorm-naming-strategies`), and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. App modules call `DatabaseModule.forRoot(entities)` instead of constructing `TypeormModuleConfig` directly.
 - `@retail-inventory-system/messaging` — RabbitMQ wiring: `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` (dotted routing keys), `EXCHANGES` (reserved exchange names). Re-exports `MicroserviceQueueEnum` / `MicroserviceClientTokenEnum` from contracts.
 - `@retail-inventory-system/cache` — Redis cache abstraction: `ICachePort` (the abstraction domain code depends on), `CACHE_PORT` (DI token), `RedisCacheAdapter` (concrete `@nestjs/cache-manager` + `@keyv/redis` implementation), `CacheModule` (Nest module that binds the port to the adapter), `@Cacheable()` decorator, `CACHE_KEYS` registry, plus `CacheHelper` for backwards-compat. ADR-002 cache-aside contract preserved verbatim.
@@ -149,7 +174,6 @@ Import via path aliases defined in `tsconfig.json`:
 
 **Forbidden imports.** Domain code (under `apps/*/src/.../domain/` and inside `libs/ddd`) MUST NOT import from `@retail-inventory-system/messaging`, `@retail-inventory-system/cache`, `@retail-inventory-system/observability`, `@retail-inventory-system/database`, or any `@nestjs/*` package. Reach those concerns via ports defined in `libs/ddd` (e.g. `IRepositoryPort`) or app-side ports. The boundary will be enforced via `eslint-plugin-boundaries` in task-12; until then it is by code review.
 
-Forward pointer: `auth` is added in task-06.
 
 ## Database
 
@@ -165,7 +189,7 @@ The codebase is mid-migration on branch `RIS-25-Architecture-migration` toward a
 
 ### Architecture rules location
 
-Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `009-…`); the next free number is `010`.
+Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `010-…`); the next free number is `011`.
 
 ### No-Git-ops rule for migration tasks
 
@@ -183,5 +207,4 @@ Each migration task produces a `_carryover-NN.md` next to it; the next task read
 
 - **Redis cache-aside is wired** for product stock queries (see [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md)). The 17 open audit items from `docs/audits/audit-2026-05-08.md` (cache stampede, schema-version segment, multi-tenant prefix, etc.) are tracked but unresolved; task-11 in the migration revisits them.
 - **Notification microservice is a stub** — connects to RabbitMQ but has no handlers or logic. Task-07 in the migration replaces this stub with a real notifier service.
-- **No authentication today** — no `@nestjs/jwt`, no `passport`, no guards. Task-06 in the migration builds JWT + RBAC from scratch.
 - **No OpenTelemetry / Jaeger** — Pino correlation IDs are the only cross-service trace today. Task-10 wires OTel.
