@@ -27,11 +27,16 @@
       "@retail-inventory-system/apps/retail-microservice": [
         "apps/retail-microservice/src/app/app.module"
       ],
+      "@retail-inventory-system/cache": ["libs/cache"],
       "@retail-inventory-system/common": ["libs/common"],
       "@retail-inventory-system/config": ["libs/config"],
       "@retail-inventory-system/contracts": ["libs/contracts"],
       "@retail-inventory-system/database": ["libs/database"],
+      "@retail-inventory-system/ddd": ["libs/ddd"],
       "@retail-inventory-system/inventory": ["libs/inventory"],
+      "@retail-inventory-system/messaging": ["libs/messaging"],
+      "@retail-inventory-system/observability": ["libs/observability"],
+      "@retail-inventory-system/observability/tracer": ["libs/observability/tracer"],
       "@retail-inventory-system/retail": ["libs/retail"]
     },
     "allowSyntheticDefaultImports": true

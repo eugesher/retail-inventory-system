@@ -1,4 +1,4 @@
-import { ICorrelationPayload } from '@retail-inventory-system/common';
+import { ICorrelationPayload } from '@retail-inventory-system/observability';
 import { ProductStock } from '../../../entities';
 
 export interface IProductStockCommonAddItem extends Pick<

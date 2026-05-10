@@ -6,7 +6,7 @@ import { apiReference } from '@scalar/nestjs-api-reference';
 import { Logger, PinoLogger } from 'nestjs-pino';
 
 import { AppNameEnum } from '@retail-inventory-system/contracts';
-import { LoggerModuleConfig } from '@retail-inventory-system/config';
+import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 import { AppModule } from './app';
 
 ((): void => {

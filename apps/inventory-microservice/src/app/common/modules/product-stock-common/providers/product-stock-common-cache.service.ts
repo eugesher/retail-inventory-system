@@ -6,7 +6,7 @@ import { Cacheable } from 'cacheable';
 import { isDefined } from 'class-validator';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { CacheHelper } from '@retail-inventory-system/common';
+import { CacheHelper } from '@retail-inventory-system/cache';
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import {
   IProductStockCommonCacheGet,

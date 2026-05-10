@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { MicroserviceClientInventoryModule } from '@retail-inventory-system/common';
+import { MicroserviceClientInventoryModule } from '@retail-inventory-system/messaging';
 import { Customer, Order } from '../../common/entities';
 import { OrderConfirmPipe, OrderCreatePipe } from './pipes';
 import { OrderConfirmService, OrderCreateService, OrderGetService } from './providers';

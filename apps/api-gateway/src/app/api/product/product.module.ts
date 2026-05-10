@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 
-import { MicroserviceClientInventoryModule } from '@retail-inventory-system/common';
+import { MicroserviceClientInventoryModule } from '@retail-inventory-system/messaging';
 import { ProductStockGetService } from './providers';
 import { ProductController } from './product.controller';
 

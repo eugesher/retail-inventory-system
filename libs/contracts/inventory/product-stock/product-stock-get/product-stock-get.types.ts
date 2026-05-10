@@ -1,4 +1,4 @@
-import { ICorrelationPayload } from '@retail-inventory-system/common';
+import { ICorrelationPayload } from '../../../microservices';
 
 export interface IProductStockGetPayload extends ICorrelationPayload {
   productId: number;
