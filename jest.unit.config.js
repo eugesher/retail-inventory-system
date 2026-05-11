@@ -8,6 +8,7 @@ module.exports = {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
   },
   moduleNameMapper: {
+    '^@retail-inventory-system/auth$': '<rootDir>/libs/auth',
     '^@retail-inventory-system/cache$': '<rootDir>/libs/cache',
     '^@retail-inventory-system/common$': '<rootDir>/libs/common',
     '^@retail-inventory-system/config$': '<rootDir>/libs/config',

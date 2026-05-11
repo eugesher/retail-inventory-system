@@ -27,6 +27,7 @@
       "@retail-inventory-system/apps/retail-microservice": [
         "apps/retail-microservice/src/app/app.module"
       ],
+      "@retail-inventory-system/auth": ["libs/auth"],
       "@retail-inventory-system/cache": ["libs/cache"],
       "@retail-inventory-system/common": ["libs/common"],
       "@retail-inventory-system/config": ["libs/config"],

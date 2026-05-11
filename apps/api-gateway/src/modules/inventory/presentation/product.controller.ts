@@ -1,6 +1,14 @@
 import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
 
+import { RoleEnum, Roles } from '@retail-inventory-system/auth';
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
@@ -8,6 +16,8 @@ import { GetProductStockUseCase } from '../application/use-cases';
 import { ProductStockGetQueryDto } from './dto';
 
 @ApiTags('Product')
+@ApiBearerAuth()
+@Roles(RoleEnum.CUSTOMER, RoleEnum.ADMIN)
 @Controller('product')
 export class ProductController {
   constructor(private readonly getProductStockUseCase: GetProductStockUseCase) {}

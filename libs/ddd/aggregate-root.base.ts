@@ -6,19 +6,19 @@ import { Entity } from './entity.base';
 // dispatch them on a transactional outbox / messaging bus. Pull semantics
 // keep the aggregate framework-free.
 export abstract class AggregateRoot<TId> extends Entity<TId> {
-  private _domainEvents: DomainEvent[] = [];
+  private _domainEvents: DomainEvent<TId>[] = [];
 
-  protected addDomainEvent(event: DomainEvent): void {
+  protected addDomainEvent(event: DomainEvent<TId>): void {
     this._domainEvents.push(event);
   }
 
-  public pullDomainEvents(): DomainEvent[] {
+  public pullDomainEvents(): DomainEvent<TId>[] {
     const events = this._domainEvents;
     this._domainEvents = [];
     return events;
   }
 
-  public get domainEvents(): readonly DomainEvent[] {
+  public get domainEvents(): readonly DomainEvent<TId>[] {
     return this._domainEvents;
   }
 }

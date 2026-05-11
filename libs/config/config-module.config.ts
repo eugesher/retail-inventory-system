@@ -21,5 +21,19 @@ export const configModuleConfig = {
 
     CACHE_TTL_MS_DEFAULT: Joi.number().integer().positive().default(60000),
     CACHE_TTL_MS_PRODUCT_STOCK: Joi.number().integer().positive().default(60000),
+
+    JWT_ACCESS_SECRET: Joi.string().min(32).required(),
+    JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
+    JWT_REFRESH_SECRET: Joi.string()
+      .min(32)
+      .required()
+      .invalid(Joi.ref('JWT_ACCESS_SECRET'))
+      .messages({
+        'any.invalid': 'JWT_REFRESH_SECRET must differ from JWT_ACCESS_SECRET',
+      }),
+    JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
+    AUTH_ARGON2_MEMORY_COST: Joi.number().integer().positive().default(19_456),
+    AUTH_ARGON2_TIME_COST: Joi.number().integer().positive().default(2),
+    AUTH_ARGON2_PARALLELISM: Joi.number().integer().positive().default(1),
   }).options({ allowUnknown: true, abortEarly: false }),
 };
