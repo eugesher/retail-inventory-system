@@ -1,3 +1,5 @@
+import '@retail-inventory-system/observability/tracer';
+
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';

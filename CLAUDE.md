@@ -49,7 +49,7 @@ apps/
   api-gateway/              # HTTP entry point (port 3000)
   inventory-microservice/   # Stock management
   retail-microservice/      # Orders
-  notification-microservice # Stub (not yet implemented)
+  notification-microservice # Hexagonal per-module template (consumes retail/inventory events, fans out via NotifierPort)
 libs/
   auth/                     # JWT + RBAC framework-glue (AuthModule.forRootAsync, JwtStrategy, JwtAuthGuard, RolesGuard, @Public/@Roles/@CurrentUser, RoleEnum re-export)
   cache/                    # CachePort + RedisCacheAdapter + @Cacheable + cache-keys registry
@@ -67,18 +67,21 @@ migrations/                 # TypeORM migrations + data-source config
 
 **Request flow:** HTTP → API Gateway (auth + global guards) → RabbitMQ (request-response) → Microservice → MySQL
 
-**RabbitMQ queues:** `retail_queue`, `inventory_queue`, `notification_events`
+**RabbitMQ queues:** `retail_queue`, `inventory_queue`, `notification_events` (the `notification` exchange constant is reserved for future topic-exchange routing — today the queue is bound to the default exchange).
 
-**Message patterns (RPC, defined in libs/contracts/microservices and mirrored as `ROUTING_KEYS` in libs/messaging — wire format is dotted `<service>.<aggregate>.<action>`, see ADR-008):**
+**Message patterns (RPC + events, defined in libs/contracts/microservices and mirrored as `ROUTING_KEYS` in libs/messaging — wire format is dotted `<service>.<aggregate>.<action>`, see ADR-008):**
 - `retail.order.create` — create order (API Gateway → Retail)
 - `retail.order.confirm` — confirm order (API Gateway → Retail → Inventory)
 - `retail.order.get` — get order by id (API Gateway → Retail)
+- `retail.order.created` — event; consumed by Notification (publisher arrives in task-09)
 - `inventory.product-stock.get` — query stock levels (API Gateway → Inventory)
 - `inventory.order.confirm` — reserve stock for confirmed order products (Retail → Inventory)
+- `inventory.stock.low` — event; consumed by Notification (publisher arrives in task-08)
+- `notification.health.ping` — RMQ-transport health check on the Notification microservice
 
 ## Service Structure
 
-The API Gateway is on the per-module hexagonal layout (ADR-009). Microservices are still on the legacy flat layout — they migrate in tasks 07–09.
+The API Gateway and the Notification microservice are on the per-module hexagonal layout (ADR-009, ADR-011). Inventory and Retail are still on the legacy flat layout — they migrate in tasks 08–09 and follow the notification module's shape verbatim.
 
 ### API Gateway (`apps/api-gateway/src/`)
 
@@ -156,7 +159,23 @@ config/
   config-object.ts             # Joi-validated env config
 ```
 
-These migrate to the per-module hexagonal layout in tasks 07 (notification), 08 (inventory), and 09 (retail).
+Notification has been migrated (task-07); inventory and retail migrate next in tasks 08–09. The notification module is the **canonical per-module template** — later services follow its shape:
+
+```
+apps/notification-microservice/src/modules/notifications/
+  domain/                       # Notification value object + NotificationChannelEnum
+  application/
+    ports/                      # INotifierPort + NOTIFIER symbol
+    use-cases/                  # SendOrderNotificationUseCase, SendLowStockAlertUseCase
+  infrastructure/
+    consumers/                  # @EventPattern subscribers (RMQ): order-events, inventory-events
+    delivery/                   # NOTIFIER adapters: log (default), email (TODO), webhook (TODO)
+    notifications.module.ts     # binds NOTIFIER -> LogNotifierAdapter (single-line rebind to swap)
+  presentation/
+    health.controller.ts        # @MessagePattern('notification.health.ping')
+```
+
+The notification microservice is RMQ-only (no HTTP). Tasks 08/09 produce the same `domain/`, `application/`, `infrastructure/`, `presentation/` split per bounded context.
 
 ## Shared Libraries
 
@@ -189,7 +208,7 @@ The codebase is mid-migration on branch `RIS-25-Architecture-migration` toward a
 
 ### Architecture rules location
 
-Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `010-…`); the next free number is `011`.
+Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `011-…`); the next free number is `012`.
 
 ### No-Git-ops rule for migration tasks
 
@@ -206,5 +225,5 @@ Each migration task produces a `_carryover-NN.md` next to it; the next task read
 ## Known Issues
 
 - **Redis cache-aside is wired** for product stock queries (see [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md)). The 17 open audit items from `docs/audits/audit-2026-05-08.md` (cache stampede, schema-version segment, multi-tenant prefix, etc.) are tracked but unresolved; task-11 in the migration revisits them.
-- **Notification microservice is a stub** — connects to RabbitMQ but has no handlers or logic. Task-07 in the migration replaces this stub with a real notifier service.
+- **No producer for `retail.order.created` / `inventory.stock.low` yet.** The notification microservice subscribes and the use-cases work end-to-end (proven by the smoke test in `test/notification.e2e-spec.ts` against a synthetic publish), but the retail and inventory services do not yet emit these events. Producers arrive in tasks 08–09.
 - **No OpenTelemetry / Jaeger** — Pino correlation IDs are the only cross-service trace today. Task-10 wires OTel.
