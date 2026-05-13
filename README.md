@@ -66,7 +66,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | ------- | ------- |
 | `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/`, `inventory/`. |
 | `database` | TypeORM base — `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. |
-| `messaging` | RabbitMQ wiring — `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` and `EXCHANGES` constants. |
+| `messaging` | RabbitMQ wiring — `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory,Notification}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` and `EXCHANGES` constants. |
 | `cache` | Cache port + Redis adapter — `ICachePort`, `RedisCacheAdapter`, `CacheModule`, `@Cacheable()` decorator, `CACHE_KEYS` registry. Existing `CacheHelper` is re-exported here for compatibility. |
 | `observability` | Pino logger + correlation-ID middleware/decorator/types, OTel `tracer.ts` shell (filled in task-10), `MetricsModule` placeholder, `TraceContextInterceptor` stub. |
 | `ddd` | Framework-free domain building blocks — `Entity`, `AggregateRoot`, `ValueObject`, `DomainEvent`, `IRepositoryPort`. No `@nestjs/*` or TypeORM imports. |
@@ -118,9 +118,9 @@ apps/api-gateway/src/
 
 The gateway has no `domain/` of its own — task-06 will add `modules/auth/` with a real `domain/` (User, Role). `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol.
 
-### Notification microservice layout
+### Per-module hexagonal layout
 
-The notification microservice is the **canonical per-module template** for the bigger services. Tasks 08 (inventory) and 09 (retail) reshape themselves into this shape:
+The notification microservice established the **canonical per-module template** for the bigger services. The inventory microservice has been reshaped into the same layout (task-08); retail follows in task-09.
 
 ```
 apps/notification-microservice/src/
@@ -149,6 +149,37 @@ apps/notification-microservice/src/
 ```
 
 `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
+
+The inventory microservice exposes a single `stock` bounded context laid out the same way:
+
+```
+apps/inventory-microservice/src/
+├── app/app.module.ts                          # imports StockModule + LoggerModule + CacheModule + DatabaseModule
+├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
+└── modules/stock/
+    ├── domain/
+    │   ├── stock-item.model.ts                # aggregate (quantity / reservedQuantity invariants)
+    │   ├── storage.model.ts                   # ValueObject<Storage>
+    │   └── events/                             # StockReservedEvent, StockReleasedEvent, StockLowEvent
+    ├── application/
+    │   ├── ports/
+    │   │   ├── stock.repository.port.ts       # IStockRepositoryPort + STOCK_REPOSITORY symbol
+    │   │   ├── stock-cache.port.ts            # IStockCachePort + STOCK_CACHE symbol
+    │   │   └── stock-events.publisher.port.ts # IStockEventsPublisherPort + STOCK_EVENTS_PUBLISHER symbol
+    │   └── use-cases/
+    │       ├── get-stock.use-case.ts          # cache-aside read
+    │       ├── reserve-stock-for-order.use-case.ts
+    │       └── add-stock.use-case.ts          # internal-only ledger append
+    ├── infrastructure/
+    │   ├── persistence/                       # TypeORM entities + StockTypeormRepository + StockItemMapper
+    │   ├── cache/stock-redis.cache.ts         # STOCK_CACHE adapter; preserves ADR-002 cache-aside contract
+    │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (emit → notification queue)
+    │   └── stock.module.ts                    # binds all three port symbols → adapters
+    └── presentation/
+        └── stock.controller.ts                # @MessagePattern handlers for INVENTORY_PRODUCT_STOCK_GET / INVENTORY_ORDER_CONFIRM
+```
+
+`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts`; the use cases inject `STOCK_EVENTS_PUBLISHER` and await a plain Promise. See [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md) for the aggregate boundaries and the port-and-adapter split.
 
 ## Getting Started
 
@@ -317,8 +348,8 @@ The following shows the full log output for a `PUT /api/order/1/confirm` request
 {"level":30,"time":1748000000016,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"retail_order_confirm","msg":"Sending RPC to retail service"}
 {"level":30,"time":1748000000020,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"productCount":2,"msg":"Received RPC: confirm order"}
 {"level":30,"time":1748000000021,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"inventory_order_confirm","msg":"Sending RPC to inventory service"}
-{"level":30,"time":1748000000025,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ProductStockOrderConfirmService","totalProducts":2,"pendingCount":2,"msg":"Received RPC: reserve order product stock"}
-{"level":30,"time":1748000000040,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ProductStockOrderConfirmService","confirmedCount":2,"skippedCount":0,"msg":"Stock reserved for order products"}
+{"level":30,"time":1748000000025,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ReserveStockForOrderUseCase","totalProducts":2,"pendingCount":2,"msg":"Received RPC: reserve order product stock"}
+{"level":30,"time":1748000000040,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ReserveStockForOrderUseCase","confirmedCount":2,"skippedCount":0,"msg":"Stock reserved for order products"}
 {"level":30,"time":1748000000045,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"confirmedCount":2,"msg":"Inventory stock confirmation received"}
 {"level":30,"time":1748000000048,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"msg":"Order fully confirmed"}
 {"level":30,"time":1748000000060,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"statusId":"confirmed","msg":"Order successfully confirmed"}
@@ -331,16 +362,16 @@ See [ADR-001](docs/adr/001-structured-logging-with-pino.md) for the rationale be
 
 The product stock query (`GET /product/:productId/stock`) reads from an append-only `product_stock` ledger. Each row records a delta (positive or negative) against a `(productId, storageId)` pair, so producing a current balance requires a `SUM(quantity) ... GROUP BY storageId` aggregation. Aggregation cost grows linearly with the row count, while the read pattern is heavy and the write pattern is comparatively light — a good fit for caching.
 
-The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. Cache logic lives in `ProductStockCommonService` (façade) and `ProductStockCommonCacheService` (Redis I/O); the HTTP-facing `ProductStockGetService` is unaware of the cache.
+The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. `GetStockUseCase` orchestrates the cache-aside read; `StockRedisCache` (the `STOCK_CACHE` adapter) owns Redis I/O; `StockTypeormRepository` materializes the SUM/GROUP BY aggregate. The presentation-layer `StockController` is unaware of the cache.
 
 ### Read flow
 
 ```
-1. Client request                → ProductStockCommonService.get()
-2. cache.get(key)                → hit?  return cached DTO, done
+1. Client request                → GetStockUseCase.execute()
+2. STOCK_CACHE.get(key)          → hit?  return cached DTO, done
                                  → miss? continue
-3. ProductStockCommonGetService  → SUM/GROUP BY against product_stock
-4. cache.set(key, data, TTL)     → populate cache
+3. STOCK_REPOSITORY.aggregateForProduct(...)  → SUM/GROUP BY against product_stock
+4. STOCK_CACHE.set(key, data, TTL) → populate cache
 5. Return DTO                    → reply to client
 ```
 
@@ -353,7 +384,7 @@ stock:<productId>:<storageIds-joined-by-comma>   # e.g. stock:42:storage-a,stora
 stock:<productId>:*                              # when no storageIds filter is supplied
 ```
 
-Built by `CacheHelper.keys.productStock(productId, storageIds)` in `libs/common/cache/cache.helper.ts`.
+Built by `CACHE_KEYS.productStock(productId, storageIds)` in `libs/cache/cache-keys.ts` (a backwards-compatible `CacheHelper.keys.productStock(...)` alias re-exports the same function).
 
 ### TTL
 
@@ -366,7 +397,7 @@ TTL is a safety net, not the primary freshness mechanism — explicit invalidati
 
 ### Invalidation
 
-When `ProductStockOrderConfirmService` reserves stock for a confirmed order, it inserts ledger rows inside a transaction and — **after the transaction commits** — fires a fire-and-forget invalidation for every `(productId, storageId)` pair that was written.
+When `ReserveStockForOrderUseCase` reserves stock for a confirmed order, it inserts ledger rows inside a transaction and — **after the transaction commits** — fires a fire-and-forget invalidation for every `(productId, storageId)` pair that was written.
 
 Invalidation runs `SCAN MATCH stock:<productId>:*` per affected `productId` in parallel and `UNLINK`s every matching key. `UNLINK` (vs `DEL`) frees memory asynchronously on the Redis side, avoiding a blocking O(N) delete on Redis's main thread. Calling invalidation before commit would race with concurrent readers and let them re-populate the cache from uncommitted state.
 

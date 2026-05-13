@@ -1,6 +1,7 @@
 export * from './exchanges.constants';
 export * from './messaging.module';
 export * from './microservice-client-inventory.module';
+export * from './microservice-client-notification.module';
 export * from './microservice-client-retail.module';
 export * from './microservice-client.configuration';
 export * from './rabbitmq.client.factory';
