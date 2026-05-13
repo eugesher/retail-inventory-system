@@ -9,16 +9,16 @@ import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
-import { entities } from './common';
-import { ProductStockModule } from './api';
+import { stockEntities } from '../modules/stock/infrastructure/persistence';
+import { StockModule } from '../modules/stock/infrastructure/stock.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.INVENTORY_MICROSERVICE)),
-    DatabaseModule.forRoot(entities),
+    DatabaseModule.forRoot(stockEntities),
     CacheModule.registerAsync(cacheModuleConfig),
-    ProductStockModule,
+    StockModule,
   ],
 })
 export class AppModule {}
