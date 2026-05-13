@@ -15,11 +15,20 @@ describe('ROUTING_KEYS', () => {
       MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRM,
     );
     expect(ROUTING_KEYS.RETAIL_ORDER_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_ORDER_GET);
+    expect(ROUTING_KEYS.RETAIL_ORDER_CREATED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATED,
+    );
     expect(ROUTING_KEYS.INVENTORY_PRODUCT_STOCK_GET).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
     );
     expect(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LOW).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LOW,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_HEALTH_PING).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_HEALTH_PING,
     );
   });
 

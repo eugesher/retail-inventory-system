@@ -82,7 +82,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
-| `notification-microservice` | RabbitMQ (`notification_queue`) | Stub (not yet implemented)                           |
+| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
 
 ### API Gateway layout
 
@@ -117,6 +117,38 @@ apps/api-gateway/src/
 ```
 
 The gateway has no `domain/` of its own — task-06 will add `modules/auth/` with a real `domain/` (User, Role). `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol.
+
+### Notification microservice layout
+
+The notification microservice is the **canonical per-module template** for the bigger services. Tasks 08 (inventory) and 09 (retail) reshape themselves into this shape:
+
+```
+apps/notification-microservice/src/
+├── app/app.module.ts                          # imports NotificationsModule + LoggerModule
+├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
+└── modules/notifications/
+    ├── domain/
+    │   ├── notification.model.ts              # ValueObject<Notification>
+    │   └── notification-channel.enum.ts
+    ├── application/
+    │   ├── ports/notifier.port.ts             # INotifierPort + NOTIFIER symbol
+    │   └── use-cases/
+    │       ├── send-order-notification.use-case.ts
+    │       └── send-low-stock-alert.use-case.ts
+    ├── infrastructure/
+    │   ├── consumers/                          # RMQ @EventPattern subscribers
+    │   │   ├── order-events.consumer.ts        # retail.order.created
+    │   │   └── inventory-events.consumer.ts    # inventory.stock.low
+    │   ├── delivery/                           # NOTIFIER implementations
+    │   │   ├── log.notifier.adapter.ts         # default
+    │   │   ├── email.notifier.adapter.ts       # scaffold (TODO)
+    │   │   └── webhook.notifier.adapter.ts     # scaffold (TODO)
+    │   └── notifications.module.ts             # binds NOTIFIER -> LogNotifierAdapter
+    └── presentation/
+        └── health.controller.ts                # @MessagePattern('notification.health.ping')
+```
+
+`LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
 
 ## Getting Started
 
@@ -221,7 +253,7 @@ Two seeded roles, defined as the `RoleEnum` in [`libs/contracts/auth/role.enum.t
 | `admin@example.com` | `admin1234` | `admin`, `customer` |
 | `customer@example.com` | `customer1234` | `customer` |
 
-Auth events (`UserLoggedIn`, `LoginFailed`, `RefreshTokenRotated`, `LogoutPerformed`) emit Pino log lines with `userId` and `correlationId`. They are not fanned out to RabbitMQ today; task-07 wires the notification microservice if those events become consumer-driven.
+Auth events (`UserLoggedIn`, `LoginFailed`, `RefreshTokenRotated`, `LogoutPerformed`) emit Pino log lines with `userId` and `correlationId`. They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.user-logged-in` routing key plus a publisher in `LoginUseCase` are missing.
 
 ## Logging & Observability
 
