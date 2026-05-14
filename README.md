@@ -10,7 +10,7 @@ This branch (`RIS-25-Architecture-migration`) is migrating the codebase to a per
 - Task queue: [`docs/architecture-migration-plan/tasks/`](docs/architecture-migration-plan/tasks/) — `task-01` is the reconciliation step; tasks `02`–`14` execute the migration in order.
 - Each task produces a `_carryover-NN.md` next to it. The next task reads it as its first action.
 
-The `tasks/` folder and every `_carryover-NN.md` are **scratch** for the migration and **will be deleted before this branch merges into `main`**. The durable architectural artefacts are this `README.md`, [`CLAUDE.md`](CLAUDE.md), and the ADRs under [`docs/adr/`](docs/adr/).
+The `tasks/` folder and every `_carryover-NN.md` are **scratch** for the migration and **will be deleted before this branch merges into `main`**. The durable architectural artefacts are this `README.md`, [`CLAUDE.md`](CLAUDE.md), and the ADRs under [`docs/adr/`](docs/adr/) — see [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index (one row per ADR, with status, date, and a one-line summary).
 
 ### Migration baseline
 

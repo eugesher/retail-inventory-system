@@ -71,3 +71,12 @@ Calling invalidation before commit was rejected: a concurrent reader could re-po
 - **Bounded staleness window on Redis outage.** If a confirm commits but invalidation cannot reach Redis, cached stock for the affected `(productId, storageId)` keys remains stale until TTL expiry (default 60 s). Acceptable for the current scale; revisit if business rules tighten.
 - **Cache-aside read/write race.** Between a cache miss and the subsequent `cache.set`, a concurrent writer could commit and invalidate, after which the original reader writes the now-stale DB result back. No single-flight or version-stamping today; the staleness is bounded by TTL. Tracked as `AUDIT-2026-05-08 [CACHE-001]`.
 - **Cache shape is typed at compile time only.** A breaking change to `ProductStockGetResponseDto` would deserialize old in-flight entries without runtime validation for one TTL window. Future mitigation: a schema-version segment in the key (e.g. `stock:v2:<productId>:...`). Tracked as `AUDIT-2026-05-08 [CACHE-003]`.
+
+---
+
+## References
+
+- [ADR-006](006-cache-aside-via-libs-cache.md) — refines the abstraction behind an `ICachePort` / `RedisCacheAdapter` without changing this ADR's contract.
+- [ADR-016](016-cache-aside-generalized.md) — generalizes the key convention to `ris:<service>:<aggregate>:<id>`, moves SCAN+UNLINK into `libs/cache`, and closes `CACHE-006/010/011/012`.
+- [ADR-019](019-typeorm-and-mysql-for-persistence.md) — the TypeORM / MySQL stack the cached aggregation runs against.
+- [`docs/audits/audit-2026-05-08.md`](../audits/audit-2026-05-08.md) — open items `CACHE-001` and `CACHE-003` referenced above.

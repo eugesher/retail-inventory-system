@@ -195,3 +195,16 @@ together with the publisher-port introduction in task-08/task-09.
   `jest.e2e.config.js` path aliases. Cosmetic; the load-bearing
   structure (per-module folders, port/adapter split) is in place.
   Tracked for task-14 cleanup.
+
+---
+
+## References
+
+- [ADR-004](004-adopt-hexagonal-architecture-per-service.md) — the
+  per-service hexagonal target this gateway alignment realizes.
+- [ADR-008](008-rabbitmq-via-libs-messaging.md) — the routing-key
+  wire format the gateway adapters consume.
+- [ADR-018](018-nestjs-monorepo-apps-and-libs.md) — the monorepo
+  apps/libs layout the gateway sits inside.
+- [ADR-020](020-rabbitmq-as-inter-service-bus.md) — the transport
+  the messaging adapter wraps.

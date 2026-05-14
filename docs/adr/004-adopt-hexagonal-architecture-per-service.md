@@ -187,3 +187,14 @@ and the libs we already have (`common`, `config`, `inventory`,
 - Choosing not to adopt CQRS or event sourcing now means a future
   decision if the read/write asymmetry grows; left as a future ADR
   rather than over-investing today.
+
+---
+
+## References
+
+- [ADR-018](018-nestjs-monorepo-apps-and-libs.md) — the NestJS
+  monorepo shape this layout lives inside.
+- [ADR-005](005-split-shared-common-into-bounded-libs.md) — the lib
+  split that gives the hexagonal layout its shared seams.
+- [ADR-017](017-architecture-lint-via-eslint-boundaries.md) — the
+  lint rules that enforce the layer boundaries this ADR commits to.
