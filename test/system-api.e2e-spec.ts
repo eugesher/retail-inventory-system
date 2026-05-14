@@ -9,8 +9,11 @@ import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/
 import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { CACHE_KEYS } from '@retail-inventory-system/cache';
-import { CORRELATION_ID_HEADER, MicroserviceQueueEnum } from '@retail-inventory-system/common';
-import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
+import {
+  MicroserviceQueueEnum,
+  ProductStockGetResponseDto,
+} from '@retail-inventory-system/contracts';
+import { CORRELATION_ID_HEADER } from '@retail-inventory-system/observability';
 import { SystemApiE2ESpecDataSource } from './data-source';
 
 describe('Retail Inventory System API', () => {

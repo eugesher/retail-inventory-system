@@ -58,29 +58,7 @@ const boundariesElements = [
     mode: 'file',
     capture: ['app'],
   },
-  // Shared libs — one element type per lib (ADR-017 §2). The shim entry
-  // MUST come first: the plugin matches the first pattern that hits, so
-  // narrower `libs/common/<subfolder>/**` entries would otherwise be
-  // shadowed by the broad `libs/common/**` pattern below.
-  //
-  // One-release shims (removed in task-14): the lib-shim element type
-  // covers the contract-shim libs and the leftover
-  // libs/common/{cache,config,modules,correlation} re-exports that point
-  // at their new homes.
-  {
-    type: 'lib-shim',
-    pattern: [
-      'libs/inventory/**',
-      'libs/retail/**',
-      'libs/common/cache/**',
-      'libs/common/config/**',
-      'libs/common/correlation/**',
-      'libs/common/modules/**',
-      'libs/config/cache-module.config.ts',
-      'libs/config/logger-module.config.ts',
-    ],
-    mode: 'file',
-  },
+  // Shared libs — one element type per lib (ADR-017 §2).
   { type: 'lib-auth', pattern: 'libs/auth/**', mode: 'file' },
   { type: 'lib-cache', pattern: 'libs/cache/**', mode: 'file' },
   { type: 'lib-common', pattern: 'libs/common/**', mode: 'file' },
@@ -284,23 +262,6 @@ const dependencyRules = [
     from: { type: 'lib-auth' },
     allow: [lib('lib-auth'), lib('lib-common'), lib('lib-contracts'), lib('lib-observability')],
   },
-  // lib-shim — re-export shims may reach into any other lib (their job is
-  // to forward; they disappear in task-14).
-  {
-    from: { type: 'lib-shim' },
-    allow: [
-      lib('lib-auth'),
-      lib('lib-cache'),
-      lib('lib-common'),
-      lib('lib-config'),
-      lib('lib-contracts'),
-      lib('lib-database'),
-      lib('lib-ddd'),
-      lib('lib-messaging'),
-      lib('lib-observability'),
-    ],
-  },
-
   // External-package denylists per source layer (ADR-017 §4). Each entry
   // overrides the catch-all "allow any external module" rule at index 0.
   // class-validator / class-transformer / @nestjs/swagger remain allowed

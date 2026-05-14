@@ -2,25 +2,21 @@
 
 A microservices-based retail inventory management API built with NestJS, RabbitMQ, and MySQL.
 
-## Architecture migration in progress
+## Architecture
 
-This branch (`RIS-25-Architecture-migration`) is migrating the codebase to a per-module hexagonal layout (Brocoders-style ports & adapters) per service. The migration plan, the per-task scripts, and the carryover files all live under [`docs/architecture-migration-plan/`](docs/architecture-migration-plan/).
+Every service follows a per-module **hexagonal layout** (ports & adapters): `domain/` holds framework-free aggregates and value objects; `application/` holds use cases and the port interfaces they depend on; `infrastructure/` holds the concrete adapters (TypeORM repositories, RabbitMQ clients, Redis cache, etc.); `presentation/` holds HTTP controllers and `@MessagePattern` handlers. The boundaries are enforced by `eslint-plugin-boundaries` ([ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)) — `yarn lint` is the source of truth for where a file should live.
 
-- Plan overview: [`docs/architecture-migration-plan/architecture-migration-plan.md`](docs/architecture-migration-plan/architecture-migration-plan.md)
-- Task queue: [`docs/architecture-migration-plan/tasks/`](docs/architecture-migration-plan/tasks/) — `task-01` is the reconciliation step; tasks `02`–`14` execute the migration in order.
-- Each task produces a `_carryover-NN.md` next to it. The next task reads it as its first action.
-
-The `tasks/` folder and every `_carryover-NN.md` are **scratch** for the migration and **will be deleted before this branch merges into `main`**. The durable architectural artefacts are this `README.md`, [`CLAUDE.md`](CLAUDE.md), and the ADRs under [`docs/adr/`](docs/adr/) — see [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index (one row per ADR, with status, date, and a one-line summary).
+The durable architectural artefacts are this `README.md`, [`CLAUDE.md`](CLAUDE.md), and the ADRs under [`docs/adr/`](docs/adr/). See [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index (one row per ADR with status, date, and a one-line summary). [`docs/architecture-migration-plan/parts/`](docs/architecture-migration-plan/parts/) holds the original recommendation document and project audit as a historical record.
 
 ### Migration baseline
 
-[`docs/baseline/`](docs/baseline/) holds frozen copies of the configuration files, test-coverage report, and workspace listing as they were at the start of the migration (commit `04713bb`, captured 2026-05-09). This folder is **read-only** — captured as the pre-migration snapshot so later phases can diff against it. Do not edit these files; if a config drifts from baseline, that drift is the diff the migration is producing.
+[`docs/baseline/`](docs/baseline/) holds frozen copies of the configuration files, test-coverage report, and workspace listing as they were at the start of the migration (commit `04713bb`, captured 2026-05-09). This folder is **read-only** — captured as the pre-migration snapshot so later phases could diff against it. Do not edit these files.
 
 ## Overview
 
 The system handles order lifecycle management and product stock tracking across a distributed architecture. Clients interact with a single HTTP API gateway, which delegates work to specialized microservices over RabbitMQ.
 
-## Architecture
+### System diagram
 
 ```
 ┌───────────────────────────────────────────────────────────┐
@@ -30,9 +26,11 @@ The system handles order lifecycle management and product stock tracking across 
 ┌─────────────────────────────▼─────────────────────────────┐
 │                  API Gateway port: 3000                   │
 │                                                           │
+│  POST  /api/auth/{login,refresh,logout}                   │
+│  GET   /api/auth/me                                       │
 │  POST  /api/order                                         │
 │  PUT   /api/order/:id/confirm                             │
-│  GET   /product/:productId/stock                          │
+│  GET   /api/product/:productId/stock                      │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -45,18 +43,19 @@ The system handles order lifecycle management and product stock tracking across 
 │                        │  │  Emits:                       │
 │  Emits:                │  │  inventory.stock.low ─────────┼─┐
 │  retail.order.created ─┼──┐                               │ │
-│  retail.order.confirmed│  │                               │ │
-└──────────────┬─────────┘  └─────────────────┬─────────────┘ │
-               │                              │               │
+│  retail.order.confirmed│  │  ┌────────────┐               │ │
+└──────────────┬─────────┘  │  │   Redis    │◄──cache-aside─┤ │
+               │            │  │ stock keys │               │ │
+               │            │  └────────────┘               │ │
+               │            │                               │ │
+               │            └─────────────────┬─────────────┘ │
                │            MySQL             │               │
                └──────────────┬───────────────┘               │
                               │                               │
 ┌─────────────────────────────▼─────────────────────────────┐ │
-│                         Retail DB                         │ │
-│                                                           │ │
-│  order                                                    │ │
-│  order_product                                            │ │
-│  product_stock                                            │ │
+│                        Shared DB                          │ │
+│  user / order / order_product / product / product_stock   │ │
+│  storage / order_status / order_product_status            │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
@@ -64,6 +63,10 @@ The system handles order lifecycle management and product stock tracking across 
 │  Listens: retail.order.created, inventory.stock.low           │
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
+
+OpenTelemetry: every service exports OTLP/HTTP spans through the
+otel-collector → Jaeger UI at http://localhost:16686 (see the
+"Distributed tracing" section below).
 ```
 
 ## Shared libraries
@@ -72,15 +75,14 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 
 | Library | Purpose |
 | ------- | ------- |
-| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/`, `inventory/`. |
+| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/`, `inventory/`, `auth/` (`RoleEnum`, `ICurrentUser`, JWT payload interfaces). |
 | `database` | TypeORM base — `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. |
 | `messaging` | RabbitMQ wiring — `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory,Notification}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` and `EXCHANGES` constants. |
-| `cache` | Cache port + Redis adapter — `ICachePort`, `RedisCacheAdapter`, `CacheModule`, `@Cacheable()` decorator, `CACHE_KEYS` registry. Existing `CacheHelper` is re-exported here for compatibility. |
-| `observability` | Pino logger + correlation-ID middleware/decorator/types, OTel `tracer.ts` shell (filled in task-10), `MetricsModule` placeholder, `TraceContextInterceptor` stub. |
+| `cache` | Cache port + Redis adapter — `ICachePort` (`get` / `set` / `del` / `wrap` / `delByPrefix`), `CACHE_PORT` DI token, `RedisCacheAdapter` (OTel-spanned), `CacheModule` (global), `@Cacheable()` decorator, `CACHE_KEYS` registry. |
+| `observability` | Pino logger (`LoggerModuleConfig` with trace-correlation hook), `CorrelationMiddleware` + `@CorrelationId()` + `CORRELATION_ID_HEADER`, OTel bootstrap (`tracer.ts` side-effect import for `main.ts`), `TraceContextInterceptor` and `MetricsModule` placeholders. |
 | `ddd` | Framework-free domain building blocks — `Entity`, `AggregateRoot`, `ValueObject`, `DomainEvent`, `IRepositoryPort`. No `@nestjs/*` or TypeORM imports. |
-| `common` | Slimmed framework-free utilities (`Result`, `DomainException`, pagination types, utility types). The `cache/`, `correlation/`, and `modules/` subfolders are now one-release shims pointing at `libs/{cache,observability,messaging}`. Removed in task-14. |
-| `config` | `configModuleConfig` (Joi env schema). `LoggerModuleConfig` and `cacheModuleConfig` are now shims pointing at `libs/observability` and `libs/cache` respectively; `TypeormModuleConfig` is also a shim — use `DatabaseModule.forRoot()` instead. All three shims are removed in task-14. |
-| `inventory`, `retail` | One-release shims that re-export `@retail-inventory-system/contracts`. Removed in task-14. |
+| `common` | Framework-free utilities (`Result`, `DomainException`, pagination types `IPage` / `IPageRequest`, `Maybe` / `Nullable`). |
+| `config` | `configModuleConfig` (Joi env schema). |
 | `auth` | Framework-glue for JWT + RBAC: `AuthModule.forRootAsync()`, `JwtStrategy`, `JwtAuthGuard`, `RolesGuard`, `@Public()`, `@Roles()`, `@CurrentUser()`. The `RoleEnum` (`admin`, `customer`) is re-exported from `@retail-inventory-system/contracts/auth` (the source of truth — framework-free). |
 
 ## Services
@@ -94,7 +96,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 
 ### API Gateway layout
 
-The API Gateway is on the per-module hexagonal layout introduced in [ADR-009](docs/adr/009-port-adapter-at-the-gateway.md). Microservices remain on the legacy flat layout until tasks 07–09 of the migration:
+The API Gateway is on the per-module hexagonal layout introduced in [ADR-009](docs/adr/009-port-adapter-at-the-gateway.md):
 
 ```
 apps/api-gateway/src/
@@ -124,11 +126,11 @@ apps/api-gateway/src/
             └── dto/product-stock-get-query.dto.ts
 ```
 
-The gateway has no `domain/` of its own — task-06 will add `modules/auth/` with a real `domain/` (User, Role). `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol.
+The gateway also hosts a `modules/auth/` module — the only gateway module with a real `domain/` (User aggregate, RoleVO) and the only one that owns DB state. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md).
 
 ### Per-module hexagonal layout
 
-The notification microservice established the **canonical per-module template** for the bigger services. The inventory microservice (task-08) and the retail microservice (task-09) have both been reshaped into the same layout.
+The notification microservice is the **canonical per-module template**. The inventory and retail microservices follow the same shape.
 
 ```
 apps/notification-microservice/src/
@@ -235,11 +237,54 @@ yarn start:dev
 
 ## Scripts
 
-| Script                   | Description                                                                                                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `yarn test:seed`         | Populate the database with deterministic test fixtures (products, orders, stock records) defined in `scripts/seeds/*.sql`                                          |
-| `yarn test:infra:reload` | Reset and reprovision the full local environment: tears down existing containers and volumes, starts MySQL/Redis/RabbitMQ, runs migrations, and seeds the database |
-| `yarn test:e2e`          | Run `test:infra:reload` then execute the E2E test suite against a clean database                                                                                   |
+### Development
+
+| Script | Description |
+| ------ | ----------- |
+| `yarn start:dev` | Start all four services concurrently with watch reload (uses `scripts/bash/start-dev.sh`). |
+| `yarn start:dev:api-gateway` | Start the API gateway with watch reload. |
+| `yarn start:dev:inventory-microservice` | Start the inventory microservice with watch reload. |
+| `yarn start:dev:retail-microservice` | Start the retail microservice with watch reload. |
+| `yarn start:dev:notification-microservice` | Start the notification microservice with watch reload. |
+| `yarn start:prod:<service>` | Run a built service from `dist/` (`api-gateway`, `inventory-microservice`, `retail-microservice`, `notification-microservice`). |
+
+### Build
+
+| Script | Description |
+| ------ | ----------- |
+| `yarn build` | Build all four apps via `nest build --all`. |
+| `yarn build:<service>` | Build a single app — same four service names as above. |
+
+### Lint / format
+
+| Script | Description |
+| ------ | ----------- |
+| `yarn lint` | Full ESLint pass, includes `boundaries/*` and runs with `--max-warnings 0` (CI gate). |
+| `yarn lint:fix` | Auto-fix what can be auto-fixed (prettier, sortable imports, etc.). |
+| `yarn format` | Run prettier in write mode across `apps/**/*.ts` and `libs/**/*.ts`. |
+| `yarn format:check` | Run prettier in check-only mode (CI gate). |
+
+### Database migrations
+
+| Script | Description |
+| ------ | ----------- |
+| `yarn migration:create` | Scaffold a new migration file under `migrations/` (uses `scripts/migration-create.ts`). |
+| `yarn migration:run` | Apply every pending migration via the TypeORM CLI. |
+| `yarn migration:revert` | Revert the last applied migration. |
+| `yarn migration:show` | List every migration with its applied/pending status. |
+| `yarn typeorm:migration-cli` | Raw TypeORM CLI hook used by the three commands above (pre-wired with the data-source config). |
+
+### Testing
+
+| Script | Description |
+| ------ | ----------- |
+| `yarn test:unit` | Run the Jest unit suite (`jest.unit.config.js`). |
+| `yarn test:e2e` | Run `test:infra:reload` then the full E2E suite against a clean database. |
+| `yarn test:e2e:run` | Run the E2E suite only — assumes infra is already up. |
+| `yarn test:infra:up` | Start the MySQL / Redis / RabbitMQ containers and wait for them to be healthy. |
+| `yarn test:infra:down` | Stop and remove the test infra containers (drops volumes and orphans). |
+| `yarn test:infra:reload` | Tear down then recreate test infra, run migrations, and seed the database. |
+| `yarn test:seed` | Seed the database with deterministic fixtures from `scripts/test-db-seed.ts`. |
 
 ### Architecture lint
 
@@ -468,7 +513,7 @@ The collector config lives at [`infrastructure/otel-collector-config.yaml`](infr
 
 #### The "first import in `main.ts`" rule
 
-Every service's `main.ts` must `import '@retail-inventory-system/observability/tracer';` as its **very first import**. The tracer bootstrap registers OpenTelemetry's auto-instrumentations (HTTP, MySQL, Redis, amqplib), and those have to run before any of the patched modules are required — otherwise the instrumentation does nothing and spans are silently missing. This rule is enforced by code review today; an eslint rule may follow in task-12.
+Every service's `main.ts` must `import '@retail-inventory-system/observability/tracer';` as its **very first import**. The tracer bootstrap registers OpenTelemetry's auto-instrumentations (HTTP, MySQL, Redis, amqplib), and those have to run before any of the patched modules are required — otherwise the instrumentation does nothing and spans are silently missing. This rule is enforced by code review today; a future eslint rule for import ordering would close the loop.
 
 ## Caching
 
