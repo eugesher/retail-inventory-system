@@ -211,3 +211,16 @@ is intentional.
 2. **Skip the cross-service gateway port; inject `ClientProxy` directly into the confirm use case.** Rejected — the test asymmetry was the whole point. With the port, the spec drives "stock-confirmed / stock-insufficient / timeout" without RabbitMQ; without it the unit suite would either mock `firstValueFrom` or skip these branches.
 3. **Promote `Customer` to its own aggregate inside the orders module.** Rejected — no behavior lives on it today (read-only seed data). The Order aggregate owns its customer reference as a `CustomerRef` VO.
 4. **Emit `OrderConfirmed` from the use case, mirroring `stock.low`.** Considered — but the confirm path always runs against a persisted aggregate, so recording the event inside `applyInventoryConfirmation(...)` is straightforward and keeps the state transition + event emission co-located. The create-path asymmetry is documented in §5.
+
+## References
+
+- [ADR-004](004-adopt-hexagonal-architecture-per-service.md) — the
+  per-module hexagonal target this module realizes.
+- [ADR-011](011-notifier-port-and-adapters.md) /
+  [ADR-012](012-stock-aggregate-and-port-adapter.md) — the per-module
+  template and the inventory counterpart this module mirrors.
+- [ADR-019](019-typeorm-and-mysql-for-persistence.md) — the
+  TypeORM/MySQL stack `OrderTypeormRepository` builds on.
+- [ADR-020](020-rabbitmq-as-inter-service-bus.md) — the broker the
+  cross-service `inventory.order.confirm` RPC and the
+  `retail.order.created` event travel over.

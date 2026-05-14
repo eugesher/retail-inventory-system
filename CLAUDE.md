@@ -243,7 +243,9 @@ The codebase is mid-migration on branch `RIS-25-Architecture-migration` toward a
 
 ### Architecture rules location
 
-Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `017-…`); the next free number is `018`.
+Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/) — see [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index. The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `020-…`); the next free number is `021`.
+
+When making an architectural decision, write an ADR. The format is documented in [ADR-003](docs/adr/003-record-architecture-decisions.md) (record architecture decisions): Nygard hybrid (Status, Context, Decision, Alternatives, Consequences), 3-digit padding, one decision per file, slug describes the decision not the area.
 
 ### No-Git-ops rule for migration tasks
 

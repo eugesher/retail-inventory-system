@@ -182,3 +182,5 @@ the consumer.
 - ADR-009 — gateway port/adapter split (the layout this module mirrors).
 - ADR-010 — JWT/RBAC at the gateway (first gateway module with a real
   `domain/`; this ADR is the first microservice equivalent).
+- ADR-020 — RabbitMQ as the inter-service bus that carries the events
+  this module subscribes to.

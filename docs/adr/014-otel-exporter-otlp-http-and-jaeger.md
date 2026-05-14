@@ -179,3 +179,15 @@ remains the exception, not the rule.
   answer "where did the latency go" and "where did the error
   originate" — both questions show up in the cross-service confirm
   flow we now have.
+
+---
+
+## References
+
+- [ADR-007](007-pino-and-opentelemetry.md) — the
+  Pino-plus-OpenTelemetry shape this ADR fills in.
+- [ADR-015](015-pino-trace-correlation.md) — Pino log lines pick up
+  the `traceId`/`spanId` produced by the SDK wired here.
+- [ADR-020](020-rabbitmq-as-inter-service-bus.md) — the RabbitMQ
+  transport the `amqplib` auto-instrumentation propagates
+  `traceparent` across.

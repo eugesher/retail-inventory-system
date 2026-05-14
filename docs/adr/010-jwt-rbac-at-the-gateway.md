@@ -186,3 +186,4 @@ later task, this stub gets replaced.
 - ADR-008 — RabbitMQ wire format (relevant to the future cross-service auth).
 - ADR-009 — gateway port/adapter split (the layout this auth module slots
   into).
+- ADR-019 — the TypeORM + MySQL stack the `user` table lives on.

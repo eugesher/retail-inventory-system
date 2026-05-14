@@ -243,5 +243,10 @@ moves; this task only stages them.
   and the responsibility split.
 - [ADR-004](004-adopt-hexagonal-architecture-per-service.md) — the
   hexagonal target this split enables.
+- [ADR-018](018-nestjs-monorepo-apps-and-libs.md) — the NestJS monorepo
+  shape that hosts every `libs/<name>` introduced here.
+- [ADR-019](019-typeorm-and-mysql-for-persistence.md) — the persistence
+  stack the new `libs/database` lib codifies (`BaseEntity`,
+  `BaseTypeormRepository`, `SnakeNamingStrategy`).
 - [`docs/architecture-migration-plan/tasks/task-03-extract-shared-libs-foundation.md`](../architecture-migration-plan/tasks/task-03-extract-shared-libs-foundation.md)
   — the task that executes the structural move recorded by this ADR.

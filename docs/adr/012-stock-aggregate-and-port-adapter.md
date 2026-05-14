@@ -168,3 +168,17 @@ generalization pass for these items; this ADR explicitly does not.
 2. **Promote `StockItem` to `AggregateRoot` and emit `StockLowEvent` from within the aggregate.** Rejected as premature — see §6. Easy to revisit if domain logic grows.
 3. **Put the low-stock threshold on the `product_stock` row.** Rejected as a migration cost with no current benefit. Easy to lift to the column later by keeping the threshold lookup behind the use case (the constant is referenced in one place).
 4. **Keep emitting `inventory.stock.low` via a fan-out exchange.** Deferred. Today's single-consumer model (notification queue) is sufficient.
+
+## References
+
+- [ADR-004](004-adopt-hexagonal-architecture-per-service.md) — the
+  per-module hexagonal target this module realizes.
+- [ADR-011](011-notifier-port-and-adapters.md) — the canonical
+  per-module template this module follows.
+- [ADR-002](002-redis-cache-aside-product-stock.md) /
+  [ADR-016](016-cache-aside-generalized.md) — the cache-aside
+  contract the stock cache adapter preserves and generalizes.
+- [ADR-019](019-typeorm-and-mysql-for-persistence.md) — the
+  TypeORM/MySQL stack `StockTypeormRepository` builds on.
+- [ADR-020](020-rabbitmq-as-inter-service-bus.md) — the broker the
+  `inventory.stock.low` publisher emits onto.

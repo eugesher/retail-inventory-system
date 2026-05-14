@@ -136,3 +136,14 @@ The spec is added to `apps/**/*.ts` + `libs/**/*.ts` lint scope via the `tests/*
 - **`eslint-plugin-import` only.** Path-pattern restrictions via `no-restricted-imports` cover the *external* package denylists but cannot express per-layer / per-module isolation without explicitly enumerating every (source, target) tuple — that explodes with each new module. `eslint-plugin-boundaries` is the smallest tool that handles both axes natively.
 - **A pre-commit script that greps for forbidden imports.** Faster to write, slower to maintain — every new forbidden pattern is a new grep, and the script can't reason about module resolution (it can't tell `import 'redis'` from `import './redis'`). The boundaries plugin gets module resolution for free via `eslint-import-resolver-typescript`.
 - **Split eslint config files** (`eslint.config.mjs` for code style, `eslint.architecture.mjs` for boundaries, two `yarn lint:*` scripts). Rejected: a single config that runs in a single CI step keeps the developer feedback loop shorter and avoids the "I ran one lint but not the other" foot-gun.
+
+---
+
+## References
+
+- [ADR-004](004-adopt-hexagonal-architecture-per-service.md) — the
+  layer boundaries this lint encodes.
+- [ADR-005](005-split-shared-common-into-bounded-libs.md) — the lib
+  taxonomy the element types map onto.
+- [ADR-018](018-nestjs-monorepo-apps-and-libs.md) — the unified
+  monorepo source tree the boundaries plugin operates over.

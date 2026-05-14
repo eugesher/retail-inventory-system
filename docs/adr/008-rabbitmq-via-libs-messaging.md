@@ -136,3 +136,12 @@ diff.
 - **Introduce the publisher port now.** Rejected: scope creep.
   Better as a focused step in task-08/task-09 alongside the
   hexagonal re-org of the consuming services.
+
+---
+
+## References
+
+- [ADR-020](020-rabbitmq-as-inter-service-bus.md) — the broker
+  choice this ADR's wiring conventions sit on top of.
+- [ADR-004](004-adopt-hexagonal-architecture-per-service.md) — the
+  hexagonal layout the publisher-port follow-up lands inside.
