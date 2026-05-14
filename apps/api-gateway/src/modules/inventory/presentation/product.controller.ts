@@ -43,6 +43,6 @@ export class ProductController {
     @Query() dto: ProductStockGetQueryDto,
     @CorrelationId() correlationId: string,
   ): Promise<ProductStockGetResponseDto> {
-    return await this.getProductStockUseCase.execute(productId, dto, correlationId);
+    return await this.getProductStockUseCase.execute(productId, dto.storageIds, correlationId);
   }
 }
