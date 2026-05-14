@@ -48,7 +48,7 @@ NestJS monorepo with three active microservices and an API gateway, communicatin
 apps/
   api-gateway/              # HTTP entry point (port 3000)
   inventory-microservice/   # Stock management (per-module hexagonal: modules/stock/)
-  retail-microservice/      # Orders (still on the legacy flat layout, migrates in task-09)
+  retail-microservice/      # Orders (per-module hexagonal: modules/orders/)
   notification-microservice # Hexagonal per-module template (consumes retail/inventory events, fans out via NotifierPort)
 libs/
   auth/                     # JWT + RBAC framework-glue (AuthModule.forRootAsync, JwtStrategy, JwtAuthGuard, RolesGuard, @Public/@Roles/@CurrentUser, RoleEnum re-export)
@@ -73,7 +73,9 @@ migrations/                 # TypeORM migrations + data-source config
 - `retail.order.create` — create order (API Gateway → Retail)
 - `retail.order.confirm` — confirm order (API Gateway → Retail → Inventory)
 - `retail.order.get` — get order by id (API Gateway → Retail)
-- `retail.order.created` — event; consumed by Notification (publisher arrives in task-09)
+- `retail.order.created` — event; published by Retail's `OrderRabbitmqPublisher` after `CreateOrderUseCase` persists the aggregate; consumed by Notification
+- `retail.order.confirmed` — event; published by Retail's `OrderRabbitmqPublisher` when `ConfirmOrderUseCase` flips an Order to fully-confirmed; no cross-service consumer today (port surface reserved)
+- `retail.order.cancelled` — event; reserved for the future cancel flow (no producer or consumer today)
 - `inventory.product-stock.get` — query stock levels (API Gateway → Inventory)
 - `inventory.order.confirm` — reserve stock for confirmed order products (Retail → Inventory)
 - `inventory.stock.low` — event; published by Inventory's `StockRabbitmqPublisher` whenever a post-commit (productId, storageId) quantity sits at-or-below `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`; consumed by Notification
@@ -81,7 +83,7 @@ migrations/                 # TypeORM migrations + data-source config
 
 ## Service Structure
 
-The API Gateway, the Notification microservice, and the Inventory microservice are on the per-module hexagonal layout (ADR-009, ADR-011, ADR-012). Retail is still on the legacy flat layout — it migrates in task-09 and follows the notification module's shape verbatim.
+The API Gateway, the Notification microservice, the Inventory microservice, and the Retail microservice are all on the per-module hexagonal layout (ADR-009, ADR-011, ADR-012, ADR-013).
 
 ### API Gateway (`apps/api-gateway/src/`)
 
@@ -142,7 +144,7 @@ modules/auth/
 
 ### Microservices (per-module hexagonal layout)
 
-The notification microservice (task-07) and the inventory microservice (task-08) are on the per-module hexagonal layout. Retail migrates next in task-09 and produces the same shape. The notification module is the **canonical per-module template** — later services follow its shape:
+The notification microservice (task-07), the inventory microservice (task-08), and the retail microservice (task-09) are all on the per-module hexagonal layout. The notification module is the **canonical per-module template** — later services follow its shape:
 
 ```
 apps/notification-microservice/src/modules/notifications/
@@ -179,7 +181,32 @@ apps/inventory-microservice/src/modules/stock/
     stock.controller.ts           # @MessagePattern handlers for INVENTORY_PRODUCT_STOCK_GET and INVENTORY_ORDER_CONFIRM
 ```
 
-The notification microservice is RMQ-only (no HTTP). Task-09 produces the same `domain/`, `application/`, `infrastructure/`, `presentation/` split per bounded context for the retail microservice.
+The notification microservice is RMQ-only (no HTTP). The retail microservice's single `orders` bounded context follows the same split (ADR-013):
+
+```
+apps/retail-microservice/src/modules/orders/
+  domain/                         # Order aggregate (line-item invariants + status transitions),
+                                  #   OrderProduct child entity, OrderStatus/OrderProductStatus VOs,
+                                  #   CustomerRef VO, OrderCreated/OrderConfirmed/OrderCancelled events
+  application/
+    ports/                        # IOrderRepositoryPort, IOrderEventsPublisherPort,
+                                  #   IInventoryConfirmGatewayPort + ORDER_REPOSITORY,
+                                  #   ORDER_EVENTS_PUBLISHER, INVENTORY_CONFIRM_GATEWAY symbols
+    use-cases/                    # CreateOrderUseCase, ConfirmOrderUseCase, GetOrderUseCase
+  infrastructure/
+    persistence/                  # Order / OrderProduct / OrderStatus / OrderProductStatus / Customer
+                                  #   entities, OrderMapper, OrderProductMapper, CustomerMapper,
+                                  #   OrderTypeormRepository
+    messaging/                    # OrderRabbitmqPublisher (ORDER_EVENTS_PUBLISHER adapter; emits
+                                  #   retail.order.created/confirmed/cancelled) +
+                                  #   InventoryConfirmRabbitmqAdapter (INVENTORY_CONFIRM_GATEWAY
+                                  #   adapter; wraps ClientProxy.send for inventory.order.confirm)
+    orders.module.ts              # binds the three ports to their adapters
+  presentation/
+    orders.controller.ts          # @MessagePattern handlers for RETAIL_ORDER_CREATE / CONFIRM / GET
+    pipes/                        # OrderCreatePipe (customer + product existence checks),
+                                  #   OrderConfirmPipe (loads order line items for the use case)
+```
 
 ## Shared Libraries
 
@@ -202,7 +229,7 @@ Import via path aliases defined in `tsconfig.json`:
 
 MySQL via TypeORM. Connection string from `DATABASE_URL` env var (docker-compose default: `mysql://retail:retailpass@mysql:3306/retail_db`).
 
-Migration config is in `migrations/config/data-source.ts`. Entities live next to the bounded context that owns them: the inventory microservice's are at `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/`. Retail and the gateway's `auth` module follow analogous conventions (retail's still under `app/common/entities/` until task-09).
+Migration config is in `migrations/config/data-source.ts`. Entities live next to the bounded context that owns them: the inventory microservice's are at `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/`, retail's at `apps/retail-microservice/src/modules/orders/infrastructure/persistence/`, and the gateway's `auth` module follows the same convention.
 
 Run `docker-compose up` to start MySQL, RabbitMQ, and Redis locally.
 
@@ -212,7 +239,7 @@ The codebase is mid-migration on branch `RIS-25-Architecture-migration` toward a
 
 ### Architecture rules location
 
-Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `012-…`); the next free number is `013`.
+Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/). The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `013-…`); the next free number is `014`.
 
 ### No-Git-ops rule for migration tasks
 
@@ -229,5 +256,5 @@ Each migration task produces a `_carryover-NN.md` next to it; the next task read
 ## Known Issues
 
 - **Redis cache-aside is wired** for product stock queries (see [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md)). The 17 open audit items from `docs/audits/audit-2026-05-08.md` (cache stampede, schema-version segment, multi-tenant prefix, etc.) are tracked but unresolved; task-11 in the migration revisits them.
-- **No producer for `retail.order.created` yet.** The notification microservice subscribes and the use-case works end-to-end (proven by the smoke test in `test/notification.e2e-spec.ts` against a synthetic publish), but the retail service does not yet emit this event. The producer arrives in task-09. The inventory side (`inventory.stock.low`) is now wired — `ReserveStockForOrderUseCase` emits via `StockRabbitmqPublisher` whenever a post-commit quantity sits at-or-below `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`.
+- **All cross-service events are now wired.** `retail.order.created` is published by `OrderRabbitmqPublisher` after `CreateOrderUseCase` persists the aggregate — the notification microservice consumes it. `retail.order.confirmed` is published when `ConfirmOrderUseCase` flips an Order to fully-confirmed (no cross-service consumer yet; port surface reserved). The inventory side (`inventory.stock.low`) was already wired in task-08.
 - **No OpenTelemetry / Jaeger** — Pino correlation IDs are the only cross-service trace today. Task-10 wires OTel.

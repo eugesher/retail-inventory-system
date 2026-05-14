@@ -7,15 +7,15 @@ import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
-import { entities } from './common';
-import { OrderModule } from './api';
+import { OrdersModule } from '../modules/orders/infrastructure/orders.module';
+import { orderEntities } from '../modules/orders/infrastructure/persistence';
 
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.RETAIL_MICROSERVICE)),
-    DatabaseModule.forRoot(entities),
-    OrderModule,
+    DatabaseModule.forRoot(orderEntities),
+    OrdersModule,
   ],
 })
 export class AppModule {}
