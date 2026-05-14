@@ -35,5 +35,12 @@ export const configModuleConfig = {
     AUTH_ARGON2_MEMORY_COST: Joi.number().integer().positive().default(19_456),
     AUTH_ARGON2_TIME_COST: Joi.number().integer().positive().default(2),
     AUTH_ARGON2_PARALLELISM: Joi.number().integer().positive().default(1),
+
+    OTEL_SERVICE_NAME: Joi.string().required(),
+    OTEL_EXPORTER_OTLP_ENDPOINT: Joi.string()
+      .uri({ scheme: ['http', 'https'] })
+      .required(),
+    OTEL_RESOURCE_ATTRIBUTES: Joi.string().optional(),
+    OTEL_SDK_DISABLED: Joi.boolean().default(false),
   }).options({ allowUnknown: true, abortEarly: false }),
 };

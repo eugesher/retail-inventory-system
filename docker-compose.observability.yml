@@ -1,0 +1,27 @@
+# Overlay compose file: opt in with
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up
+# Both files share the `backend` network defined in docker-compose.yml.
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+    ports:
+      - '16686:16686' # Jaeger UI
+    networks:
+      - backend
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    container_name: otel-collector
+    command: ['--config=/etc/otelcol-contrib/config.yaml']
+    volumes:
+      - ./infrastructure/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - '4317:4317' # OTLP gRPC ingress (apps publish to this from the host)
+      - '4318:4318' # OTLP HTTP ingress (apps publish to this from the host)
+    depends_on:
+      - jaeger
+    networks:
+      - backend
