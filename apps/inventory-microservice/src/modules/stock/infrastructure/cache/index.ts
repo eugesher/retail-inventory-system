@@ -1,1 +1,1 @@
-export * from './stock-redis.cache';
+export * from './stock.cache';

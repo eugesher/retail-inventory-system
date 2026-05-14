@@ -8,11 +8,8 @@ import { ObjectLiteral } from 'typeorm';
 import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
 import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
-import {
-  CacheHelper,
-  CORRELATION_ID_HEADER,
-  MicroserviceQueueEnum,
-} from '@retail-inventory-system/common';
+import { CACHE_KEYS } from '@retail-inventory-system/cache';
+import { CORRELATION_ID_HEADER, MicroserviceQueueEnum } from '@retail-inventory-system/common';
 import { ProductStockGetResponseDto } from '@retail-inventory-system/inventory';
 import { SystemApiE2ESpecDataSource } from './data-source';
 
@@ -36,12 +33,12 @@ describe('Retail Inventory System API', () => {
   };
 
   const getCachedStock = (productId: number, storageIds?: string[]) =>
-    cache.get<ProductStockGetResponseDto>(CacheHelper.keys.productStock(productId, storageIds));
+    cache.get<ProductStockGetResponseDto>(CACHE_KEYS.inventoryStock(productId, storageIds));
   const setCachedStock = (
     productId: number,
     storageIds: string[] | undefined,
     value: ProductStockGetResponseDto,
-  ) => cache.set(CacheHelper.keys.productStock(productId, storageIds), value);
+  ) => cache.set(CACHE_KEYS.inventoryStock(productId, storageIds), value);
 
   beforeAll(async () => {
     const rmqUrl = process.env.RABBITMQ_URL!;
