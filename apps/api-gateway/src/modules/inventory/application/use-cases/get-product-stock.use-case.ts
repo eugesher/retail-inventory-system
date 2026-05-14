@@ -4,7 +4,6 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 
 import { throwRpcError } from '../../../../common/utils';
-import { ProductStockGetQueryDto } from '../../presentation/dto';
 import { IInventoryGatewayPort, INVENTORY_GATEWAY_PORT } from '../ports';
 
 @Injectable()
@@ -18,11 +17,9 @@ export class GetProductStockUseCase {
 
   public async execute(
     productId: number,
-    dto: ProductStockGetQueryDto,
+    storageIds: string[] | undefined,
     correlationId: string,
   ): Promise<ProductStockGetResponseDto> {
-    const { storageIds } = dto;
-
     this.logger.assign({ correlationId });
 
     try {

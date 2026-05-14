@@ -1,4 +1,7 @@
-import { EntityManager } from 'typeorm';
+// TODO(task-14): introduce an `ITransactionPort` so callers can pass an
+// opaque unit-of-work token instead of TypeORM's EntityManager. Tracked in
+// _carryover-12.md as ARCH-LINT-EX-01.
+import { EntityManager } from 'typeorm'; // eslint-disable-line boundaries/dependencies
 
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 

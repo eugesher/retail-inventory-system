@@ -241,6 +241,28 @@ yarn start:dev
 | `yarn test:infra:reload` | Reset and reprovision the full local environment: tears down existing containers and volumes, starts MySQL/Redis/RabbitMQ, runs migrations, and seeds the database |
 | `yarn test:e2e`          | Run `test:infra:reload` then execute the E2E test suite against a clean database                                                                                   |
 
+### Architecture lint
+
+The per-module hexagonal layout (`domain` → `application` → `infrastructure`/`presentation`, plus the `libs/*` boundaries documented in [ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)) is enforced by `eslint-plugin-boundaries`. The rules live in `eslint.config.mjs` and are the **source of truth for where a file should live** — when in doubt, run `yarn lint` and let the plugin answer.
+
+```bash
+yarn lint              # full ESLint pass, includes boundaries/* (CI gate)
+yarn lint:fix          # auto-fix what can be auto-fixed (prettier, etc.)
+```
+
+What the boundaries rules cover today:
+
+- `domain/` may import only `@retail-inventory-system/ddd`, `lib-common`, and `lib-contracts` (enums/types). No `@nestjs/*`, no TypeORM, no Redis, no AMQP, no logging.
+- `application/use-cases/` may import its own module's `domain`, `application/ports`, `application/dto`, plus the same lib set as domain — plus `lib-auth` for port interfaces. Concrete adapters and `@nestjs/cache-manager`/`@keyv/redis`/`@nestjs/typeorm` imports are rejected.
+- `application/ports/` may import only `domain` types and `lib-contracts`. (One narrow exception is documented as a TODO in `apps/inventory-microservice/.../stock.repository.port.ts`; see ADR-017 §6.)
+- `infrastructure/` is the only layer allowed to touch concrete adapters (`typeorm`, `@keyv/redis`, `amqplib`, etc.).
+- `presentation/` may import `application` layers + `lib-{auth,contracts,messaging,observability}`. Direct TypeORM repositories and Redis clients are rejected.
+- `libs/contracts/` is plain TypeScript (`class-validator`, `class-transformer`, and `@nestjs/swagger` are the documented exceptions for HTTP/RPC DTOs).
+- `libs/ddd/` is framework-free (no `@nestjs/*`, no TypeORM, no I/O packages).
+- Cross-service (`apps/X` → `apps/Y`) and cross-module imports are rejected by `boundaries/dependencies` via the `{{from.captured.app}}` / `{{from.captured.module}}` template-matched selectors.
+
+The rules are regression-tested in `tests/lint/architecture-lint.spec.ts` — every rule has a fixture that intentionally violates it and asserts the expected `boundaries/*` ruleId fires, so silent weakening of a rule fails the unit suite.
+
 ## API
 
 ### Orders
