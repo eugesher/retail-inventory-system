@@ -400,6 +400,54 @@ The following shows the full log output for a `PUT /api/order/1/confirm` request
 
 See [ADR-001](docs/adr/001-structured-logging-with-pino.md) for the rationale behind this design.
 
+### Distributed tracing (OpenTelemetry + Jaeger)
+
+In addition to correlation IDs, every service ships W3C-trace-context spans via OpenTelemetry. A single client request becomes a single trace that follows the HTTP entrypoint into the gateway and then across every RabbitMQ hop into the retail, inventory, and notification services. Every Pino log line emitted inside an active span is decorated with `traceId` and `spanId`, so logs and traces can be cross-filtered in any sink.
+
+ADRs: [ADR-014](docs/adr/014-otel-exporter-otlp-http-and-jaeger.md) (OTLP/HTTP → collector → Jaeger), [ADR-015](docs/adr/015-pino-trace-correlation.md) (Pino `traceId`/`spanId` enrichment).
+
+#### Required environment variables
+
+| Var | Example | Notes |
+| --- | --- | --- |
+| `OTEL_SERVICE_NAME` | `api-gateway` | Distinct per service; Jaeger uses it for the "Service" filter |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector:4318/v1/traces` | OTLP/HTTP traces endpoint |
+| `OTEL_RESOURCE_ATTRIBUTES` | `team=platform` | Optional; merged into the OTel `Resource` |
+| `OTEL_SDK_DISABLED` | `false` | Set to `true` to short-circuit the SDK at boot (useful in some tests) |
+
+In Docker Compose, the per-service `environment:` blocks already set `OTEL_SERVICE_NAME` and point `OTEL_EXPORTER_OTLP_ENDPOINT` at the in-cluster `otel-collector:4318`. For host-side `yarn start:dev`, copy `.env.example` to `.env.local` — the defaults there point at `http://localhost:4318/v1/traces`, which is where the `otel-collector` container publishes when the observability overlay is up.
+
+#### Starting the observability stack
+
+The Jaeger UI and the OpenTelemetry collector are kept in a **separate compose overlay** so day-to-day work doesn't pay for them:
+
+```bash
+# Bring up infra + observability together
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up
+
+# Or stop just the observability containers when you're done
+docker compose -f docker-compose.yml -f docker-compose.observability.yml stop jaeger otel-collector
+```
+
+| Endpoint | Purpose |
+| --- | --- |
+| `http://localhost:16686` | Jaeger UI — filter by service, search by trace ID |
+| `http://localhost:4317` | OTLP/gRPC ingress on the collector |
+| `http://localhost:4318` | OTLP/HTTP ingress on the collector (apps publish here) |
+
+The collector config lives at [`infrastructure/otel-collector-config.yaml`](infrastructure/otel-collector-config.yaml) and is a single pipeline: OTLP receiver → `batch` processor → OTLP exporter to Jaeger (with a `debug` exporter for visibility during local development).
+
+#### Finding a trace
+
+1. Open Jaeger at <http://localhost:16686>.
+2. Pick a service (e.g. `api-gateway`) and an operation (e.g. `PUT /api/order/:id/confirm`).
+3. The matching trace shows spans from all four services, including the AMQP `publish` / `process` pairs that connect the gateway → retail → inventory → notification flow.
+4. To go from a log line back to the trace, copy `traceId` from any service's log and paste it into Jaeger's "Lookup by Trace ID" box.
+
+#### The "first import in `main.ts`" rule
+
+Every service's `main.ts` must `import '@retail-inventory-system/observability/tracer';` as its **very first import**. The tracer bootstrap registers OpenTelemetry's auto-instrumentations (HTTP, MySQL, Redis, amqplib), and those have to run before any of the patched modules are required — otherwise the instrumentation does nothing and spans are silently missing. This rule is enforced by code review today; an eslint rule may follow in task-12.
+
 ## Caching
 
 The product stock query (`GET /product/:productId/stock`) reads from an append-only `product_stock` ledger. Each row records a delta (positive or negative) against a `(productId, storageId)` pair, so producing a current balance requires a `SUM(quantity) ... GROUP BY storageId` aggregation. Aggregation cost grows linearly with the row count, while the read pattern is heavy and the write pattern is comparatively light — a good fit for caching.

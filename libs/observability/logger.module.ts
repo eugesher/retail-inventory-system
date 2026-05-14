@@ -1,5 +1,6 @@
 import { RequestMethod } from '@nestjs/common';
 import { MiddlewareConfigProxy } from '@nestjs/common/interfaces';
+import { trace } from '@opentelemetry/api';
 import { Params } from 'nestjs-pino';
 import { levels, LogFn } from 'pino';
 import { Options } from 'pino-http';
@@ -15,10 +16,9 @@ const NOISY_CONTEXTS = new Set<string>([
   'RoutesResolver',
 ]);
 
-// Pino logger configuration. Relocated from
-// `libs/config/logger-module.config.ts` unchanged. The `traceId`/`spanId`
-// enrichment hook lands as a stub; task-10 wires it to the active OTel
-// context via `tracer.ts`.
+// Pino logger configuration. The `logMethod` hook decorates every log
+// record with `traceId`/`spanId` from the currently active OTel span so
+// log lines and traces can be cross-filtered (ADR-015).
 export class LoggerModuleConfig implements Params {
   public readonly pinoHttp: Options;
   public readonly forRoutes: Parameters<MiddlewareConfigProxy['forRoutes']>;
@@ -46,9 +46,19 @@ export class LoggerModuleConfig implements Params {
           ) {
             return;
           }
-          // Stub for task-10: enrich `inputArgs[0]` with active
-          // OTel `trace_id`/`span_id` before forwarding. Today this is a
-          // no-op because `tracer.ts` does not start an SDK yet.
+
+          const spanContext = trace.getActiveSpan()?.spanContext();
+          if (spanContext?.traceId && spanContext.spanId) {
+            const first = inputArgs[0];
+            const enrichment = { traceId: spanContext.traceId, spanId: spanContext.spanId };
+
+            if (typeof first === 'object' && first !== null) {
+              inputArgs[0] = { ...enrichment, ...(first as Record<string, unknown>) };
+            } else {
+              inputArgs.unshift(enrichment);
+            }
+          }
+
           method.apply(this, inputArgs);
         },
       },
