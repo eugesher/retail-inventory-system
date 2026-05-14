@@ -18,6 +18,12 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.RETAIL_ORDER_CREATED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATED,
     );
+    expect(ROUTING_KEYS.RETAIL_ORDER_CONFIRMED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRMED,
+    );
+    expect(ROUTING_KEYS.RETAIL_ORDER_CANCELLED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCELLED,
+    );
     expect(ROUTING_KEYS.INVENTORY_PRODUCT_STOCK_GET).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
     );

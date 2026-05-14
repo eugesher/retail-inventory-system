@@ -39,23 +39,31 @@ The system handles order lifecycle management and product stock tracking across 
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
 │                        │  │                               │
-│  RETAIL_ORDER_CREATE   │  │  INVENTORY_PRODUCT_STOCK_GET  │
-│  RETAIL_ORDER_CONFIRM  │  │                               │
-│                        │  │  Listens:                     │
-│  Emits:                │  │  RETAIL_ORDER_CREATED         │
-│  RETAIL_ORDER_CREATED ─┼───► (stock reservation)          │
-└──────────────┬─────────┘  └─────────────────┬─────────────┘
-               │                              │
-               │            MySQL             │
-               └──────────────┬───────────────┘
-                              │
-┌─────────────────────────────▼─────────────────────────────┐
-│                         Retail DB                         │
-│                                                           │
-│  order                                                    │
-│  order_product                                            │
-│  product_stock                                            │
-└───────────────────────────────────────────────────────────┘
+│  retail.order.create   │  │  inventory.product-stock.get  │
+│  retail.order.confirm ─┼──► inventory.order.confirm       │
+│  retail.order.get      │  │                               │
+│                        │  │  Emits:                       │
+│  Emits:                │  │  inventory.stock.low ─────────┼─┐
+│  retail.order.created ─┼──┐                               │ │
+│  retail.order.confirmed│  │                               │ │
+└──────────────┬─────────┘  └─────────────────┬─────────────┘ │
+               │                              │               │
+               │            MySQL             │               │
+               └──────────────┬───────────────┘               │
+                              │                               │
+┌─────────────────────────────▼─────────────────────────────┐ │
+│                         Retail DB                         │ │
+│                                                           │ │
+│  order                                                    │ │
+│  order_product                                            │ │
+│  product_stock                                            │ │
+└───────────────────────────────────────────────────────────┘ │
+                                                              │
+┌─────────────────────────────────────────────────────────────▼─┐
+│              Notification Microservice (RMQ)                  │
+│  Listens: retail.order.created, inventory.stock.low           │
+│  Fan-out via NotifierPort (log / email / webhook adapters)    │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ## Shared libraries
@@ -120,7 +128,7 @@ The gateway has no `domain/` of its own — task-06 will add `modules/auth/` wit
 
 ### Per-module hexagonal layout
 
-The notification microservice established the **canonical per-module template** for the bigger services. The inventory microservice has been reshaped into the same layout (task-08); retail follows in task-09.
+The notification microservice established the **canonical per-module template** for the bigger services. The inventory microservice (task-08) and the retail microservice (task-09) have both been reshaped into the same layout.
 
 ```
 apps/notification-microservice/src/
@@ -180,6 +188,40 @@ apps/inventory-microservice/src/
 ```
 
 `ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts`; the use cases inject `STOCK_EVENTS_PUBLISHER` and await a plain Promise. See [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md) for the aggregate boundaries and the port-and-adapter split.
+
+The retail microservice exposes a single `orders` bounded context laid out the same way:
+
+```
+apps/retail-microservice/src/
+├── app/app.module.ts                          # imports OrdersModule + LoggerModule + DatabaseModule
+├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
+└── modules/orders/
+    ├── domain/
+    │   ├── order.model.ts                     # aggregate (non-empty lines, status transitions)
+    │   ├── order-product.model.ts             # child entity inside the Order aggregate
+    │   ├── customer.model.ts                  # CustomerRef VO
+    │   ├── order-status.value-object.ts       # OrderStatusVO (PENDING / CONFIRMED)
+    │   ├── order-product-status.value-object.ts
+    │   └── events/                            # OrderCreatedEvent, OrderConfirmedEvent, OrderCancelledEvent
+    ├── application/
+    │   ├── ports/
+    │   │   ├── order.repository.port.ts       # IOrderRepositoryPort + ORDER_REPOSITORY symbol
+    │   │   ├── order-events.publisher.port.ts # IOrderEventsPublisherPort + ORDER_EVENTS_PUBLISHER symbol
+    │   │   └── inventory-confirm.gateway.port.ts # IInventoryConfirmGatewayPort + INVENTORY_CONFIRM_GATEWAY symbol
+    │   └── use-cases/
+    │       ├── create-order.use-case.ts       # persists then publishes retail.order.created
+    │       ├── confirm-order.use-case.ts      # cross-service: calls INVENTORY_CONFIRM_GATEWAY then updates
+    │       └── get-order.use-case.ts          # header status lookup (consumed by gateway pipe)
+    ├── infrastructure/
+    │   ├── persistence/                       # Order/OrderProduct/Customer/OrderStatus/OrderProductStatus entities + mappers + OrderTypeormRepository
+    │   ├── messaging/                          # OrderRabbitmqPublisher + InventoryConfirmRabbitmqAdapter
+    │   └── orders.module.ts                   # binds all three port symbols → adapters
+    └── presentation/
+        ├── orders.controller.ts               # @MessagePattern handlers for RETAIL_ORDER_CREATE / CONFIRM / GET
+        └── pipes/                              # OrderCreatePipe + OrderConfirmPipe (pre-RPC validation/load)
+```
+
+`ClientProxy` is confined to the two adapters under `infrastructure/messaging/`; the use cases inject `INVENTORY_CONFIRM_GATEWAY` (for the cross-service reserve call) and `ORDER_EVENTS_PUBLISHER` (for `retail.order.created` / `retail.order.confirmed`). See [ADR-013](docs/adr/013-order-aggregate-and-cross-service-confirm.md) for the aggregate boundaries and the cross-service confirm flow.
 
 ## Getting Started
 

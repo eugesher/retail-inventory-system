@@ -11,5 +11,7 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_ORDER_CONFIRM = 'retail.order.confirm',
   RETAIL_ORDER_GET = 'retail.order.get',
   RETAIL_ORDER_CREATED = 'retail.order.created',
+  RETAIL_ORDER_CONFIRMED = 'retail.order.confirmed',
+  RETAIL_ORDER_CANCELLED = 'retail.order.cancelled',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
 }
