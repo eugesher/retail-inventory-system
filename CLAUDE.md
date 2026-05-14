@@ -53,15 +53,13 @@ apps/
 libs/
   auth/                     # JWT + RBAC framework-glue (AuthModule.forRootAsync, JwtStrategy, JwtAuthGuard, RolesGuard, @Public/@Roles/@CurrentUser, RoleEnum re-export)
   cache/                    # CachePort + RedisCacheAdapter + @Cacheable + cache-keys registry
-  common/                   # Slimmed framework-free utilities (result, exceptions, pagination, types); the cache/correlation/modules subfolders are now shims
-  config/                   # ConfigModuleConfiguration wrapper; logger/cache/typeorm config files are shims pointing at the new homes
+  common/                   # Framework-free utilities (Result, DomainException, pagination types, utility types)
+  config/                   # configModuleConfig (Joi env schema)
   contracts/                # Cross-service message and DTO contracts (auth, microservices, retail, inventory)
   database/                 # TypeORM base entity/repository, snake-naming strategy, DatabaseModule
   ddd/                      # Framework-free domain building blocks (Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort)
-  inventory/                # Shim re-export of @retail-inventory-system/contracts (removed in task-14)
   messaging/                # RabbitMQ wiring — MessagingModule, MicroserviceClient*Module, MicroserviceClientConfiguration, RabbitmqClientFactory, ROUTING_KEYS, EXCHANGES
-  observability/            # Pino LoggerModuleConfig + correlation middleware/decorator/types + OTel tracer.ts shell + TraceContextInterceptor + MetricsModule
-  retail/                   # Shim re-export of @retail-inventory-system/contracts (removed in task-14)
+  observability/            # Pino LoggerModuleConfig + correlation middleware/decorator/types + OTel tracer.ts + TraceContextInterceptor + MetricsModule
 migrations/                 # TypeORM migrations + data-source config
 ```
 
@@ -115,7 +113,7 @@ src/
         dto/                   # ProductStockGetQueryDto
 ```
 
-The gateway also has `modules/auth/` (added in task-06). It is the first gateway module with a real `domain/` (User aggregate, Role value object) and the only gateway module that owns DB state. See ADR-010.
+The gateway also has `modules/auth/` — the only gateway module with a real `domain/` (User aggregate, Role value object) and the only one that owns DB state. See ADR-010.
 
 ```
 modules/auth/
@@ -144,7 +142,7 @@ modules/auth/
 
 ### Microservices (per-module hexagonal layout)
 
-The notification microservice (task-07), the inventory microservice (task-08), and the retail microservice (task-09) are all on the per-module hexagonal layout. The notification module is the **canonical per-module template** — later services follow its shape:
+The notification, inventory, and retail microservices are all on the per-module hexagonal layout. The notification module is the **canonical per-module template** — the other services follow its shape:
 
 ```
 apps/notification-microservice/src/modules/notifications/
@@ -213,14 +211,13 @@ apps/retail-microservice/src/modules/orders/
 Import via path aliases defined in `tsconfig.json`:
 - `@retail-inventory-system/contracts` — cross-service message and DTO contracts (plain TypeScript, no Nest decorators outside of `class-validator`/Swagger metadata on DTOs). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/` (Order DTOs, enums, interfaces), `inventory/` (product-stock DTOs, types, constants — `INVENTORY_DEFAULT_STORAGE`, `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`), `auth/` (`RoleEnum`, `ICurrentUser`, `IJwtAccessPayload`, `IJwtRefreshPayload` — framework-free; future microservices that validate tokens off-gateway depend on these).
 - `@retail-inventory-system/auth` — Nest-aware framework glue for JWT + RBAC: `AuthModule.forRootAsync({ imports, providers, exports })` (registers `PassportModule` + `JwtModule` + `JwtStrategy` + `JwtAuthGuard` + `RolesGuard`, global), `AUTH_USER_VALIDATOR` port (apps bind a `IAuthUserValidator` here so the strategy can resolve a request user), decorators (`@Public`, `@Roles`, `@CurrentUser`), runtime `RoleEnum` re-export.
-- `@retail-inventory-system/database` — TypeORM base. Exports `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy` (re-export of `typeorm-naming-strategies`), and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. App modules call `DatabaseModule.forRoot(entities)` instead of constructing `TypeormModuleConfig` directly.
+- `@retail-inventory-system/database` — TypeORM base. Exports `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy` (re-export of `typeorm-naming-strategies`), and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. App modules call `DatabaseModule.forRoot(entities)` rather than constructing a TypeORM config directly.
 - `@retail-inventory-system/messaging` — RabbitMQ wiring: `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory,Notification}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` (dotted routing keys), `EXCHANGES` (reserved exchange names). Re-exports `MicroserviceQueueEnum` / `MicroserviceClientTokenEnum` from contracts.
 - `@retail-inventory-system/cache` — Redis cache abstraction: `ICachePort` (get/set/del/wrap/**delByPrefix**), `CACHE_PORT` (DI token), `RedisCacheAdapter` (concrete `@nestjs/cache-manager` + `@keyv/redis` implementation with OTel spans on every op), `CacheModule` (a `@Global()` Nest module that binds the port to the adapter — register once at app root), `@Cacheable()` decorator, `CACHE_KEYS` registry (typed builders — apps may not write string cache-key literals), plus `CacheHelper` for backwards-compat. ADR-002 cache-aside contract preserved; ADR-016 generalizes the key convention to `ris:<service>:<aggregate>:<id>[:<facet>]` and adds the `delByPrefix` primitive.
 - `@retail-inventory-system/observability` — Pino logger + correlation + OTel bootstrap: `LoggerModuleConfig` (Pino setup with redaction, transport split, and the `logMethod` hook that injects active-span `traceId`/`spanId` into every log record — ADR-015), `CorrelationMiddleware`, `CorrelationId` decorator, `CORRELATION_ID_HEADER` constant, `ICorrelationPayload` (re-exported from contracts), OTel `tracer.ts` (side-effect import: configures `NodeSDK` + `OTLPTraceExporter` + auto-instrumentations and starts at module load — ADR-014), `TraceContextInterceptor` (placeholder; auto-instrumentation covers the cross-service flow today), `MetricsModule` (placeholder).
 - `@retail-inventory-system/ddd` — framework-free domain building blocks: `Entity<TId>`, `AggregateRoot<TId>` (with `pullDomainEvents()`), `ValueObject<TProps>`, `DomainEvent<TAggregateId>`, `IRepositoryPort<TAggregate, TId>`. **No `@nestjs/*`, no TypeORM imports** — domain code is the consumer.
-- `@retail-inventory-system/common` — slimmed to framework-free utilities: `Result<T, E>`, `DomainException`, pagination types, utility types. The `cache/`, `correlation/`, and `modules/` subfolders are now one-release shims pointing at the new lib homes; removed in task-14.
-- `@retail-inventory-system/config` — `configModuleConfig` (Joi schema). `LoggerModuleConfig`, `cacheModuleConfig`, and `TypeormModuleConfig` are now shims pointing at `libs/observability`, `libs/cache`, and `DatabaseModule.forRoot()` respectively; all three removed in task-14.
-- `@retail-inventory-system/inventory`, `@retail-inventory-system/retail` — one-release shims that re-export `@retail-inventory-system/contracts`. Removed in task-14.
+- `@retail-inventory-system/common` — framework-free utilities: `Result<T, E>`, `DomainException`, pagination types (`IPage`, `IPageRequest`), utility types (`Maybe`, `Nullable`).
+- `@retail-inventory-system/config` — `configModuleConfig` (Joi env schema). App modules call `DatabaseModule.forRoot()` for TypeORM and `LoggerModuleConfig` from `@retail-inventory-system/observability` for Pino — there are no Nest-binding helpers in this lib.
 
 **Forbidden imports.** Domain code (under `apps/*/src/.../domain/` and inside `libs/ddd`) MUST NOT import from `@retail-inventory-system/messaging`, `@retail-inventory-system/cache`, `@retail-inventory-system/observability`, `@retail-inventory-system/database`, or any `@nestjs/*` package. Reach those concerns via ports defined in `libs/ddd` (e.g. `IRepositoryPort`) or app-side ports.
 
@@ -237,31 +234,20 @@ Migration config is in `migrations/config/data-source.ts`. Entities live next to
 
 Run `docker-compose up` to start MySQL, RabbitMQ, and Redis locally.
 
-## Architecture migration
+## Architecture rules location
 
-The codebase is mid-migration on branch `RIS-25-Architecture-migration` toward a per-module hexagonal layout (ports & adapters) per service.
-
-### Architecture rules location
-
-Architectural rules and target state are defined in [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) and recorded as ADRs under [`docs/adr/`](docs/adr/) — see [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index. The migration plan (`docs/architecture-migration-plan/`) is the *transition* artefact; ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `020-…`); the next free number is `021`.
+Architectural rules and the target state are recorded as ADRs under [`docs/adr/`](docs/adr/) — see [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index. ADRs are the durable record. The recommendation document that drove the per-module hexagonal migration is preserved at [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) for historical reference. Existing ADRs use 3-digit padding (`001-…`, `020-…`); the next free number is `021`.
 
 When making an architectural decision, write an ADR. The format is documented in [ADR-003](docs/adr/003-record-architecture-decisions.md) (record architecture decisions): Nygard hybrid (Status, Context, Decision, Alternatives, Consequences), 3-digit padding, one decision per file, slug describes the decision not the area.
-
-### No-Git-ops rule for migration tasks
-
-Sessions executing a `task-NN.md` file from `docs/architecture-migration-plan/tasks/` do **not** run `git add`, `git commit`, `git push`, `git tag`, `git merge`, or any other branch-modifying command. Commits and PRs are the human's job. `.gitignore` may be edited only when a task explicitly creates new classes of file that should not be tracked.
-
-### Carryover-file pattern
-
-Each migration task produces a `_carryover-NN.md` next to it; the next task reads it as its first action and fails fast if the file is missing. Carryovers are deleted with the rest of `tasks/` before merge — anything durable goes in this `CLAUDE.md`, the README, or an ADR.
 
 ### Baseline snapshot
 
 `docs/baseline/` is a frozen pre-migration snapshot (configs, coverage report, workspace listing) captured at the start of the migration. Treat it as **read-only** — do not edit any file under it.
 
-## Known Issues
+## Operational notes
 
-- **Redis cache-aside is wired and generalized.** Product stock reads still go through cache-aside (see [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md)); task-11 generalized the key convention to `ris:<service>:<aggregate>:<id>` and moved all `@nestjs/cache-manager` / `@keyv/redis` reach-through into `libs/cache` (see [ADR-016](docs/adr/016-cache-aside-generalized.md)). Audit findings closed: CACHE-010 (sort comparator) and CACHE-011 (`__all__` sentinel) are fixed in the new builder; CACHE-006 (layer reach-through fragility) no longer applies to apps because the SCAN+UNLINK path lives in the lib. Still open from `docs/audits/audit-2026-05-08.md`: CACHE-001 (cache-aside read/write race), CACHE-002 (post-commit contract enforced by comment), CACHE-003 (no schema-version segment), CACHE-004 (no TTL jitter), CACHE-005 (duplicate warn logs on Redis-down), CACHE-009 (no tenant segment).
-- **All cross-service events are now wired.** `retail.order.created` is published by `OrderRabbitmqPublisher` after `CreateOrderUseCase` persists the aggregate — the notification microservice consumes it. `retail.order.confirmed` is published when `ConfirmOrderUseCase` flips an Order to fully-confirmed (no cross-service consumer yet; port surface reserved). The inventory side (`inventory.stock.low`) was already wired in task-08.
-- **OpenTelemetry + Jaeger are wired.** Every service's `main.ts` imports `@retail-inventory-system/observability/tracer` as its very first line; the bootstrap starts a `NodeSDK` with OTLP/HTTP export and auto-instrumentations (HTTP, MySQL, Redis, amqplib). The amqplib hooks inject `traceparent` into AMQP properties on publish and extract it on consume, so a single trace spans gateway → retail → inventory → notification across RabbitMQ. The compose overlay `docker-compose.observability.yml` provides Jaeger + an OTel collector for local dev; see [ADR-014](docs/adr/014-otel-exporter-otlp-http-and-jaeger.md). Pino log lines emitted inside an active span carry `traceId`/`spanId` ([ADR-015](docs/adr/015-pino-trace-correlation.md)).
-- **The first import in every app's `main.ts` MUST be `@retail-inventory-system/observability/tracer`.** Auto-instrumentation patches happen at module load — any HTTP / TypeORM / Redis / amqplib client `require()`'d before the tracer is invisible to OTel. Enforced by code review. (The boundaries rules wired in task-12 cover layer/lib direction but not import ordering; a future task can add an import-order ESLint rule.)
+- **The first import in every app's `main.ts` MUST be `@retail-inventory-system/observability/tracer`.** Auto-instrumentation patches happen at module load — any HTTP / TypeORM / Redis / amqplib client `require()`'d before the tracer is invisible to OTel. Enforced by code review today; a future import-order ESLint rule would close the loop.
+- **Redis cache-aside is generalized.** Product stock reads use cache-aside ([ADR-002](docs/adr/002-redis-cache-aside-product-stock.md)) with the `ris:<service>:<aggregate>:<id>[:<facet>]` key convention ([ADR-016](docs/adr/016-cache-aside-generalized.md)). Open audit items from `docs/audits/audit-2026-05-08.md`: CACHE-001 (cache-aside read/write race), CACHE-002 (post-commit contract enforced by comment), CACHE-003 (no schema-version segment), CACHE-004 (no TTL jitter), CACHE-005 (duplicate warn logs on Redis-down), CACHE-009 (no tenant segment). CACHE-006, CACHE-010, CACHE-011, CACHE-012 are closed by ADR-016.
+- **Cross-service events are fully wired.** `retail.order.created` is consumed by the notification microservice; `retail.order.confirmed` is published when an order is fully confirmed (no cross-service consumer yet; port surface reserved). `inventory.stock.low` is published by the inventory microservice when post-commit `(productId, storageId)` quantity is at-or-below `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`.
+- **OpenTelemetry + Jaeger are wired.** The compose overlay `docker-compose.observability.yml` provides Jaeger + an OTel collector for local dev; see [ADR-014](docs/adr/014-otel-exporter-otlp-http-and-jaeger.md). Pino log lines emitted inside an active span carry `traceId`/`spanId` ([ADR-015](docs/adr/015-pino-trace-correlation.md)).
+- **One outstanding architectural exception (ARCH-LINT-EX-01).** `apps/inventory-microservice/.../application/ports/stock.repository.port.ts` imports `EntityManager` from `typeorm` so the use case can scope reads inside a caller-owned transaction; the inline ESLint disable carries the tracking code (see ADR-017 §6). Closing it requires introducing an `ITransactionPort` abstraction — left as a follow-up.

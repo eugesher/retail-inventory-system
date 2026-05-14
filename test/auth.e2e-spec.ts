@@ -6,7 +6,7 @@ import * as supertest from 'supertest';
 import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
 import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
-import { MicroserviceQueueEnum } from '@retail-inventory-system/common';
+import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
