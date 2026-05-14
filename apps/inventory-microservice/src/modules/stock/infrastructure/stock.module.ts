@@ -10,7 +10,7 @@ import {
   ReserveStockForOrderUseCase,
 } from '../application/use-cases';
 import { StockController } from '../presentation/stock.controller';
-import { StockRedisCache } from './cache';
+import { StockCache } from './cache';
 import { StockRabbitmqPublisher } from './messaging';
 import {
   Product,
@@ -34,8 +34,8 @@ import {
     StockTypeormRepository,
     { provide: STOCK_REPOSITORY, useExisting: StockTypeormRepository },
 
-    StockRedisCache,
-    { provide: STOCK_CACHE, useExisting: StockRedisCache },
+    StockCache,
+    { provide: STOCK_CACHE, useExisting: StockCache },
 
     StockRabbitmqPublisher,
     { provide: STOCK_EVENTS_PUBLISHER, useExisting: StockRabbitmqPublisher },

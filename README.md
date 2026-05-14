@@ -452,7 +452,9 @@ Every service's `main.ts` must `import '@retail-inventory-system/observability/t
 
 The product stock query (`GET /product/:productId/stock`) reads from an append-only `product_stock` ledger. Each row records a delta (positive or negative) against a `(productId, storageId)` pair, so producing a current balance requires a `SUM(quantity) ... GROUP BY storageId` aggregation. Aggregation cost grows linearly with the row count, while the read pattern is heavy and the write pattern is comparatively light — a good fit for caching.
 
-The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. `GetStockUseCase` orchestrates the cache-aside read; `StockRedisCache` (the `STOCK_CACHE` adapter) owns Redis I/O; `StockTypeormRepository` materializes the SUM/GROUP BY aggregate. The presentation-layer `StockController` is unaware of the cache.
+The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. `GetStockUseCase` orchestrates the cache-aside read; `StockCache` (the `STOCK_CACHE` adapter) is a thin domain-shaped wrapper over the generic `CACHE_PORT`; `StockTypeormRepository` materializes the SUM/GROUP BY aggregate. The presentation-layer `StockController` is unaware of the cache.
+
+The cache layer follows the conventions formalized in [ADR-016](docs/adr/016-cache-aside-generalized.md): every cache key is built via `CACHE_KEYS.*` (no string literals in `apps/*/src`), and apps depend on `ICachePort` rather than `@nestjs/cache-manager` directly.
 
 ### Read flow
 
@@ -470,11 +472,13 @@ Reads inside a caller-owned `EntityManager` (i.e., inside an open transaction) b
 ### Cache key
 
 ```
-stock:<productId>:<storageIds-joined-by-comma>   # e.g. stock:42:storage-a,storage-b
-stock:<productId>:*                              # when no storageIds filter is supplied
+ris:inventory:stock:<productId>:__all__                       # no storageIds filter
+ris:inventory:stock:<productId>:<storageIds-joined-by-comma>  # e.g. ris:inventory:stock:42:storage-a,storage-b
 ```
 
-Built by `CACHE_KEYS.productStock(productId, storageIds)` in `libs/cache/cache-keys.ts` (a backwards-compatible `CacheHelper.keys.productStock(...)` alias re-exports the same function).
+Storage IDs are sorted with `localeCompare` so callers passing the same set in different orders generate identical keys. Built by `CACHE_KEYS.inventoryStock(productId, storageIds)` in `libs/cache/cache-keys.ts`. The legacy `stock:<productId>:*` builder is retained so the SCAN-based invalidate path can wipe entries written under the previous prefix during a rolling deploy.
+
+The general key convention is `ris:<service>:<aggregate>:<id>[:<facet>]`. `CACHE_KEYS.retailOrder(orderId)` follows the same shape (no caller today; reserved for a future read path).
 
 ### TTL
 
@@ -487,9 +491,13 @@ TTL is a safety net, not the primary freshness mechanism — explicit invalidati
 
 ### Invalidation
 
-When `ReserveStockForOrderUseCase` reserves stock for a confirmed order, it inserts ledger rows inside a transaction and — **after the transaction commits** — fires a fire-and-forget invalidation for every `(productId, storageId)` pair that was written.
+When `ReserveStockForOrderUseCase` reserves stock for a confirmed order, it inserts ledger rows inside a transaction and — **after the transaction commits** — awaits an invalidation pass for every `(productId, storageId)` pair that was written. The await means the confirm RPC's post-state includes "cache cleared for the mutated products", so the next GET reads the fresh DB row.
 
-Invalidation runs `SCAN MATCH stock:<productId>:*` per affected `productId` in parallel and `UNLINK`s every matching key. `UNLINK` (vs `DEL`) frees memory asynchronously on the Redis side, avoiding a blocking O(N) delete on Redis's main thread. Calling invalidation before commit would race with concurrent readers and let them re-populate the cache from uncommitted state.
+Invalidation issues two `delByPrefix` calls per affected `productId` (new + legacy prefixes). Each `delByPrefix` does `SCAN MATCH <prefix>*` and `UNLINK`s every matching key. `UNLINK` (vs `DEL`) frees memory asynchronously on the Redis side, avoiding a blocking O(N) delete on Redis's main thread. Calling invalidation before commit would race with concurrent readers and let them re-populate the cache from uncommitted state.
+
+### Tracing
+
+Each cache call opens an OTel span (`cache.get`, `cache.set`, `cache.del`, `cache.wrap`, `cache.delByPrefix`) with `cache.key`, `cache.hit`, and (for prefix deletes) `cache.keys_unlinked` attributes. Hits and misses are visible in Jaeger end-to-end.
 
 ### Graceful degradation
 
@@ -505,16 +513,16 @@ A Redis outage degrades latency, never correctness — no path throws to the cli
 
 ```bash
 # List every cached stock entry across all products
-redis-cli --scan --pattern 'stock:*'
+redis-cli --scan --pattern 'ris:inventory:stock:*'
 
-# Read a specific entry (replace 42 and the storage list with real values)
-redis-cli GET 'stock:42:*'
+# Read a specific entry
+redis-cli GET 'ris:inventory:stock:42:__all__'
 
 # Check remaining TTL (in ms) for a key
-redis-cli PTTL 'stock:42:*'
+redis-cli PTTL 'ris:inventory:stock:42:__all__'
 
 # Manually invalidate every cached entry for a single product
-redis-cli --scan --pattern 'stock:42:*' | xargs -r redis-cli UNLINK
+redis-cli --scan --pattern 'ris:inventory:stock:42:*' | xargs -r redis-cli UNLINK
 ```
 
-See [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md) for the rationale behind this design.
+See [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md) for the original design and [ADR-016](docs/adr/016-cache-aside-generalized.md) for the generalized key convention + port-based invalidation.

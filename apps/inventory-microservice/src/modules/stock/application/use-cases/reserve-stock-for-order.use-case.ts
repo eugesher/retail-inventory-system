@@ -122,12 +122,11 @@ export class ReserveStockForOrderUseCase {
     // invalidate inside the callback would race with concurrent readers that
     // could re-populate the cache from uncommitted state.
     //
-    // Fire-and-forget: the cache adapter swallows Redis errors internally, and
-    // the response correctness does not depend on invalidation completing
-    // before reply (a brief stale-read window already exists for any reader
-    // that fetched DB state before our commit but writes cache after — see
-    // CACHE-001). Awaiting would only add SCAN+UNLINK latency to every
-    // confirm RPC. The .catch is for unexpected programming errors only.
+    // Awaited rather than fire-and-forget. Per ADR-016, the confirm RPC's
+    // post-state must include "cache invalidated for the mutated products"
+    // so the very next GET reads the fresh DB row. The SCAN+UNLINK cost is
+    // a few ms; the adapter swallows backend errors so this never raises.
+    // CACHE-001's read/write race window remains open and is tracked.
     if (items.length > 0) {
       // The !!item.storageId predicate is unreachable today. Every entry
       // pushed into `items` above is constructed with `storageId:
@@ -150,14 +149,7 @@ export class ReserveStockForOrderUseCase {
         .map(({ productId, storageId }) => ({ productId, storageId }));
 
       if (invalidateItems.length > 0) {
-        void this.stockCache
-          .invalidate({ items: invalidateItems, correlationId })
-          .catch((err) =>
-            this.logger.error(
-              { err: err as Error, correlationId },
-              'Background cache invalidation rejected unexpectedly',
-            ),
-          );
+        await this.stockCache.invalidate({ items: invalidateItems, correlationId });
       }
 
       // Emit `inventory.stock.low` for every (productId, storageId) pair
