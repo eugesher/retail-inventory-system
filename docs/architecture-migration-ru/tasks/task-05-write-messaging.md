@@ -1,6 +1,4 @@
-# task-05 — Write messaging articles (Phase: messaging/) — DRAFT
-
-> **DRAFT — may be revised by task-01.**
+# task-05 — Write messaging articles (Phase: messaging/)
 
 ## Context
 

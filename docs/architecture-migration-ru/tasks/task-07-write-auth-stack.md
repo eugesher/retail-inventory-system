@@ -1,7 +1,6 @@
-# task-07 — Write auth stack (Phase: auth/) — DRAFT
+# task-07 — Write auth stack (Phase: auth/)
 
-> **DRAFT — may be revised by task-01.** This is the second
-> **clarification group**: the five auth libraries
+> This is the second **clarification group**: the five auth libraries
 > (`@nestjs/passport`, `passport`, `passport-jwt`, `@nestjs/jwt`,
 > `argon2`) confuse readers because they layer on top of each other
 > in non-obvious ways.

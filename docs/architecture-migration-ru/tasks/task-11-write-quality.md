@@ -1,6 +1,4 @@
-# task-11 — Write quality articles (Phase: quality/) — DRAFT
-
-> **DRAFT — may be revised by task-01.**
+# task-11 — Write quality articles (Phase: quality/)
 
 ## Context
 

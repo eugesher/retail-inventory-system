@@ -1,10 +1,9 @@
-# task-12 — Finalize glossary and run guide-wide audit (Phase: glossary + final pass) — DRAFT
+# task-12 — Finalize glossary and run guide-wide audit (Phase: glossary + final pass)
 
-> **DRAFT — may be revised by task-01.** This is the **final**
-> writing task. Its job is consolidation: collect every glossary
-> entry from previous carryovers into `glossary.md`, audit
-> wiki-link health across the entire guide, polish the root file,
-> and flip every article's `status` to `final`.
+> This is the **final** writing task. Its job is consolidation:
+> collect every glossary entry from previous carryovers into
+> `glossary.md`, audit wiki-link health across the entire guide,
+> polish the root file, and flip every article's `status` to `final`.
 
 ## Context
 

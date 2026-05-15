@@ -1,9 +1,8 @@
-# task-09 — Write observability libraries (Phase: observability/, libs) — DRAFT
+# task-09 — Write observability libraries (Phase: observability/, libs)
 
-> **DRAFT — may be revised by task-01.** This task fills the eight
-> per-`@opentelemetry/*` library articles. It is split from task-08
-> because the combined batch exceeds the per-session granularity
-> budget.
+> This task fills the eight per-`@opentelemetry/*` library articles.
+> It is split from task-08 because the combined batch exceeds the
+> per-session granularity budget.
 
 ## Context
 

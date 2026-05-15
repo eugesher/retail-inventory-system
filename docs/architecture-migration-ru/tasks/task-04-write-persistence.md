@@ -1,6 +1,4 @@
-# task-04 — Write persistence articles (Phase: persistence/) — DRAFT
-
-> **DRAFT — may be revised by task-01.**
+# task-04 — Write persistence articles (Phase: persistence/)
 
 ## Context
 

@@ -1,9 +1,9 @@
-# task-08 — Write observability overview (Phase: observability/, concepts) — DRAFT
+# task-08 — Write observability overview (Phase: observability/, concepts)
 
-> **DRAFT — may be revised by task-01.** Observability is the third
-> clarification group; it splits into two tasks (overview here,
-> per-library articles in task-09) because the combined batch is
-> ~12 articles — too much for a single cleared context.
+> Observability is the third clarification group; it splits into two
+> tasks (overview here, per-library articles in task-09) because the
+> combined batch is ~12 articles — too much for a single cleared
+> context.
 
 ## Context
 

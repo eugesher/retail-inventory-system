@@ -1,8 +1,4 @@
-# task-03 — Write project-shape articles (Phase: project-shape/) — DRAFT
-
-> **DRAFT — may be revised by task-01.** Path annotations carrying
-> `(verify in task-01: path may differ)` are deliberate uncertainty
-> markers.
+# task-03 — Write project-shape articles (Phase: project-shape/)
 
 ## Context
 

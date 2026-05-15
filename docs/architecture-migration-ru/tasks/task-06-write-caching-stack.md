@@ -1,9 +1,8 @@
-# task-06 — Write caching stack (Phase: caching/) — DRAFT
+# task-06 — Write caching stack (Phase: caching/)
 
-> **DRAFT — may be revised by task-01.** This is a **clarification
-> group**: the stack-overview article must explain how the five
-> libraries cooperate, and each per-library article zooms into one
-> library's role + what it does NOT do.
+> This is a **clarification group**: the stack-overview article must
+> explain how the five libraries cooperate, and each per-library
+> article zooms into one library's role + what it does NOT do.
 
 ## Context
 

@@ -1,6 +1,4 @@
-# task-10 — Write application-layer articles (Phase: application-layer/) — DRAFT
-
-> **DRAFT — may be revised by task-01.**
+# task-10 — Write application-layer articles (Phase: application-layer/)
 
 ## Context
 

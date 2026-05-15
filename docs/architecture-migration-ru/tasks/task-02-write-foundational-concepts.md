@@ -1,10 +1,4 @@
-# task-02 — Write foundational concepts (Phase: concepts/) — DRAFT
-
-> **DRAFT — may be revised by task-01.** Slot list, article shapes,
-> and verification gate are working assumptions until task-01's
-> inventory confirms them. Where this draft mentions a file path that
-> may not exist verbatim in the codebase, the inline annotation
-> `(verify in task-01: path may differ)` flags the spot.
+# task-02 — Write foundational concepts (Phase: concepts/)
 
 ## Context
 
