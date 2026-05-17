@@ -1,8 +1,8 @@
 ---
 created: 2026-05-15
-updated: 2026-05-15
+updated: 2026-05-17
 tags: [retail-inventory-system, concepts, ddd, domain-driven-design]
-status: review
+status: final
 related:
   - "[[hexagonal-architecture]]"
   - "[[clean-architecture-layers]]"

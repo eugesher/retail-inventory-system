@@ -2,7 +2,7 @@
 created: 2026-05-15
 updated: 2026-05-17
 tags: [retail-inventory-system, application-layer, dto, contracts]
-status: review
+status: final
 related:
   - "[[use-cases-vs-fat-services]]"
   - "[[notifier-port-and-adapters]]"

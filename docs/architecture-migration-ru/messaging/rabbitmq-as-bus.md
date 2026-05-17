@@ -1,8 +1,8 @@
 ---
 created: 2026-05-15
-updated: 2026-05-16
+updated: 2026-05-17
 tags: [retail-inventory-system, messaging, rabbitmq]
-status: review
+status: final
 related:
   - "[[nest-microservices-transport]]"
   - "[[message-vs-event-patterns]]"

@@ -2,7 +2,7 @@
 created: 2026-05-15
 updated: 2026-05-17
 tags: [retail-inventory-system, quality, tests, jest, e2e]
-status: review
+status: final
 related:
   - "[[lib-eslint-plugin-boundaries]]"
   - "[[hexagonal-architecture]]"

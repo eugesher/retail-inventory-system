@@ -1,8 +1,8 @@
 ---
 created: 2026-05-15
-updated: 2026-05-16
+updated: 2026-05-17
 tags: [retail-inventory-system, auth, library, jwt]
-status: review
+status: final
 related:
   - "[[auth-stack-overview]]"
   - "[[jwt-and-rbac]]"

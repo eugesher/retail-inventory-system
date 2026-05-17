@@ -1,8 +1,8 @@
 ---
 created: 2026-05-15
-updated: 2026-05-15
+updated: 2026-05-17
 tags: [retail-inventory-system, concepts, boundaries, eslint]
-status: review
+status: final
 related:
   - "[[clean-architecture-layers]]"
   - "[[hexagonal-architecture]]"

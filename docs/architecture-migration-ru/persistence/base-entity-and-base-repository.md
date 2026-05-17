@@ -1,8 +1,8 @@
 ---
 created: 2026-05-15
-updated: 2026-05-16
+updated: 2026-05-17
 tags: [retail-inventory-system, persistence, base-classes, libs-database]
-status: review
+status: final
 related:
   - "[[typeorm-overview]]"
   - "[[entity-vs-domain-model]]"

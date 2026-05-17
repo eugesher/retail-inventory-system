@@ -2,7 +2,7 @@
 created: 2026-05-15
 updated: 2026-05-17
 tags: [retail-inventory-system, application-layer, use-cases, hexagonal]
-status: review
+status: final
 related:
   - "[[hexagonal-architecture]]"
   - "[[clean-architecture-layers]]"

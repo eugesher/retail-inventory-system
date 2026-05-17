@@ -1,8 +1,8 @@
 ---
 created: 2026-05-15
-updated: 2026-05-16
+updated: 2026-05-17
 tags: [retail-inventory-system, observability, library, otel, amqp, rabbitmq]
-status: review
+status: final
 related:
   - "[[opentelemetry-overview]]"
   - "[[jaeger-backend]]"

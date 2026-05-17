@@ -1,8 +1,8 @@
 ---
 created: 2026-05-15
-updated: 2026-05-16
+updated: 2026-05-17
 tags: [retail-inventory-system, observability, pino, logging]
-status: review
+status: final
 related:
   - "[[opentelemetry-overview]]"
   - "[[trace-log-correlation]]"
