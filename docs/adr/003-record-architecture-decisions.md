@@ -9,8 +9,8 @@
 
 The retail-inventory-system has grown enough architectural decisions —
 Pino + correlation IDs (ADR-001), Redis cache-aside for product stock
-(ADR-002), and now a full hexagonal-architecture migration starting on
-branch `RIS-25-Architecture-migration` — that the *why* behind each
+(ADR-002), and the full hexagonal-architecture migration that began
+around the time this ADR was written — that the *why* behind each
 choice has started leaking into PR descriptions, commit messages, and
 maintainer memory. None of those survive long-term: PR descriptions
 are searchable but inconvenient; commit messages compress decisions

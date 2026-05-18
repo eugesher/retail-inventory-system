@@ -11,8 +11,8 @@ The retail-inventory-system today uses a "fat service" layout: each
 microservice keeps its features under `app/api/<feature>/` with
 per-action services that inject `Repository<X>` and `ClientProxy`
 directly. The pattern is consistent and the per-action split is a real
-strength (already partially in place on `RIS-25-Architecture-migration`),
-but the lack of a port/adapter inversion means that:
+strength (already partially in place at the start of the architecture
+migration), but the lack of a port/adapter inversion means that:
 
 - TypeORM is bound to the service surface — there is no place to
   exercise the service against a fake repository, so unit tests today
@@ -26,17 +26,15 @@ but the lack of a port/adapter inversion means that:
   obvious seam to attach to other than directly inside the service
   classes, which would compound the coupling.
 
-The migration plan
-[`docs/architecture-migration-plan/parts/recommendation.md`](../architecture-migration-plan/parts/recommendation.md)
-identifies hexagonal architecture (Ports & Adapters) as the target
-pattern and dedicates Sections 1–3 to motivating it: it is the only
-TypeORM-compatible pattern with a star-validated reference in the
-NestJS ecosystem, it lets the project keep its current stack
+The pre-migration recommendation that drove this work identified
+hexagonal architecture (Ports & Adapters) as the target pattern: it is
+the only TypeORM-compatible pattern with a star-validated reference in
+the NestJS ecosystem, it lets the project keep its current stack
 (TypeORM/MySQL/RabbitMQ/Redis/Pino), and it provides a clean seam for
-the cache, OTel, and notification work that is queued up after the
-structural migration. This ADR records the *commitment* to that
-target. The structural moves are tracked by tasks 03–09; the
-architecture-lint enforcement that prevents drift is task-12.
+the cache, OTel, and notification work that followed the structural
+migration. This ADR records the *commitment* to that target.
+Architecture-lint enforcement that prevents drift is recorded in
+[ADR-017](017-architecture-lint-via-eslint-boundaries.md).
 
 ---
 
@@ -76,9 +74,9 @@ modules/<module-name>/
 ```
 
 The detailed layer responsibilities, allowed dependencies, and naming
-conventions are specified in
-[`recommendation.md` Section 3 ("Module boundary rules")](../architecture-migration-plan/parts/recommendation.md)
-and Section 4 ("Naming conventions"). Highlights:
+conventions are codified in `CLAUDE.md`'s "Forbidden imports"
+paragraph and enforced by
+[ADR-017](017-architecture-lint-via-eslint-boundaries.md). Highlights:
 
 - `domain/` may import from nothing outside its own module (no
   `@nestjs/*`, no TypeORM, no `class-validator` decorators on
@@ -117,8 +115,7 @@ a future ADR if the need materializes.
 
 ## Alternatives Considered
 
-**Awesome Nest Boilerplate / Tony133 (flat layout).** Rejected per
-[`recommendation.md` Section 1](../architecture-migration-plan/parts/recommendation.md):
+**Awesome Nest Boilerplate / Tony133 (flat layout).** Rejected because
 both are flat and would lock the project into the "fat services"
 shape we are leaving. Neither offers a place to attach the cache,
 OTel, and notification work without re-introducing the same coupling
