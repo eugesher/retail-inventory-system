@@ -38,12 +38,13 @@ between "what this gateway needs to ask the downstream service" and
 faking it for unit tests) required substituting the Nest microservice
 client globally.
 
-The migration recommendation
-([`docs/architecture-migration-plan/parts/recommendation.md`](../architecture-migration-plan/parts/recommendation.md)
-§5) explicitly forbids `ClientProxy` injection from a controller and
-calls for a `*.gateway.port.ts` adapter pair. The gateway needs the
-same layered shape as every other service so that the architecture-lint
-rules in task-12 can apply uniformly.
+The pre-migration recommendation explicitly forbade `ClientProxy`
+injection from a controller and called for a `*.gateway.port.ts`
+adapter pair; the live form of that rule is captured in `CLAUDE.md`'s
+"Boundary rule" paragraph and enforced by
+[ADR-017](017-architecture-lint-via-eslint-boundaries.md). The gateway
+needs the same layered shape as every other service so the
+architecture-lint rules can apply uniformly.
 
 ## Decision
 

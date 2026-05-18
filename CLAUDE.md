@@ -236,7 +236,7 @@ Run `docker-compose up` to start MySQL, RabbitMQ, and Redis locally.
 
 ## Architecture rules location
 
-Architectural rules and the target state are recorded as ADRs under [`docs/adr/`](docs/adr/) — see [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index. ADRs are the durable record. The recommendation document that drove the per-module hexagonal migration is preserved at [`docs/architecture-migration-plan/parts/recommendation.md`](docs/architecture-migration-plan/parts/recommendation.md) for historical reference. Existing ADRs use 3-digit padding (`001-…`, `020-…`); the next free number is `021`.
+Architectural rules and the target state are recorded as ADRs under [`docs/adr/`](docs/adr/) — see [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index. ADRs are the durable record. Existing ADRs use 3-digit padding (`001-…`, `020-…`); the next free number is `021`.
 
 When making an architectural decision, write an ADR. The format is documented in [ADR-003](docs/adr/003-record-architecture-decisions.md) (record architecture decisions): Nygard hybrid (Status, Context, Decision, Alternatives, Consequences), 3-digit padding, one decision per file, slug describes the decision not the area.
 

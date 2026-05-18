@@ -7,7 +7,7 @@
 
 ## Context
 
-By task-11 the codebase had reached its target shape: every service follows the per-module hexagonal layout (`domain` / `application/ports` / `application/use-cases` / `infrastructure` / `presentation`), the shared libs (`@retail-inventory-system/{contracts,ddd,common,database,messaging,cache,observability,auth,config}`) have stable surfaces, and cross-service traffic is RabbitMQ-only. The boundaries between these layers and libs were documented in §3 of [`docs/architecture-migration-plan/parts/recommendation.md`](../architecture-migration-plan/parts/recommendation.md) and reinforced in `CLAUDE.md` as the "Forbidden imports" paragraph.
+By task-11 the codebase had reached its target shape: every service follows the per-module hexagonal layout (`domain` / `application/ports` / `application/use-cases` / `infrastructure` / `presentation`), the shared libs (`@retail-inventory-system/{contracts,ddd,common,database,messaging,cache,observability,auth,config}`) have stable surfaces, and cross-service traffic is RabbitMQ-only. The boundaries between these layers and libs are codified in `CLAUDE.md` as the "Forbidden imports" paragraph.
 
 Until now those rules were enforced **by code review**. `eslint-plugin-boundaries` was installed back in task-02 ([ADR-004](004-architecture-migration-commitment.md)) but intentionally left off so the migration could proceed without thrashing the lint feedback loop on every checkpoint.
 
