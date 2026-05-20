@@ -11,6 +11,8 @@ import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-syst
 import { CACHE_KEYS } from '@retail-inventory-system/cache';
 import {
   MicroserviceQueueEnum,
+  OrderProductStatusEnum,
+  OrderStatusEnum,
   ProductStockGetResponseDto,
 } from '@retail-inventory-system/contracts';
 import { CORRELATION_ID_HEADER } from '@retail-inventory-system/observability';
@@ -25,6 +27,15 @@ describe('Retail Inventory System API', () => {
   let dataSource: SystemApiE2ESpecDataSource;
   let cache: Cache;
   let customerAccessToken: string;
+  // Memory-backed Pino capture (TEST-002). The memory stream itself is
+  // installed by `test/jest.setup.ts` *before* any spec import runs —
+  // that's the only point at which `LoggerModuleConfig`'s constructor
+  // (eagerly evaluated inside each AppModule's `@Module({ imports: [...] })`)
+  // can see the destination. This file just reads the array reference
+  // back off `globalThis`. Across all three apps the records share one
+  // array (distinguishable by the `app` field).
+  const capturedLogs = (globalThis as { __RIS_E2E_CAPTURED_LOGS__?: Record<string, unknown>[] })
+    .__RIS_E2E_CAPTURED_LOGS__!;
 
   // Routes are guarded with @Roles(CUSTOMER, ADMIN) globally now. The seed
   // user `customer@example.com` is established by `yarn test:seed`; we log in
@@ -49,7 +60,6 @@ describe('Retail Inventory System API', () => {
     retailMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
       RetailMicroserviceAppModule,
       {
-        logger: false,
         transport: Transport.RMQ,
         options: {
           urls: [rmqUrl],
@@ -62,7 +72,6 @@ describe('Retail Inventory System API', () => {
     inventoryMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
       InventoryMicroserviceAppModule,
       {
-        logger: false,
         transport: Transport.RMQ,
         options: {
           urls: [rmqUrl],
@@ -74,7 +83,7 @@ describe('Retail Inventory System API', () => {
 
     await Promise.all([retailMicroservice.listen(), inventoryMicroservice.listen()]);
 
-    apiGatewayApp = await NestFactory.create(ApiGatewayAppModule, { logger: false });
+    apiGatewayApp = await NestFactory.create(ApiGatewayAppModule);
     apiGatewayApp.setGlobalPrefix('api');
     apiGatewayApp.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
@@ -107,6 +116,9 @@ describe('Retail Inventory System API', () => {
     // Isolate cache state across tests — without this, a previous test's writes
     // would mask cache miss/hit branches in subsequent tests.
     await cache.clear();
+    // Also drop captured pino records so per-test side-channel assertions
+    // see only this test's log output.
+    capturedLogs.length = 0;
   });
 
   describe('Product', () => {
@@ -206,6 +218,20 @@ describe('Retail Inventory System API', () => {
         expect(status).toBe(HttpStatus.OK);
         // G2: response equals the sentinel → cache hit, no DB read.
         expect(body).toEqual(sentinel);
+        // TEST-002: parallel log-based side-channel. The sentinel pattern
+        // already proves the cache-hit branch by way of the impossible
+        // quantity; this assertion proves the *capability* of asserting
+        // on Pino logs end-to-end. `StockCache.get` emits a debug record
+        // with `cacheHit: true` on hit (`stock.cache.ts:53–56`).
+        expect(capturedLogs).toContainEqual(
+          expect.objectContaining({
+            cacheHit: true,
+            // `LoggerModuleConfig` prepends `[<app>] ` via `msgPrefix`,
+            // so the captured `msg` is e.g. `[retail-microservice] Cache hit for stock query`.
+            msg: expect.stringContaining('Cache hit for stock query'),
+            productId: 1,
+          }),
+        );
       });
 
       it('returns 400 when storageIds is not valid JSON', async () => {
@@ -215,6 +241,11 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        // TEST-001: explicit body assertion paired with the snapshot — when
+        // the snapshot diff fires, this assertion attributes the regression
+        // source (a 4xx body schema drift vs. an unrelated wording change).
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
 
@@ -223,6 +254,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
     });
@@ -258,6 +291,16 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.CREATED);
+        // TEST-001: explicit field assertions to attribute regressions —
+        // status string, header row count, line-item expansion count.
+        expect(body.orderId).toEqual(expect.any(Number));
+        expect(body.status).toBe(OrderStatusEnum.PENDING);
+        expect(orderRows).toHaveLength(1);
+        expect(orderRows[0].status_id).toBe(OrderStatusEnum.PENDING);
+        expect(orderProductRows).toHaveLength(1);
+        expect(
+          orderProductRows.every((r: any) => r.status_id === OrderProductStatusEnum.PENDING),
+        ).toBe(true);
         assertData({ body, orderRows, orderProductRows });
       });
 
@@ -276,6 +319,13 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.CREATED);
+        // 2 + 1 = 3 expanded per-unit line items.
+        expect(body.status).toBe(OrderStatusEnum.PENDING);
+        expect(orderRows).toHaveLength(1);
+        expect(orderProductRows).toHaveLength(3);
+        expect(
+          orderProductRows.every((r: any) => r.status_id === OrderProductStatusEnum.PENDING),
+        ).toBe(true);
         assertData({ body, orderRows, orderProductRows });
       });
 
@@ -286,6 +336,9 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.NOT_FOUND);
+        expect(body.statusCode).toBe(HttpStatus.NOT_FOUND);
+        expect(body.error).toBe('Not Found');
+        expect(body.message).toContain('Customer #9999');
         expect(body).toMatchSnapshot();
       });
 
@@ -296,6 +349,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
 
@@ -306,6 +361,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
 
@@ -316,6 +373,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
 
@@ -326,6 +385,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
 
@@ -334,6 +395,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
 
@@ -344,6 +407,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
 
@@ -354,6 +419,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
 
@@ -364,6 +431,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
     });
@@ -427,6 +496,17 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
+        // TEST-001: explicit field assertions paired with the snapshot.
+        // The contract for the all-confirmed branch is: header CONFIRMED,
+        // every line CONFIRMED, one ledger row per line with quantity -1.
+        expect(body.status.id).toBe(OrderStatusEnum.CONFIRMED);
+        expect(orderRows).toHaveLength(1);
+        expect(orderRows[0].status_id).toBe(OrderStatusEnum.CONFIRMED);
+        expect(
+          orderProductRows.every((r: any) => r.status_id === OrderProductStatusEnum.CONFIRMED),
+        ).toBe(true);
+        expect(productStockRows.length).toBeGreaterThan(0);
+        expect(productStockRows.every((r: any) => r.quantity === -1)).toBe(true);
         assertData({ body, orderRows, orderProductRows, productStockRows });
         // Post-commit SCAN+UNLINK invalidated every key for the mutated products.
         expect(await getCachedStock(1)).toBeUndefined();
@@ -449,6 +529,13 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
+        // Partial branch: header stays PENDING; ledger has fewer rows than
+        // the order has lines; the rows present must still be quantity -1.
+        expect(body.status.id).toBe(OrderStatusEnum.PENDING);
+        expect(orderRows[0].status_id).toBe(OrderStatusEnum.PENDING);
+        expect(productStockRows.length).toBeGreaterThan(0);
+        expect(productStockRows.length).toBeLessThan(orderProductRows.length);
+        expect(productStockRows.every((r: any) => r.quantity === -1)).toBe(true);
         assertData({ body, orderRows, orderProductRows, productStockRows });
         // Mutated product cache cleared; untouched product cache survives.
         expect(await getCachedStock(3)).toBeUndefined();
@@ -468,6 +555,14 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.OK);
+        // Out-of-stock branch: header PENDING, every line PENDING, no
+        // ledger rows written at all (so the invalidate path was skipped).
+        expect(body.status.id).toBe(OrderStatusEnum.PENDING);
+        expect(orderRows[0].status_id).toBe(OrderStatusEnum.PENDING);
+        expect(
+          orderProductRows.every((r: any) => r.status_id === OrderProductStatusEnum.PENDING),
+        ).toBe(true);
+        expect(productStockRows).toHaveLength(0);
         assertData({ body, orderRows, orderProductRows, productStockRows });
         await expect(getCachedStock(4)).resolves.toMatchObject({ productId: 4, quantity: 42 });
       });
@@ -481,6 +576,12 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        // Already-confirmed guard: status 400, message names the transition,
+        // no ledger rows inserted.
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
+        expect(body.message).toContain('cannot be confirmed');
+        expect(productStockRows).toHaveLength(0);
         assertData({ body, orderRows, orderProductRows, productStockRows });
       });
 
@@ -493,6 +594,14 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.NOT_FOUND);
+        // Not-found guard: status 404, message names the missing id,
+        // nothing in any of the joined tables.
+        expect(body.statusCode).toBe(HttpStatus.NOT_FOUND);
+        expect(body.error).toBe('Not Found');
+        expect(body.message).toContain('not found');
+        expect(orderRows).toHaveLength(0);
+        expect(orderProductRows).toHaveLength(0);
+        expect(productStockRows).toHaveLength(0);
         assertData({ body, orderRows, orderProductRows, productStockRows });
       });
 
@@ -503,6 +612,8 @@ describe('Retail Inventory System API', () => {
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
+        expect(body.error).toBe('Bad Request');
         expect(body).toMatchSnapshot();
       });
     });

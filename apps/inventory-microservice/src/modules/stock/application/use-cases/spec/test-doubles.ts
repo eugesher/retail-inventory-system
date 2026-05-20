@@ -7,12 +7,14 @@ import {
   IStockAggregateForProductPayload,
   IStockAppendDeltasPayload,
   IStockCacheGetPayload,
-  IStockCacheInvalidatePayload,
+  IStockCacheGetResult,
+  IStockCacheInvalidateItem,
   IStockCachePort,
   IStockCacheSetPayload,
   IStockEventsPublisherPort,
   IStockLockedTotalsPayload,
   IStockRepositoryPort,
+  IStockWithInvalidationOptions,
 } from '../../ports';
 
 // In-memory stock repository implementation. Stores StockItem aggregates by
@@ -106,15 +108,19 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
 // records every invalidation/set call so specs can assert on them.
 export class InMemoryStockCache implements IStockCachePort {
   public readonly store = new Map<string, ProductStockGetResponseDto>();
-  public readonly invalidations: IStockCacheInvalidatePayload[] = [];
+  public readonly invalidations: {
+    items: IStockCacheInvalidateItem[];
+    opts?: IStockWithInvalidationOptions;
+  }[] = [];
   public readonly setCalls: IStockCacheSetPayload[] = [];
 
   private key(productId: number, storageIds?: string[]): string {
     return `${productId}:${(storageIds ?? []).slice().sort().join(',') || '*'}`;
   }
 
-  public get(payload: IStockCacheGetPayload): Promise<ProductStockGetResponseDto | undefined> {
-    return Promise.resolve(this.store.get(this.key(payload.productId, payload.storageIds)));
+  public get(payload: IStockCacheGetPayload): Promise<IStockCacheGetResult> {
+    const value = this.store.get(this.key(payload.productId, payload.storageIds));
+    return Promise.resolve({ value, available: true });
   }
 
   public set(payload: IStockCacheSetPayload): Promise<void> {
@@ -123,9 +129,35 @@ export class InMemoryStockCache implements IStockCachePort {
     return Promise.resolve();
   }
 
-  public invalidate(payload: IStockCacheInvalidatePayload): Promise<void> {
-    this.invalidations.push(payload);
-    return Promise.resolve();
+  public async getOrLoad(
+    payload: IStockCacheGetPayload,
+    loader: () => Promise<ProductStockGetResponseDto>,
+  ): Promise<ProductStockGetResponseDto> {
+    const { value, available } = await this.get(payload);
+    if (value !== undefined) return value;
+    const data = await loader();
+    if (available) {
+      await this.set({
+        productId: payload.productId,
+        storageIds: payload.storageIds,
+        data,
+        correlationId: payload.correlationId,
+      });
+    }
+    return data;
+  }
+
+  public async withInvalidation<T>(
+    work: () => Promise<T>,
+    resolveItems: (result: T) => IStockCacheInvalidateItem[],
+    opts?: IStockWithInvalidationOptions,
+  ): Promise<T> {
+    const result = await work();
+    const items = resolveItems(result);
+    if (items.length > 0) {
+      this.invalidations.push({ items, opts });
+    }
+    return result;
   }
 }
 

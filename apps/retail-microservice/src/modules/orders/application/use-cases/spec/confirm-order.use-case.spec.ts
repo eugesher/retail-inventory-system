@@ -5,6 +5,7 @@ import {
   OrderProductStatusEnum,
   OrderStatusEnum,
 } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { ConfirmOrderUseCase } from '../confirm-order.use-case';
 import {
@@ -14,29 +15,18 @@ import {
   InMemoryOrderRepository,
 } from './test-doubles';
 
-type LoggerMock = Record<'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'trace', jest.Mock>;
-
-const makeLogger = (): LoggerMock => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  fatal: jest.fn(),
-  trace: jest.fn(),
-});
-
 describe('ConfirmOrderUseCase', () => {
   let repository: InMemoryOrderRepository;
   let inventory: InMemoryInventoryConfirmGateway;
   let publisher: InMemoryOrderEventsPublisher;
-  let logger: LoggerMock;
+  let logger: PinoLoggerMock;
   let useCase: ConfirmOrderUseCase;
 
   beforeEach(() => {
     repository = new InMemoryOrderRepository();
     inventory = new InMemoryInventoryConfirmGateway();
     publisher = new InMemoryOrderEventsPublisher();
-    logger = makeLogger();
+    logger = makePinoLoggerMock();
     useCase = new ConfirmOrderUseCase(
       repository,
       inventory,

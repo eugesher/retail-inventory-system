@@ -36,7 +36,8 @@
       "@retail-inventory-system/ddd": ["libs/ddd"],
       "@retail-inventory-system/messaging": ["libs/messaging"],
       "@retail-inventory-system/observability": ["libs/observability"],
-      "@retail-inventory-system/observability/tracer": ["libs/observability/tracer"]
+      "@retail-inventory-system/observability/tracer": ["libs/observability/tracer"],
+      "@retail-inventory-system/observability/testing": ["libs/observability/testing"]
     },
     "allowSyntheticDefaultImports": true
   }

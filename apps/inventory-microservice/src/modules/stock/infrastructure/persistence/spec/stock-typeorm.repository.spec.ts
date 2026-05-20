@@ -1,21 +1,12 @@
 import { PinoLogger } from 'nestjs-pino';
 import { EntityManager, Repository } from 'typeorm';
 
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
+
 import { ProductStock } from '../product-stock.entity';
 import { StockTypeormRepository } from '../stock-typeorm.repository';
 
 const correlationId = 'corr-1';
-
-type LoggerMock = Record<'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'trace', jest.Mock>;
-
-const makeLogger = (): LoggerMock => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  fatal: jest.fn(),
-  trace: jest.fn(),
-});
 
 const makeQueryBuilder = (rawMany: jest.Mock): Record<string, jest.Mock> => {
   const qb: Record<string, jest.Mock> = {
@@ -37,7 +28,7 @@ describe('StockTypeormRepository', () => {
   let injectedRepo: jest.Mocked<
     Pick<Repository<ProductStock>, 'createQueryBuilder' | 'insert' | 'findOne' | 'save'>
   >;
-  let logger: LoggerMock;
+  let logger: PinoLoggerMock;
   let repository: StockTypeormRepository;
 
   beforeEach(() => {
@@ -48,7 +39,7 @@ describe('StockTypeormRepository', () => {
       findOne: jest.fn(),
       save: jest.fn(),
     } as never;
-    logger = makeLogger();
+    logger = makePinoLoggerMock();
     repository = new StockTypeormRepository(
       injectedRepo as unknown as Repository<ProductStock>,
       logger as unknown as PinoLogger,

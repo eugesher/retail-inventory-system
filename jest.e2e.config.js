@@ -26,6 +26,7 @@ module.exports = {
     '^@retail-inventory-system/messaging$': '<rootDir>/libs/messaging',
     '^@retail-inventory-system/observability$': '<rootDir>/libs/observability',
     '^@retail-inventory-system/observability/tracer$': '<rootDir>/libs/observability/tracer',
+    '^@retail-inventory-system/observability/testing$': '<rootDir>/libs/observability/testing',
     '^@retail-inventory-system/retail$': '<rootDir>/libs/retail',
   },
   testEnvironment: 'node',

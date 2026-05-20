@@ -1,19 +1,10 @@
 import { PinoLogger } from 'nestjs-pino';
 import { EntityManager } from 'typeorm';
 
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
+
 import { IStockAppendDeltaItem, IStockRepositoryPort } from '../../ports';
 import { AddStockUseCase } from '../add-stock.use-case';
-
-type LoggerMock = Record<'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'trace', jest.Mock>;
-
-const makeLogger = (): LoggerMock => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  fatal: jest.fn(),
-  trace: jest.fn(),
-});
 
 const correlationId = 'corr-1';
 const items: IStockAppendDeltaItem[] = [
@@ -35,13 +26,13 @@ const items: IStockAppendDeltaItem[] = [
 
 describe('AddStockUseCase', () => {
   let repository: jest.Mocked<Pick<IStockRepositoryPort, 'appendDeltas'>>;
-  let logger: LoggerMock;
+  let logger: PinoLoggerMock;
   let useCase: AddStockUseCase;
 
   beforeEach(() => {
     jest.resetAllMocks();
     repository = { appendDeltas: jest.fn() } as never;
-    logger = makeLogger();
+    logger = makePinoLoggerMock();
     useCase = new AddStockUseCase(
       repository as unknown as IStockRepositoryPort,
       logger as unknown as PinoLogger,

@@ -51,29 +51,13 @@ export class GetStockUseCase {
         );
       }
 
-      const cached = await this.stockCache.get({ productId, storageIds, correlationId });
-
-      // Strict undefined check matches the cache adapter's miss/error contract:
-      // both miss and read-error return undefined. Avoid coupling to the
-      // invariant that response DTOs are always non-null objects.
-      if (cached !== undefined) {
-        return cached;
-      }
-
-      // Cache-aside read/write race window — between this miss and the
-      // cache.set below, a concurrent writer could commit + SCAN-invalidate,
-      // then we'd write the now-stale DB result back to the cache. No
-      // single-flight / version stamp here today; tracked for a future pass.
-      // AUDIT-2026-05-08 [CACHE-001]
-      const data = await this.repository.aggregateForProduct({
-        productId,
-        storageIds,
-        correlationId,
-      });
-
-      await this.stockCache.set({ productId, storageIds, data, correlationId });
-
-      return data;
+      // `getOrLoad` provides the cache-aside read-through, fans concurrent
+      // misses into one loader invocation (ADR-021 single-flight), and
+      // writes back with ±10% TTL jitter. A read-error inside the adapter
+      // surfaces as a miss → loader runs → DB-fallback semantics preserved.
+      return await this.stockCache.getOrLoad({ productId, storageIds, correlationId }, () =>
+        this.repository.aggregateForProduct({ productId, storageIds, correlationId }),
+      );
     } catch (error) {
       this.logger.error({ err: error as Error, ...payload }, 'Error retrieving product stock');
 
