@@ -88,6 +88,8 @@ All mandatory checks green. Detailed table above.
 
 3. **`msgPrefix` makes the captured `msg` field carry the `[<app>] ` prefix.** The cacheHit log assertion ended up using `expect.stringContaining('Cache hit for stock query')` rather than a literal match because the captured record's `msg` is `'[retail-microservice] Cache hit for stock query'`. Future log-based assertions in the same suite should follow the same convention.
 
+4. **CI-only regression caught after local merge.** CI's `ci-cd.yml` sets `LOG_LEVEL: warn` at the job level so pipeline logs stay lean. `LoggerModuleConfig` originally honored `process.env.LOG_LEVEL` first, which on CI filtered the `debug`-level `cacheHit` log out before it could reach the memory stream — the spec saw an empty `capturedLogs` array. Fixed by making the e2e-capture branch unconditionally `'debug'`; documented inline in `libs/observability/logger.module.ts`. Verified locally by re-running the e2e suite with `LOG_LEVEL=warn` exported.
+
 ## Scope discipline — adjacent findings deferred
 
 Per CONVENTIONS §6, the following duplicated patterns were observed across the seven specs but **not** fixed in this task:

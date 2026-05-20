@@ -8,10 +8,6 @@ Every service follows a per-module **hexagonal layout** (ports & adapters): `dom
 
 The durable architectural artefacts are this `README.md`, [`CLAUDE.md`](CLAUDE.md), and the ADRs under [`docs/adr/`](docs/adr/). See [`docs/adr/index.md`](docs/adr/index.md) for the catalogue index (one row per ADR with status, date, and a one-line summary).
 
-### Migration baseline
-
-[`docs/baseline/`](docs/baseline/) holds frozen copies of the configuration files, test-coverage report, and workspace listing as they were at the start of the migration (commit `04713bb`, captured 2026-05-09). This folder is **read-only** — captured as the pre-migration snapshot so later phases could diff against it. Do not edit these files.
-
 ## Overview
 
 The system handles order lifecycle management and product stock tracking across a distributed architecture. Clients interact with a single HTTP API gateway, which delegates work to specialized microservices over RabbitMQ.

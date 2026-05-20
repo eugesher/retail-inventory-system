@@ -421,7 +421,6 @@ export default typescriptEslint.config(
       '.yarn/**',
       'coverage/**',
       'dist/**',
-      'docs/baseline/**',
       'migrations/config/**',
       // Lint-fixture files are intentionally non-compliant — see tests/lint.
       'tests/lint/fixtures/**',

@@ -48,7 +48,15 @@ export class LoggerModuleConfig implements Params {
 
     const baseOptions: Options = {
       msgPrefix: `[${appName}] `,
-      level: process.env.LOG_LEVEL ?? (e2eDestination ? 'debug' : isProduction ? 'info' : 'debug'),
+      // When the e2e capture is active, force `debug` regardless of
+      // `LOG_LEVEL`. CI deliberately sets `LOG_LEVEL=warn` to keep
+      // pipeline logs lean, but that would drop the very `debug`-level
+      // records (e.g. `cacheHit: true` from `StockCache.get`) the e2e
+      // suite asserts against. Honoring the env var here is a real CI
+      // regression — see CI failure on RIS-40 follow-up.
+      level: e2eDestination
+        ? 'debug'
+        : (process.env.LOG_LEVEL ?? (isProduction ? 'info' : 'debug')),
       customProps: (): { app: AppNameEnum } => customProps,
       redact: {
         paths: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],

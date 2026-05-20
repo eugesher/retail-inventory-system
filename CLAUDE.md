@@ -242,10 +242,6 @@ Architectural rules and the target state are recorded as ADRs under [`docs/adr/`
 
 When making an architectural decision, write an ADR. The format is documented in [ADR-003](docs/adr/003-record-architecture-decisions.md) (record architecture decisions): Nygard hybrid (Status, Context, Decision, Alternatives, Consequences), 3-digit padding, one decision per file, slug describes the decision not the area.
 
-### Baseline snapshot
-
-`docs/baseline/` is a frozen pre-migration snapshot (configs, coverage report, workspace listing) captured at the start of the migration. Treat it as **read-only** — do not edit any file under it.
-
 ## Operational notes
 
 - **The first import in every app's `main.ts` MUST be `@retail-inventory-system/observability/tracer`.** Auto-instrumentation patches happen at module load — any HTTP / TypeORM / Redis / amqplib client `require()`'d before the tracer is invisible to OTel. Enforced by code review today; a future import-order ESLint rule would close the loop.
