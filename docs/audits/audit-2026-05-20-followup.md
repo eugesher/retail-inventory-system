@@ -34,7 +34,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: `apps/inventory-microservice/src/app/common/modules/product-stock-common/product-stock-common.service.ts` (~L73) → `apps/inventory-microservice/src/modules/stock/application/use-cases/get-stock.use-case.ts` (L64–L74).
 - **Reasoning**: The miss-then-set sequence in `GetStockUseCase.execute` still calls `repository.aggregateForProduct` and then `stockCache.set` with no single-flight or version-stamp protection. The block carries an explicit `AUDIT-2026-05-08 [CACHE-001]` annotation at L67 marking the same race the original audit identified. The migration preserved ADR-002's contract verbatim (per ADR-006), so the window did not narrow. ADR-016 §3 explicitly confirms this race remains open after task-11.
-- **Fix task**: [`docs/tasks/fix-cache-stampede-and-jitter.md`](../tasks/fix-cache-stampede-and-jitter.md)
+- **Resolution**: Closed by [ADR-021](../adr/021-cache-single-flight-and-ttl-jitter.md). `IStockCachePort.getOrLoad` wraps the miss path in an in-process single-flight against `ICachePort.singleFlight`, so concurrent miss-cohorts share one loader invocation. The leader is the only one that runs the loader and writes back; followers reuse the leader's result. The write-back applies ±10% TTL jitter (see CACHE-004 resolution below).
 
 ### CACHE-002 — Post-commit-only invalidate contract is comment-enforced
 
@@ -43,7 +43,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: `apps/inventory-microservice/src/app/common/modules/product-stock-common/product-stock-common.service.ts` (~L102) → contract is now enforced by comment at `apps/inventory-microservice/src/modules/stock/application/use-cases/reserve-stock-for-order.use-case.ts` (L122–L132) and the public method lives on `apps/inventory-microservice/src/modules/stock/application/ports/stock-cache.port.ts` (L35).
 - **Reasoning**: `IStockCachePort.invalidate(payload)` is publicly exposed and the "must run after the transaction commits" rule is documented only in a comment block above the call site (the `reserve-stock-for-order` use case). The comment is now *more* prominent than before — ADR-016 awaits the call rather than fire-and-forgetting it — but nothing in the type system prevents a future use case from invoking `stockCache.invalidate(...)` inside an `entityManager.transaction(...)` callback. The structural risk the original audit flagged is unchanged.
-- **Fix task**: [`docs/tasks/fix-cache-invalidate-contract.md`](../tasks/fix-cache-invalidate-contract.md)
+- **Resolution**: Closed by [ADR-023](../adr/023-cache-invalidate-post-commit-by-type.md). `IStockCachePort.invalidate(...)` is removed from the public port surface; callers route writes through `withInvalidation(work, resolveItems, opts)`, which awaits `work` and only then fans out the prefix-delete via a private `invalidatePrefixes` helper. The post-commit ordering is type-enforced — a caller cannot reach the underlying invalidate from inside a transaction callback because the type signature forbids it.
 
 ### CACHE-003 — Untyped cache values; no schema-version segment in keys
 
@@ -52,7 +52,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: `libs/common/cache/cache.helper.ts` (~L1) → `libs/cache/cache-keys.ts` (L26–L40, `CACHE_KEYS.inventoryStock*`) and the read site `apps/inventory-microservice/src/modules/stock/infrastructure/cache/stock.cache.ts` (L43, `cache.get<ProductStockGetResponseDto>(...)`).
 - **Reasoning**: The new builder `CACHE_KEYS.inventoryStock(productId, storageIds)` produces `ris:inventory:stock:<productId>:<facet>` with no schema-version segment. `StockCache.get` still uses a generic type assertion (`cache.get<ProductStockGetResponseDto>`) with no runtime validation on read. A DTO-shape change would still leave one TTL window of entries that deserialize correctly into a mismatched shape. The `cache-keys.ts` header comment (L23–L24) explicitly tracks this as open.
-- **Fix task**: [`docs/tasks/fix-cache-keys-tenant-and-schema-version.md`](../tasks/fix-cache-keys-tenant-and-schema-version.md)
+- **Resolution**: Closed by [ADR-022](../adr/022-cache-keys-tenant-and-schema-version.md). `CACHE_KEYS.inventoryStock*` and `CACHE_KEYS.retailOrder*` builders now emit `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]` with per-aggregate version constants (`INVENTORY_STOCK_KEY_VERSION`, `RETAIL_ORDER_KEY_VERSION` — currently `v1`). A breaking DTO shape change bumps the constant in one line and pre-bump entries become unreachable on the next deploy.
 
 ### CACHE-004 — TTL has no jitter (thundering-herd risk)
 
@@ -61,7 +61,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: `apps/inventory-microservice/src/app/common/modules/product-stock-common/providers/product-stock-common-cache.service.ts` (~L28) → `apps/inventory-microservice/src/modules/stock/infrastructure/cache/stock.cache.ts` (L61–L75, `set` method).
 - **Reasoning**: `StockCache.set` passes `configService.get<number>('CACHE_TTL_MS_PRODUCT_STOCK')` straight into `cache.set(key, data, ttl)`. There is no `±10%` jitter applied here or in the underlying `RedisCacheAdapter.set` (`libs/cache/redis-cache.adapter.ts` L48–L61). Any batch of writes that lands within one event-loop tick will expire on the same wall-clock band. The original mitigation still applies verbatim.
-- **Fix task**: [`docs/tasks/fix-cache-stampede-and-jitter.md`](../tasks/fix-cache-stampede-and-jitter.md) (bundled with CACHE-001 per the original audit's coupling note)
+- **Resolution**: Closed by [ADR-021](../adr/021-cache-single-flight-and-ttl-jitter.md) (bundled with CACHE-001 per the original audit's coupling note). `StockCache.set` (and the `getOrLoad` write-back) apply ±10% uniform jitter (`Math.floor(ttl + (Math.random() * 2 - 1) * 0.1 * ttl)`) before delegating to `cache.set`. The floor on the lower bound preserves ADR-002's TTL-as-safety-net role.
 
 ### CACHE-005 — Redis-down produces duplicate warn logs (get + set)
 
@@ -70,7 +70,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: `apps/inventory-microservice/src/app/common/modules/product-stock-common/providers/product-stock-common-cache.service.ts` (~L32) → `apps/inventory-microservice/src/modules/stock/infrastructure/cache/stock.cache.ts` (`get` at L36–L59, `set` at L61–L75) and the use case at `apps/inventory-microservice/src/modules/stock/application/use-cases/get-stock.use-case.ts` (L54–L74).
 - **Reasoning**: `StockCache.get` warn-logs and returns `undefined` when `cache.get` throws. `GetStockUseCase` interprets `undefined` as a miss, runs the DB aggregation, and unconditionally calls `stockCache.set`. During a Redis outage `set` will also reject and produce a second warn-log. No `cacheAvailable` flag is propagated. The path is functionally correct (correctness fallback still works) but emits two warn lines per request — the same duplicate-log signature the original audit identified.
-- **Fix task**: [`docs/tasks/fix-cache-redis-down-warn-logs.md`](../tasks/fix-cache-redis-down-warn-logs.md)
+- **Resolution**: Closed by changing `IStockCachePort.get`'s return shape to `{ value: ProductStockGetResponseDto | undefined; available: boolean }`. When the underlying `cache.get` rejects, `available: false` short-circuits the single-flight + write-back path inside `getOrLoad`, so a Redis-down request emits exactly one warn line ("Failed to read from cache") instead of three.
 
 ### CACHE-006 — Layer reach-through fragility; pin `cacheable` major
 
@@ -103,7 +103,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: `libs/common/cache/cache.helper.ts` (~L17, `keyPrefixes.productStock`) → `libs/cache/cache-keys.ts` (L26–L40, `CACHE_KEYS.inventoryStock*`).
 - **Reasoning**: The new builders read `ris:inventory:stock:<productId>:<facet>` with no tenant segment. The cache-keys.ts header comment L23–L24 explicitly tracks CACHE-009 as open. No tenant model exists today so the bug is still latent, but the structural absence is unchanged. ADR-016 §"Still open" lists CACHE-009 by name.
-- **Fix task**: [`docs/tasks/fix-cache-keys-tenant-and-schema-version.md`](../tasks/fix-cache-keys-tenant-and-schema-version.md)
+- **Resolution**: Closed by [ADR-022](../adr/022-cache-keys-tenant-and-schema-version.md) (bundled with CACHE-003 — same builder change). The cache-key builders accept an optional `opts?: { tenantId?: string }` and prepend `t:<tenantId>:` to the key when supplied. The segment is omitted entirely when `tenantId` is missing (no silent `t:default:…`), so single-tenant mode remains the wire-format unchanged. No use case populates `tenantId` today — the port surface is ready for a future migration.
 
 ### CACHE-010 — `storageIds` sort comparator uses `charCodeAt(0)` only
 
@@ -136,7 +136,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: `test/system-api.e2e-spec.ts` (no path change).
 - **Reasoning**: The e2e file still uses `toMatchSnapshot()` as the sole assertion on response bodies and DB rows in many places (e.g. error-path assertions at L218, L226, L289, L309 and the whole `assertData` helper at L244–L250). The migration added explicit `toMatchObject` cache-state assertions (e.g. L141, L153, L455) but didn't pair those with explicit field assertions on the snapshot calls. The original concern — snapshot diffs collapse cache/DB/DTO regressions into one signal — survives.
-- **Fix task**: [`docs/tasks/improve-test-infrastructure.md`](../tasks/improve-test-infrastructure.md)
+- **Resolution**: Closed. Every `toMatchSnapshot()` call on an error-path body in `test/system-api.e2e-spec.ts` is now paired with explicit assertions on `statusCode`, `error`, and key message substrings. The `assertData` helpers used by the order-create and order-confirm tests get per-row-category assertions on header status (e.g. `OrderStatusEnum.CONFIRMED`), line counts, and the `quantity === -1` sign on `productStockRows`. Snapshots remain as the comprehensive baseline — explicit assertions are additive tripwires that label the regression source.
 
 ### TEST-002 — Pino logger disabled in E2E (loses cache-hit side-channel)
 
@@ -145,7 +145,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: `test/system-api.e2e-spec.ts` (no path change).
 - **Reasoning**: All three bootstrap calls in the e2e spec still pass `logger: false` — retail microservice at L52, inventory microservice at L67, and the API gateway at L77. The `cacheHit` log field that `StockCache.get` and `set` emit is therefore invisible to e2e assertions; tests rely on direct cache reads through `getCachedStock` instead. The mitigation the original audit suggested (a Pino stream piped into a memory transport) is not in place.
-- **Fix task**: [`docs/tasks/improve-test-infrastructure.md`](../tasks/improve-test-infrastructure.md)
+- **Resolution**: Closed. The three `logger: false` flags are gone from `test/system-api.e2e-spec.ts`. A memory-backed `Writable` is installed by `test/jest.setup.ts` (via `installMemoryPinoLogger()` from `libs/observability/testing/pino-memory-stream.ts`) *before* any spec import runs — the only point at which `LoggerModuleConfig`'s constructor can see the destination, because each `@Module({ imports: [...] })` decorator evaluates `LoggerModule.forRoot(new LoggerModuleConfig(...))` eagerly at AppModule load time. The destination is plumbed via the nestjs-pino tuple form `pinoHttp: [Options, DestinationStream]`. One log-based side-channel assertion (`cacheHit: true` on the primed-cache GET test) demonstrates the capability end-to-end.
 
 ### TEST-003 — `makePinoLoggerMock()` factory would dedupe spec setup
 
@@ -154,7 +154,7 @@ Breakdown by classification (with new verdict column):
 - **New verdict**: `still-relevant`
 - **Path remap**: cross-cutting; the duplicated factory now appears in every spec that mocks `PinoLogger`. Examples: `apps/inventory-microservice/src/modules/stock/application/use-cases/spec/get-stock.use-case.spec.ts` L9–L18, `apps/inventory-microservice/src/modules/stock/application/use-cases/spec/reserve-stock-for-order.use-case.spec.ts` L17–L26, `apps/inventory-microservice/src/modules/stock/infrastructure/cache/spec/stock.cache.spec.ts` L27–L36, `apps/retail-microservice/src/modules/orders/application/use-cases/spec/confirm-order.use-case.spec.ts` L17–L26 (and the sibling `create-order` / `get-order` specs follow the same pattern).
 - **Reasoning**: Each spec redefines the same `LoggerMock` type alias and `makeLogger()` factory inline. The duplication count grew rather than shrank during the migration because every per-module spec was written from the template. No shared helper has been hoisted into a `libs/observability/testing` or `test/utils` location.
-- **Fix task**: [`docs/tasks/improve-test-infrastructure.md`](../tasks/improve-test-infrastructure.md)
+- **Resolution**: Closed. `makePinoLoggerMock()` and the `PinoLoggerMock` type alias live at `libs/observability/testing/pino-logger.mock.ts`, exposed via the deep-import path `@retail-inventory-system/observability/testing` (mirroring the existing `/tracer` deep-import convention). The `testing/` barrel is intentionally **not** re-exported from `libs/observability/index.ts`, keeping production import graphs out. Eight specs (the seven originally listed plus `stock-typeorm.repository.spec.ts`, which the audit verification grep caught) replace their inline factory with the helper. The notification microservice's class-based `FakeLogger` is left untouched per the original DOCS-001 caveat — the two styles are deliberately different and serve different testing shapes.
 
 ### CODE-001 — Defensive filter `!!item.storageId` is unreachable today
 
@@ -187,7 +187,7 @@ Carrying forward from the original audit. Cross-cutting items with no single ann
 
 | Code        | Reason                                                                                                                                                                                                                                                                                                                              |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TEST-001`  | Cross-cutting test refinement across `test/system-api.e2e-spec.ts`; no single line to annotate. The fix task scopes the work by `describe` block rather than by line.                                                                                                                                                                |
-| `TEST-002`  | E2E test-infra item (`logger: false` on three bootstrap calls in `test/system-api.e2e-spec.ts`); the annotation target is the test-infra change itself, which lives in the fix task.                                                                                                                                                |
-| `TEST-003`  | Cross-cutting spec refactor across ≥ten spec files; the canonical helper target does not exist yet, so there is no production location to annotate. The fix task names the proposed helper path.                                                                                                                                    |
+| `TEST-001`  | Cross-cutting test refinement across `test/system-api.e2e-spec.ts`; no single line to annotate. Resolved across multiple `describe` blocks in the same file (see Resolution under TEST-001).                                                                                                                                         |
+| `TEST-002`  | E2E test-infra item (`logger: false` on three bootstrap calls in `test/system-api.e2e-spec.ts`); the annotation target was the test-infra change itself, now realised by `test/jest.setup.ts` + `libs/observability/testing/pino-memory-stream.ts`.                                                                                  |
+| `TEST-003`  | Cross-cutting spec refactor across eight spec files; the canonical helper now lives at `libs/observability/testing/pino-logger.mock.ts` (see Resolution under TEST-003).                                                                                                                                                             |
 | `DOCS-001`  | Informational note about cross-microservice spec-layout convention; deliberately left in-spec rather than promoted to CLAUDE.md (see verdict).                                                                                                                                                                                       |
