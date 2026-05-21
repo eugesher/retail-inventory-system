@@ -3,9 +3,9 @@ import { ApiBearerAuth, ApiForbiddenResponse, ApiOkResponse, ApiTags } from '@ne
 
 import { RoleEnum, Roles } from '@retail-inventory-system/auth';
 
-// Admin-only smoke endpoint. The retail/inventory routes today only need a
-// CUSTOMER-or-ADMIN role; without this, the role guard could not be exercised
-// for the admin-vs-customer 403 path. Documented in ADR-010.
+// Exists to cover the RolesGuard 403 path — the retail/inventory routes
+// only require CUSTOMER-or-ADMIN, leaving the admin-vs-customer rejection
+// otherwise unexercised. See ADR-010.
 @ApiTags('Auth (admin)')
 @Controller('auth/admin')
 export class AuthAdminController {

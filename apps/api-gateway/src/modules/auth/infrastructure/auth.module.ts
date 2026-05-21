@@ -18,11 +18,9 @@ import { JwtTokenAdapter } from './jwt/jwt-token.adapter';
 import { UserEntity } from './persistence/user.entity';
 import { UserTypeormRepository } from './persistence/user-typeorm.repository';
 
-// libs/auth registers its JwtStrategy which depends on AUTH_USER_VALIDATOR.
-// We supply the validator (ValidateUserUseCase) and the repository it needs
-// inside `forRootAsync` so the lib module's DI graph is self-contained;
-// the bindings are also exported so the use-cases below can inject them
-// without re-registering providers.
+// AUTH_USER_VALIDATOR + USER_REPOSITORY are bound inside libs/auth's `forRootAsync`
+// so its JwtStrategy can resolve them; re-exported so the use cases below inject
+// the same providers without re-registering them.
 const authLibProviders = [
   UserTypeormRepository,
   { provide: USER_REPOSITORY, useExisting: UserTypeormRepository },
