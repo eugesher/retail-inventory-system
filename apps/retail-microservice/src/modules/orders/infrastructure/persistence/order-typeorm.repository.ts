@@ -73,10 +73,9 @@ export class OrderTypeormRepository implements IOrderRepositoryPort {
 
   public async findExistingProductIds(productIds: number[]): Promise<number[]> {
     if (productIds.length === 0) return [];
-    // The `product` table is owned by the inventory service today; we only
-    // read from it here for the order-create existence check. Routed
-    // through the orders repository port so the boundary rule (no
-    // `Repository<...>` outside `infrastructure/`) holds — see ADR-013.
+    // The `product` table is owned by the inventory service; the order-create
+    // existence check reads it here so the boundary rule (no `Repository<...>`
+    // outside `infrastructure/`) stays intact (ADR-013).
     const rows = await this.dataSource.query<{ id: number }[]>(
       `SELECT id FROM product WHERE id IN (${productIds.map(() => '?').join(',')})`,
       productIds,

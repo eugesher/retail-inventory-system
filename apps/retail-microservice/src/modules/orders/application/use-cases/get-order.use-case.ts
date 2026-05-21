@@ -5,10 +5,6 @@ import { OrderStatusEnum } from '@retail-inventory-system/contracts';
 
 import { IOrderRepositoryPort, ORDER_REPOSITORY } from '../ports';
 
-// The API gateway's `OrderConfirmPipe` only needs the order header status
-// today (it short-circuits a non-PENDING confirm with a 400 before sending
-// the full RPC). Returning just `{ statusId }` keeps the wire payload small
-// and matches the gateway-side port shape verbatim.
 export interface IOrderHeaderView {
   statusId: OrderStatusEnum;
 }

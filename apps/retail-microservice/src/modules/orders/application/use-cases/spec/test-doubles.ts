@@ -16,18 +16,12 @@ import {
   IOrderRepositoryPort,
 } from '../../ports';
 
-// In-memory port doubles for the orders use-case specs. Pure TypeScript — no
-// jest globals, so the file is safe to include in production builds when
-// `tsconfig.app.json`'s `exclude` only filters `*.spec.ts` (see
-// _carryover-08 §9 #5).
+// Jest-free so the production build (which `tsconfig.app.json` excludes
+// `*.spec.ts` but not `test-doubles.ts`) stays clean.
 
 let _nextOrderId = 1000;
 let _nextOrderProductId = 9000;
 
-// Builds an in-memory Order with persisted ids — mimics what the repository
-// hands back after an INSERT. Specs that exercise the create-path should
-// keep the id assignment in the repo double (so the use case observes the
-// real assign-after-save flow).
 export const buildPersistedOrder = (props: {
   id?: number;
   customerId?: number;
@@ -121,9 +115,6 @@ export class InMemoryOrderRepository implements IOrderRepositoryPort {
   }
 
   public save(order: Order): Promise<Order> {
-    // Mimic repo behavior: an unpersisted aggregate (id === null) gets a
-    // fresh id; line items also get ids. We hand back a `reconstitute`d copy
-    // with the assigned ids — the use case treats this as authoritative.
     const persisted = buildPersistedOrder({
       id: order.id ?? _nextOrderId++,
       customerId: order.customer.id,

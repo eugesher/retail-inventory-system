@@ -5,9 +5,7 @@ export interface IOrderConfirmedEventLine {
   productId: number;
 }
 
-// Fires when Order.confirm transitions the aggregate to CONFIRMED (i.e. every
-// line item is confirmed). Reserved for future cross-service consumers — no
-// subscriber today.
+// No cross-service subscriber today; the port surface is reserved.
 export class OrderConfirmedEvent extends DomainEvent<number> {
   public readonly customerId: number;
   public readonly lines: IOrderConfirmedEventLine[];

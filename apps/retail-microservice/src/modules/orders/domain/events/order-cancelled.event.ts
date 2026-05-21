@@ -1,8 +1,7 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Reserved for the future cancel flow (task-09 brief defers the cancel
-// use-case). The event exists so the publisher port surface is stable; the
-// only producer that would emit it does not exist today.
+// No producer wires this today; reserved so the publisher port surface
+// stays stable for a future cancel flow.
 export class OrderCancelledEvent extends DomainEvent<number> {
   public readonly customerId: number;
   public readonly reason?: string;

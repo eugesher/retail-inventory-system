@@ -5,9 +5,9 @@ export interface IOrderCreatedEventLine {
   quantity: number;
 }
 
-// Fires after Order.create succeeds. The publisher adapter transforms this
-// in-process event into the wire-format `IRetailOrderCreatedEvent` consumed
-// by the notification microservice (see ROUTING_KEYS.RETAIL_ORDER_CREATED).
+// Constructed by `CreateOrderUseCase` after the repository round-trip
+// assigns the aggregate id (ADR-013 §5) — the aggregate cannot fabricate
+// its own id at create-time.
 export class OrderCreatedEvent extends DomainEvent<number> {
   public readonly customerId: number;
   public readonly lines: IOrderCreatedEventLine[];

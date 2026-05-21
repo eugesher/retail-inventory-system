@@ -4,10 +4,6 @@ import { Order as OrderEntity } from '../order.entity';
 import { OrderProduct as OrderProductEntity } from '../order-product.entity';
 import { OrderMapper } from '../order.mapper';
 
-// Round-trip: entity → domain → entity-shaped projection back. We don't have
-// a domain → entity mapper today (the typeorm repo builds a `DeepPartial`
-// in-line via `save`), so the assertion is on the domain-side projection
-// preserving every field used downstream.
 describe('OrderMapper round-trip', () => {
   it('maps a persisted Order entity into a domain aggregate with line items and statuses', () => {
     const entity: OrderEntity = Object.assign(new OrderEntity(), {

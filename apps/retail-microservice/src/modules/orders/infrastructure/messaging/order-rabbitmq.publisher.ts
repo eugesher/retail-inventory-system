@@ -33,15 +33,13 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         quantity: line.quantity,
       })),
       occurredAt: event.occurredAt.toISOString(),
-      // The wire contract makes `correlationId` required. The use case
-      // threads the real id from the inbound RPC payload; the empty-string
-      // default is a defensive fallback (see _carryover-08 §9 #4).
+      // Wire contract makes `correlationId` required — empty-string is a
+      // defensive fallback if the caller didn't thread one through.
       correlationId: correlationId ?? '',
     };
 
-    // `ClientProxy.emit()` returns a cold Observable; `firstValueFrom`
-    // materializes it and waits for the broker ack so application code can
-    // await a plain Promise (see _carryover-07 §5 #3).
+    // `ClientProxy.emit()` is a cold Observable; `firstValueFrom`
+    // materializes it and waits for the broker ack.
     await firstValueFrom(
       this.notificationClient.emit<void, IRetailOrderCreatedEvent>(
         ROUTING_KEYS.RETAIL_ORDER_CREATED,

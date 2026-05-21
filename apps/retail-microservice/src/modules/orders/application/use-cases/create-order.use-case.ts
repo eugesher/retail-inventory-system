@@ -49,11 +49,6 @@ export class CreateOrderUseCase {
 
       this.logger.info({ correlationId, orderId, customerId }, 'Order created');
 
-      // `retail.order.created` is published after persistence so subscribers
-      // (notification microservice) observe a stable aggregate id. The
-      // adapter wraps `ClientProxy.emit()` in `firstValueFrom`; we await the
-      // broker ack so a publish failure surfaces in the RPC response rather
-      // than disappearing into a fire-and-forget observable.
       const event = new OrderCreatedEvent({
         orderId,
         customerId,
@@ -62,8 +57,7 @@ export class CreateOrderUseCase {
       try {
         await this.publisher.publishOrderCreated(event, correlationId);
       } catch (err) {
-        // The response correctness does not depend on the notifier — the
-        // order is persisted. Warn-log and continue.
+        // Publish failures never raise — the order is already persisted.
         this.logger.warn(
           { err: err as Error, correlationId, orderId },
           'Failed to publish retail.order.created event',

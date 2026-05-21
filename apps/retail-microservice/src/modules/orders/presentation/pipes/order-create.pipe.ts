@@ -6,12 +6,6 @@ import { IOrderCreatePayload } from '@retail-inventory-system/contracts';
 
 import { IOrderRepositoryPort, ORDER_REPOSITORY } from '../../application/ports';
 
-// Pre-RPC validator. Confirms the customer exists and every productId
-// resolves to a row in `product`. Lives in `presentation/pipes/` rather than
-// in `application/` because it operates on the wire payload — it pre-checks
-// inputs before the use case sees them so the use case can assume a valid
-// shape. Reaches the database via the `ORDER_REPOSITORY` port so no
-// `Repository<...>` injection leaks out of `infrastructure/` (ADR-013).
 @Injectable()
 export class OrderCreatePipe implements PipeTransform<
   IOrderCreatePayload,

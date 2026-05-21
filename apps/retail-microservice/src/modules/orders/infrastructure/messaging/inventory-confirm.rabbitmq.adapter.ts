@@ -17,14 +17,13 @@ export class InventoryConfirmRabbitmqAdapter implements IInventoryConfirmGateway
     private readonly inventoryClient: ClientProxy,
   ) {}
 
+  // The TypeScript compile is the cross-service contract test — the
+  // inventory-side handler imports `IProductStockOrderConfirmPayload` from
+  // the same place (ADR-013 §7).
   public async reserveOrderStock(payload: {
     products: IOrderProductConfirm[];
     correlationId: string;
   }): Promise<number[]> {
-    // Wire contract: `IProductStockOrderConfirmPayload` from
-    // `@retail-inventory-system/contracts/inventory` — same type the
-    // inventory side's `StockController` consumes. The TypeScript compile is
-    // the cross-service contract test (both ends import this interface).
     return firstValueFrom(
       this.inventoryClient.send<number[], IProductStockOrderConfirmPayload>(
         ROUTING_KEYS.INVENTORY_ORDER_CONFIRM,
