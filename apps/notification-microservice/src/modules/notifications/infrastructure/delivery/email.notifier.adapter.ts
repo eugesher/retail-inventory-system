@@ -3,10 +3,9 @@ import { Injectable } from '@nestjs/common';
 import { Notification } from '../../domain';
 import { INotifierPort } from '../../application/ports';
 
-// Scaffold only. TODO(post-migration): wire an SMTP transport (nodemailer or
-// a managed provider) and rebind `NOTIFIER` in `notifications.module.ts`.
-// The dependency is intentionally not in `package.json` yet — adding it now
-// would force a choice of provider before the business need is settled.
+// Scaffold for a future SMTP transport — dependency deliberately not in
+// `package.json` so the provider choice isn't forced before the business
+// need is settled (ADR-011 §3).
 @Injectable()
 export class EmailNotifierAdapter implements INotifierPort {
   public send(notification: Notification): Promise<void> {
