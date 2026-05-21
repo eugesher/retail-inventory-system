@@ -9,10 +9,6 @@ import {
 
 import { MicroserviceClientConfiguration } from './microservice-client.configuration';
 
-// ClientProxy producer module for the notification microservice. Imported by
-// any service that needs to emit cross-service events on the
-// `notification_events` queue (e.g. `inventory.stock.low` from the inventory
-// microservice, `retail.order.created` from retail in task-09).
 @Module({
   imports: [
     ConfigModule,

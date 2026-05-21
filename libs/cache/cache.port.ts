@@ -1,10 +1,6 @@
 // Cache abstraction. Domain code depends on this port; only adapters in this
 // lib (and integration tests) reach for the concrete `Cache` from
-// `@nestjs/cache-manager`. The contract is intentionally narrow: get/set/del
-// for direct manipulation, `wrap` for the read-through cache-aside pattern
-// formalized in ADR-002 / ADR-006 / ADR-016, plus `delByPrefix` for the
-// multi-key invalidation that the stock cache needs and `singleFlight` for
-// the in-process miss-dedupe primitive added by ADR-021.
+// `@nestjs/cache-manager`.
 export const CACHE_PORT = Symbol('CachePort');
 
 export interface ICachePort {

@@ -18,20 +18,14 @@ interface IRedisScanClient {
   unlink(keys: string[]): Promise<number>;
 }
 
-// Adapter implementing `ICachePort` against the existing
-// `@nestjs/cache-manager` + `@keyv/redis` setup. Preserves the ADR-002
-// cache-aside contract for product-stock, adds the generalized
-// invalidation primitive (`delByPrefix`) used by every aggregate cache
-// in task-11 / ADR-016, and the in-process `singleFlight` primitive
-// introduced by ADR-021 to dedupe concurrent miss-path loads.
 @Injectable()
 export class RedisCacheAdapter implements ICachePort {
-  // ADR-021: in-process map of in-flight loads. Single-replica deployments
-  // get full dedupe; multi-replica deployments dedupe per process (still
-  // a meaningful win — one replica's stampede no longer fans out to
-  // `concurrency × loader-cost`). A store-side advisory lock would push
+  // In-process map of in-flight loads for `singleFlight`. Single-replica
+  // deployments get full dedupe; multi-replica deployments dedupe per
+  // process — one replica's stampede no longer fans out to
+  // `concurrency × loader-cost`. A store-side advisory lock would push
   // dedupe across replicas at the cost of two extra Redis round-trips
-  // per miss; rejected for the current scale.
+  // per miss; rejected for the current scale (ADR-021).
   private readonly inFlight = new Map<string, Promise<unknown>>();
 
   constructor(

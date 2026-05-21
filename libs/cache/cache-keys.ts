@@ -96,8 +96,7 @@ export const CACHE_KEYS = {
   },
 } as const;
 
-// Backwards-compat alias kept for the one release that still imports it.
-// Removed in task-14.
+// Backwards-compat alias surface. Prefer `CACHE_KEYS` builders for new code.
 export class CacheHelper {
   public static keyPrefixes = {
     productStock: CACHE_KEYS.productStockPrefix,
