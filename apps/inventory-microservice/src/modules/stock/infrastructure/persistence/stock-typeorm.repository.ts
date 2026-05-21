@@ -49,12 +49,13 @@ export class StockTypeormRepository
     };
   }
 
-  // The repository adapter is the only place inside the stock module that
-  // downcasts `ITransactionScope` to its concrete `EntityManager` form. The
-  // application layer holds the scope as an opaque token; the type-erasure
-  // here is the seam between the hexagonal abstraction and the ORM.
   private toEntityManager(scope: ITransactionScope | undefined): EntityManager | undefined {
     return scope as unknown as EntityManager | undefined;
+  }
+
+  private repoFor(scope: ITransactionScope | undefined): Repository<ProductStock> {
+    const em = this.toEntityManager(scope);
+    return em ? em.getRepository(ProductStock) : this.productStockRepository;
   }
 
   public async findById(id: number): Promise<StockItem | null> {
@@ -77,12 +78,7 @@ export class StockTypeormRepository
     scope?: ITransactionScope,
   ): Promise<ProductStockGetResponseDto> {
     const { productId, storageIds, correlationId } = payload;
-    const entityManager = this.toEntityManager(scope);
-    const repository = entityManager
-      ? entityManager.getRepository(ProductStock)
-      : this.productStockRepository;
-
-    const builder = repository
+    const builder = this.repoFor(scope)
       .createQueryBuilder('ProductStock')
       .select([
         'ProductStock.storageId      AS storageId',
@@ -180,19 +176,14 @@ export class StockTypeormRepository
   ): Promise<void> {
     const { items, correlationId } = payload;
     const itemCount = items.length;
-    const entityManager = this.toEntityManager(scope);
 
     this.logger.debug(
-      { correlationId, itemCount, withinTransaction: !!entityManager },
+      { correlationId, itemCount, withinTransaction: !!scope },
       'Inserting product stock ledger rows',
     );
 
-    const repository = entityManager
-      ? entityManager.getRepository(ProductStock)
-      : this.productStockRepository;
-
     try {
-      await repository.insert(items);
+      await this.repoFor(scope).insert(items);
     } catch (error) {
       this.logger.error(
         { err: error as Error, correlationId, itemCount },

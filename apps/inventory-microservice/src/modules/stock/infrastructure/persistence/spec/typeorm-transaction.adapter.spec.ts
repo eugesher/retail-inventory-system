@@ -21,16 +21,12 @@ describe('TypeormTransactionAdapter', () => {
 
     expect(result).toBe('ok');
     expect(transaction).toHaveBeenCalledTimes(1);
-    // The scope handed to the work callback is the EntityManager TypeORM
-    // provided — type-erased to ITransactionScope at the seam.
     expect(receivedScope as unknown).toBe(innerEm);
   });
 
   it('propagates errors thrown inside the work callback (rollback semantics)', async () => {
     const innerEm = {} as EntityManager;
     const txErr = new Error('mid-tx-fail');
-    // Mirror the production behavior: when the inner callback rejects,
-    // TypeORM's `transaction` returns a rejected promise and never commits.
     const transaction = jest.fn(async (callback: (em: EntityManager) => unknown) => {
       await callback(innerEm);
     });

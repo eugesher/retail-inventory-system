@@ -36,9 +36,6 @@ const confirmedProduct = (id: number, productId: number): IOrderProductConfirm =
   statusId: OrderProductStatusEnum.CONFIRMED,
 });
 
-// Sentinel scope value. The repository port methods receive this and the
-// spec asserts on identity — the concrete shape is irrelevant here because
-// only the TypeORM adapter ever inspects an `ITransactionScope`.
 const txScope = {} as ITransactionScope;
 
 const makeTransactionPort = (): {

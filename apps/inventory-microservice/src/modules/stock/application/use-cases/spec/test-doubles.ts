@@ -13,7 +13,6 @@ import {
   IStockLockedTotalsPayload,
   IStockRepositoryPort,
   IStockWithInvalidationOptions,
-  ITransactionPort,
   ITransactionScope,
 } from '../../ports';
 
@@ -101,19 +100,6 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
   public save(stockItem: StockItem): Promise<StockItem> {
     this.seed(stockItem);
     return Promise.resolve(stockItem);
-  }
-}
-
-// In-memory transaction port. The fake scope is a singleton sentinel — the
-// in-memory repository ignores it, but use cases can still assert that
-// `runInTransaction` was called and that the inner work received a scope.
-export class InMemoryTransactionPort implements ITransactionPort {
-  public readonly scope = {} as ITransactionScope;
-  public callCount = 0;
-
-  public async runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
-    this.callCount += 1;
-    return work(this.scope);
   }
 }
 
