@@ -1,8 +1,6 @@
-// Wire-format routing keys. Renamed from snake_case to dotted
-// `<service>.<aggregate>.<action>` in task-04 (ADR-008). The values are kept
-// in sync with `ROUTING_KEYS` in libs/messaging — the enum stays here as the
-// source of truth for transport identifiers, and `ROUTING_KEYS` re-exposes
-// the same strings as a more idiomatic constants object for new callers.
+// Wire-format routing keys. Kept in lock-step with `ROUTING_KEYS` in
+// libs/messaging — this enum is the source of truth, `ROUTING_KEYS` is the
+// idiomatic constants surface for new callers.
 export enum MicroserviceMessagePatternEnum {
   INVENTORY_PRODUCT_STOCK_GET = 'inventory.product-stock.get',
   INVENTORY_ORDER_CONFIRM = 'inventory.order.confirm',

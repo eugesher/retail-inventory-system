@@ -21,22 +21,13 @@ class FakeAggregate extends AggregateRoot<number> {
 // repository can dispatch the events exactly once on save without risk of
 // double-publishing on a subsequent `save`.
 describe('AggregateRoot', () => {
-  it('records added events until pulled', () => {
+  it('buffers added events and drains them on pull', () => {
     const aggregate = new FakeAggregate(1);
     aggregate.emit();
     aggregate.emit();
 
-    expect(aggregate.domainEvents).toHaveLength(2);
-  });
-
-  it('drains events on pull', () => {
-    const aggregate = new FakeAggregate(1);
-    aggregate.emit();
-
-    const pulled = aggregate.pullDomainEvents();
-
-    expect(pulled).toHaveLength(1);
-    expect(aggregate.domainEvents).toHaveLength(0);
+    expect(aggregate.pullDomainEvents()).toHaveLength(2);
+    expect(aggregate.pullDomainEvents()).toHaveLength(0);
   });
 
   it('equates entities by id within the same subtype', () => {
