@@ -1,5 +1,4 @@
 import { PinoLogger } from 'nestjs-pino';
-import { EntityManager } from 'typeorm';
 
 import {
   INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD,
@@ -18,6 +17,8 @@ import {
   IStockEventsPublisherPort,
   IStockRepositoryPort,
   IStockWithInvalidationOptions,
+  ITransactionPort,
+  ITransactionScope,
 } from '../../ports';
 import { ReserveStockForOrderUseCase } from '../reserve-stock-for-order.use-case';
 
@@ -35,13 +36,22 @@ const confirmedProduct = (id: number, productId: number): IOrderProductConfirm =
   statusId: OrderProductStatusEnum.CONFIRMED,
 });
 
-const txEm = {} as EntityManager;
+// Sentinel scope value. The repository port methods receive this and the
+// spec asserts on identity — the concrete shape is irrelevant here because
+// only the TypeORM adapter ever inspects an `ITransactionScope`.
+const txScope = {} as ITransactionScope;
 
-const makeEntityManager = (): { entityManager: EntityManager; transaction: jest.Mock } => {
-  const transaction = jest.fn(async (callback: (em: EntityManager) => unknown) => {
-    await callback(txEm);
-  });
-  return { entityManager: { transaction } as unknown as EntityManager, transaction };
+const makeTransactionPort = (): {
+  transactionPort: ITransactionPort;
+  runInTransaction: jest.Mock;
+} => {
+  const runInTransaction = jest.fn((work: (scope: ITransactionScope) => unknown) =>
+    Promise.resolve(work(txScope)),
+  );
+  return {
+    transactionPort: { runInTransaction } as unknown as ITransactionPort,
+    runInTransaction,
+  };
 };
 
 // Faithful in-place stand-in for the production `StockCache.withInvalidation`
@@ -85,8 +95,8 @@ describe('ReserveStockForOrderUseCase', () => {
   let publisher: { publishStockLow: jest.Mock; publishStockReserved: jest.Mock };
   let logger: PinoLoggerMock;
   let useCase: ReserveStockForOrderUseCase;
-  let entityManager: EntityManager;
-  let transaction: jest.Mock;
+  let transactionPort: ITransactionPort;
+  let runInTransaction: jest.Mock;
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -101,9 +111,9 @@ describe('ReserveStockForOrderUseCase', () => {
       publishStockReserved: jest.fn().mockResolvedValue(undefined),
     };
     logger = makePinoLoggerMock();
-    ({ entityManager, transaction } = makeEntityManager());
+    ({ transactionPort, runInTransaction } = makeTransactionPort());
     useCase = new ReserveStockForOrderUseCase(
-      entityManager,
+      transactionPort,
       repository as unknown as IStockRepositoryPort,
       stockCache as unknown as IStockCachePort,
       publisher as unknown as IStockEventsPublisherPort,
@@ -121,7 +131,7 @@ describe('ReserveStockForOrderUseCase', () => {
       const result = await useCase.execute(payload);
 
       expect(result).toEqual([]);
-      expect(transaction).not.toHaveBeenCalled();
+      expect(runInTransaction).not.toHaveBeenCalled();
       expect(repository.appendDeltas).not.toHaveBeenCalled();
       expect(withInvalidation).not.toHaveBeenCalled();
       expect(invalidatePrefixes).not.toHaveBeenCalled();
@@ -150,10 +160,10 @@ describe('ReserveStockForOrderUseCase', () => {
 
       expect(result).toEqual([11, 12]);
 
-      // Locked totals were fetched within the transaction.
+      // Locked totals were fetched within the transaction scope.
       expect(repository.lockedTotalsByProduct).toHaveBeenCalledWith(
         { productIds: [1, 2], correlationId },
-        txEm,
+        txScope,
       );
 
       // appendDeltas received exactly one ledger row per pending product.
@@ -178,7 +188,7 @@ describe('ReserveStockForOrderUseCase', () => {
           ],
           correlationId,
         },
-        txEm,
+        txScope,
       );
 
       // The helper was invoked once with the correlationId option flowed through.
@@ -263,7 +273,7 @@ describe('ReserveStockForOrderUseCase', () => {
         expect.objectContaining({
           items: [expect.objectContaining({ productId: 1, orderProductId: 11, quantity: -1 })],
         }),
-        txEm,
+        txScope,
       );
       expect(invalidatePrefixes).toHaveBeenCalledWith(
         [{ productId: 1, storageId: INVENTORY_DEFAULT_STORAGE }],
@@ -281,7 +291,7 @@ describe('ReserveStockForOrderUseCase', () => {
         correlationId,
       };
       const err = new Error('tx-fail');
-      transaction.mockRejectedValue(err);
+      runInTransaction.mockRejectedValue(err);
 
       await expect(useCase.execute(payload)).rejects.toBe(err);
 
@@ -326,12 +336,14 @@ describe('ReserveStockForOrderUseCase', () => {
       repository.lockedTotalsByProduct.mockResolvedValue(new Map([[1, high]]));
       repository.appendDeltas.mockResolvedValue(undefined);
       const commitErr = new Error('commit-fail');
-      // Override the transaction mock to invoke the inner callback (so
+      // Override the transaction port to invoke the inner callback (so
       // appendDeltas runs) and then reject as if the commit failed.
-      transaction.mockImplementationOnce(async (callback: (em: EntityManager) => unknown) => {
-        await callback(txEm);
-        throw commitErr;
-      });
+      runInTransaction.mockImplementationOnce(
+        async (callback: (scope: ITransactionScope) => unknown) => {
+          await callback(txScope);
+          throw commitErr;
+        },
+      );
 
       await expect(useCase.execute(payload)).rejects.toBe(commitErr);
 

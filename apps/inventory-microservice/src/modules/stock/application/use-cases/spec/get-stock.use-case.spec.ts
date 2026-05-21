@@ -1,10 +1,9 @@
 import { PinoLogger } from 'nestjs-pino';
-import { EntityManager } from 'typeorm';
 
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { IStockCachePort, IStockRepositoryPort } from '../../ports';
+import { IStockCachePort, IStockRepositoryPort, ITransactionScope } from '../../ports';
 import { GetStockUseCase } from '../get-stock.use-case';
 
 const correlationId = 'corr-1';
@@ -80,19 +79,19 @@ describe('GetStockUseCase', () => {
       );
     });
 
-    it('skips the cache entirely when an entity manager is provided', async () => {
-      const em = {} as EntityManager;
+    it('skips the cache entirely when a transaction scope is provided', async () => {
+      const scope = {} as ITransactionScope;
       repository.aggregateForProduct.mockResolvedValue(sampleDto);
 
-      await useCase.execute({ productId: 1, correlationId }, { entityManager: em });
+      await useCase.execute({ productId: 1, correlationId }, { scope });
 
       expect(stockCache.getOrLoad).not.toHaveBeenCalled();
       expect(repository.aggregateForProduct).toHaveBeenCalledWith(
         { productId: 1, storageIds: undefined, correlationId },
-        em,
+        scope,
       );
       expect(logger.debug).toHaveBeenCalledWith(
-        { correlationId, productId: 1, reason: 'entityManager' },
+        { correlationId, productId: 1, reason: 'transactionScope' },
         'Cache skipped for stock query',
       );
     });
@@ -105,7 +104,7 @@ describe('GetStockUseCase', () => {
       expect(stockCache.getOrLoad).not.toHaveBeenCalled();
       expect(repository.aggregateForProduct).toHaveBeenCalledWith(
         { productId: 1, storageIds: undefined, correlationId },
-        // Skip-cache branch forwards `entityManager` positionally; when only
+        // Skip-cache branch forwards `scope` positionally; when only
         // `ignoreCache` is set the second arg is `undefined`.
         undefined,
       );
@@ -115,17 +114,14 @@ describe('GetStockUseCase', () => {
       );
     });
 
-    it('prefers reason:entityManager when both options are set', async () => {
-      const em = {} as EntityManager;
+    it('prefers reason:transactionScope when both options are set', async () => {
+      const scope = {} as ITransactionScope;
       repository.aggregateForProduct.mockResolvedValue(sampleDto);
 
-      await useCase.execute(
-        { productId: 1, correlationId },
-        { entityManager: em, ignoreCache: true },
-      );
+      await useCase.execute({ productId: 1, correlationId }, { scope, ignoreCache: true });
 
       expect(logger.debug).toHaveBeenCalledWith(
-        { correlationId, productId: 1, reason: 'entityManager' },
+        { correlationId, productId: 1, reason: 'transactionScope' },
         'Cache skipped for stock query',
       );
     });

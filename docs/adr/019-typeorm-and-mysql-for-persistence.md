@@ -37,10 +37,11 @@ The decision matters because it constrains the migration workflow
 test infrastructure (`yarn test:infra:up` provisions a MySQL container,
 not Postgres), the naming convention (snake_case columns mapped to
 camelCase TypeScript fields by `SnakeNamingStrategy`), and the
-hexagonal-port surface (the leaked `EntityManager` exception
-`ARCH-LINT-EX-01` documented in
-[ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6 is rooted
-in TypeORM's unit-of-work shape).
+hexagonal-port surface (the previously-leaked `EntityManager` —
+tracked as `ARCH-LINT-EX-01` in
+[ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6 — has
+since been wrapped behind an `ITransactionPort` so the application
+layer no longer depends on TypeORM's unit-of-work shape).
 
 ---
 
@@ -97,11 +98,12 @@ TypeORM-free. Their implementations
 (`StockTypeormRepository`, `OrderTypeormRepository`,
 `UserTypeormRepository`) live in `infrastructure/persistence/` and are
 the only files allowed to import `typeorm`, `@nestjs/typeorm`, or use
-`InjectRepository`. The exception
-([ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6,
-`ARCH-LINT-EX-01`) is the leaked `EntityManager` typing on the stock
-repository port — a future `ITransactionPort` refactor in task-14 / -15
-closes it.
+`InjectRepository`. The previously-tracked `ARCH-LINT-EX-01` exception
+([ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6) — a
+leaked `EntityManager` typing on the stock repository port — has since
+been closed by the `ITransactionPort` abstraction: the port now accepts
+an opaque `ITransactionScope`, and the TypeORM downcast lives only in
+`TypeormTransactionAdapter` and `StockTypeormRepository`.
 
 ---
 
@@ -199,10 +201,11 @@ trivial.
   query builder, and `EntityManager` calls. Mitigated by pinning the
   major version in `package.json`; revisited when a real upgrade need
   arises.
-- The `EntityManager`-as-unit-of-work pattern leaks across the
-  application port surface in one place — the documented
-  `ARCH-LINT-EX-01` exception. The clean fix is an `ITransactionPort`
-  abstraction; tracked for task-14 / -15.
+- The `EntityManager`-as-unit-of-work pattern is hidden behind the
+  application-layer `ITransactionPort` (opaque `ITransactionScope`); the
+  TypeORM downcast lives only in `TypeormTransactionAdapter` and
+  `StockTypeormRepository`. The previously-documented `ARCH-LINT-EX-01`
+  exception is closed.
 - Auto-increment IDs (per ADR-005 §3) constrain the project away from
   client-generated identifiers and from sharding by primary key. Both
   are revisitable if a future ADR requires UUID v7.
@@ -224,9 +227,10 @@ trivial.
 - [ADR-002](002-redis-cache-aside-product-stock.md) — caches a TypeORM
   aggregation; the contract the cache adapters preserve.
 - [ADR-012](012-stock-aggregate-and-port-adapter.md) — stock TypeORM
-  repository + the documented `EntityManager` leak.
+  repository whose `EntityManager` leak is now closed behind
+  `ITransactionPort`.
 - [ADR-013](013-order-aggregate-and-cross-service-confirm.md) — order
   TypeORM repository + the cross-aggregate transactional confirm flow.
 - [ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6 — the
-  `ARCH-LINT-EX-01` exception this ADR's ORM choice is the upstream
-  cause of.
+  previously-tracked `ARCH-LINT-EX-01` exception (rooted in this ADR's
+  ORM choice) is now closed by the `ITransactionPort` abstraction.

@@ -1,8 +1,9 @@
 import { PinoLogger } from 'nestjs-pino';
-import { EntityManager, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
+import { ITransactionScope } from '../../../application/ports';
 import { ProductStock } from '../product-stock.entity';
 import { StockTypeormRepository } from '../stock-typeorm.repository';
 
@@ -23,6 +24,12 @@ const makeQueryBuilder = (rawMany: jest.Mock): Record<string, jest.Mock> => {
   }
   return qb;
 };
+
+// The adapter is the only consumer that downcasts an `ITransactionScope` to
+// an `EntityManager`. The spec fakes the scope as a duck-typed object whose
+// `getRepository` / `createQueryBuilder` methods stand in for the manager,
+// then casts through `unknown` to satisfy the opaque type.
+const asScope = (em: object): ITransactionScope => em as unknown as ITransactionScope;
 
 describe('StockTypeormRepository', () => {
   let injectedRepo: jest.Mocked<
@@ -91,14 +98,14 @@ describe('StockTypeormRepository', () => {
       });
     });
 
-    it('uses the entity-manager repository when one is provided', async () => {
+    it('uses the scope-backed repository when a transaction scope is provided', async () => {
       const rawMany = jest.fn().mockResolvedValue([]);
       const qb = makeQueryBuilder(rawMany);
       const txRepo = { createQueryBuilder: jest.fn().mockReturnValue(qb) };
       const getRepository = jest.fn().mockReturnValue(txRepo);
-      const entityManager = { getRepository } as unknown as EntityManager;
+      const scope = asScope({ getRepository });
 
-      await repository.aggregateForProduct({ productId: 1, correlationId }, entityManager);
+      await repository.aggregateForProduct({ productId: 1, correlationId }, scope);
 
       expect(getRepository).toHaveBeenCalledWith(ProductStock);
       expect(txRepo.createQueryBuilder).toHaveBeenCalled();
@@ -135,11 +142,11 @@ describe('StockTypeormRepository', () => {
   describe('lockedTotalsByProduct', () => {
     it('returns an empty Map without touching the database when productIds is empty', async () => {
       const createQueryBuilder = jest.fn();
-      const entityManager = { createQueryBuilder } as unknown as EntityManager;
+      const scope = asScope({ createQueryBuilder });
 
       const result = await repository.lockedTotalsByProduct(
         { productIds: [], correlationId },
-        entityManager,
+        scope,
       );
 
       expect(result.size).toBe(0);
@@ -152,13 +159,11 @@ describe('StockTypeormRepository', () => {
         { productId: '2', totalQuantity: '3' },
       ]);
       const qb = makeQueryBuilder(rawMany);
-      const entityManager = {
-        createQueryBuilder: jest.fn().mockReturnValue(qb),
-      } as unknown as EntityManager;
+      const scope = asScope({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
 
       const result = await repository.lockedTotalsByProduct(
         { productIds: [1, 2], correlationId },
-        entityManager,
+        scope,
       );
 
       expect(qb.setLock).toHaveBeenCalledWith('pessimistic_write');
@@ -174,12 +179,10 @@ describe('StockTypeormRepository', () => {
       const err = new Error('lock-fail');
       const rawMany = jest.fn().mockRejectedValue(err);
       const qb = makeQueryBuilder(rawMany);
-      const entityManager = {
-        createQueryBuilder: jest.fn().mockReturnValue(qb),
-      } as unknown as EntityManager;
+      const scope = asScope({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
 
       await expect(
-        repository.lockedTotalsByProduct({ productIds: [1], correlationId }, entityManager),
+        repository.lockedTotalsByProduct({ productIds: [1], correlationId }, scope),
       ).rejects.toBe(err);
 
       expect(logger.error).toHaveBeenCalledWith(
@@ -207,7 +210,7 @@ describe('StockTypeormRepository', () => {
       },
     ];
 
-    it('inserts via the injected repository when no entity manager is provided', async () => {
+    it('inserts via the injected repository when no transaction scope is provided', async () => {
       injectedRepo.insert.mockResolvedValue(undefined as never);
 
       await repository.appendDeltas({ items, correlationId });
@@ -223,12 +226,12 @@ describe('StockTypeormRepository', () => {
       );
     });
 
-    it('inserts via the entity-manager repository when one is provided', async () => {
+    it('inserts via the scope-backed repository when a transaction scope is provided', async () => {
       const txRepo = { insert: jest.fn().mockResolvedValue(undefined) };
       const getRepository = jest.fn().mockReturnValue(txRepo);
-      const entityManager = { getRepository } as unknown as EntityManager;
+      const scope = asScope({ getRepository });
 
-      await repository.appendDeltas({ items, correlationId }, entityManager);
+      await repository.appendDeltas({ items, correlationId }, scope);
 
       expect(getRepository).toHaveBeenCalledWith(ProductStock);
       expect(txRepo.insert).toHaveBeenCalledWith(items);

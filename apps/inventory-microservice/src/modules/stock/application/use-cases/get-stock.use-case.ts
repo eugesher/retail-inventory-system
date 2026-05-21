@@ -1,16 +1,21 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { EntityManager } from 'typeorm';
 
 import {
   IProductStockGetPayload,
   ProductStockGetResponseDto,
 } from '@retail-inventory-system/contracts';
 
-import { IStockCachePort, IStockRepositoryPort, STOCK_CACHE, STOCK_REPOSITORY } from '../ports';
+import {
+  IStockCachePort,
+  IStockRepositoryPort,
+  ITransactionScope,
+  STOCK_CACHE,
+  STOCK_REPOSITORY,
+} from '../ports';
 
 interface IGetStockOptions {
-  entityManager?: EntityManager;
+  scope?: ITransactionScope;
   ignoreCache?: boolean;
 }
 
@@ -30,14 +35,14 @@ export class GetStockUseCase {
     options: IGetStockOptions = {},
   ): Promise<ProductStockGetResponseDto> {
     const { productId, storageIds, correlationId } = payload;
-    const { entityManager, ignoreCache = false } = options;
+    const { scope, ignoreCache = false } = options;
 
     this.logger.info(payload, 'Received RPC: get product stock');
 
     try {
       // A read inside a caller-owned transaction can see uncommitted rows;
       // caching that data would corrupt the shared cache for other callers.
-      const skipReason = entityManager ? 'entityManager' : ignoreCache ? 'ignoreCache' : null;
+      const skipReason = scope ? 'transactionScope' : ignoreCache ? 'ignoreCache' : null;
 
       if (skipReason !== null) {
         this.logger.debug(
@@ -45,10 +50,7 @@ export class GetStockUseCase {
           'Cache skipped for stock query',
         );
 
-        return this.repository.aggregateForProduct(
-          { productId, storageIds, correlationId },
-          entityManager,
-        );
+        return this.repository.aggregateForProduct({ productId, storageIds, correlationId }, scope);
       }
 
       // `getOrLoad` provides the cache-aside read-through, fans concurrent

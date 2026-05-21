@@ -136,7 +136,7 @@ const DEPENDENCY_RULES = [
     from: { type: 'application-use-case' },
     disallow: {
       dependency: {
-        module: ['@keyv/redis', 'amqplib', '@nestjs/cache-manager', '@nestjs/typeorm'],
+        module: ['@keyv/redis', 'amqplib', '@nestjs/cache-manager', '@nestjs/typeorm', 'typeorm'],
       },
     },
   },
@@ -225,6 +225,18 @@ describe('boundaries rules (ADR-017)', () => {
 
     it('application use-case may not import @keyv/redis', () => {
       const code = `import KeyvRedis from '@keyv/redis';\nexport const x = KeyvRedis;\n`;
+      const messages = lint(
+        code,
+        'apps/inventory-microservice/src/modules/stock/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('application use-case may not import typeorm', () => {
+      // The application layer reaches transaction scope via ITransactionPort,
+      // not by importing EntityManager directly. This fixture is the bumper
+      // that catches a regression of the pre-ITransactionPort exception.
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
       const messages = lint(
         code,
         'apps/inventory-microservice/src/modules/stock/application/use-cases/__fixture__.ts',

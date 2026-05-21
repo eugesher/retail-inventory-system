@@ -1,11 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-// TODO: replace the raw `@nestjs/typeorm` + `EntityManager` seam with an
-// `ITransactionPort` so this use case no longer reaches into the ORM
-// directly. Tracked as ARCH-LINT-EX-01 in
-// docs/adr/017-architecture-lint-via-eslint-boundaries.md §6.
-import { InjectEntityManager } from '@nestjs/typeorm'; // eslint-disable-line boundaries/dependencies
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { EntityManager } from 'typeorm';
 
 import {
   INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD,
@@ -21,16 +15,18 @@ import {
   IStockCachePort,
   IStockEventsPublisherPort,
   IStockRepositoryPort,
+  ITransactionPort,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_REPOSITORY,
+  TRANSACTION_PORT,
 } from '../ports';
 
 @Injectable()
 export class ReserveStockForOrderUseCase {
   constructor(
-    @InjectEntityManager()
-    private readonly entityManager: EntityManager,
+    @Inject(TRANSACTION_PORT)
+    private readonly transactionPort: ITransactionPort,
     @Inject(STOCK_REPOSITORY)
     private readonly repository: IStockRepositoryPort,
     @Inject(STOCK_CACHE)
@@ -73,10 +69,10 @@ export class ReserveStockForOrderUseCase {
       items = await this.stockCache.withInvalidation(
         async () => {
           const acc: IStockAppendDeltaItem[] = [];
-          await this.entityManager.transaction(async (entityManager) => {
+          await this.transactionPort.runInTransaction(async (scope) => {
             const stockMap = await this.repository.lockedTotalsByProduct(
               { productIds, correlationId },
-              entityManager,
+              scope,
             );
 
             for (const item of pendingItems) {
@@ -100,7 +96,7 @@ export class ReserveStockForOrderUseCase {
             }
 
             if (acc.length > 0) {
-              await this.repository.appendDeltas({ items: acc, correlationId }, entityManager);
+              await this.repository.appendDeltas({ items: acc, correlationId }, scope);
 
               this.logger.info(
                 {

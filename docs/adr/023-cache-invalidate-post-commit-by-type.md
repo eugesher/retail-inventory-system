@@ -85,18 +85,16 @@ Option A wins on three counts:
    hook onto `IStockRepositoryPort` would couple the repository
    surface to a cache-only concern that no other repository caller
    uses.
-2. **Composes cleanly with the future `ITransactionPort`** (the
-   eventual replacement for the `EntityManager` leak documented in
-   [ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6 as
-   ARCH-LINT-EX-01). The helper takes a `work: () => Promise<T>`
-   callback — it knows nothing about TypeORM. When
-   `entityManager.transaction(...)` is replaced by
-   `transactionPort.run(work)`, the helper signature does not change:
-   the use case wraps the new `transactionPort.run(...)` call inside
-   `withInvalidation(...)` and the contract holds verbatim.
-   Option B would have encoded the contract on the
-   `IStockRepositoryPort.afterCommit` API, which the
-   `ITransactionPort` refactor would then need to migrate again.
+2. **Composes cleanly with `ITransactionPort`** (the replacement for
+   the `EntityManager` leak previously documented in
+   [ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6 — the
+   exception is now closed). The helper takes a `work: () => Promise<T>`
+   callback — it knows nothing about TypeORM. `ReserveStockForOrderUseCase`
+   today wraps `transactionPort.runInTransaction(...)` inside
+   `withInvalidation(...)`; the helper signature did not need to change
+   when the transaction seam moved. Option B would have encoded the
+   contract on the `IStockRepositoryPort.afterCommit` API, which the
+   `ITransactionPort` refactor would then have needed to migrate again.
 3. **The type signature carries the discovery → invalidate ordering.**
    `resolveItems(result: T)` takes the *resolved* `work` result. A
    misuse — deriving items before `work` runs — cannot be expressed.
@@ -202,11 +200,12 @@ correctly skips invalidation.
   cache for the `orders` aggregate, the same shape applies: an
   `IOrderCachePort.withInvalidation(work, resolveItems, opts)` helper
   encodes the same rule with zero new comment blocks.
-- **Composes cleanly with the future `ITransactionPort`** (ADR-017 §6
-  ARCH-LINT-EX-01). The helper's `work: () => Promise<T>` callback is
-  transaction-API-agnostic; the use case can swap
-  `entityManager.transaction(...)` for `transactionPort.run(...)`
-  without touching `IStockCachePort`.
+- **Composes cleanly with `ITransactionPort`** (the abstraction that
+  closed the previous ADR-017 §6 `ARCH-LINT-EX-01` exception). The
+  helper's `work: () => Promise<T>` callback is transaction-API-agnostic;
+  the use case swaps `entityManager.transaction(...)` for
+  `transactionPort.runInTransaction(...)` without touching
+  `IStockCachePort`.
 - **Adapter tests get a sharper seam.** The
   `stock.cache.spec.ts` → `describe('withInvalidation')` block
   asserts ordering at the helper's own boundary
@@ -229,12 +228,7 @@ correctly skips invalidation.
 
 ### Open
 
-- **`ITransactionPort` (ARCH-LINT-EX-01).** The
-  `@nestjs/typeorm` + `EntityManager` seam in
-  `ReserveStockForOrderUseCase` is still in place; the
-  `withInvalidation` helper does not change it. The two suppressed
-  imports tracked in ADR-017 §6 remain — the work to close that
-  exception is independent of this ADR.
+No open items.
 
 ## References
 
@@ -244,10 +238,11 @@ correctly skips invalidation.
 - [ADR-016](016-cache-aside-generalized.md) — the centralised
   `delByPrefix` invalidation primitive that `withInvalidation` now
   delegates to internally.
-- [ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6 —
-  ARCH-LINT-EX-01, the `EntityManager` leak that the future
-  `ITransactionPort` will close. The helper composes cleanly with that
-  refactor.
+- [ADR-017](017-architecture-lint-via-eslint-boundaries.md) §6 — the
+  previous `ARCH-LINT-EX-01` exception (the `EntityManager` leak) is
+  now closed by the `ITransactionPort` abstraction. The
+  `withInvalidation` helper composes verbatim with the new transaction
+  seam.
 - [ADR-022](022-cache-keys-tenant-and-schema-version.md) — the
   schema-version + tenant key segments that the private
   `invalidatePrefixes` still fans out across.

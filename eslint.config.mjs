@@ -292,10 +292,9 @@ const dependencyRules = [
   },
   // Application use-cases — no concrete adapters / Redis / Rabbit clients.
   // `@nestjs/common` is intentionally allowed (use cases are Nest providers).
-  // `@nestjs/typeorm` is forbidden — repository ports are the seam. Note:
-  // `reserve-stock-for-order.use-case.ts` currently injects EntityManager via
-  // `@nestjs/typeorm`; that ONE file carries an inline disable + TODO
-  // pending the transaction-port refactor (task-14).
+  // Both `@nestjs/typeorm` and bare `typeorm` are forbidden — the transaction
+  // seam is the application-layer `ITransactionPort`; repository ports are
+  // the data-access seam. Use cases never touch TypeORM types directly.
   {
     from: { type: 'application-use-case' },
     disallow: {
@@ -309,14 +308,14 @@ const dependencyRules = [
           'amqp-connection-manager',
           '@nestjs/cache-manager',
           '@nestjs/typeorm',
+          'typeorm',
           'axios',
         ],
       },
     },
   },
-  // Application ports — domain types only. `stock.repository.port.ts`
-  // imports `EntityManager` from typeorm for transaction scoping; the
-  // matching inline disable carries the ARCH-LINT-EX-01 tracking code.
+  // Application ports — domain types only. No framework or transport
+  // packages may appear here; the ports are pure TypeScript contracts.
   {
     from: { type: 'application-port' },
     disallow: {

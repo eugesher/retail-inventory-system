@@ -1,8 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { EntityManager } from 'typeorm';
 
-import { IStockAppendDeltasPayload, IStockRepositoryPort, STOCK_REPOSITORY } from '../ports';
+import {
+  IStockAppendDeltasPayload,
+  IStockRepositoryPort,
+  ITransactionScope,
+  STOCK_REPOSITORY,
+} from '../ports';
 
 // Internal-only use case for appending ledger rows directly (e.g. manual
 // stock adjustments by ops, future reconciliation jobs). Today it is
@@ -20,15 +24,15 @@ export class AddStockUseCase {
 
   public async execute(
     payload: IStockAppendDeltasPayload,
-    entityManager?: EntityManager,
+    scope?: ITransactionScope,
   ): Promise<void> {
     const { items, correlationId } = payload;
 
     this.logger.debug(
-      { correlationId, itemCount: items.length, withinTransaction: !!entityManager },
+      { correlationId, itemCount: items.length, withinTransaction: !!scope },
       'Delegating to stock repository for ledger append',
     );
 
-    return this.repository.appendDeltas(payload, entityManager);
+    return this.repository.appendDeltas(payload, scope);
   }
 }

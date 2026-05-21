@@ -1,5 +1,3 @@
-import { EntityManager } from 'typeorm';
-
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 
 import { StockItem, StockLowEvent, StockReservedEvent } from '../../../domain';
@@ -15,6 +13,8 @@ import {
   IStockLockedTotalsPayload,
   IStockRepositoryPort,
   IStockWithInvalidationOptions,
+  ITransactionPort,
+  ITransactionScope,
 } from '../../ports';
 
 // In-memory stock repository implementation. Stores StockItem aggregates by
@@ -44,9 +44,9 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
 
   public aggregateForProduct(
     payload: IStockAggregateForProductPayload,
-    entityManager?: EntityManager,
+    scope?: ITransactionScope,
   ): Promise<ProductStockGetResponseDto> {
-    void entityManager;
+    void scope;
     const matching = [...this.items.values()].filter(
       (item) =>
         item.productId === payload.productId &&
@@ -66,9 +66,9 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
 
   public lockedTotalsByProduct(
     payload: IStockLockedTotalsPayload,
-    entityManager: EntityManager,
+    scope: ITransactionScope,
   ): Promise<Map<number, number>> {
-    void entityManager;
+    void scope;
     const totals = new Map<number, number>();
     for (const item of this.items.values()) {
       if (!payload.productIds.includes(item.productId)) continue;
@@ -79,9 +79,9 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
 
   public appendDeltas(
     payload: IStockAppendDeltasPayload,
-    entityManager?: EntityManager,
+    scope?: ITransactionScope,
   ): Promise<void> {
-    void entityManager;
+    void scope;
     for (const item of payload.items) {
       this.deltas.push(item);
       const key = this.key(item.productId, item.storageId);
@@ -101,6 +101,19 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
   public save(stockItem: StockItem): Promise<StockItem> {
     this.seed(stockItem);
     return Promise.resolve(stockItem);
+  }
+}
+
+// In-memory transaction port. The fake scope is a singleton sentinel — the
+// in-memory repository ignores it, but use cases can still assert that
+// `runInTransaction` was called and that the inner work received a scope.
+export class InMemoryTransactionPort implements ITransactionPort {
+  public readonly scope = {} as ITransactionScope;
+  public callCount = 0;
+
+  public async runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
+    this.callCount += 1;
+    return work(this.scope);
   }
 }
 

@@ -3,7 +3,12 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import { MicroserviceClientNotificationModule } from '@retail-inventory-system/messaging';
 
-import { STOCK_CACHE, STOCK_EVENTS_PUBLISHER, STOCK_REPOSITORY } from '../application/ports';
+import {
+  STOCK_CACHE,
+  STOCK_EVENTS_PUBLISHER,
+  STOCK_REPOSITORY,
+  TRANSACTION_PORT,
+} from '../application/ports';
 import {
   AddStockUseCase,
   GetStockUseCase,
@@ -18,9 +23,10 @@ import {
   ProductStockAction,
   Storage,
   StockTypeormRepository,
+  TypeormTransactionAdapter,
 } from './persistence';
 
-// Per-module wiring for the stock bounded context. Binds the three port
+// Per-module wiring for the stock bounded context. Binds the four port
 // symbols to their concrete adapters; `useExisting` shares the single
 // adapter instance with code that injects the concrete class directly
 // (e.g. integration tests that need to assert on adapter state).
@@ -39,6 +45,9 @@ import {
 
     StockRabbitmqPublisher,
     { provide: STOCK_EVENTS_PUBLISHER, useExisting: StockRabbitmqPublisher },
+
+    TypeormTransactionAdapter,
+    { provide: TRANSACTION_PORT, useExisting: TypeormTransactionAdapter },
 
     AddStockUseCase,
     GetStockUseCase,

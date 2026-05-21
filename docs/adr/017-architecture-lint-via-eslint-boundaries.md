@@ -73,7 +73,7 @@ Cross-service and cross-module isolation are encoded by the `{{from.captured.app
 Only layers with documented denylists carry external rules. Each entry pins to a `from: { type: 'X' }` source and lists modules under `disallow: { dependency: { module: [...] } }`. Highlights:
 
 - **`domain`** denies `@nestjs/*`, `typeorm`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `axios`, `nestjs-pino`, `pino`, `pino-http`.
-- **`application-use-case`** denies `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `@nestjs/cache-manager`, `@nestjs/typeorm`, `axios`. `typeorm` itself is intentionally allowed at this layer because of the `EntityManager` transaction seam; see §6.
+- **`application-use-case`** denies `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `@nestjs/cache-manager`, `@nestjs/typeorm`, `typeorm`, `axios`. The transaction seam is the application-layer `ITransactionPort` (`apps/inventory-microservice/src/modules/stock/application/ports/transaction.port.ts`); use cases acquire an opaque `ITransactionScope` from it and pass that scope into repository port methods — they never reach for `EntityManager` directly. Closing the previous `ARCH-LINT-EX-01` exception is what unlocked the tighter denylist; see §6.
 - **`application-port`** denies all of `@nestjs/{common,core,microservices,typeorm,cache-manager}`, `typeorm`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `axios`, `nestjs-pino`.
 - **`application-dto`** denies `@nestjs/*`, `typeorm`, `@keyv/redis`, `cacheable`, `redis`, `amqplib`, `axios`.
 - **`presentation`** denies `typeorm`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `@nestjs/typeorm`, `amqplib`, `amqp-connection-manager`. Nest controller/swagger/microservices imports stay allowed — that's the entire job of this layer.
@@ -88,16 +88,14 @@ If clearer per-rule failure messages become valuable later, a sibling script `ya
 
 ### 6. Documented exceptions
 
-The strict reading of the recommendation table leaves a few real violations that are not worth fixing today. They are documented in-file with a `TODO` and a tracking code, and re-enumerated below:
+No outstanding exceptions.
 
-| Code              | File                                                                                                          | What                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `ARCH-LINT-EX-01` | `apps/inventory-microservice/src/modules/stock/application/ports/stock.repository.port.ts`                    | `import { EntityManager } from 'typeorm'` for the transaction-scope arg on port methods.      |
-| `ARCH-LINT-EX-01` | `apps/inventory-microservice/src/modules/stock/application/use-cases/reserve-stock-for-order.use-case.ts`     | `import { InjectEntityManager } from '@nestjs/typeorm'` to grab the same EntityManager.       |
+The previous `ARCH-LINT-EX-01` exception is closed. It covered two files in the stock module that leaked TypeORM's `EntityManager` across the application/infrastructure boundary so the `ReserveStockForOrderUseCase` could compose transactional reads/writes inside a single `transaction(...)` callback:
 
-Both are the same root cause: the unit-of-work the use case opens is an `EntityManager` from TypeORM, leaked across the port surface so callers can compose transactional reads/writes inside a single `transaction(...)` callback. The clean fix is an `ITransactionPort` abstraction that the use case acquires and the repository accepts as an opaque token. The refactor is bigger than task-12's scope and naturally belongs with the task-14 shim cleanup, when the `libs/common` re-exports finally come down and the application layer can settle on its final port surface.
+- `apps/inventory-microservice/src/modules/stock/application/ports/stock.repository.port.ts` — `import { EntityManager } from 'typeorm'` for the transaction-scope arg on port methods.
+- `apps/inventory-microservice/src/modules/stock/application/use-cases/reserve-stock-for-order.use-case.ts` — `import { InjectEntityManager } from '@nestjs/typeorm'` to grab the same `EntityManager`.
 
-Each exception carries an `eslint-disable-line boundaries/dependencies` plus a TODO comment naming the tracking code. Re-running `yarn lint` with the disable removed re-surfaces the violation in seconds — the suppression is intentional and reversible.
+The fix introduces an `ITransactionPort` abstraction (`apps/inventory-microservice/src/modules/stock/application/ports/transaction.port.ts`) with a `runInTransaction((scope: ITransactionScope) => Promise<T>) => Promise<T>` method and an opaque `ITransactionScope` marker type. Repository port methods now accept `ITransactionScope` instead of `EntityManager`. The downcast back to `EntityManager` lives only in the two infrastructure-layer adapters: `TypeormTransactionAdapter` (`apps/inventory-microservice/src/modules/stock/infrastructure/persistence/typeorm-transaction.adapter.ts`) hands the manager to the work callback under the opaque scope type; `StockTypeormRepository` casts it back when it needs the manager for query construction. With both leaks removed, the `application-use-case` denylist tightens to forbid both `@nestjs/typeorm` and bare `typeorm`, and `application-port` no longer carries an inline ESLint disable.
 
 ### 7. Regression test
 

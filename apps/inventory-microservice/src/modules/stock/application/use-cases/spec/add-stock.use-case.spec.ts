@@ -1,9 +1,8 @@
 import { PinoLogger } from 'nestjs-pino';
-import { EntityManager } from 'typeorm';
 
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { IStockAppendDeltaItem, IStockRepositoryPort } from '../../ports';
+import { IStockAppendDeltaItem, IStockRepositoryPort, ITransactionScope } from '../../ports';
 import { AddStockUseCase } from '../add-stock.use-case';
 
 const correlationId = 'corr-1';
@@ -40,7 +39,7 @@ describe('AddStockUseCase', () => {
   });
 
   describe('execute', () => {
-    it('delegates to the repository without an entity manager and debug-logs withinTransaction:false', async () => {
+    it('delegates to the repository without a transaction scope and debug-logs withinTransaction:false', async () => {
       repository.appendDeltas.mockResolvedValue(undefined);
 
       await useCase.execute({ items, correlationId });
@@ -52,13 +51,13 @@ describe('AddStockUseCase', () => {
       );
     });
 
-    it('passes the entity manager through and debug-logs withinTransaction:true', async () => {
-      const em = {} as EntityManager;
+    it('passes the transaction scope through and debug-logs withinTransaction:true', async () => {
+      const scope = {} as ITransactionScope;
       repository.appendDeltas.mockResolvedValue(undefined);
 
-      await useCase.execute({ items, correlationId }, em);
+      await useCase.execute({ items, correlationId }, scope);
 
-      expect(repository.appendDeltas).toHaveBeenCalledWith({ items, correlationId }, em);
+      expect(repository.appendDeltas).toHaveBeenCalledWith({ items, correlationId }, scope);
       expect(logger.debug).toHaveBeenCalledWith(
         { correlationId, itemCount: 2, withinTransaction: true },
         'Delegating to stock repository for ledger append',
