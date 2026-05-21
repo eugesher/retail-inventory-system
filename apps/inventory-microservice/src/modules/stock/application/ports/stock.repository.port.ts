@@ -29,11 +29,8 @@ export interface IStockLockedTotalsPayload {
   correlationId?: string;
 }
 
-// Inbound port for the stock aggregate's persistence. Adapter is the
-// TypeORM-backed `StockTypeormRepository`; use cases never reference the
-// concrete repo or the `product_stock` entity directly. The optional `scope`
-// arg on the read/write paths is the seam transactional callers use to
-// attach the operation to an open unit-of-work (see ITransactionPort).
+// `scope` on the read/write paths attaches the operation to an open
+// unit-of-work — see ITransactionPort.
 export interface IStockRepositoryPort {
   findById(id: number): Promise<StockItem | null>;
   findBySku(sku: string): Promise<StockItem | null>;

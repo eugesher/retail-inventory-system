@@ -26,10 +26,9 @@ import {
   TypeormTransactionAdapter,
 } from './persistence';
 
-// Per-module wiring for the stock bounded context. Binds the four port
-// symbols to their concrete adapters; `useExisting` shares the single
-// adapter instance with code that injects the concrete class directly
-// (e.g. integration tests that need to assert on adapter state).
+// `useExisting` shares the single adapter instance with code that injects
+// the concrete class directly (e.g. integration tests that assert on
+// adapter state).
 @Module({
   imports: [
     DatabaseModule.forFeature([Product, ProductStock, ProductStockAction, Storage]),

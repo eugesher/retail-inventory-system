@@ -16,9 +16,6 @@ import {
   ITransactionScope,
 } from '../../ports';
 
-// In-memory stock repository implementation. Stores StockItem aggregates by
-// (productId, storageId). Pure TypeScript — no jest globals here so the file
-// is safe to include in production builds when not excluded by tsconfig.app.
 export class InMemoryStockRepository implements IStockRepositoryPort {
   public readonly items = new Map<string, StockItem>();
   public readonly deltas: IStockAppendDeltasPayload['items'] = [];
@@ -103,8 +100,6 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
   }
 }
 
-// In-memory cache port implementation. Stores set values verbatim and
-// records every invalidation/set call so specs can assert on them.
 export class InMemoryStockCache implements IStockCachePort {
   public readonly store = new Map<string, ProductStockGetResponseDto>();
   public readonly invalidations: {
@@ -160,8 +155,6 @@ export class InMemoryStockCache implements IStockCachePort {
   }
 }
 
-// In-memory publisher; records every emit so specs can assert on event
-// payloads without binding to RxJS.
 export class InMemoryStockEventsPublisher implements IStockEventsPublisherPort {
   public readonly lows: { event: StockLowEvent; correlationId?: string }[] = [];
   public readonly reserves: { event: StockReservedEvent; correlationId?: string }[] = [];

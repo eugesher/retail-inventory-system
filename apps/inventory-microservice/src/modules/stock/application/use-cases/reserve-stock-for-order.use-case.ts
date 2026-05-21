@@ -56,16 +56,12 @@ export class ReserveStockForOrderUseCase {
 
     const productIds = [...new Set(pendingItems.map((i) => i.productId))];
     const confirmedIds: number[] = [];
-    // Captured inside the transaction; consumed after commit to decide
-    // whether each (productId, storageId) crossed the low-stock threshold.
+    // Captured inside the transaction; consumed post-commit to decide
+    // which (productId, storageId) crossed the low-stock threshold.
     const postCommitQuantities = new Map<string, number>();
 
     let items: IStockAppendDeltaItem[] = [];
     try {
-      // ADR-023: `withInvalidation` runs the transaction work first and only
-      // fires the cache prefix-delete on resolution. The post-commit
-      // ordering is encoded in the helper — there is no public `invalidate`
-      // call to misuse from inside the transaction callback.
       items = await this.stockCache.withInvalidation(
         async () => {
           const acc: IStockAppendDeltaItem[] = [];
@@ -147,10 +143,8 @@ export class ReserveStockForOrderUseCase {
     }
 
     if (items.length > 0) {
-      // Emit `inventory.stock.low` for every (productId, storageId) pair
-      // whose post-commit quantity sits at-or-below the threshold. Errors
-      // are warn-logged but never raised: the order confirm result must
-      // not depend on the event broker's availability.
+      // Publish failures are warn-logged but never raised — the order
+      // confirm result must not depend on the broker's availability.
       for (const [key, quantity] of postCommitQuantities) {
         if (quantity > INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD) {
           continue;

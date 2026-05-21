@@ -8,13 +8,10 @@ interface IStockItemRawAggregate {
   updatedAt?: Date | null;
 }
 
-// Aggregated rows from `product_stock` are net of all signed deltas — the
-// resulting non-negative quantity is what becomes the StockItem's
-// `quantity`. The entity itself is a single ledger row (not the aggregate),
-// so the entity → domain mapping is reserved for places where we materialize
-// a single row as a StockItem with quantity=delta; the aggregate path uses
-// `toDomainFromAggregate` below.
 export class StockItemMapper {
+  // Both paths clamp at zero: aggregates net signed deltas and single
+  // ledger rows can themselves be signed, but the StockItem invariant
+  // requires `quantity >= 0`.
   public static toDomainFromAggregate(raw: IStockItemRawAggregate): StockItem {
     return new StockItem({
       productId: raw.productId,
@@ -25,10 +22,6 @@ export class StockItemMapper {
   }
 
   public static toDomain(entity: ProductStock): StockItem {
-    // Single ledger rows can be signed — clamp at zero when materializing
-    // as a StockItem so the aggregate-invariant (`quantity >= 0`) holds.
-    // Use the aggregate path for queries; this branch exists for the
-    // single-row case (e.g. lookups by ledger row id).
     return new StockItem({
       productId: entity.productId,
       storageId: entity.storageId,

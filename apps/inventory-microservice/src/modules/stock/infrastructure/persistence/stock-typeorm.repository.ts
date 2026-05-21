@@ -64,11 +64,8 @@ export class StockTypeormRepository
   }
 
   public findBySku(sku: string): Promise<StockItem | null> {
-    // The current schema does not carry an SKU column on `product_stock`; the
-    // port surface includes the lookup so future schema evolutions can light
-    // it up without changing call-site code. Returning null today is
-    // intentional, not a "not implemented" stub — callers must tolerate the
-    // miss until the column exists.
+    // Intentional null, not a "not implemented" stub — `product_stock` has
+    // no SKU column today; callers must tolerate the miss.
     void sku;
     return Promise.resolve(null);
   }

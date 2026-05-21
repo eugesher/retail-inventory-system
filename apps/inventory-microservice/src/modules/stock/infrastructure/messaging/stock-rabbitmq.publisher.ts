@@ -25,9 +25,8 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // `ClientProxy.emit()` returns a cold Observable; `firstValueFrom`
-    // materializes it and waits for the broker ack so application code can
-    // await a plain Promise (see _carryover-07 §5 #3).
+    // `firstValueFrom` materializes the cold Observable from `emit()` and
+    // waits for the broker ack so application code awaits a plain Promise.
     await firstValueFrom(
       this.notificationClient.emit<void, IInventoryStockLowEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_LOW,
@@ -37,11 +36,9 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
   }
 
   public publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void> {
-    // No cross-service consumer for `stock.reserved` today; the port surface
-    // exists so the publisher binding is in place when one is added (e.g.
-    // an analytics service that wants per-line reservation telemetry).
-    // Intentional no-op rather than a `not implemented` throw — call sites
-    // would otherwise have to guard every emit.
+    // Intentional no-op rather than a `not implemented` throw — no
+    // cross-service consumer today, but the port stays callable so emit
+    // sites do not have to guard the call.
     void event;
     void correlationId;
     return Promise.resolve();

@@ -1,9 +1,7 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Emitted whenever stock is reserved against a confirmed order. Aggregate id
-// is the productId — events are scoped to the (productId, storageId) pair.
-// In-process for now; cross-service publication happens through the
-// stock-events publisher adapter.
+// Reserved against a confirmed order. Aggregate id is the productId;
+// events are scoped to the (productId, storageId) pair.
 export class StockReservedEvent extends DomainEvent<number> {
   public readonly storageId: string;
   public readonly orderProductId: number;

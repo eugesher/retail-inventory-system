@@ -16,10 +16,8 @@ const sampleDto: ProductStockGetResponseDto = {
 
 describe('GetStockUseCase', () => {
   let repository: jest.Mocked<Pick<IStockRepositoryPort, 'aggregateForProduct'>>;
-  // The use case now delegates the entire cache-aside dance to
-  // `IStockCachePort.getOrLoad` (ADR-021 single-flight + jitter live there);
-  // the `get`/`set` surface stays on the port but the use case no longer
-  // calls them on the cache-using path. Specs target `getOrLoad`.
+  // Cache-aside lives entirely in `getOrLoad` (ADR-021 single-flight +
+  // jitter); the use case never calls `get`/`set` on the cache-using path.
   let stockCache: jest.Mocked<Pick<IStockCachePort, 'getOrLoad'>>;
   let logger: PinoLoggerMock;
   let useCase: GetStockUseCase;

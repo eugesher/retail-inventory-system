@@ -1,8 +1,7 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Emitted when a previously-reserved quantity is released back to available
-// stock (e.g. order cancellation). No producer wires this today — the event
-// type exists so the release path has a stable shape when it is added.
+// Released back to available stock (e.g. order cancellation). No producer
+// wires this today — type reserved for the release path.
 export class StockReleasedEvent extends DomainEvent<number> {
   public readonly storageId: string;
   public readonly orderProductId: number;

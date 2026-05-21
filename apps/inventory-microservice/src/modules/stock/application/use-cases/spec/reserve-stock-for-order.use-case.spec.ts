@@ -51,10 +51,9 @@ const makeTransactionPort = (): {
   };
 };
 
-// Faithful in-place stand-in for the production `StockCache.withInvalidation`
-// contract (ADR-023): run work first, only then derive items and call the
-// `invalidatePrefixes` spy. Captures call ordering and item payloads so the
-// spec can assert post-commit semantics without mocking out the helper body.
+// Mirrors ADR-023's `withInvalidation` body: run work, then call the
+// `invalidatePrefixes` spy. Captures ordering and payloads so the spec
+// can assert post-commit semantics without mocking out the helper itself.
 type WithInvalidationMock = jest.Mock<
   Promise<unknown>,
   [

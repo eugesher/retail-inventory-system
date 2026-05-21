@@ -8,11 +8,6 @@ import {
   STOCK_REPOSITORY,
 } from '../ports';
 
-// Internal-only use case for appending ledger rows directly (e.g. manual
-// stock adjustments by ops, future reconciliation jobs). Today it is
-// invoked only by `ReserveStockForOrderUseCase`; kept as its own class
-// so future call sites (admin endpoints, batch importers) can depend on
-// the use case rather than the repository port directly.
 @Injectable()
 export class AddStockUseCase {
   constructor(

@@ -41,7 +41,7 @@ export class GetStockUseCase {
 
     try {
       // A read inside a caller-owned transaction can see uncommitted rows;
-      // caching that data would corrupt the shared cache for other callers.
+      // caching that would corrupt the shared cache for other callers.
       const skipReason = scope ? 'transactionScope' : ignoreCache ? 'ignoreCache' : null;
 
       if (skipReason !== null) {
@@ -53,10 +53,6 @@ export class GetStockUseCase {
         return this.repository.aggregateForProduct({ productId, storageIds, correlationId }, scope);
       }
 
-      // `getOrLoad` provides the cache-aside read-through, fans concurrent
-      // misses into one loader invocation (ADR-021 single-flight), and
-      // writes back with ±10% TTL jitter. A read-error inside the adapter
-      // surfaces as a miss → loader runs → DB-fallback semantics preserved.
       return await this.stockCache.getOrLoad({ productId, storageIds, correlationId }, () =>
         this.repository.aggregateForProduct({ productId, storageIds, correlationId }),
       );

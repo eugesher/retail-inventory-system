@@ -25,10 +25,9 @@ const makeQueryBuilder = (rawMany: jest.Mock): Record<string, jest.Mock> => {
   return qb;
 };
 
-// The adapter is the only consumer that downcasts an `ITransactionScope` to
-// an `EntityManager`. The spec fakes the scope as a duck-typed object whose
-// `getRepository` / `createQueryBuilder` methods stand in for the manager,
-// then casts through `unknown` to satisfy the opaque type.
+// `ITransactionScope` is opaque (unique-symbol brand); only the adapter
+// downcasts to `EntityManager`. The spec casts through `unknown` to
+// satisfy the type with a duck-typed fake.
 const asScope = (em: object): ITransactionScope => em as unknown as ITransactionScope;
 
 describe('StockTypeormRepository', () => {

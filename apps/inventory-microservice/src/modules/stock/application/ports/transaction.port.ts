@@ -1,6 +1,5 @@
-// Opaque unit-of-work token. The `unique symbol` brand prevents an
-// object literal from satisfying the type without an explicit cast —
-// only the TypeORM adapter constructs values (via `as unknown as`).
+// The `unique symbol` brand prevents an object literal from satisfying
+// the type — only the TypeORM adapter constructs values (`as unknown as`).
 export interface ITransactionScope {
   readonly __transactionScope: unique symbol;
 }
