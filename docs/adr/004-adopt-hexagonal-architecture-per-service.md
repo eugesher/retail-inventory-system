@@ -139,8 +139,7 @@ plausible alternative if the project were larger. Rejected for now
 because the existing four-app split is already the right granularity
 and the libs we already have (`common`, `config`, `inventory`,
 `retail`) cover the cross-app contract needs without a separate
-`core` lib. Section 7 of `recommendation.md` lists these libs as
-"already correct, preserve as-is" with a re-mapping (not a rewrite).
+`core` lib — the migration is a re-mapping of those libs, not a rewrite.
 
 ---
 
@@ -173,9 +172,8 @@ and the libs we already have (`common`, `config`, `inventory`,
   cost of uniformity, since the architecture-lint rules require the
   same shape everywhere.
 - Migration is multi-PR (tasks 03–09) and inevitably reshapes the
-  diff surface. The carryover-file pattern documented in `CLAUDE.md`
-  is the bridge: each task-NN.md produces a `_carryover-NN.md` for
-  the next session.
+  diff surface. Each PR is scoped to one structural move so that
+  reviewers can verify the shape one boundary at a time.
 - Lint rules (task-12) will catch back-edges (e.g., `domain/`
   importing TypeORM) only after the structural moves are complete;
   intermediate task PRs may briefly violate the target shape. This is

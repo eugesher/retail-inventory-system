@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-// TODO(task-14): replace the raw `@nestjs/typeorm` + `EntityManager` seam
-// with an `ITransactionPort` so this use case no longer reaches into the
-// ORM directly. Tracked in _carryover-12.md as ARCH-LINT-EX-01.
+// TODO: replace the raw `@nestjs/typeorm` + `EntityManager` seam with an
+// `ITransactionPort` so this use case no longer reaches into the ORM
+// directly. Tracked as ARCH-LINT-EX-01 in
+// docs/adr/017-architecture-lint-via-eslint-boundaries.md §6.
 import { InjectEntityManager } from '@nestjs/typeorm'; // eslint-disable-line boundaries/dependencies
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { EntityManager } from 'typeorm';

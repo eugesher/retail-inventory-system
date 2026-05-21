@@ -16,8 +16,7 @@ acceptable for the deliverable.
 
 Task-06 adds end-to-end authentication and role-based authorization. The
 decisions in this ADR record the *shape* we picked rather than the
-incremental task notes — those live in the `_carryover-06.md` file alongside
-the task script and are deleted before merge.
+incremental task notes.
 
 ADR-009 already established the per-module hexagonal layout for the gateway;
 auth is the first gateway module with a real `domain/` aggregate, so the ADR
@@ -139,7 +138,7 @@ Vault) is in scope.
 HTTP. Seed users (`admin@example.com` / `customer@example.com`) cover every
 test scenario today; the live registration flow needs rate limiting, email
 verification, and CAPTCHA before it can be safe to expose, none of which is
-in scope. Documented as a follow-up in `_carryover-06.md`.
+in scope. Deferred as a follow-up.
 
 ### 8. Smoke endpoint for the admin role guard
 

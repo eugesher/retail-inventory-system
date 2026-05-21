@@ -149,8 +149,8 @@ The pre-task-05 pipe sent only the numeric order id over
 verbatim — flipping it to include a `correlationId` would have
 required a coordinated change on the retail microservice
 `@MessagePattern` handler, which is out of scope for the gateway
-alignment. The gap is acknowledged in `_carryover-05.md`; a fix lands
-together with the publisher-port introduction in task-08/task-09.
+alignment. The gap is acknowledged here; a fix lands together with
+the publisher-port introduction in a later task.
 
 ## Consequences
 

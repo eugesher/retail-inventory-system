@@ -88,7 +88,7 @@ If clearer per-rule failure messages become valuable later, a sibling script `ya
 
 ### 6. Documented exceptions
 
-The strict reading of the recommendation table leaves a few real violations that are not worth fixing in scope of task-12. They are documented in-file with a `TODO(task-14)` and a tracking code, and re-enumerated in `_carryover-12.md`:
+The strict reading of the recommendation table leaves a few real violations that are not worth fixing today. They are documented in-file with a `TODO` and a tracking code, and re-enumerated below:
 
 | Code              | File                                                                                                          | What                                                                                          |
 | ----------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
