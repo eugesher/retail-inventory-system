@@ -18,13 +18,16 @@ interface IRedisScanClient {
   unlink(keys: string[]): Promise<number>;
 }
 
-// Adapter implementing `ICachePort` against the existing
-// `@nestjs/cache-manager` + `@keyv/redis` setup. Preserves the ADR-002
-// cache-aside contract for product-stock and adds the generalized
-// invalidation primitive (`delByPrefix`) used by every aggregate cache
-// in task-11 / ADR-016.
 @Injectable()
 export class RedisCacheAdapter implements ICachePort {
+  // In-process map of in-flight loads for `singleFlight`. Single-replica
+  // deployments get full dedupe; multi-replica deployments dedupe per
+  // process — one replica's stampede no longer fans out to
+  // `concurrency × loader-cost`. A store-side advisory lock would push
+  // dedupe across replicas at the cost of two extra Redis round-trips
+  // per miss; rejected for the current scale (ADR-021).
+  private readonly inFlight = new Map<string, Promise<unknown>>();
+
   constructor(
     @Inject(CACHE_MANAGER)
     private readonly cache: Cache,
@@ -89,6 +92,30 @@ export class RedisCacheAdapter implements ICachePort {
       } finally {
         span.end();
       }
+    });
+  }
+
+  public singleFlight<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const tracer = trace.getTracer(TRACER_NAME);
+    return tracer.startActiveSpan('cache.singleFlight', (span) => {
+      span.setAttribute('cache.key', key);
+      const existing = this.inFlight.get(key) as Promise<T> | undefined;
+      if (existing) {
+        span.setAttribute('cache.singleflight.joined', true);
+        span.end();
+        return existing;
+      }
+      span.setAttribute('cache.singleflight.joined', false);
+      // Eagerly invoke `fn` so the returned promise reflects whatever the
+      // loader does (including a synchronous throw). The `finally` clears
+      // the in-flight slot whether the leader resolves or rejects — a
+      // rejected leader must not poison the key for the next caller.
+      const promise = (async (): Promise<T> => fn())().finally(() => {
+        this.inFlight.delete(key);
+      });
+      this.inFlight.set(key, promise);
+      span.end();
+      return promise;
     });
   }
 

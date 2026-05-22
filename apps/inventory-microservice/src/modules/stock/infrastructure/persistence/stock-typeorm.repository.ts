@@ -12,6 +12,7 @@ import {
   IStockAppendDeltasPayload,
   IStockLockedTotalsPayload,
   IStockRepositoryPort,
+  ITransactionScope,
 } from '../../application/ports';
 import { ProductStock } from './product-stock.entity';
 import { StockItemMapper } from './stock-item.mapper';
@@ -48,31 +49,33 @@ export class StockTypeormRepository
     };
   }
 
+  private toEntityManager(scope: ITransactionScope | undefined): EntityManager | undefined {
+    return scope as unknown as EntityManager | undefined;
+  }
+
+  private repoFor(scope: ITransactionScope | undefined): Repository<ProductStock> {
+    const em = this.toEntityManager(scope);
+    return em ? em.getRepository(ProductStock) : this.productStockRepository;
+  }
+
   public async findById(id: number): Promise<StockItem | null> {
     const entity = await this.productStockRepository.findOne({ where: { id } });
     return entity ? StockItemMapper.toDomain(entity) : null;
   }
 
   public findBySku(sku: string): Promise<StockItem | null> {
-    // The current schema does not carry an SKU column on `product_stock`; the
-    // port surface includes the lookup so future schema evolutions can light
-    // it up without changing call-site code. Returning null today is
-    // intentional, not a "not implemented" stub — callers must tolerate the
-    // miss until the column exists.
+    // Intentional null, not a "not implemented" stub — `product_stock` has
+    // no SKU column today; callers must tolerate the miss.
     void sku;
     return Promise.resolve(null);
   }
 
   public async aggregateForProduct(
     payload: IStockAggregateForProductPayload,
-    entityManager?: EntityManager,
+    scope?: ITransactionScope,
   ): Promise<ProductStockGetResponseDto> {
     const { productId, storageIds, correlationId } = payload;
-    const repository = entityManager
-      ? entityManager.getRepository(ProductStock)
-      : this.productStockRepository;
-
-    const builder = repository
+    const builder = this.repoFor(scope)
       .createQueryBuilder('ProductStock')
       .select([
         'ProductStock.storageId      AS storageId',
@@ -125,7 +128,7 @@ export class StockTypeormRepository
 
   public async lockedTotalsByProduct(
     payload: IStockLockedTotalsPayload,
-    entityManager: EntityManager,
+    scope: ITransactionScope,
   ): Promise<Map<number, number>> {
     const { productIds, correlationId } = payload;
 
@@ -133,6 +136,7 @@ export class StockTypeormRepository
       return new Map();
     }
 
+    const entityManager = this.toEntityManager(scope)!;
     let rows: { productId: string; totalQuantity: string }[];
 
     try {
@@ -165,22 +169,18 @@ export class StockTypeormRepository
 
   public async appendDeltas(
     payload: IStockAppendDeltasPayload,
-    entityManager?: EntityManager,
+    scope?: ITransactionScope,
   ): Promise<void> {
     const { items, correlationId } = payload;
     const itemCount = items.length;
 
     this.logger.debug(
-      { correlationId, itemCount, withinTransaction: !!entityManager },
+      { correlationId, itemCount, withinTransaction: !!scope },
       'Inserting product stock ledger rows',
     );
 
-    const repository = entityManager
-      ? entityManager.getRepository(ProductStock)
-      : this.productStockRepository;
-
     try {
-      await repository.insert(items);
+      await this.repoFor(scope).insert(items);
     } catch (error) {
       this.logger.error(
         { err: error as Error, correlationId, itemCount },

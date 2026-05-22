@@ -81,8 +81,8 @@ newly-confirmed line ids the persistence adapter needs.
 - `IOrderEventsPublisherPort` (DI symbol `ORDER_EVENTS_PUBLISHER`) —
   outbound event emission. Adapter: `OrderRabbitmqPublisher`, which
   wraps `ClientProxy.emit()` and the `firstValueFrom` materialization
-  noted in `_carryover-07 §5 #3` so application code awaits a plain
-  Promise. Targets the `NOTIFICATION_MICROSERVICE` ClientProxy from
+  so application code awaits a plain Promise. Targets the
+  `NOTIFICATION_MICROSERVICE` ClientProxy from
   `MicroserviceClientNotificationModule` (added in task-08 for the
   inventory `stock.low` flow).
 - `IInventoryConfirmGatewayPort` (DI symbol `INVENTORY_CONFIRM_GATEWAY`)
@@ -166,9 +166,9 @@ Both the retail-side adapter (`InventoryConfirmRabbitmqAdapter`) and
 the inventory-side handler (`StockController.handleOrderConfirm`)
 import `IProductStockOrderConfirmPayload` from
 `@retail-inventory-system/contracts`. Any drift in the payload shape
-fails compilation on both ends simultaneously. The carryover records
-this explicitly so reviewers know the lack of a runtime contract test
-is intentional.
+fails compilation on both ends simultaneously. The compile-time
+coupling is the contract test; no separate runtime contract test is
+added.
 
 ### 8. Test layout follows the inventory module's structure
 
@@ -180,8 +180,7 @@ is intentional.
   `test-doubles.ts` carrying in-memory `IOrderRepositoryPort`,
   `IInventoryConfirmGatewayPort`, and `IOrderEventsPublisherPort`
   implementations. `test-doubles.ts` is jest-free so the production
-  build stays clean (the `tsconfig.app.json` excludes `*.spec.ts` only —
-  see `_carryover-08 §9 #5`).
+  build stays clean (the `tsconfig.app.json` excludes `*.spec.ts` only).
 - `infrastructure/persistence/spec/order.mapper.spec.ts` — entity →
   domain round-trip for the create and confirm states.
 

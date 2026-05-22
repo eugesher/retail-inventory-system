@@ -70,9 +70,8 @@ callers.
   fallback for non-Redis backends).
 - `IStockEventsPublisherPort` (DI symbol `STOCK_EVENTS_PUBLISHER`) — outbound
   event emission. Adapter: `StockRabbitmqPublisher`, which wraps
-  `ClientProxy.emit()` and the `firstValueFrom` materialization noted in
-  `_carryover-07 §5 #3`, so application code awaits a plain Promise and
-  never touches RxJS.
+  `ClientProxy.emit()` and the `firstValueFrom` materialization, so
+  application code awaits a plain Promise and never touches RxJS.
 
 The cache port is intentionally stock-specific (rather than reusing the
 generic `CACHE_PORT` from `libs/cache` directly) because the existing

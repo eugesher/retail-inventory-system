@@ -5,31 +5,21 @@ import {
   OrderProductStatusEnum,
   OrderStatusEnum,
 } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { CreateOrderUseCase } from '../create-order.use-case';
 import { InMemoryOrderEventsPublisher, InMemoryOrderRepository } from './test-doubles';
 
-type LoggerMock = Record<'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'trace', jest.Mock>;
-
-const makeLogger = (): LoggerMock => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  fatal: jest.fn(),
-  trace: jest.fn(),
-});
-
 describe('CreateOrderUseCase', () => {
   let repository: InMemoryOrderRepository;
   let publisher: InMemoryOrderEventsPublisher;
-  let logger: LoggerMock;
+  let logger: PinoLoggerMock;
   let useCase: CreateOrderUseCase;
 
   beforeEach(() => {
     repository = new InMemoryOrderRepository();
     publisher = new InMemoryOrderEventsPublisher();
-    logger = makeLogger();
+    logger = makePinoLoggerMock();
     useCase = new CreateOrderUseCase(repository, publisher, logger as unknown as PinoLogger);
   });
 

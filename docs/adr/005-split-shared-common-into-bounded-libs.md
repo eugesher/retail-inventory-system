@@ -148,8 +148,8 @@ hasn't been repointed yet.
 `libs/{common,config,inventory,retail}` shape. They do **not** have a
 `src/` subfolder, a per-lib `tsconfig.lib.json`, or an entry under
 `nest-cli.json` `projects`. The four existing libs follow this same
-flat shape (see baseline `workspaces.json`); making the new libs
-match keeps all six libs uniform.
+flat shape at commit `04713bb` (the migration-start state);
+making the new libs match keeps all six libs uniform.
 
 ---
 

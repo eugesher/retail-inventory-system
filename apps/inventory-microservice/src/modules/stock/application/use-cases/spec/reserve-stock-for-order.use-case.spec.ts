@@ -1,5 +1,4 @@
 import { PinoLogger } from 'nestjs-pino';
-import { EntityManager } from 'typeorm';
 
 import {
   INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD,
@@ -9,21 +8,19 @@ import {
   OrderProductStatusEnum,
   ProductStockActionEnum,
 } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { StockLowEvent } from '../../../domain';
-import { IStockCachePort, IStockEventsPublisherPort, IStockRepositoryPort } from '../../ports';
+import {
+  IStockCacheInvalidateItem,
+  IStockCachePort,
+  IStockEventsPublisherPort,
+  IStockRepositoryPort,
+  IStockWithInvalidationOptions,
+  ITransactionPort,
+  ITransactionScope,
+} from '../../ports';
 import { ReserveStockForOrderUseCase } from '../reserve-stock-for-order.use-case';
-
-type LoggerMock = Record<'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'trace', jest.Mock>;
-
-const makeLogger = (): LoggerMock => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  fatal: jest.fn(),
-  trace: jest.fn(),
-});
 
 const correlationId = 'corr-1';
 
@@ -39,23 +36,63 @@ const confirmedProduct = (id: number, productId: number): IOrderProductConfirm =
   statusId: OrderProductStatusEnum.CONFIRMED,
 });
 
-const txEm = {} as EntityManager;
+const txScope = {} as ITransactionScope;
 
-const makeEntityManager = (): { entityManager: EntityManager; transaction: jest.Mock } => {
-  const transaction = jest.fn(async (callback: (em: EntityManager) => unknown) => {
-    await callback(txEm);
+const makeTransactionPort = (): {
+  transactionPort: ITransactionPort;
+  runInTransaction: jest.Mock;
+} => {
+  const runInTransaction = jest.fn((work: (scope: ITransactionScope) => unknown) =>
+    Promise.resolve(work(txScope)),
+  );
+  return {
+    transactionPort: { runInTransaction } as unknown as ITransactionPort,
+    runInTransaction,
+  };
+};
+
+// Mirrors ADR-023's `withInvalidation` body: run work, then call the
+// `invalidatePrefixes` spy. Captures ordering and payloads so the spec
+// can assert post-commit semantics without mocking out the helper itself.
+type WithInvalidationMock = jest.Mock<
+  Promise<unknown>,
+  [
+    work: () => Promise<unknown>,
+    resolveItems: (result: unknown) => IStockCacheInvalidateItem[],
+    opts?: IStockWithInvalidationOptions,
+  ]
+>;
+
+const makeStockCache = (
+  invalidatePrefixes: jest.Mock,
+): {
+  stockCache: jest.Mocked<Pick<IStockCachePort, 'withInvalidation'>>;
+  withInvalidation: WithInvalidationMock;
+} => {
+  const withInvalidation: WithInvalidationMock = jest.fn(async (work, resolveItems, opts) => {
+    const result = await work();
+    const items = resolveItems(result);
+    if (items.length > 0) {
+      await invalidatePrefixes(items, opts);
+    }
+    return result;
   });
-  return { entityManager: { transaction } as unknown as EntityManager, transaction };
+  return {
+    stockCache: { withInvalidation } as never,
+    withInvalidation,
+  };
 };
 
 describe('ReserveStockForOrderUseCase', () => {
   let repository: jest.Mocked<Pick<IStockRepositoryPort, 'lockedTotalsByProduct' | 'appendDeltas'>>;
-  let stockCache: jest.Mocked<Pick<IStockCachePort, 'invalidate'>>;
+  let stockCache: jest.Mocked<Pick<IStockCachePort, 'withInvalidation'>>;
+  let withInvalidation: WithInvalidationMock;
+  let invalidatePrefixes: jest.Mock;
   let publisher: { publishStockLow: jest.Mock; publishStockReserved: jest.Mock };
-  let logger: LoggerMock;
+  let logger: PinoLoggerMock;
   let useCase: ReserveStockForOrderUseCase;
-  let entityManager: EntityManager;
-  let transaction: jest.Mock;
+  let transactionPort: ITransactionPort;
+  let runInTransaction: jest.Mock;
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -63,15 +100,16 @@ describe('ReserveStockForOrderUseCase', () => {
       lockedTotalsByProduct: jest.fn(),
       appendDeltas: jest.fn(),
     } as never;
-    stockCache = { invalidate: jest.fn() } as never;
+    invalidatePrefixes = jest.fn().mockResolvedValue(undefined);
+    ({ stockCache, withInvalidation } = makeStockCache(invalidatePrefixes));
     publisher = {
       publishStockLow: jest.fn().mockResolvedValue(undefined),
       publishStockReserved: jest.fn().mockResolvedValue(undefined),
     };
-    logger = makeLogger();
-    ({ entityManager, transaction } = makeEntityManager());
+    logger = makePinoLoggerMock();
+    ({ transactionPort, runInTransaction } = makeTransactionPort());
     useCase = new ReserveStockForOrderUseCase(
-      entityManager,
+      transactionPort,
       repository as unknown as IStockRepositoryPort,
       stockCache as unknown as IStockCachePort,
       publisher as unknown as IStockEventsPublisherPort,
@@ -89,9 +127,10 @@ describe('ReserveStockForOrderUseCase', () => {
       const result = await useCase.execute(payload);
 
       expect(result).toEqual([]);
-      expect(transaction).not.toHaveBeenCalled();
+      expect(runInTransaction).not.toHaveBeenCalled();
       expect(repository.appendDeltas).not.toHaveBeenCalled();
-      expect(stockCache.invalidate).not.toHaveBeenCalled();
+      expect(withInvalidation).not.toHaveBeenCalled();
+      expect(invalidatePrefixes).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
         { correlationId },
         'No pending products to reserve stock for',
@@ -112,16 +151,15 @@ describe('ReserveStockForOrderUseCase', () => {
         ]),
       );
       repository.appendDeltas.mockResolvedValue(undefined);
-      stockCache.invalidate.mockResolvedValue(undefined);
 
       const result = await useCase.execute(payload);
 
       expect(result).toEqual([11, 12]);
 
-      // Locked totals were fetched within the transaction.
+      // Locked totals were fetched within the transaction scope.
       expect(repository.lockedTotalsByProduct).toHaveBeenCalledWith(
         { productIds: [1, 2], correlationId },
-        txEm,
+        txScope,
       );
 
       // appendDeltas received exactly one ledger row per pending product.
@@ -146,17 +184,23 @@ describe('ReserveStockForOrderUseCase', () => {
           ],
           correlationId,
         },
-        txEm,
+        txScope,
       );
 
+      // The helper was invoked once with the correlationId option flowed through.
+      expect(withInvalidation).toHaveBeenCalledTimes(1);
+      const opts = withInvalidation.mock.calls[0][2];
+      expect(opts).toEqual({ correlationId });
+
       // Post-commit invalidation receives only the (productId, storageId) shape.
-      expect(stockCache.invalidate).toHaveBeenCalledWith({
-        items: [
+      expect(invalidatePrefixes).toHaveBeenCalledTimes(1);
+      expect(invalidatePrefixes).toHaveBeenCalledWith(
+        [
           { productId: 1, storageId: INVENTORY_DEFAULT_STORAGE },
           { productId: 2, storageId: INVENTORY_DEFAULT_STORAGE },
         ],
-        correlationId,
-      });
+        { correlationId },
+      );
 
       expect(publisher.publishStockLow).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
@@ -176,7 +220,7 @@ describe('ReserveStockForOrderUseCase', () => {
 
       expect(result).toEqual([]);
       expect(repository.appendDeltas).not.toHaveBeenCalled();
-      expect(stockCache.invalidate).not.toHaveBeenCalled();
+      expect(invalidatePrefixes).not.toHaveBeenCalled();
     });
 
     it('skips append and invalidate and warn-logs when no product has available stock', async () => {
@@ -190,7 +234,10 @@ describe('ReserveStockForOrderUseCase', () => {
 
       expect(result).toEqual([]);
       expect(repository.appendDeltas).not.toHaveBeenCalled();
-      expect(stockCache.invalidate).not.toHaveBeenCalled();
+      // The helper still fires (the transaction completes), but resolveItems
+      // produces an empty list so the prefix-delete is not invoked.
+      expect(withInvalidation).toHaveBeenCalledTimes(1);
+      expect(invalidatePrefixes).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledWith(
         { correlationId, pendingCount: 1, productIds: [1] },
         'No stock available to reserve for any pending order products',
@@ -213,7 +260,6 @@ describe('ReserveStockForOrderUseCase', () => {
         ]),
       );
       repository.appendDeltas.mockResolvedValue(undefined);
-      stockCache.invalidate.mockResolvedValue(undefined);
 
       const result = await useCase.execute(payload);
 
@@ -223,21 +269,25 @@ describe('ReserveStockForOrderUseCase', () => {
         expect.objectContaining({
           items: [expect.objectContaining({ productId: 1, orderProductId: 11, quantity: -1 })],
         }),
-        txEm,
+        txScope,
       );
-      expect(stockCache.invalidate).toHaveBeenCalledWith({
-        items: [{ productId: 1, storageId: INVENTORY_DEFAULT_STORAGE }],
-        correlationId,
-      });
+      expect(invalidatePrefixes).toHaveBeenCalledWith(
+        [{ productId: 1, storageId: INVENTORY_DEFAULT_STORAGE }],
+        { correlationId },
+      );
     });
 
     it('error-logs and rethrows when the transaction rejects, and does not invalidate', async () => {
+      // ADR-023 negative path: rejection inside `work` propagates through
+      // `withInvalidation` without ever reaching the prefix delete. The
+      // helper's contract — invalidate only on resolution — is the bumper
+      // that prevents a rolled-back transaction from poisoning the cache.
       const payload: IProductStockOrderConfirmPayload = {
         products: [pendingProduct(11, 1)],
         correlationId,
       };
       const err = new Error('tx-fail');
-      transaction.mockRejectedValue(err);
+      runInTransaction.mockRejectedValue(err);
 
       await expect(useCase.execute(payload)).rejects.toBe(err);
 
@@ -245,11 +295,16 @@ describe('ReserveStockForOrderUseCase', () => {
         { err, correlationId, productIds: [1], pendingCount: 1 },
         'Error reserving stock for order products',
       );
-      expect(stockCache.invalidate).not.toHaveBeenCalled();
+      expect(withInvalidation).toHaveBeenCalledTimes(1);
+      expect(invalidatePrefixes).not.toHaveBeenCalled();
       expect(publisher.publishStockLow).not.toHaveBeenCalled();
     });
 
-    it('orders appendDeltas (in-transaction) before invalidate (post-commit)', async () => {
+    it('runs appendDeltas (in-transaction) before invalidatePrefixes (post-commit)', async () => {
+      // ADR-023 positive path: the helper's body intrinsically orders
+      // `work` resolution before the prefix delete, so we can assert the
+      // invocation order at the spy level without relying on any
+      // transaction-callback shape.
       const high = INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD + 10;
       const payload: IProductStockOrderConfirmPayload = {
         products: [pendingProduct(11, 1)],
@@ -257,13 +312,39 @@ describe('ReserveStockForOrderUseCase', () => {
       };
       repository.lockedTotalsByProduct.mockResolvedValue(new Map([[1, high]]));
       repository.appendDeltas.mockResolvedValue(undefined);
-      stockCache.invalidate.mockResolvedValue(undefined);
 
       await useCase.execute(payload);
 
       const appendOrder = repository.appendDeltas.mock.invocationCallOrder[0];
-      const invalidateOrder = stockCache.invalidate.mock.invocationCallOrder[0];
+      const invalidateOrder = invalidatePrefixes.mock.invocationCallOrder[0];
       expect(appendOrder).toBeLessThan(invalidateOrder);
+    });
+
+    it('does not invoke invalidatePrefixes when work rejects after partial appendDeltas', async () => {
+      // ADR-023: even if the inner work has done some I/O, a rejection
+      // means no invalidate. Simulated by letting appendDeltas resolve but
+      // failing the transaction commit afterwards.
+      const high = INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD + 10;
+      const payload: IProductStockOrderConfirmPayload = {
+        products: [pendingProduct(11, 1)],
+        correlationId,
+      };
+      repository.lockedTotalsByProduct.mockResolvedValue(new Map([[1, high]]));
+      repository.appendDeltas.mockResolvedValue(undefined);
+      const commitErr = new Error('commit-fail');
+      // Override the transaction port to invoke the inner callback (so
+      // appendDeltas runs) and then reject as if the commit failed.
+      runInTransaction.mockImplementationOnce(
+        async (callback: (scope: ITransactionScope) => unknown) => {
+          await callback(txScope);
+          throw commitErr;
+        },
+      );
+
+      await expect(useCase.execute(payload)).rejects.toBe(commitErr);
+
+      expect(repository.appendDeltas).toHaveBeenCalledTimes(1);
+      expect(invalidatePrefixes).not.toHaveBeenCalled();
     });
 
     it('emits inventory.stock.low when the post-commit quantity sits at-or-below the threshold', async () => {
@@ -277,7 +358,6 @@ describe('ReserveStockForOrderUseCase', () => {
       };
       repository.lockedTotalsByProduct.mockResolvedValue(new Map([[1, startingQty]]));
       repository.appendDeltas.mockResolvedValue(undefined);
-      stockCache.invalidate.mockResolvedValue(undefined);
 
       await useCase.execute(payload);
 

@@ -23,8 +23,12 @@ describe('LoggerModuleConfig — trace-correlation hook', () => {
   } => {
     const config = new LoggerModuleConfig(AppNameEnum.API_GATEWAY);
     const captured: { args: unknown[] | null } = { args: null };
+    // `pinoHttp` is `Options | [Options, DestinationStream]`. In test mode
+    // (no E2E destination installed) the constructor produces the plain
+    // `Options` branch, so the cast below is safe in this fixture.
+    const options = config.pinoHttp as { hooks?: { logMethod?: unknown } };
     return {
-      hook: config.pinoHttp.hooks!.logMethod! as unknown as (
+      hook: options.hooks!.logMethod! as unknown as (
         args: unknown[],
         method: (...a: unknown[]) => void,
         level: number,

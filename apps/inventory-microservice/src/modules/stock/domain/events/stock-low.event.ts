@@ -1,9 +1,7 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Fires when the remaining quantity for a (productId, storageId) pair drops
-// at-or-below `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`. The publisher adapter
-// transforms this in-process event into the wire-format `IInventoryStockLowEvent`
-// (see libs/contracts/inventory/events/stock-low.event.ts).
+// Fires when (productId, storageId) quantity sits at-or-below
+// `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`.
 export class StockLowEvent extends DomainEvent<number> {
   public readonly storageId: string;
   public readonly quantity: number;

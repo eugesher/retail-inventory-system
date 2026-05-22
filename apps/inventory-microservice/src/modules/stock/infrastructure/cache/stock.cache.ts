@@ -7,24 +7,23 @@ import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 
 import {
   IStockCacheGetPayload,
-  IStockCacheInvalidatePayload,
+  IStockCacheGetResult,
+  IStockCacheInvalidateItem,
   IStockCachePort,
   IStockCacheSetPayload,
+  IStockWithInvalidationOptions,
 } from '../../application/ports';
 
-// Stock-cache adapter: implements the domain-shaped `IStockCachePort`
-// over the generic `ICachePort` (libs/cache). The port handles SCAN+UNLINK
-// for prefix invalidation; this class only knows the stock cache-key
-// shape (delegated to `CACHE_KEYS.inventoryStock*` per ADR-016).
-//
-// Open audit items still tracked here, not addressed by task-11:
-//   * CACHE-001 — read/write race / no single-flight
-//   * CACHE-003 — no schema-version segment in keys
-//   * CACHE-004 — TTL has no jitter
-//   * CACHE-005 — duplicate warn logs on Redis-down
-//   * CACHE-006 — `cacheable` major-bump fragility
+// Audit closures: CACHE-001/004 by ADR-021 (single-flight + jitter),
+// CACHE-003/009 by ADR-022 (schema-version + opt-in tenant segments),
+// CACHE-005 by the `available` flag from `get` (Redis-down request emits
+// one warn instead of three).
 @Injectable()
 export class StockCache implements IStockCachePort {
+  // ADR-021 ±10% TTL jitter; the floor preserves ADR-002's TTL-as-safety-net
+  // role so a missed invalidate still has a bounded staleness window.
+  private static readonly JITTER_FRACTION = 0.1;
+
   constructor(
     @Inject(CACHE_PORT)
     private readonly cache: ICachePort,
@@ -33,11 +32,9 @@ export class StockCache implements IStockCachePort {
     private readonly logger: PinoLogger,
   ) {}
 
-  public async get(
-    payload: IStockCacheGetPayload,
-  ): Promise<ProductStockGetResponseDto | undefined> {
-    const { productId, storageIds, correlationId } = payload;
-    const cacheKey = CACHE_KEYS.inventoryStock(productId, storageIds);
+  public async get(payload: IStockCacheGetPayload): Promise<IStockCacheGetResult> {
+    const { productId, storageIds, tenantId, correlationId } = payload;
+    const cacheKey = CACHE_KEYS.inventoryStock(productId, storageIds, { tenantId });
 
     try {
       const cached = await this.cache.get<ProductStockGetResponseDto>(cacheKey);
@@ -48,20 +45,20 @@ export class StockCache implements IStockCachePort {
         cacheHit ? 'Cache hit for stock query' : 'Cache miss for stock query',
       );
 
-      return cached;
+      return { value: cached, available: true };
     } catch (error) {
       this.logger.warn(
         { err: error as Error, correlationId, productId, cacheKey },
         'Failed to read from cache',
       );
-      return undefined;
+      return { value: undefined, available: false };
     }
   }
 
   public async set(payload: IStockCacheSetPayload): Promise<void> {
-    const { productId, storageIds, data, correlationId } = payload;
-    const cacheKey = CACHE_KEYS.inventoryStock(productId, storageIds);
-    const ttl = this.configService.get<number>('CACHE_TTL_MS_PRODUCT_STOCK');
+    const { productId, storageIds, tenantId, data, correlationId } = payload;
+    const cacheKey = CACHE_KEYS.inventoryStock(productId, storageIds, { tenantId });
+    const ttl = this.jitterTtl(this.configuredTtl());
 
     try {
       await this.cache.set(cacheKey, data, ttl);
@@ -74,24 +71,83 @@ export class StockCache implements IStockCachePort {
     }
   }
 
-  public async invalidate(payload: IStockCacheInvalidatePayload): Promise<void> {
-    const { items, correlationId } = payload;
-    if (items.length === 0) return;
+  public async getOrLoad(
+    payload: IStockCacheGetPayload,
+    loader: () => Promise<ProductStockGetResponseDto>,
+  ): Promise<ProductStockGetResponseDto> {
+    const { productId, storageIds, tenantId, correlationId } = payload;
+    const cacheKey = CACHE_KEYS.inventoryStock(productId, storageIds, { tenantId });
 
+    const { value, available } = await this.get(payload);
+    if (value !== undefined) return value;
+
+    // CACHE-005: outer `get` already warn-logged on outage; skip the
+    // single-flight + write-back to avoid duplicate warns against a dead
+    // client. DB fallback continues via the direct loader call.
+    if (!available) return loader();
+
+    // Re-check inside the leader handles the rare race where a hit lands
+    // between the outer `get` and the leader starting.
+    return this.cache.singleFlight(cacheKey, async () => {
+      const insideLeader = await this.get(payload);
+      if (insideLeader.value !== undefined) return insideLeader.value;
+
+      const data = await loader();
+      // Inner re-check may observe an outage the outer read missed; skip
+      // the write-back so we do not emit a second warn.
+      if (insideLeader.available) {
+        await this.set({ productId, storageIds, tenantId, data, correlationId });
+      }
+      return data;
+    });
+  }
+
+  private configuredTtl(): number {
+    // Defensive coerce: the Joi schema in libs/config supplies a default,
+    // but some unit-test bootstraps skip env loading.
+    return this.configService.get<number>('CACHE_TTL_MS_PRODUCT_STOCK') ?? 60000;
+  }
+
+  private jitterTtl(ttl: number): number {
+    // Symmetric ±JITTER_FRACTION; floor()ed for the integer-ms contract of
+    // `ICachePort.set`.
+    const offset = (Math.random() * 2 - 1) * StockCache.JITTER_FRACTION * ttl;
+    return Math.floor(ttl + offset);
+  }
+
+  // ADR-023: the prefix delete is intentionally private. The post-commit
+  // ordering is encoded in this method's body (work first, then invalidate)
+  // so it cannot be misused from inside a transaction callback.
+  public async withInvalidation<T>(
+    work: () => Promise<T>,
+    resolveItems: (result: T) => IStockCacheInvalidateItem[],
+    opts?: IStockWithInvalidationOptions,
+  ): Promise<T> {
+    const result = await work();
+    const items = resolveItems(result);
+    if (items.length > 0) {
+      await this.invalidatePrefixes(items, opts);
+    }
+    return result;
+  }
+
+  private async invalidatePrefixes(
+    items: IStockCacheInvalidateItem[],
+    opts?: IStockWithInvalidationOptions,
+  ): Promise<void> {
+    const { tenantId, correlationId } = opts ?? {};
     const productIds = [...new Set(items.map((i) => i.productId))];
 
-    // Two prefixes are wiped per productId:
-    //   * `ris:inventory:stock:<productId>:` — the post-ADR-016 shape
-    //   * `stock:<productId>:`               — the pre-ADR-016 legacy shape,
-    //                                          covered for one rolling deploy
-    //                                          so in-flight entries written
-    //                                          before the cut-over do not
-    //                                          survive a write.
+    // ADR-022 transition window — three prefixes per productId:
+    //   * v1 (tenanted, CACHE-003 / CACHE-009)
+    //   * pre-v1 post-ADR-016 (single-tenant — never carried a tenant segment)
+    //   * pre-ADR-016 legacy (single-tenant by construction)
     let totalUnlinked = 0;
     try {
       const counts = await Promise.all(
         productIds.flatMap((productId) => [
-          this.cache.delByPrefix(CACHE_KEYS.inventoryStockPrefix(productId)),
+          this.cache.delByPrefix(CACHE_KEYS.inventoryStockPrefix(productId, { tenantId })),
+          this.cache.delByPrefix(CACHE_KEYS.inventoryStockLegacyPrefix(productId)),
           this.cache.delByPrefix(CACHE_KEYS.productStockPrefix(productId)),
         ]),
       );

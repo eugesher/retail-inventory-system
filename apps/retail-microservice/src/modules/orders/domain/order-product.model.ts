@@ -9,9 +9,6 @@ interface IOrderProductProps {
   status: OrderProductStatusVO;
 }
 
-// Child entity inside the Order aggregate. Identity comes from the persisted
-// `order_product.id`; transient (pre-persistence) line items use `null` until
-// the repository round-trip assigns a real id.
 export class OrderProduct extends Entity<number | null> {
   private _productId: number;
   private _status: OrderProductStatusVO;

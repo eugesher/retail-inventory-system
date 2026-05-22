@@ -24,9 +24,8 @@ import {
   OrderTypeormRepository,
 } from './persistence';
 
-// Per-module wiring for the orders bounded context. Binds the three port
-// symbols to their concrete adapters; `useExisting` shares the single
-// adapter instance with code that injects the concrete class directly.
+// `useExisting` shares the single adapter instance across the port-symbol
+// and concrete-class injectors.
 @Module({
   imports: [
     DatabaseModule.forFeature([Customer, Order, OrderProduct, OrderProductStatus, OrderStatus]),

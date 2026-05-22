@@ -1,5 +1,3 @@
-import { EntityManager } from 'typeorm';
-
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 
 import { StockItem, StockLowEvent, StockReservedEvent } from '../../../domain';
@@ -7,17 +5,17 @@ import {
   IStockAggregateForProductPayload,
   IStockAppendDeltasPayload,
   IStockCacheGetPayload,
-  IStockCacheInvalidatePayload,
+  IStockCacheGetResult,
+  IStockCacheInvalidateItem,
   IStockCachePort,
   IStockCacheSetPayload,
   IStockEventsPublisherPort,
   IStockLockedTotalsPayload,
   IStockRepositoryPort,
+  IStockWithInvalidationOptions,
+  ITransactionScope,
 } from '../../ports';
 
-// In-memory stock repository implementation. Stores StockItem aggregates by
-// (productId, storageId). Pure TypeScript — no jest globals here so the file
-// is safe to include in production builds when not excluded by tsconfig.app.
 export class InMemoryStockRepository implements IStockRepositoryPort {
   public readonly items = new Map<string, StockItem>();
   public readonly deltas: IStockAppendDeltasPayload['items'] = [];
@@ -42,9 +40,9 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
 
   public aggregateForProduct(
     payload: IStockAggregateForProductPayload,
-    entityManager?: EntityManager,
+    scope?: ITransactionScope,
   ): Promise<ProductStockGetResponseDto> {
-    void entityManager;
+    void scope;
     const matching = [...this.items.values()].filter(
       (item) =>
         item.productId === payload.productId &&
@@ -64,9 +62,9 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
 
   public lockedTotalsByProduct(
     payload: IStockLockedTotalsPayload,
-    entityManager: EntityManager,
+    scope: ITransactionScope,
   ): Promise<Map<number, number>> {
-    void entityManager;
+    void scope;
     const totals = new Map<number, number>();
     for (const item of this.items.values()) {
       if (!payload.productIds.includes(item.productId)) continue;
@@ -77,9 +75,9 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
 
   public appendDeltas(
     payload: IStockAppendDeltasPayload,
-    entityManager?: EntityManager,
+    scope?: ITransactionScope,
   ): Promise<void> {
-    void entityManager;
+    void scope;
     for (const item of payload.items) {
       this.deltas.push(item);
       const key = this.key(item.productId, item.storageId);
@@ -102,19 +100,21 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
   }
 }
 
-// In-memory cache port implementation. Stores set values verbatim and
-// records every invalidation/set call so specs can assert on them.
 export class InMemoryStockCache implements IStockCachePort {
   public readonly store = new Map<string, ProductStockGetResponseDto>();
-  public readonly invalidations: IStockCacheInvalidatePayload[] = [];
+  public readonly invalidations: {
+    items: IStockCacheInvalidateItem[];
+    opts?: IStockWithInvalidationOptions;
+  }[] = [];
   public readonly setCalls: IStockCacheSetPayload[] = [];
 
   private key(productId: number, storageIds?: string[]): string {
     return `${productId}:${(storageIds ?? []).slice().sort().join(',') || '*'}`;
   }
 
-  public get(payload: IStockCacheGetPayload): Promise<ProductStockGetResponseDto | undefined> {
-    return Promise.resolve(this.store.get(this.key(payload.productId, payload.storageIds)));
+  public get(payload: IStockCacheGetPayload): Promise<IStockCacheGetResult> {
+    const value = this.store.get(this.key(payload.productId, payload.storageIds));
+    return Promise.resolve({ value, available: true });
   }
 
   public set(payload: IStockCacheSetPayload): Promise<void> {
@@ -123,14 +123,38 @@ export class InMemoryStockCache implements IStockCachePort {
     return Promise.resolve();
   }
 
-  public invalidate(payload: IStockCacheInvalidatePayload): Promise<void> {
-    this.invalidations.push(payload);
-    return Promise.resolve();
+  public async getOrLoad(
+    payload: IStockCacheGetPayload,
+    loader: () => Promise<ProductStockGetResponseDto>,
+  ): Promise<ProductStockGetResponseDto> {
+    const { value, available } = await this.get(payload);
+    if (value !== undefined) return value;
+    const data = await loader();
+    if (available) {
+      await this.set({
+        productId: payload.productId,
+        storageIds: payload.storageIds,
+        data,
+        correlationId: payload.correlationId,
+      });
+    }
+    return data;
+  }
+
+  public async withInvalidation<T>(
+    work: () => Promise<T>,
+    resolveItems: (result: T) => IStockCacheInvalidateItem[],
+    opts?: IStockWithInvalidationOptions,
+  ): Promise<T> {
+    const result = await work();
+    const items = resolveItems(result);
+    if (items.length > 0) {
+      this.invalidations.push({ items, opts });
+    }
+    return result;
   }
 }
 
-// In-memory publisher; records every emit so specs can assert on event
-// payloads without binding to RxJS.
 export class InMemoryStockEventsPublisher implements IStockEventsPublisherPort {
   public readonly lows: { event: StockLowEvent; correlationId?: string }[] = [];
   public readonly reserves: { event: StockReservedEvent; correlationId?: string }[] = [];

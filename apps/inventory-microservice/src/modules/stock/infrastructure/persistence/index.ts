@@ -15,3 +15,4 @@ export const stockEntities: TypeOrmModuleOptions['entities'] = [
 export { Product, ProductStock, ProductStockAction, Storage };
 export * from './stock-item.mapper';
 export * from './stock-typeorm.repository';
+export * from './typeorm-transaction.adapter';

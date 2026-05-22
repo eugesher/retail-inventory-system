@@ -1,29 +1,19 @@
 import { PinoLogger } from 'nestjs-pino';
 
 import { OrderStatusEnum } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { GetOrderUseCase } from '../get-order.use-case';
 import { buildPersistedOrder, InMemoryOrderRepository } from './test-doubles';
 
-type LoggerMock = Record<'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'trace', jest.Mock>;
-
-const makeLogger = (): LoggerMock => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  fatal: jest.fn(),
-  trace: jest.fn(),
-});
-
 describe('GetOrderUseCase', () => {
   let repository: InMemoryOrderRepository;
-  let logger: LoggerMock;
+  let logger: PinoLoggerMock;
   let useCase: GetOrderUseCase;
 
   beforeEach(() => {
     repository = new InMemoryOrderRepository();
-    logger = makeLogger();
+    logger = makePinoLoggerMock();
     useCase = new GetOrderUseCase(repository, logger as unknown as PinoLogger);
   });
 

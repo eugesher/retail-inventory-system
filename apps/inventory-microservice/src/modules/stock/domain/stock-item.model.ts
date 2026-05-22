@@ -6,17 +6,9 @@ interface IStockItemProps {
   updatedAt?: Date | null;
 }
 
-// Aggregated stock state for a single (productId, storageId) pair. Pure
-// class — no framework imports. The constructor enforces:
-//   - `quantity >= 0` (an aggregate net of all signed ledger deltas)
-//   - `reservedQuantity >= 0`
-//   - `reservedQuantity <= quantity` (cannot reserve more than is on hand)
-//
-// `reservedQuantity` defaults to 0 because the persistence model today is a
-// single signed ledger (`product_stock`) and does not record reservations
-// separately. The field exists in the domain because reservation semantics
-// belong here, not in the adapter; future ledger evolutions (a dedicated
-// reservations column or a separate ledger) become invisible to callers.
+// `reservedQuantity` defaults to 0 because the `product_stock` ledger does
+// not record reservations separately — the field lives in the domain so
+// reservation semantics stay here, not in the adapter.
 export class StockItem {
   public readonly productId: number;
   public readonly storageId: string;

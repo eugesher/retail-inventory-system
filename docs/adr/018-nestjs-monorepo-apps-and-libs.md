@@ -83,8 +83,8 @@ copies of every contract drifting silently. The build, lint, and
 `@retail-inventory-system/contracts`-anchored type-checking that catch
 cross-service drift in a single PR all stop working the moment the
 services live in separate repos. The migration's whole shape — one ADR
-catalogue, one architecture-lint config, one carryover-driven task queue
-— assumes the unified tree.
+catalogue, one architecture-lint config, one set of cross-service
+contracts in `libs/contracts` — assumes the unified tree.
 
 **Nx workspace.** Rejected. Nx layers a more powerful dependency-graph,
 caching, and affected-targets system over a NestJS-style monorepo. It

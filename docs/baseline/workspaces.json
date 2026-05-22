@@ -1,5 +1,0 @@
-{"location":".","name":"retail-inventory-system"}
-{"location":"apps/api-gateway","name":"api-gateway"}
-{"location":"apps/inventory-microservice","name":"inventory-microservice"}
-{"location":"apps/notification-microservice","name":"notification-microservice"}
-{"location":"apps/retail-microservice","name":"retail-microservice"}

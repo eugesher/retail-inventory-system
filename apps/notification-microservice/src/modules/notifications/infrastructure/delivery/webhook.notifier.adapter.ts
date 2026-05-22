@@ -3,9 +3,8 @@ import { Injectable } from '@nestjs/common';
 import { Notification } from '../../domain';
 import { INotifierPort } from '../../application/ports';
 
-// Scaffold only. TODO(post-migration): POST the serialized notification to a
-// configured webhook URL (with retries + signed payloads). Kept as a stub so
-// the adapter slot exists in the DI graph and ADR-011 can reference it.
+// Scaffold for a future webhook delivery channel — kept as a stub so the DI
+// slot stays visible alongside `EmailNotifierAdapter` (ADR-011 §3).
 @Injectable()
 export class WebhookNotifierAdapter implements INotifierPort {
   public send(notification: Notification): Promise<void> {

@@ -41,9 +41,6 @@ export class ConfirmOrderUseCase {
         correlationId,
       });
     } catch (error) {
-      // RMQ timeout / inventory RPC failure surfaces here. Treat the order as
-      // unchanged and rethrow so the gateway returns 500; the existing legacy
-      // path did the same (no compensation today).
       this.logger.error(
         { err: error as Error, correlationId, orderId: id },
         'Inventory order.confirm RPC failed',
@@ -89,15 +86,10 @@ export class ConfirmOrderUseCase {
       );
     }
 
-    // Drain aggregate events (today only `OrderConfirmed` fires from the
-    // confirm path) and publish them post-commit. Failures are warn-logged
-    // but never raised — the order is already persisted, and there is no
-    // cross-service subscriber for `retail.order.confirmed` today (the
-    // publisher port surface is wired so a future consumer can be added
-    // without code-shape changes).
     for (const event of aggregate.pullDomainEvents()) {
       if (event instanceof OrderConfirmedEvent) {
         try {
+          // Publish failures never raise — the order is already persisted.
           await this.publisher.publishOrderConfirmed(event, correlationId);
         } catch (err) {
           this.logger.warn(

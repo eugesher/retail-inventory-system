@@ -1,11 +1,7 @@
-// TODO(task-14): introduce an `ITransactionPort` so callers can pass an
-// opaque unit-of-work token instead of TypeORM's EntityManager. Tracked in
-// _carryover-12.md as ARCH-LINT-EX-01.
-import { EntityManager } from 'typeorm'; // eslint-disable-line boundaries/dependencies
-
 import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 
 import { StockItem } from '../../domain';
+import { ITransactionScope } from './transaction.port';
 
 export const STOCK_REPOSITORY = Symbol('STOCK_REPOSITORY');
 
@@ -33,22 +29,19 @@ export interface IStockLockedTotalsPayload {
   correlationId?: string;
 }
 
-// Inbound port for the stock aggregate's persistence. Adapter is the
-// TypeORM-backed `StockTypeormRepository`; use cases never reference the
-// concrete repo or the `product_stock` entity directly. The optional
-// `entityManager` arg on the write paths is the seam transactional callers
-// use to attach the operation to an existing TypeORM unit-of-work.
+// `scope` on the read/write paths attaches the operation to an open
+// unit-of-work — see ITransactionPort.
 export interface IStockRepositoryPort {
   findById(id: number): Promise<StockItem | null>;
   findBySku(sku: string): Promise<StockItem | null>;
   aggregateForProduct(
     payload: IStockAggregateForProductPayload,
-    entityManager?: EntityManager,
+    scope?: ITransactionScope,
   ): Promise<ProductStockGetResponseDto>;
   lockedTotalsByProduct(
     payload: IStockLockedTotalsPayload,
-    entityManager: EntityManager,
+    scope: ITransactionScope,
   ): Promise<Map<number, number>>;
-  appendDeltas(payload: IStockAppendDeltasPayload, entityManager?: EntityManager): Promise<void>;
+  appendDeltas(payload: IStockAppendDeltasPayload, scope?: ITransactionScope): Promise<void>;
   save(stockItem: StockItem): Promise<StockItem>;
 }

@@ -10,9 +10,6 @@ export interface INotificationProps extends Record<string, unknown> {
   metadata: Record<string, unknown>;
 }
 
-// Notification is a value object — equality is by content, not by identity.
-// Construction enforces invariants so adapters can never be handed a
-// half-formed message.
 export class Notification extends ValueObject<INotificationProps> {
   constructor(props: INotificationProps) {
     if (!props.recipient || props.recipient.trim().length === 0) {

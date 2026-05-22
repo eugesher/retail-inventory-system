@@ -1,9 +1,7 @@
 import { randomUUID } from 'crypto';
 
-// Domain event base — framework-free. Subclasses set `aggregateId` and
-// payload-specific fields. The transport layer (libs/messaging) is
-// responsible for serializing these onto a routing key; this file makes no
-// assumptions about RabbitMQ or any other broker.
+// Transport-agnostic — serialization onto a routing key is a transport-layer
+// concern (libs/messaging); this base makes no assumptions about the broker.
 export abstract class DomainEvent<TAggregateId = number> {
   public readonly id: string;
   public readonly occurredAt: Date;

@@ -8,9 +8,8 @@ export interface INotificationHealthResponse {
   service: 'notification-microservice';
 }
 
-// The notification microservice is RMQ-only — there is no HTTP surface, so
-// the health check is exposed through the same RabbitMQ transport. The
-// gateway can proxy a `GET /health/notification` to this pattern later.
+// RMQ-only service (ADR-011 §6); the liveness probe rides the same transport
+// as the event subscribers — there is no HTTP listener to hit.
 @Controller()
 export class HealthController {
   @MessagePattern(ROUTING_KEYS.NOTIFICATION_HEALTH_PING)

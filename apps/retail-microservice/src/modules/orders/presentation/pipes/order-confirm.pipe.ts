@@ -6,10 +6,6 @@ import { IOrderConfirm, IOrderConfirmPayload } from '@retail-inventory-system/co
 
 import { IOrderRepositoryPort, ORDER_REPOSITORY } from '../../application/ports';
 
-// Pre-RPC loader. Fetches the order's line items so the use case can decide
-// transitions without a second DB hit; the pipe is the natural place for the
-// 404 short-circuit when the order does not exist. Reaches the database via
-// the `ORDER_REPOSITORY` port — see ADR-013.
 @Injectable()
 export class OrderConfirmPipe implements PipeTransform<
   IOrderConfirmPayload,

@@ -9,10 +9,9 @@ import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import { CorrelationMiddleware, LoggerModuleConfig } from '@retail-inventory-system/observability';
 
-import { UserEntity } from '../modules/auth/infrastructure/persistence/user.entity';
-import { AuthModule } from '../modules/auth/infrastructure/auth.module';
-import { InventoryModule } from '../modules/inventory/infrastructure/inventory.module';
-import { RetailModule } from '../modules/retail/infrastructure/retail.module';
+import { AuthModule, UserEntity } from '../modules/auth';
+import { InventoryModule } from '../modules/inventory';
+import { RetailModule } from '../modules/retail';
 
 @Module({
   imports: [

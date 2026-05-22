@@ -19,11 +19,9 @@ import { firstValueFrom } from 'rxjs';
 import { Notification } from '../apps/notification-microservice/src/modules/notifications/domain';
 import { LogNotifierAdapter } from '../apps/notification-microservice/src/modules/notifications/infrastructure/delivery/log.notifier.adapter';
 
-// E2E smoke test for the notification microservice. Publishes a synthetic
-// `retail.order.created` event onto the `notification_events` queue and
-// asserts the LogNotifierAdapter received a Notification carrying the order
-// id. The full retail → notification path comes online in task-09; this
-// test exercises the consumer + use-case + notifier wiring in isolation.
+// Exercises the consumer + use-case + notifier wiring in isolation by
+// publishing a synthetic `retail.order.created` directly to the queue,
+// bypassing the API gateway → retail path.
 describe('Notification flow (e2e)', () => {
   const timeout = 60_000;
 
@@ -32,8 +30,7 @@ describe('Notification flow (e2e)', () => {
   let sendSpy: jest.SpyInstance<Promise<void>, [Notification]>;
 
   beforeAll(async () => {
-    // jest.spyOn keeps the original implementation (so the Pino info line is
-    // still emitted) and records every call for inspection.
+    // `spyOn` (not `jest.fn()`) keeps the LogNotifierAdapter.send() body running.
     sendSpy = jest.spyOn(LogNotifierAdapter.prototype, 'send');
 
     const rmqUrl = process.env.RABBITMQ_URL!;
@@ -94,9 +91,7 @@ describe('Notification flow (e2e)', () => {
       occurredAt: '2026-05-13T14:00:00.000Z',
     };
 
-    // `client.emit()` returns a cold observable — without subscription no
-    // bytes leave the publisher. `firstValueFrom` triggers the emit and
-    // resolves once the broker has acknowledged the publish.
+    // `firstValueFrom` triggers the cold emit and awaits broker ack.
     await firstValueFrom(publisher.emit(ROUTING_KEYS.RETAIL_ORDER_CREATED, event));
 
     await waitForCall(() => sendSpy.mock.calls.length > 0);

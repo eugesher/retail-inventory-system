@@ -1,9 +1,6 @@
 // Cache abstraction. Domain code depends on this port; only adapters in this
 // lib (and integration tests) reach for the concrete `Cache` from
-// `@nestjs/cache-manager`. The contract is intentionally narrow: get/set/del
-// for direct manipulation, `wrap` for the read-through cache-aside pattern
-// formalized in ADR-002 / ADR-006 / ADR-016, plus `delByPrefix` for the
-// multi-key invalidation that the stock cache needs.
+// `@nestjs/cache-manager`.
 export const CACHE_PORT = Symbol('CachePort');
 
 export interface ICachePort {
@@ -17,4 +14,11 @@ export interface ICachePort {
   // number of keys actually unlinked so callers can debug-log it.
   delByPrefix(prefix: string): Promise<number>;
   wrap<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T>;
+  // In-process single-flight: concurrent calls with the same `key` share
+  // one invocation of `fn`. Followers await the leader's promise and
+  // observe the same outcome (value or rejection). The in-flight entry is
+  // cleared in `finally` so a rejected leader does not poison the key.
+  // Scope is the current Node process — see ADR-021 for the choice to
+  // skip a store-side advisory lock.
+  singleFlight<T>(key: string, fn: () => Promise<T>): Promise<T>;
 }

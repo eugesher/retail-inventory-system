@@ -6,10 +6,9 @@ import { HealthController } from '../presentation/health.controller';
 import { InventoryEventsConsumer, OrderEventsConsumer } from './consumers';
 import { LogNotifierAdapter } from './delivery';
 
-// Per-module wiring for the notifications bounded context. The `NOTIFIER`
-// symbol is bound to `LogNotifierAdapter` today; swapping to
-// `EmailNotifierAdapter` or `WebhookNotifierAdapter` is a one-line change to
-// the `useClass` below once those adapters are implemented.
+// `NOTIFIER` is bound to `LogNotifierAdapter` today; swap to
+// `EmailNotifierAdapter` / `WebhookNotifierAdapter` is a one-line `useExisting`
+// rebind once those adapters are implemented (ADR-011 §3).
 @Module({
   controllers: [HealthController, OrderEventsConsumer, InventoryEventsConsumer],
   providers: [

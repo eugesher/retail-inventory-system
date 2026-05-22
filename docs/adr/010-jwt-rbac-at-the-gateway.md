@@ -16,8 +16,7 @@ acceptable for the deliverable.
 
 Task-06 adds end-to-end authentication and role-based authorization. The
 decisions in this ADR record the *shape* we picked rather than the
-incremental task notes — those live in the `_carryover-06.md` file alongside
-the task script and are deleted before merge.
+incremental task notes.
 
 ADR-009 already established the per-module hexagonal layout for the gateway;
 auth is the first gateway module with a real `domain/` aggregate, so the ADR
@@ -139,7 +138,7 @@ Vault) is in scope.
 HTTP. Seed users (`admin@example.com` / `customer@example.com`) cover every
 test scenario today; the live registration flow needs rate limiting, email
 verification, and CAPTCHA before it can be safe to expose, none of which is
-in scope. Documented as a follow-up in `_carryover-06.md`.
+in scope. Deferred as a follow-up.
 
 ### 8. Smoke endpoint for the admin role guard
 
@@ -158,7 +157,7 @@ later task, this stub gets replaced.
   the `user` table — only the gateway writes to it.
 - `libs/auth/` is a Nest-aware library. Domain code (under `apps/*/src/.../domain/`)
   must not depend on it; consumers are gateway controllers / use-cases /
-  modules. The DDD-purity rule from CLAUDE.md still holds.
+  modules. The DDD-purity rule still holds.
 - The Joi config schema in `libs/config` now requires `JWT_ACCESS_SECRET`
   and `JWT_REFRESH_SECRET` (≥ 32 chars each, distinct). A stack started
   without these env vars fails fast at boot.

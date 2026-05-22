@@ -36,8 +36,7 @@ export class InMemoryUserRepository implements IUserRepositoryPort {
   }
 }
 
-// Minimal hasher: prefixes the plaintext so verify() is a string compare.
-// Avoids the cost of real argon2 in unit tests.
+// Plaintext-prefixing fake — avoids real argon2's intentional cost in unit tests.
 export class FakeHasher implements IPasswordPort {
   public hash(plain: string): Promise<string> {
     return Promise.resolve(`hash:${plain}`);

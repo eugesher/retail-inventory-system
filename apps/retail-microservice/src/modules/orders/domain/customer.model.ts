@@ -4,11 +4,8 @@ interface ICustomerRefProps extends Record<string, unknown> {
   id: number;
 }
 
-// Order owns its customer reference. Today retail does not maintain a
-// Customer aggregate of its own (the `customer` table is read-only seed
-// data); the domain models Customer as a VO referenced by Order so the
-// domain layer stays framework-free and the persistence side is free to
-// evolve independently.
+// Retail does not own a Customer aggregate — the `customer` table is
+// read-only seed data, so Order holds it as a VO (ADR-013 §3).
 export class CustomerRef extends ValueObject<ICustomerRefProps> {
   constructor(props: ICustomerRefProps) {
     if (!Number.isInteger(props.id) || props.id <= 0) {

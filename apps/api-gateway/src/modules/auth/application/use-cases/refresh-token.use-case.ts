@@ -36,9 +36,8 @@ export class RefreshTokenUseCase {
 
     const matches = await this.hasher.verify(user.refreshTokenHash, command.refreshToken);
     if (!matches) {
-      // Rotation reuse: token was already exchanged. Conservative response is
-      // to invalidate the live refresh hash so an attacker can't keep using
-      // the most recent valid one.
+      // Rotation reuse — clear the live hash so a leaked stale refresh token
+      // can't roll forward (ADR-010).
       user.rotateRefreshTokenHash(null);
       await this.users.save(user);
       this.logger.warn({ userId: user.id }, 'RefreshFailed: rotation reuse detected');

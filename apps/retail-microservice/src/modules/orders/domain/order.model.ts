@@ -14,11 +14,6 @@ interface IOrderProps {
   status: OrderStatusVO;
 }
 
-// Result of `Order.applyInventoryConfirmation` — replaces the legacy
-// `OrderConfirmDomain` state-transition computer. The legacy class lived as
-// a standalone helper because the service layer needed the three flags
-// simultaneously; today the aggregate decides transitions internally and
-// hands the use case just enough to drive persistence.
 export interface IOrderConfirmationResult {
   someProductsConfirmed: boolean;
   allProductsConfirmed: boolean;
@@ -26,20 +21,6 @@ export interface IOrderConfirmationResult {
   newlyConfirmedProductIds: number[];
 }
 
-// Order aggregate root. Invariants enforced here:
-//   - line items array is non-empty (an empty order cannot exist)
-//   - `confirm()` is rejected when the header status is already CONFIRMED
-//   - line-item statuses only ever transition PENDING → CONFIRMED
-//
-// The aggregate is the sole authority on "which line ids got newly
-// confirmed?" — that question used to live in the standalone
-// `OrderConfirmDomain` class. Folding it in keeps state transitions inside
-// the boundary and lets the use case stay framework-thin.
-//
-// Create-path events (`retail.order.created`) are constructed by the use
-// case after persistence assigns the aggregate id — the aggregate records
-// only confirm/cancel events, which fire on transitions that always occur
-// against an already-persisted aggregate.
 export class Order extends AggregateRoot<number | null> {
   private _customer: CustomerRef;
   private _products: OrderProduct[];
@@ -52,9 +33,8 @@ export class Order extends AggregateRoot<number | null> {
     this._status = props.status;
   }
 
-  // Factory for the create path. Expands per-quantity into one line per unit
-  // (the legacy invariant — the persistence model has no `quantity` column on
-  // `order_product`).
+  // Expands per-quantity into one line per unit — `order_product` has no
+  // `quantity` column, so each unit gets its own row.
   public static create(props: {
     customer: CustomerRef;
     lines: { productId: number; quantity: number }[];
@@ -87,8 +67,6 @@ export class Order extends AggregateRoot<number | null> {
     });
   }
 
-  // Reconstitutes an aggregate from persisted state. No domain event is
-  // recorded — repositories use this on read-back paths.
   public static reconstitute(props: IOrderProps): Order {
     return new Order(props);
   }
@@ -109,14 +87,8 @@ export class Order extends AggregateRoot<number | null> {
     return this._status.value;
   }
 
-  // Apply the result of an inventory `order.confirm` reservation: the
-  // inventory side returns the subset of `OrderProduct.id`s for which stock
-  // was successfully reserved. The aggregate decides which lines transition,
-  // whether the header should flip to CONFIRMED, and records the
-  // `OrderConfirmed` event when applicable. Returns the legacy
-  // `someProductsConfirmed / allProductsConfirmed / skipUpdate` flags + the
-  // newly-confirmed line ids so the persistence adapter can write the
-  // minimum set of UPDATEs.
+  // `confirmedOrderProductIds` is the subset of line ids for which the
+  // inventory side actually reserved stock — not the request set.
   public applyInventoryConfirmation(confirmedOrderProductIds: number[]): IOrderConfirmationResult {
     if (this._status.isConfirmed()) {
       throw new Error('Order.applyInventoryConfirmation: order is already confirmed');
@@ -153,9 +125,8 @@ export class Order extends AggregateRoot<number | null> {
     return { someProductsConfirmed, allProductsConfirmed, skipUpdate, newlyConfirmedProductIds };
   }
 
-  // Reserved for a future cancel flow. Not exercised today; included so the
-  // event/state contract is documented in code. Disallowed once the order is
-  // CONFIRMED; the cancel-after-confirm pathway is a separate refund flow.
+  // No producer wires this today; the cancel-after-confirm pathway is a
+  // separate refund flow, hence the CONFIRMED guard.
   public cancel(reason?: string): void {
     if (this._status.isConfirmed()) {
       throw new Error('Order.cancel: cannot cancel an already-confirmed order');

@@ -6,7 +6,7 @@ import { configModuleConfig } from '@retail-inventory-system/config';
 import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
-import { NotificationsModule } from '../modules/notifications/infrastructure/notifications.module';
+import { NotificationsModule } from '../modules/notifications';
 
 @Module({
   imports: [

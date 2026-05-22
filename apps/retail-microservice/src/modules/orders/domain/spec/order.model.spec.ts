@@ -30,12 +30,6 @@ const makeOrder = (products: OrderProduct[], statusId = OrderStatusEnum.PENDING)
       statusId === OrderStatusEnum.CONFIRMED ? OrderStatusVO.CONFIRMED : OrderStatusVO.PENDING,
   });
 
-// Migrated from `app/api/order/domain/spec/order-confirm.domain.spec.ts` — the
-// legacy `OrderConfirmDomain` state-transition class folded into
-// `Order.applyInventoryConfirmation`. Assertion shape is preserved verbatim
-// against the new return type (the legacy `result.skipUpdate /
-// someProductsConfirmed / allProductsConfirmed` fields live on
-// `IOrderConfirmationResult`).
 describe('Order.applyInventoryConfirmation', () => {
   describe('someProductsConfirmed', () => {
     it('is false when confirmedOrderProductIds is empty', () => {
