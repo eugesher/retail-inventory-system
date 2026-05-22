@@ -107,8 +107,8 @@ starts a span via `context.with(...)`, and asserts the hook output
 carries the matching `traceId` / `spanId`. A second test asserts the
 hook is a passthrough when no span is active. This is the smallest
 behaviour-anchoring test that guards the contract — anything more
-involved is the integration of the SDK with Jaeger, which is the
-smoke-test in task-10's carryover.
+involved is the integration of the SDK with Jaeger, which belongs in
+a smoke test rather than this unit suite.
 
 ## Consequences
 
