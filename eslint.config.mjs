@@ -421,8 +421,7 @@ export default typescriptEslint.config(
       'coverage/**',
       'dist/**',
       'migrations/config/**',
-      // Lint-fixture files are intentionally non-compliant — see tests/lint.
-      'tests/lint/fixtures/**',
+      'spec/fixtures/**',
     ],
   },
   eslint.configs.recommended,
@@ -532,14 +531,8 @@ export default typescriptEslint.config(
       'boundaries/no-ignored': 'off',
     },
   },
-  // Relax strict typing rules for test files: supertest's `body` is
-  // inherently `any`, asserting raw DB rows doesn't warrant full typings,
-  // and lint-fixture sources (tests/lint/) intentionally hand-craft import
-  // strings the production rules then reject. Template literals are also
-  // permitted so fixture source code can embed single quotes without
-  // backslash escapes.
   {
-    files: ['test/**/*.ts', 'tests/**/*.ts'],
+    files: ['test/**/*.ts', 'spec/**/*.ts'],
     rules: {
       'no-restricted-imports': 'off',
       quotes: 'off',

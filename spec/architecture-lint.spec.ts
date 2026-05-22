@@ -25,7 +25,7 @@ const tsParser: unknown = tsParserModule.default ?? tsParserModule;
 
 type Plugin = NonNullable<Linter.Config['plugins']>[string];
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = path.resolve(__dirname, '..');
 
 // Element-type taxonomy and rules — keep mirrored with eslint.config.mjs.
 // Inlined here so the spec is hermetic and independent of any future
