@@ -8,8 +8,7 @@ import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
-import { stockEntities } from '../modules/stock/infrastructure/persistence';
-import { StockModule } from '../modules/stock/infrastructure/stock.module';
+import { stockEntities, StockModule } from '../modules/stock';
 
 @Module({
   imports: [

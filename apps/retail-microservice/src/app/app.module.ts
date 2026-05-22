@@ -7,8 +7,7 @@ import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
-import { OrdersModule } from '../modules/orders/infrastructure/orders.module';
-import { orderEntities } from '../modules/orders/infrastructure/persistence';
+import { orderEntities, OrdersModule } from '../modules/orders';
 
 @Module({
   imports: [
