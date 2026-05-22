@@ -157,7 +157,7 @@ later task, this stub gets replaced.
   the `user` table — only the gateway writes to it.
 - `libs/auth/` is a Nest-aware library. Domain code (under `apps/*/src/.../domain/`)
   must not depend on it; consumers are gateway controllers / use-cases /
-  modules. The DDD-purity rule from CLAUDE.md still holds.
+  modules. The DDD-purity rule still holds.
 - The Joi config schema in `libs/config` now requires `JWT_ACCESS_SECRET`
   and `JWT_REFRESH_SECRET` (≥ 32 chars each, distinct). A stack started
   without these env vars fails fast at boot.

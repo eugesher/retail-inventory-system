@@ -40,8 +40,7 @@ client globally.
 
 The pre-migration recommendation explicitly forbade `ClientProxy`
 injection from a controller and called for a `*.gateway.port.ts`
-adapter pair; the live form of that rule is captured in `CLAUDE.md`'s
-"Boundary rule" paragraph and enforced by
+adapter pair; the live form of that rule is enforced by
 [ADR-017](017-architecture-lint-via-eslint-boundaries.md). The gateway
 needs the same layered shape as every other service so the
 architecture-lint rules can apply uniformly.

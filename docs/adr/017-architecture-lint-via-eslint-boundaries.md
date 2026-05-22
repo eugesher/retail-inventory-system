@@ -7,7 +7,7 @@
 
 ## Context
 
-By task-11 the codebase had reached its target shape: every service follows the per-module hexagonal layout (`domain` / `application/ports` / `application/use-cases` / `infrastructure` / `presentation`), the shared libs (`@retail-inventory-system/{contracts,ddd,common,database,messaging,cache,observability,auth,config}`) have stable surfaces, and cross-service traffic is RabbitMQ-only. The boundaries between these layers and libs are codified in `CLAUDE.md` as the "Forbidden imports" paragraph.
+By task-11 the codebase had reached its target shape: every service follows the per-module hexagonal layout (`domain` / `application/ports` / `application/use-cases` / `infrastructure` / `presentation`), the shared libs (`@retail-inventory-system/{contracts,ddd,common,database,messaging,cache,observability,auth,config}`) have stable surfaces, and cross-service traffic is RabbitMQ-only.
 
 Until now those rules were enforced **by code review**. `eslint-plugin-boundaries` was installed back in task-02 ([ADR-004](004-adopt-hexagonal-architecture-per-service.md)) but intentionally left off so the migration could proceed without thrashing the lint feedback loop on every checkpoint.
 
@@ -121,7 +121,7 @@ The spec is added to `apps/**/*.ts` + `libs/**/*.ts` lint scope via the `tests/*
 
 ### Negative
 
-- The lint surface is wider; a contributor adding a feature may have to reshape their imports more often. Mitigated by the rules matching what `CLAUDE.md` already documents — no surprise constraints.
+- The lint surface is wider; a contributor adding a feature may have to reshape their imports more often.
 - The combined `boundaries/dependencies` rule has more failure modes to reason about than the original split (`boundaries/element-types` + `boundaries/external`): the catch-all "allow any external/core target" rule at index 0 is load-bearing, and accidental over-broad disallow rules can silently block npm imports. The fixture spec is the bumper that catches that class of regression early.
 
 ### Open
