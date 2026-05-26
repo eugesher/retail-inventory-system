@@ -67,15 +67,15 @@ Status legend:
 - [x] ADR-018 — NestJS Monorepo (`apps/` + `libs/`) — **CONFIRMED-CLEAN**
   - [x] code
   - [x] tasks
-- [ ] ADR-019 — TypeORM + MySQL — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-020 — RabbitMQ as Inter-Service Bus — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-021 — Cache Single-Flight + TTL Jitter — **PENDING**
-  - [ ] code
-  - [ ] tasks
+- [x] ADR-019 — TypeORM + MySQL — **HAS-CORRECTIONS** (epic-00/task-17)
+  - [x] code
+  - [x] tasks
+- [x] ADR-020 — RabbitMQ as Inter-Service Bus — **CONFIRMED-CLEAN**
+  - [x] code
+  - [x] tasks
+- [x] ADR-021 — Cache Single-Flight + TTL Jitter — **CONFIRMED-CLEAN**
+  - [x] code
+  - [x] tasks
 - [ ] ADR-022 — Cache Keys Tenant + Schema Version — **PENDING**
   - [ ] code
   - [ ] tasks
@@ -225,3 +225,27 @@ Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tas
 - 0 ALREADY-FIXED in this batch.
 - ADR-018 is **CONFIRMED-CLEAN** — the only ADR in this batch with no findings.
 - 5 ADRs remain (ADR-019 through ADR-023).
+
+### Session 2026-05-27 (batch 7) — ADR-019, ADR-020, ADR-021
+
+Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tasks under `tmp/tasks/**`, all four feature epics + epic-00).
+
+**ADR-019** — TypeORM + MySQL as the persistence stack.
+- Code: 13 binding rules CONFIRMED (`mysql2` driver in `package.json:73`; `DATABASE_URL` Joi-enforced `scheme:'mysql'` at `libs/config/config-module.config.ts:13`; `SnakeNamingStrategy` re-exported from `typeorm-naming-strategies` via `libs/database/snake-naming.strategy.ts:1`; `BaseEntity` has int `@PrimaryGeneratedColumn()` + `createdAt`/`updatedAt`/nullable `@DeleteDateColumn` at `libs/database/base.entity.ts:9-19`; `synchronize: false` everywhere — `database.module.ts:21` is the only call site; migrations under `migrations/<ts>-<slug>.ts` + CLI commands wired in `package.json:29-32`; test seeds under `scripts/seeds/*.sql` applied by `yarn test:seed` at `package.json:33`; `DatabaseModule.forRoot(entities)` at every AppModule; per-aggregate ports TypeORM-free — `IStockRepositoryPort` uses opaque `ITransactionScope`, orders + user ports already verified clean in batches 4-5; `ARCH-LINT-EX-01` closed via `ITransactionPort` — `transaction.port.ts` opaque, `EntityManager` confined to `typeorm-transaction.adapter.ts` + `stock-typeorm.repository.ts`; `BaseTypeormRepository<TEntity, TDomain>` extended at `libs/database/base-typeorm.repository.ts:3`). 1 CODE-DISCREPANCY — ADR-019 §"Module wiring" line 88-92 forbids `@nestjs/typeorm` outside `infrastructure/persistence/` ("applications never import `@nestjs/typeorm` directly"), and §"Repository surface" line 99-101 explicitly names `infrastructure/persistence/` as the only allowed home for `@nestjs/typeorm` imports. But `apps/api-gateway/src/modules/auth/infrastructure/auth.module.ts:2,33,35` imports `TypeOrmModule` and calls `TypeOrmModule.forFeature([UserEntity])` directly (once at module-imports level, once inside `AuthLibModule.forRootAsync({ imports: [...] })`). The other three live infrastructure modules — `stock.module.ts:34`, `orders.module.ts:31`, and the notification template — all comply via `DatabaseModule.forFeature(...)`. The eslint boundary config does **not** enforce the ADR-019 prose at the infrastructure-module layer (only `application-use-case`/`application-port`/`application-dto`/`presentation`/`lib-contracts`/`lib-ddd` ban `@nestjs/typeorm`), so the ADR is stricter than the lint. Folded into `epic-00/task-17-adr-019-reconcile-typeorm-vs-database-module-for-feature.md`.
+- Tasks: 1 TASK-CONTRADICTION (8 task files instructing the same disallowed pattern as `auth.module.ts`): `epic-01/task-01:116`, `epic-01/task-02:79`, `epic-01/task-05:101`, `epic-02/task-01:78`, `epic-02/task-02:201`, `epic-03/task-01:102+105` (fresh `import { TypeOrmModule } from '@nestjs/typeorm';` added to a new file), `epic-03/task-02:56+223+229`, `epic-03/task-04:144` — all instruct `TypeOrmModule.forFeature(...)` at the `infrastructure/<module>.module.ts` layer rather than `DatabaseModule.forFeature(...)`. Folded into the same `epic-00/task-17` per the established one-task-per-ADR pattern; the recommended resolution is to amend ADR-019 (the rule is over-broad relative to what the lint enforces and what the eight tasks + `auth.module.ts` treat as the working idiom), not to rewrite the eight tasks. Final call left to the implementer.
+
+**ADR-020** — RabbitMQ as the inter-service message bus.
+- Code: 7 binding rules CONFIRMED (re-verified — most claims overlap with ADR-008/013/014 batches). `RABBITMQ_URL` Joi-enforced `scheme:'amqp'` at `libs/config/config-module.config.ts:18`; `@nestjs/microservices` `Transport.RMQ` end-to-end (batch 3); `MicroserviceQueueEnum` lists the three queues (batch 3); dotted routing keys + lock-step spec (batch 3); `EXCHANGES` reserved for future topic routing (batch 3); `@nestjs/microservices`/`amqplib`/`amqp-connection-manager` confined to `infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts` (batch 3); RPC failures → `RpcException` → HTTP via `throwRpcError` (batch 3); event-publish-failures warn-logged not raised (batch 5 ADR-013). 0 CODE-DISCREPANCIES.
+- Tasks: 0 new TASK-CONTRADICTIONs. The `ClientProxy`-in-use-case violations at `epic-04/task-07:80` + `task-08:202` are already filed as `epic-00/task-10` against ADR-008 (the more specific rule). Other `ClientProxy` references in tasks (epic-02/task-03:40 publisher, task-06:149 gateway adapter; epic-04/task-09:241,262 gateway adapter) sit correctly inside `infrastructure/messaging/*` files per ADR-020 §"Architectural boundary". ADR-020 is **CONFIRMED-CLEAN**.
+
+**ADR-021** — In-process single-flight + ±10% TTL jitter on the cache port.
+- Code: 10 binding rules CONFIRMED (`ICachePort.singleFlight(key, fn)` at `libs/cache/cache.port.ts:23`; in-flight `Map<string, Promise<unknown>>` at `redis-cache.adapter.ts:29` cleared in `.finally(() => this.inFlight.delete(key))` at line 113-115; ±10% TTL jitter literal-matched at `stock.cache.ts:111-115` — `Math.floor(ttl + offset)` where `offset = (Math.random() * 2 - 1) * 0.1 * ttl` is the exact formula ADR-021 §2 prescribes; aggregate-level jitter — `RedisCacheAdapter.set` at line 51-64 is a faithful pass-through; `IStockCachePort.getOrLoad(payload, loader)` at `stock-cache.port.ts:50-53` + impl at `stock.cache.ts:74-103`; `GetStockUseCase.execute` calls `stockCache.getOrLoad({productId, storageIds, correlationId}, ...)` at `get-stock.use-case.ts:56-58` matching ADR-021 §3 verbatim; skip-cache branches (`scope` / `ignoreCache:true`) short-circuit before `getOrLoad` per ADR-021 §3 last paragraph at `get-stock.use-case.ts:45-54`; re-check inside leader at `stock.cache.ts:91-93` catches the rare mid-leader hit race; CACHE-001 + CACHE-004 closure annotated at `stock.cache.ts:17-20`; ADR-002 graceful Redis-down preserved — `stock.cache.ts:49-55` swallows read errors and returns `{value:undefined, available:false}`). 0 CODE-DISCREPANCIES.
+- Tasks: 0 TASK-CONTRADICTIONs. The v1→v2 cache rewrite under `epic-04/task-05` + `task-06` explicitly preserves both primitives — `task-05:349` ("Cache-aside contract preserved... single-flight + jitter inherited"), `task-06:51-58` ("single-flight + jitter inheritance"). The transitional no-op `StockCache` between task-05 and task-06 satisfies the `IStockCachePort` interface contract (returns `{value:undefined, available:true}` for `get`, no-op `set`, loader-only `getOrLoad`, work-only `withInvalidation`) and is documented as cache-disabled-by-design until task-06 lands the real v2 implementation. No task instructs removing the `singleFlight` primitive or the jitter math. ADR-021 is **CONFIRMED-CLEAN**.
+
+**Summary for this batch:**
+- 3 ADRs processed (ADR-019, ADR-020, ADR-021).
+- 1 CODE-DISCREPANCY filed (folded into `epic-00/task-17` for ADR-019; the `auth.module.ts` direct `@nestjs/typeorm` import).
+- 1 TASK-CONTRADICTION filed (folded into the same `epic-00/task-17` per the supersession-pointer pattern; 8 task instances share one root cause — the ADR-vs-code-vs-lint disagreement on `TypeOrmModule.forFeature(...)` at the infrastructure-module layer).
+- 0 ALREADY-FIXED in this batch (the `ClientProxy`-in-use-case items at `epic-04/task-07` + `task-08` matched against ADR-020 but were already filed under ADR-008 in batch 3 — re-counted there, not here).
+- ADR-020 and ADR-021 are both **CONFIRMED-CLEAN** — two of three ADRs in this batch with no findings.
+- 2 ADRs remain (ADR-022 + ADR-023).

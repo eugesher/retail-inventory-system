@@ -37,6 +37,7 @@ Tasks under this epic are **mutually independent**. Pick them in any order.
 | 14  | [Correct ADR-015's `instrumentation-pino` "not installed" claim](task-14-adr-015-correct-instrumentation-pino-installation-claim.md) | `docs/adr/015-…md`    | ADR-015     |
 | 15  | [Add ADR-016 supersession pointer for key-shape, port-surface, invalidation evolution (ADR-021/022/023)](task-15-adr-016-add-supersession-pointer-for-key-shape-port-and-invalidation-evolution.md) | `docs/adr/016-…md`    | ADR-016     |
 | 16  | [Correct ADR-017 architecture-lint spec path drift (`tests/lint/` → `spec/`)](task-16-adr-017-fix-arch-lint-spec-path-drift.md) | `docs/adr/017-…md`    | ADR-017     |
+| 17  | [Reconcile ADR-019 — `TypeOrmModule.forFeature(...)` vs. `DatabaseModule.forFeature(...)` at infrastructure-module layer](task-17-adr-019-reconcile-typeorm-vs-database-module-for-feature.md) | `docs/adr/019-…md`    | ADR-019     |
 
 ## Provenance
 
