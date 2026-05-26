@@ -49,15 +49,15 @@ Status legend:
 - [x] ADR-012 — Stock Aggregate + Port/Adapter Split — **HAS-CORRECTIONS** (epic-00/task-12)
   - [x] code
   - [x] tasks
-- [ ] ADR-013 — Order Aggregate + Cross-Service Confirm — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-014 — OTLP/HTTP Export + Jaeger — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-015 — Pino Trace Correlation (`traceId`/`spanId`) — **PENDING**
-  - [ ] code
-  - [ ] tasks
+- [x] ADR-013 — Order Aggregate + Cross-Service Confirm — **HAS-CORRECTIONS** (epic-00/task-13)
+  - [x] code
+  - [x] tasks
+- [x] ADR-014 — OTLP/HTTP Export + Jaeger — **CONFIRMED-CLEAN**
+  - [x] code
+  - [x] tasks
+- [x] ADR-015 — Pino Trace Correlation (`traceId`/`spanId`) — **HAS-CORRECTIONS** (epic-00/task-14)
+  - [x] code
+  - [x] tasks
 - [ ] ADR-016 — Generalized Cache-Aside — **PENDING**
   - [ ] code
   - [ ] tasks
@@ -177,3 +177,27 @@ Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tas
 - 0 ALREADY-FIXED in this batch.
 - ADR-011 is **CONFIRMED-CLEAN** — the only ADR in this batch with no findings.
 - 11 ADRs remain (ADR-013 through ADR-023).
+
+### Session 2026-05-26 (batch 5) — ADR-013, ADR-014, ADR-015
+
+Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tasks under `tmp/tasks/**`, all four feature epics + epic-00).
+
+**ADR-013** — Order aggregate + cross-service confirm.
+- Code: 15 binding rules CONFIRMED (module at `apps/retail-microservice/src/modules/orders/`; `Order extends AggregateRoot<number | null>` with non-empty-lines + state-flip + PENDING→CONFIRMED-only invariants; `OrderProduct extends Entity<number | null>`; `CustomerRef` is a `ValueObject<{id}>`; three `DomainEvent<number>` events; three DI symbols `ORDER_REPOSITORY`/`ORDER_EVENTS_PUBLISHER`/`INVENTORY_CONFIRM_GATEWAY`; three concrete adapters `OrderTypeormRepository`/`OrderRabbitmqPublisher`/`InventoryConfirmRabbitmqAdapter`; `CreateOrderUseCase` warn-logs publish failures post-save; `ConfirmOrderUseCase` calls inventory gateway → `applyInventoryConfirmation` → `confirmLines`; `GetOrderUseCase.findHeaderById` is header-only; create-path event constructed in the use case after save — not from the factory; `IRetailOrderConfirmedEvent` + `IRetailOrderCancelledEvent` in `libs/contracts/retail/events/` extend `ICorrelationPayload`; `ROUTING_KEYS.RETAIL_ORDER_CONFIRMED` + `RETAIL_ORDER_CANCELLED` exist; test layout matches §8 — `domain/spec/order.model.spec.ts` + `domain/spec/order-create.model.spec.ts`, `application/use-cases/spec/test-doubles.ts` + one spec per use case, `infrastructure/persistence/spec/order.mapper.spec.ts`). 1 CODE-DISCREPANCY — ADR-013 §3 (`docs/adr/013-…md:76-80`) enumerates `IOrderRepositoryPort` as five methods (`findById`/`findHeaderById`/`findOrderResponse`/`save`/`confirmLines`), but the live port at `apps/retail-microservice/src/modules/orders/application/ports/order.repository.port.ts:14-29` has **eight** — three pipe-time loaders (`findConfirmableOrder`, `customerExists`, `findExistingProductIds`) were added post-ADR to support `OrderCreatePipe` / `OrderConfirmPipe`. The port's role (inbound persistence behind `ORDER_REPOSITORY`, adapter `OrderTypeormRepository`) is unchanged — only the enumeration is stale. Filed as `epic-00/task-13-adr-013-fix-order-repository-port-method-list-drift.md`.
+- Tasks: 0 TASK-CONTRADICTIONs. No task under `tmp/tasks/**` touches the retail orders module in a way that contradicts ADR-013's binding rules. The `ClientProxy` injections grep surfaces in `epic-02/task-03`, `epic-02/task-06`, `epic-04/task-08`, `epic-04/task-09` are all inventory/catalog adapter wirings — either correct fresh writes (gateway adapters per ADR-009) or already filed against ADR-008 (`epic-00/task-10`); none affect ADR-013's orders-module scope.
+
+**ADR-014** — OTLP/HTTP export to local Jaeger via OTel collector.
+- Code: 9 binding rules CONFIRMED (`libs/observability/tracer.ts` uses `@opentelemetry/exporter-trace-otlp-http` — not gRPC, not Jaeger-thrift; endpoint env-driven via `OTEL_EXPORTER_OTLP_ENDPOINT`; two `Resource` keys `service.name` + `deployment.environment.name` hand-rolled; `docker-compose.observability.yml` separate overlay; collector config at `infrastructure/otel-collector-config.yaml` — OTLP receiver → `batch` processor → `otlp/jaeger:4317` + `debug` exporter teed in; Joi enforces `OTEL_SERVICE_NAME` + `OTEL_EXPORTER_OTLP_ENDPOINT` required, `OTEL_RESOURCE_ATTRIBUTES` optional, `OTEL_SDK_DISABLED` defaults false; `getNodeAutoInstrumentations()` enabled with no overrides; no manual `@Span()` decorator anywhere — `grep -rn '@Span\b' apps/ libs/` returns 0 hits; `amqp-connection-manager` + `amqplib` both in `package.json` with `@opentelemetry/instrumentation-amqplib`). 0 CODE-DISCREPANCIES.
+- Tasks: 0 TASK-CONTRADICTIONs specific to ADR-014. The `otel.setup.ts` app-local violation in `epic-02/task-01` is the host-rule break already filed as `epic-00/task-08` against **ADR-007**, not ADR-014. ADR-014 is **CONFIRMED-CLEAN** — the only ADR in this batch with no findings.
+
+**ADR-015** — Pino log lines carry OTel `traceId` / `spanId`.
+- Code: 8 binding rules CONFIRMED (enrichment lives in `LoggerModuleConfig.pinoHttp.hooks.logMethod` at `libs/observability/logger.module.ts:65-87`; `trace.getActiveSpan()?.spanContext()` resolved per call; passthrough when no span — guards on both `traceId` + `spanId` non-zero; camelCase `traceId`/`spanId` field names; noisy-context drop branch composes cleanly; `correlationId` retained alongside; `TraceContextInterceptor` is a no-op passthrough; unit spec at `libs/observability/spec/logger.module.spec.ts` uses `BasicTracerProvider` + `AsyncLocalStorageContextManager` and asserts both the enrichment and the passthrough cases). 1 CODE-DISCREPANCY — ADR-015 §"Field naming" (line 76) closes "Today the auto-instrumentation package is not installed", but `yarn.lock` carries `@opentelemetry/instrumentation-pino@0.64.0` (transitively from `@opentelemetry/auto-instrumentations-node@^0.76.0`, which IS in direct deps), and `tracer.ts:46-49` activates the bundle with no per-instrumentation disables — so `instrumentation-pino` patches Pino at boot and the snake_case `trace_id`/`span_id` coexistence the ADR labels "later" is happening today. The hook is still useful — it's the only source of the camelCase pair — but the installation-status footnote is dated. Filed as `epic-00/task-14-adr-015-correct-instrumentation-pino-installation-claim.md`.
+- Tasks: 0 TASK-CONTRADICTIONs. Only `trace_id`/`span_id` references in `tmp/tasks/**` are inside `epic-00/task-06` (the corrections task for ADR-007's snake-case example shape). No task wires up a logger emitting snake_case in code.
+
+**Summary for this batch:**
+- 3 ADRs processed (ADR-013, ADR-014, ADR-015).
+- 2 CODE-DISCREPANCIES filed (`epic-00/task-13` for ADR-013 port method enumeration; `epic-00/task-14` for ADR-015 dated `instrumentation-pino` footnote).
+- 0 TASK-CONTRADICTIONs.
+- 0 ALREADY-FIXED in this batch.
+- ADR-014 is **CONFIRMED-CLEAN** — the only ADR in this batch with no findings.
+- 8 ADRs remain (ADR-016 through ADR-023).

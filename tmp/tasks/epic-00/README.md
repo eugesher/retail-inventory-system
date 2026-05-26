@@ -31,6 +31,10 @@ Tasks under this epic are **mutually independent**. Pick them in any order.
 | 08  | [Fix `epic-02/task-01` app-local `otel.setup.ts` (ADR-007 host-rule violation)](task-08-epic-02-task-01-otel-setup-violates-libs-observability-host-rule.md) | `tmp/tasks/epic-02-…/task-01-…md` + `task-09-…md` | ADR-007     |
 | 09  | [Fix `epic-03/task-03` legacy-enum usage (ADR-008 new-callers rule)](task-09-epic-03-task-03-pricing-replace-legacy-enum-with-routing-keys.md) | `tmp/tasks/epic-03-…/task-03-…md` | ADR-008     |
 | 10  | [Fix `epic-04/task-07` `ClientProxy` in use-case (collapse with task-08)](task-10-epic-04-task-07-08-collapse-clientproxy-use-case-into-publisher-port.md) | `tmp/tasks/epic-04-…/task-07-…md` + `task-08-…md` | ADR-008     |
+| 11  | [Fix `epic-01/task-10` "no new ADR is required" claim — RBAC v2 supersedes ADR-010](task-11-epic-01-task-10-rbac-claims-no-new-adr-but-supersedes-adr-010.md) | `tmp/tasks/epic-01-…/task-10-…md` | ADR-010     |
+| 12  | [Add ADR-012 supersession pointer for `StockCache` port + adapter evolution (ADR-016/021/022/023 + `ITransactionPort`)](task-12-adr-012-add-supersession-pointer-for-stock-cache-port-and-adapter-evolution.md) | `docs/adr/012-…md`    | ADR-012     |
+| 13  | [Correct ADR-013's `IOrderRepositoryPort` method list — 5 listed vs. 8 in live code](task-13-adr-013-fix-order-repository-port-method-list-drift.md) | `docs/adr/013-…md`    | ADR-013     |
+| 14  | [Correct ADR-015's `instrumentation-pino` "not installed" claim](task-14-adr-015-correct-instrumentation-pino-installation-claim.md) | `docs/adr/015-…md`    | ADR-015     |
 
 ## Provenance
 
