@@ -40,15 +40,15 @@ Status legend:
 - [x] ADR-009 — Port/Adapter at the API Gateway — **CONFIRMED-CLEAN**
   - [x] code
   - [x] tasks
-- [ ] ADR-010 — JWT + RBAC at the Gateway — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-011 — NotifierPort + Notification Microservice Template — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-012 — Stock Aggregate + Port/Adapter Split — **PENDING**
-  - [ ] code
-  - [ ] tasks
+- [x] ADR-010 — JWT + RBAC at the Gateway — **HAS-CORRECTIONS** (epic-00/task-11)
+  - [x] code
+  - [x] tasks
+- [x] ADR-011 — NotifierPort + Notification Microservice Template — **CONFIRMED-CLEAN**
+  - [x] code
+  - [x] tasks
+- [x] ADR-012 — Stock Aggregate + Port/Adapter Split — **HAS-CORRECTIONS** (epic-00/task-12)
+  - [x] code
+  - [x] tasks
 - [ ] ADR-013 — Order Aggregate + Cross-Service Confirm — **PENDING**
   - [ ] code
   - [ ] tasks
@@ -153,3 +153,27 @@ Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tas
 - 1 stale-narrative item folded into the ADR-008 amend task (epic-00/task-07).
 - ADR-009 is CONFIRMED-CLEAN — the only ADR in this batch with no findings.
 - 14 ADRs remain (ADR-010 through ADR-023).
+
+### Session 2026-05-26 (batch 4) — ADR-010, ADR-011, ADR-012
+
+Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tasks under `tmp/tasks/**`, all four feature epics + epic-00).
+
+**ADR-010** — JWT authentication and RBAC at the API gateway.
+- Code: 12 binding rules CONFIRMED (HS256 JWT, separate `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` ≥32 + distinct via Joi `invalid(ref)`; argon2id with OWASP costs env-tunable; refresh rotation with reuse detection that clears the live hash on mismatch; `User` aggregate + `DatabaseModule.forRoot([UserEntity])` in the gateway; global `JwtAuthGuard` + `RolesGuard` as `APP_GUARD`; `@Public()` only on `/auth/login` + `/auth/refresh`; `RoleEnum = 'admin' | 'customer'`; `RegisterUserUseCase` unit-tested but not HTTP-exposed; `GET /auth/admin/ping` smoke endpoint; `IJwtAccessPayload` shape in `libs/contracts/auth`). 0 CODE-DISCREPANCIES.
+- Tasks: 1 TASK-CONTRADICTION — `tmp/tasks/epic-01-baseline-identity-staffuser-customer-rbac/task-10-…:41` declares "no new ADR is required", but epic-01 substantively replaces ADR-010's RBAC model: (a) task-04 adds a third global guard `PermissionsGuard` (ADR-010 §5 commits to a 2-guard pipeline); (b) task-02 + task-05 split `User` into `StaffUser` + `Customer` aggregates with different lifecycles (ADR-010 §4 is unitary); (c) task-01 introduces a relational `role`/`permission`/`role_permissions`/`staff_user_roles` schema and four seeded roles via an IAM admin controller (ADR-010 Consequences fixes `RoleEnum` at two values and treats role addition as a three-file edit); (d) task-05 ships `POST /auth/customer/register` as `@Public()` without rate-limiting / email-verification / CAPTCHA (ADR-010 §7 explicitly defers public registration until those three exist). Per ADR-003 cadence, a new "RBAC v2" ADR (or amendment chain on ADR-010) is required. Filed as `epic-00/task-11-epic-01-task-10-rbac-claims-no-new-adr-but-supersedes-adr-010.md`.
+
+**ADR-011** — NotifierPort + notification microservice as the per-module template.
+- Code: 10 binding rules CONFIRMED (canonical 4-layer module layout under `modules/notifications/`; `INotifierPort` + `NOTIFIER` as `Symbol`; `LogNotifierAdapter` is the default `useExisting` binding; `EmailNotifierAdapter` + `WebhookNotifierAdapter` scaffolds throw "not implemented"; consumers under `infrastructure/consumers/`; `IRetailOrderCreatedEvent` + `IInventoryStockLowEvent` framework-free in `libs/contracts/{retail,inventory}/events/` extending `ICorrelationPayload` with an `occurredAt` ISO string; RMQ-only — `@MessagePattern(ROUTING_KEYS.NOTIFICATION_HEALTH_PING)`; inline `correlationId` log field on `@EventPattern`-handler paths; `NOTIFICATION_EVENTS` queue + reserved `EXCHANGES.NOTIFICATION` constant; lock-step `ROUTING_KEYS` + `MicroserviceMessagePatternEnum` spec). 0 CODE-DISCREPANCIES.
+- Tasks: 0 TASK-CONTRADICTIONs. `epic-04/task-08` reshapes `IInventoryStockLowEvent` payload from `productId`/`storageId` to `variantId`/`stockLocationId` but keeps it framework-free with `occurredAt` + `ICorrelationPayload` — a planned wire-shape evolution that does not violate any ADR-011 binding rule. ADR-011 is **CONFIRMED-CLEAN** — the only ADR in this batch with no findings.
+
+**ADR-012** — Stock aggregate and the inventory port/adapter split.
+- Code: 8 binding rules CONFIRMED (single `stock` bounded context at `apps/inventory-microservice/src/modules/stock/`; `StockItem` plain class with the three invariants `quantity ≥ 0` / `reservedQuantity ≥ 0` / `reservedQuantity ≤ quantity`; `Storage` is `ValueObject<{id:string}>` rejecting empty strings; the three events extend `DomainEvent<number>`; `IStockRepositoryPort` exposes the six listed methods; `StockTypeormRepository extends BaseTypeormRepository`; `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD = 5` in `libs/contracts/inventory/inventory.constants.ts`; events emit from the use case — `StockItem` is not an `AggregateRoot`). 5 CODE-DISCREPANCIES, all stale-narrative drift from later ADRs (016 / 021 / 022 / 023) + the post-ADR `ITransactionPort` introduction: (i) §3 names the cache adapter `StockRedisCache` — live class is `StockCache` at `stock.cache.ts:22`; (ii) §3 says the adapter "reaches through `@nestjs/cache-manager` + `@keyv/redis`" — live adapter delegates to `CACHE_PORT` per ADR-016 (and CLAUDE.md §"Cache-key convention" now forbids the direct imports); (iii) §3 "SCAN+UNLINK contract verbatim + named-key fallback" — superseded by `delByPrefix` (ADR-016) + `withInvalidation` (ADR-023); (iv) §3 "three application ports" — live `ports/` directory has four (the post-ADR `transaction.port.ts` partially ring-fences `ARCH-LINT-EX-01`); (v) §4 + §8 "post-commit fire-and-forget invalidation" + "`AUDIT-2026-05-08 [CACHE-NNN]` annotations preserved verbatim" — both replaced (post-commit is now type-enforced via `withInvalidation` per ADR-023; the verbatim audit comments became supersession references at `stock.cache.ts:17-20`, with the audit register closed in CLAUDE.md §"Operational notes"). All five folded into `epic-00/task-12-adr-012-add-supersession-pointer-for-stock-cache-port-and-adapter-evolution.md`.
+- Tasks: 0 TASK-CONTRADICTIONs. The epic-04 stock reshape (`StockItem → StockLevel`, `productId → variantId`, version column, etc.) is a planned future evolution that honors every ADR-012 binding rule (domain isolation, port/adapter split, ports under `application/ports/`, framework-free domain, event-from-use-case emission).
+
+**Summary for this batch:**
+- 3 ADRs processed (ADR-010, ADR-011, ADR-012).
+- 5 CODE-DISCREPANCIES filed (all under one task: `epic-00/task-12`, per the supersession-pointer folding pattern).
+- 1 TASK-CONTRADICTION filed (`epic-00/task-11` for ADR-010 — epic-01's RBAC v2 design needs a new ADR).
+- 0 ALREADY-FIXED in this batch.
+- ADR-011 is **CONFIRMED-CLEAN** — the only ADR in this batch with no findings.
+- 11 ADRs remain (ADR-013 through ADR-023).
