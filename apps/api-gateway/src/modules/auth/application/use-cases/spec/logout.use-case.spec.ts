@@ -1,6 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 
 import { RoleEnum } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { RoleVO } from '../../../domain/role.model';
 import { User } from '../../../domain/user.model';
@@ -9,11 +11,13 @@ import { FakeHasher, InMemoryUserRepository } from './test-doubles';
 
 describe('LogoutUseCase', () => {
   let users: InMemoryUserRepository;
+  let logger: PinoLoggerMock;
   let useCase: LogoutUseCase;
 
   beforeEach(() => {
     users = new InMemoryUserRepository();
-    useCase = new LogoutUseCase(users);
+    logger = makePinoLoggerMock();
+    useCase = new LogoutUseCase(users, logger as unknown as PinoLogger);
   });
 
   const seedActiveUser = async (): Promise<User> => {

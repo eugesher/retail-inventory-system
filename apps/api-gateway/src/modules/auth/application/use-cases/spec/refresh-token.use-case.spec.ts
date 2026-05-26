@@ -1,6 +1,8 @@
 import { UnauthorizedException } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 
 import { RoleEnum } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { RoleVO } from '../../../domain/role.model';
 import { User } from '../../../domain/user.model';
@@ -12,6 +14,8 @@ describe('RefreshTokenUseCase', () => {
   let users: InMemoryUserRepository;
   let hasher: FakeHasher;
   let tokens: FakeTokenAdapter;
+  let loginLogger: PinoLoggerMock;
+  let refreshLogger: PinoLoggerMock;
   let login: LoginUseCase;
   let refresh: RefreshTokenUseCase;
 
@@ -30,8 +34,15 @@ describe('RefreshTokenUseCase', () => {
     users = new InMemoryUserRepository();
     hasher = new FakeHasher();
     tokens = new FakeTokenAdapter();
-    login = new LoginUseCase(users, hasher, tokens);
-    refresh = new RefreshTokenUseCase(users, hasher, tokens);
+    loginLogger = makePinoLoggerMock();
+    refreshLogger = makePinoLoggerMock();
+    login = new LoginUseCase(users, hasher, tokens, loginLogger as unknown as PinoLogger);
+    refresh = new RefreshTokenUseCase(
+      users,
+      hasher,
+      tokens,
+      refreshLogger as unknown as PinoLogger,
+    );
   });
 
   it('rotates tokens on a valid refresh', async () => {

@@ -1,5 +1,6 @@
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import { ICurrentUser } from '@retail-inventory-system/contracts';
 
@@ -14,12 +15,11 @@ export interface ILoginResult extends IIssuedTokens {
 
 @Injectable()
 export class LoginUseCase {
-  private readonly logger = new Logger(LoginUseCase.name);
-
   constructor(
     @Inject(USER_REPOSITORY) private readonly users: IUserRepositoryPort,
     @Inject(PASSWORD_HASHER) private readonly hasher: IPasswordPort,
     @Inject(TOKEN_SERVICE) private readonly tokens: ITokenPort,
+    @InjectPinoLogger(LoginUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   public async execute(command: ILoginCommand): Promise<ILoginResult> {
@@ -56,7 +56,7 @@ export class LoginUseCase {
     user.recordLoggedIn();
     await this.users.save(user);
 
-    this.logger.log({ userId: user.id }, 'UserLoggedIn');
+    this.logger.info({ userId: user.id }, 'UserLoggedIn');
 
     return {
       accessToken,

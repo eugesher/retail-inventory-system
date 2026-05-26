@@ -56,7 +56,7 @@ export class PublishProductUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: IProductRepositoryPort,
     @Inject(CATALOG_EVENT_PUBLISHER) private readonly events: ICatalogEventPublisherPort,
-    private readonly logger: Logger,
+    @InjectPinoLogger(PublishProductUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   async execute(input: { productId: number; correlationId: string }): Promise<Product> {
@@ -94,7 +94,7 @@ export class ArchiveProductUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: IProductRepositoryPort,
     @Inject(CATALOG_EVENT_PUBLISHER) private readonly events: ICatalogEventPublisherPort,
-    private readonly logger: Logger,
+    @InjectPinoLogger(ArchiveProductUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   async execute(input: { productId: number; correlationId: string }): Promise<Product> {

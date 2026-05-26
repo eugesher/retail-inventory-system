@@ -60,7 +60,7 @@ Tasks 1–2 carryover present:
 export class RegisterProductUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: IProductRepositoryPort,
-    private readonly logger: Logger,
+    @InjectPinoLogger(RegisterProductUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   async execute(input: { name: string; slug: string; description?: string }): Promise<Product> {
@@ -84,7 +84,7 @@ export class AddVariantUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: IProductRepositoryPort,
     @Inject(CATALOG_EVENT_PUBLISHER) private readonly events: ICatalogEventPublisherPort,
-    private readonly logger: Logger,
+    @InjectPinoLogger(AddVariantUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   async execute(input: {

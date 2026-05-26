@@ -20,7 +20,7 @@ Task-06 carryover present:
 
 - `iam` module with five use cases.
 - Auth module has `RegisterStaffUserUseCase`, `LoginUseCase`, `RefreshTokenUseCase`, `LogoutUseCase`, `RegisterCustomerUseCase`, `LoginCustomerUseCase`, `ValidateJwtSubjectUseCase`.
-- Existing structured logging via Pino is in place — `Logger` from `@nestjs/common` already used in every use case (e.g., `this.logger.warn({ email }, 'LoginFailed: user not found or inactive')` in `login.use-case.ts`).
+- Existing structured logging via Pino is in place — `PinoLogger` from `nestjs-pino` is already injected in every use case (e.g., `this.logger.warn({ email }, 'LoginFailed: user not found or inactive')` in `login.use-case.ts`).
 
 ## Scope
 
@@ -91,12 +91,15 @@ The interface uses `Promise<void>` even for the no-op so the contract doesn't ch
 
 ```ts
 // apps/api-gateway/src/modules/auth/infrastructure/audit/no-op-audit-log.publisher.ts
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { IAuditLogEvent, IAuditLogPublisher } from '@retail-inventory-system/contracts';
 
 @Injectable()
 export class NoOpAuditLogPublisher implements IAuditLogPublisher {
-  private readonly logger = new Logger('AuditLog');
+  constructor(
+    @InjectPinoLogger('AuditLog') private readonly logger: PinoLogger,
+  ) {}
 
   public publish(event: IAuditLogEvent): Promise<void> {
     this.logger.debug(
@@ -115,7 +118,7 @@ export class NoOpAuditLogPublisher implements IAuditLogPublisher {
 }
 ```
 
-The `Logger` context is `'AuditLog'` (constant) so a grep over Pino output isolates audit events cleanly even before the real publisher exists.
+The `PinoLogger` context is `'AuditLog'` (constant) so a grep over Pino output isolates audit events cleanly even before the real publisher exists.
 
 ## Files to add
 
