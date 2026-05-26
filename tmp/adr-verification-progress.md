@@ -22,15 +22,15 @@ Status legend:
 - [x] ADR-003 — Record Architecture Decisions — **HAS-CORRECTIONS** (epic-00/task-03 covers the ADR-001 Date-line gap that ADR-003 mandates)
   - [x] code
   - [x] tasks
-- [ ] ADR-004 — Hexagonal Architecture per Service — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-005 — Split `libs/common` into Bounded Libs — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-006 — Cache-Aside via `libs/cache` — **PENDING**
-  - [ ] code
-  - [ ] tasks
+- [x] ADR-004 — Hexagonal Architecture per Service — **HAS-CORRECTIONS** (epic-00/task-04)
+  - [x] code
+  - [x] tasks
+- [x] ADR-005 — Split `libs/common` into Bounded Libs — **CONFIRMED-CLEAN**
+  - [x] code
+  - [x] tasks
+- [x] ADR-006 — Cache-Aside via `libs/cache` — **HAS-CORRECTIONS** (epic-00/task-05)
+  - [x] code
+  - [x] tasks
 - [ ] ADR-007 — Pino + OpenTelemetry Trace Correlation — **PENDING**
   - [ ] code
   - [ ] tasks
@@ -107,3 +107,26 @@ Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tas
 - 0 non-ALREADY-FIXED TASK-CONTRADICTIONs.
 - 1 ALREADY-FIXED (Prompt 1) acknowledged for ADR-001 tasks.
 - 20 ADRs remain (ADR-004 through ADR-023).
+
+### Session 2026-05-26 (batch 2) — ADR-004, ADR-005, ADR-006
+
+Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tasks under `tmp/tasks/**`, all four epics).
+
+**ADR-004** — Hexagonal Architecture Per Service.
+- Code: 5 binding rules CONFIRMED (four-layer module split present in 6 modules; `domain/` clean of `@nestjs/*` / TypeORM / `class-validator`; use-cases end in `*.use-case.ts`; adapters end in `*.adapter.ts` / `*.repository.ts` / `*.publisher.ts`; cross-module imports go through `@retail-inventory-system/*`). 1 CODE-DISCREPANCY — ADR-004 lines 70 and 96 locate ports under `domain/ports/`, but every `ports/` directory in the repo sits under `application/ports/` (`find apps -type d -name ports` returns 6 hits, all in `application/`). Every downstream ADR (009/011/012/013) plus CLAUDE.md treat `application/ports/` as the binding rule. Filed as `epic-00/task-04-adr-004-correct-ports-location-from-domain-to-application.md`.
+- Tasks: no TASK-CONTRADICTIONs. All decomposed tasks (e.g. `epic-01/task-05:83`, `epic-01/task-02:77`) use `application/ports/`, matching the live code and superseding ADR-004's stale wording.
+
+**ADR-005** — Split `libs/common` into Bounded Libs.
+- Code: 7 rules CONFIRMED (`libs/contracts` with sub-areas; `libs/database` exports `BaseEntity` / `BaseTypeormRepository` / `SnakeNamingStrategy` / `DatabaseModule.forRoot/forFeature`; slimmed `libs/common` keeps only `result` / `exceptions` / `pagination` / `types`; three shims removed in task-14 — `libs/inventory` and `libs/retail` deleted, `TypeormModuleConfig` deleted; flat lib layout with no `src/` / no `tsconfig.lib.json` / no entry in `nest-cli.json` `projects`; `BaseEntity` uses `@PrimaryGeneratedColumn()` + soft-delete `@DeleteDateColumn`). 1 MINOR-INACCURACY (not load-bearing) — ADR-005 line 99-101 claims "all 8 existing entities already use auto-increment integer PKs", but `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/storage.entity.ts:5` uses `@PrimaryColumn({ type: 'varchar', length: 36 })`. The binding decision (BaseEntity strategy itself) still holds. 1 INCOMPLETE-COMMITMENT (also not load-bearing) — ADR-005 line 119-120 promised BaseEntity retrofit "in task-08 / task-09"; `grep "extends BaseEntity" apps libs` returns nothing. Both items recorded here for the log; no correction task filed.
+- Tasks: no TASK-CONTRADICTIONs. No task places Nest DI decorators in `libs/contracts`. No task switches `BaseEntity`'s PK strategy. New task-introduced entities (`epic-01/task-01:100` RoleEntity char(36), `epic-04/task-02:153` StockLocation varchar(64)) use string PKs but do not extend `BaseEntity`, so they fall outside ADR-005's BaseEntity-scoped strategy decision.
+
+**ADR-006** — Cache-aside via `libs/cache` Port and Adapter.
+- Code: 6 rules CONFIRMED (`CACHE_PORT` DI symbol at `libs/cache/cache.port.ts:4`; `RedisCacheAdapter` `@Injectable()` over `@nestjs/cache-manager` + `@keyv/redis`; `CacheModule` binds `CACHE_PORT → RedisCacheAdapter`; `cacheModuleConfig` relocated from `libs/config` to `libs/cache/cache-module.config.ts`; `CACHE_KEYS` registry exists at `libs/cache/cache-keys.ts:54`; `@Cacheable` decorator exists at `libs/cache/decorators/cacheable.decorator.ts`). 1 CODE-DISCREPANCY (compound) — ADR-006 §Decision table and §"Relationship to ADR-002" describe four facts that are all superseded: `ICachePort` four-method surface (now six: `delByPrefix` + `singleFlight` added by ADR-016 / ADR-021), key prefix `stock:<productId>:` (now `ris:[t:<tenantId>:]inventory:stock:v1:<productId>` per ADR-016 + ADR-022), `*` sentinel (now `__all__`), and SCAN+UNLINK fire-and-forget invalidation (now `IStockCachePort.withInvalidation` post-commit per ADR-023). ADR-006 has no `## References` section — no forward graph for the reader. Filed as `epic-00/task-05-adr-006-add-supersession-pointer-for-port-surface-and-key-shape-evolution.md`.
+- Tasks: no TASK-CONTRADICTIONs. All decomposed task examples consistently use `ICachePort` / `CACHE_PORT` / `CACHE_KEYS.*` / `@Cacheable`. The only `CacheHelper` references in tasks are about its **deletion** in `epic-04/task-06-bump-cache-key-version-v1-to-v2-rewrite-stock-cache.md` (lines 135/319/342). No app or task imports `@nestjs/cache-manager` or `@keyv/redis` directly.
+
+**Summary for this batch:**
+- 3 ADRs processed (ADR-004, ADR-005, ADR-006).
+- 2 CODE-DISCREPANCIES filed (epic-00/task-04, epic-00/task-05).
+- 0 TASK-CONTRADICTIONs.
+- 1 minor factual inaccuracy + 1 incomplete commitment noted on ADR-005 — neither load-bearing; no correction task filed.
+- 17 ADRs remain (ADR-007 through ADR-023).

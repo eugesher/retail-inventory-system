@@ -24,6 +24,8 @@ Tasks under this epic are **mutually independent**. Pick them in any order.
 | 01  | [Add ADR-001 supersession pointer for logger-config relocation](task-01-adr-001-add-supersession-pointer-for-logger-relocation.md) | `docs/adr/001-…md`    | ADR-001     |
 | 02  | [Add ADR-002 supersession pointer for cache-aside evolution](task-02-adr-002-add-supersession-pointer-for-cache-evolution.md)       | `docs/adr/002-…md`    | ADR-002     |
 | 03  | [Add `**Date**` header to ADR-001](task-03-adr-001-add-date-header.md)                                                              | `docs/adr/001-…md`    | ADR-001 / ADR-003 |
+| 04  | [Correct ADR-004's ports location — `domain/ports/` → `application/ports/`](task-04-adr-004-correct-ports-location-from-domain-to-application.md) | `docs/adr/004-…md`    | ADR-004     |
+| 05  | [Add ADR-006 supersession pointer for port-surface + key-shape evolution](task-05-adr-006-add-supersession-pointer-for-port-surface-and-key-shape-evolution.md) | `docs/adr/006-…md`    | ADR-006     |
 
 ## Provenance
 
