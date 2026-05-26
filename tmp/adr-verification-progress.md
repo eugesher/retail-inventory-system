@@ -58,15 +58,15 @@ Status legend:
 - [x] ADR-015 — Pino Trace Correlation (`traceId`/`spanId`) — **HAS-CORRECTIONS** (epic-00/task-14)
   - [x] code
   - [x] tasks
-- [ ] ADR-016 — Generalized Cache-Aside — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-017 — Architecture Lint via `eslint-plugin-boundaries` — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-018 — NestJS Monorepo (`apps/` + `libs/`) — **PENDING**
-  - [ ] code
-  - [ ] tasks
+- [x] ADR-016 — Generalized Cache-Aside — **HAS-CORRECTIONS** (epic-00/task-15)
+  - [x] code
+  - [x] tasks
+- [x] ADR-017 — Architecture Lint via `eslint-plugin-boundaries` — **HAS-CORRECTIONS** (epic-00/task-16)
+  - [x] code
+  - [x] tasks
+- [x] ADR-018 — NestJS Monorepo (`apps/` + `libs/`) — **CONFIRMED-CLEAN**
+  - [x] code
+  - [x] tasks
 - [ ] ADR-019 — TypeORM + MySQL — **PENDING**
   - [ ] code
   - [ ] tasks
@@ -201,3 +201,27 @@ Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tas
 - 0 ALREADY-FIXED in this batch.
 - ADR-014 is **CONFIRMED-CLEAN** — the only ADR in this batch with no findings.
 - 8 ADRs remain (ADR-016 through ADR-023).
+
+### Session 2026-05-27 (batch 6) — ADR-016, ADR-017, ADR-018
+
+Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tasks under `tmp/tasks/**`, all four feature epics + epic-00).
+
+**ADR-016** — Generalized cache-aside: `ris:<service>:<aggregate>:<id>` keys + port-based invalidation.
+- Code: 3 binding rules CONFIRMED (`delByPrefix` on `ICachePort` at `libs/cache/cache.port.ts:15`; `CACHE_PORT` provided by `@Global()` `CacheModule`; OTel span around every cache op in `RedisCacheAdapter`). 4 CODE-DISCREPANCIES, all stale-narrative drift from the three downstream ADRs (021/022/023): (i) §1 key shape `ris:<service>:<aggregate>:<id>[:<facet>]` superseded by ADR-022's `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]` (`libs/cache/cache-keys.ts:48-70`); (ii) §2 `stockCache.invalidate({items,correlationId})` API replaced by `IStockCachePort.withInvalidation(work, resolveItems, opts)` per ADR-023 (`apps/inventory-microservice/src/modules/stock/application/ports/stock-cache.port.ts:43-57`, `…/use-cases/reserve-stock-for-order.use-case.ts:65`); (iii) §2 "once for new prefix + once for legacy `stock:` prefix" replaced by three calls per productId (v1, pre-v1 post-ADR-016, pre-ADR-016 legacy) during the ADR-022 transition window (`stock.cache.ts:147-153`); (iv) §"Still open" lists CACHE-001/002/003/004/005/009 — all six closed (CACHE-001/004 by ADR-021, CACHE-002 by ADR-023, CACHE-003/009 by ADR-022, CACHE-005 by the `available` flag on `IStockCachePort.get`). ADR-016 has no `## References` section, so no forward graph exists today. All four folded into `epic-00/task-15-adr-016-add-supersession-pointer-for-key-shape-port-and-invalidation-evolution.md` (single supersession-pointer task per the established ADR-002/006/012 pattern).
+- Tasks: 0 TASK-CONTRADICTIONs. All decomposed tasks use `CACHE_KEYS.*` builders + `ICachePort`; references to old shapes (`stock:<productId>:` literals, `CacheHelper`) only appear inside `epic-00/task-02` / `epic-00/task-05` (the existing supersession-pointer tasks that *quote* the old ADRs) or in `epic-04/task-06` where `CacheHelper`'s deletion is queued. `epic-04/task-06`'s v1 → v2 plan explicitly preserves the `withInvalidation` seam and acknowledges the three-prefix legacy fan-out.
+
+**ADR-017** — Architecture lint via `eslint-plugin-boundaries`.
+- Code: 5 binding rules CONFIRMED (`eslint-plugin-boundaries` v6.0.2 in `eslint.config.mjs:2`; element-type taxonomy matches the live `boundariesElements` array `eslint.config.mjs:9-72`; per-source disallow lists for domain / use-case / port / dto / presentation / lib-contracts / lib-ddd at `eslint.config.mjs:265-411`; CI gate is `yarn lint` with `--max-warnings 0`; `ARCH-LINT-EX-01` closed via `ITransactionPort` + `TypeormTransactionAdapter` — verified by absence of `EntityManager`/`InjectEntityManager` imports in the stock use case and repository port, and presence of `application/ports/transaction.port.ts` + `infrastructure/persistence/typeorm-transaction.adapter.ts`). 2 CODE-DISCREPANCIES, both path-drift in §7: (i) line 102 cites `tests/lint/architecture-lint.spec.ts` — the actual file is `spec/architecture-lint.spec.ts` (no `tests/` directory at repo root); (ii) line 111 references a "`tests/**/*.ts` relaxation block" — live config uses `files: ['test/**/*.ts', 'spec/**/*.ts']` at `eslint.config.mjs:535` and there is no `tests/` glob. CLAUDE.md §"Architecture rules location" mirrors the same wrong path — recorded as a side-finding inside `epic-00/task-16` but out of scope for this task (CLAUDE.md is not subject to ADR-003 immutability). One self-acknowledged stale entry: §2 table includes `lib-shim` while the live config omits it — ADR-017 §"Open" already notes "The shim element type will retire alongside the shim libs in task-14"; not a discrepancy worth a correction task. Filed as `epic-00/task-16-adr-017-fix-arch-lint-spec-path-drift.md`.
+- Tasks: 0 TASK-CONTRADICTIONs. All 16 task-file references to the spec use the correct `spec/architecture-lint.spec.ts` path (verified across epic-01/02/03/04 README + task-10 docs). No task introduces a forbidden import the rules would not catch; no task proposes moving the spec elsewhere.
+
+**ADR-018** — NestJS monorepo with `apps/` and `libs/`.
+- Code: 7 structural rules CONFIRMED (single repo at this path; one root `package.json`, no per-lib `package.json` — `find libs -name package.json` returns nothing; `nest-cli.json` with `"monorepo": true` and four `projects` entries — api-gateway, inventory-microservice, retail-microservice, notification-microservice at lines 17-53; each app carries `tsconfig.app.json`; `@retail-inventory-system/<name>` aliases for nine libs in `tsconfig.json:30-40` plus four app aliases at lines 20-29 reserved for the E2E test entry point; single `yarn lint` / `yarn test:unit` / `yarn build` pass covers the repo; libs are TS path aliases, not Yarn workspaces). 0 CODE-DISCREPANCIES.
+- Tasks: 0 TASK-CONTRADICTIONs. `grep -rn "yarn workspace\|workspaces\":\|polyrepo\|libs/.*/package.json\|nx workspace\|@nx/" tmp/tasks/` returns nothing — no decomposed task proposes per-lib `package.json`, Yarn/npm workspaces, Nx adoption, or extracting a service to its own repo.
+
+**Summary for this batch:**
+- 3 ADRs processed (ADR-016, ADR-017, ADR-018).
+- 6 CODE-DISCREPANCIES filed (4 folded into `epic-00/task-15` for ADR-016; 2 folded into `epic-00/task-16` for ADR-017).
+- 0 TASK-CONTRADICTIONs.
+- 0 ALREADY-FIXED in this batch.
+- ADR-018 is **CONFIRMED-CLEAN** — the only ADR in this batch with no findings.
+- 5 ADRs remain (ADR-019 through ADR-023).

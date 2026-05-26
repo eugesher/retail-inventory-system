@@ -35,6 +35,8 @@ Tasks under this epic are **mutually independent**. Pick them in any order.
 | 12  | [Add ADR-012 supersession pointer for `StockCache` port + adapter evolution (ADR-016/021/022/023 + `ITransactionPort`)](task-12-adr-012-add-supersession-pointer-for-stock-cache-port-and-adapter-evolution.md) | `docs/adr/012-…md`    | ADR-012     |
 | 13  | [Correct ADR-013's `IOrderRepositoryPort` method list — 5 listed vs. 8 in live code](task-13-adr-013-fix-order-repository-port-method-list-drift.md) | `docs/adr/013-…md`    | ADR-013     |
 | 14  | [Correct ADR-015's `instrumentation-pino` "not installed" claim](task-14-adr-015-correct-instrumentation-pino-installation-claim.md) | `docs/adr/015-…md`    | ADR-015     |
+| 15  | [Add ADR-016 supersession pointer for key-shape, port-surface, invalidation evolution (ADR-021/022/023)](task-15-adr-016-add-supersession-pointer-for-key-shape-port-and-invalidation-evolution.md) | `docs/adr/016-…md`    | ADR-016     |
+| 16  | [Correct ADR-017 architecture-lint spec path drift (`tests/lint/` → `spec/`)](task-16-adr-017-fix-arch-lint-spec-path-drift.md) | `docs/adr/017-…md`    | ADR-017     |
 
 ## Provenance
 
