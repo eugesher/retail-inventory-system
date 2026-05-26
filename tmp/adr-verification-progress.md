@@ -31,15 +31,15 @@ Status legend:
 - [x] ADR-006 — Cache-Aside via `libs/cache` — **HAS-CORRECTIONS** (epic-00/task-05)
   - [x] code
   - [x] tasks
-- [ ] ADR-007 — Pino + OpenTelemetry Trace Correlation — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-008 — RabbitMQ via `libs/messaging` + Dotted Routing Keys — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-009 — Port/Adapter at the API Gateway — **PENDING**
-  - [ ] code
-  - [ ] tasks
+- [x] ADR-007 — Pino + OpenTelemetry Trace Correlation — **HAS-CORRECTIONS** (epic-00/task-06, epic-00/task-08)
+  - [x] code
+  - [x] tasks
+- [x] ADR-008 — RabbitMQ via `libs/messaging` + Dotted Routing Keys — **HAS-CORRECTIONS** (epic-00/task-07, epic-00/task-09, epic-00/task-10)
+  - [x] code
+  - [x] tasks
+- [x] ADR-009 — Port/Adapter at the API Gateway — **CONFIRMED-CLEAN**
+  - [x] code
+  - [x] tasks
 - [ ] ADR-010 — JWT + RBAC at the Gateway — **PENDING**
   - [ ] code
   - [ ] tasks
@@ -130,3 +130,26 @@ Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tas
 - 0 TASK-CONTRADICTIONs.
 - 1 minor factual inaccuracy + 1 incomplete commitment noted on ADR-005 — neither load-bearing; no correction task filed.
 - 17 ADRs remain (ADR-007 through ADR-023).
+
+### Session 2026-05-26 (batch 3) — ADR-007, ADR-008, ADR-009
+
+Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tasks under `tmp/tasks/**`, all four feature epics + epic-00).
+
+**ADR-007** — Pino structured logs + OpenTelemetry trace correlation.
+- Code: 5 binding rules CONFIRMED (`libs/observability` hosts both Pino + OTel; side-effect import `@retail-inventory-system/observability/tracer` is the first line of all four `main.ts` files; `logMethod` hook at `libs/observability/logger.module.ts:66-78` reads active-span context; `TraceContextInterceptor` is a no-op passthrough at `libs/observability/trace-context.interceptor.ts:8-12`; `MicroserviceMessagePatternEnum` kept for back-compat). 2 CODE-DISCREPANCIES — (a) ADR-007 example JSON (line 73-84) uses snake_case `trace_id`/`span_id`, but live code emits camelCase `traceId`/`spanId` (`logger.module.ts:78`), and ADR-015 codifies camelCase as binding; (b) ADR-007 says resource attrs are keyed off `AppNameEnum`, but `tracer.ts:31` keys them off `process.env.OTEL_SERVICE_NAME`. 1 STALE-NARRATIVE folded in (`task-10 fills body` future-tense). All filed as `epic-00/task-06-adr-007-fix-example-log-shape-trace-id-camel-case.md`. 1 TASK-CONTRADICTION — `epic-02/task-01-scaffold-catalog-microservice.md:68,82,195,236` + `epic-02/task-09:102` instruct creating an app-local `apps/catalog-microservice/src/otel.setup.ts` and `import './otel.setup';`. Violates ADR-007 §"`libs/observability` is the host"; every existing microservice uses the shared library import. Filed as `epic-00/task-08-epic-02-task-01-otel-setup-violates-libs-observability-host-rule.md`.
+
+**ADR-008** — RabbitMQ wiring via `libs/messaging` + dotted routing keys.
+- Code: 5 binding rules CONFIRMED (exports table 1-for-1 in `libs/messaging/index.ts`; dotted `<service>.<aggregate>.<action>` routing keys in `routing-keys.constants.ts`; lock-step regression test at `libs/messaging/spec/routing-keys.constants.spec.ts`; Plan A flip executed — only the dotted form survives; `MicroserviceMessagePatternEnum` kept). 1 STALE-NARRATIVE folded in (table line 37 lists only Retail + Inventory client modules; `MicroserviceClientNotificationModule` was added by ADR-011). Filed as `epic-00/task-07-adr-008-add-references-section-and-fold-notification-client-module-stale-narrative.md`. 2 TASK-CONTRADICTIONs — (a) `epic-03/task-03:159` registers a new `@MessagePattern(MicroserviceMessagePatternEnum.CATALOG_PRICE_SET)` — both the wrong surface (new keys must go in `ROUTING_KEYS` per ADR-008 §Decision table) and a value that doesn't exist in the enum (`MicroserviceMessagePatternEnum` has only retail/inventory/notification entries); filed as `epic-00/task-09-epic-03-task-03-pricing-replace-legacy-enum-with-routing-keys.md`. (b) `epic-04/task-07:54-95` instructs the implementer to inject `ClientProxy` directly into `AutoInitStockLevelUseCase` (an `application/use-cases/` file), contradicting ADR-008 §"Domain code depends on a publisher port (deferred)" — the deferred window has closed in live code. Task-08 of the same epic immediately fixes the violation but the contradiction lives in task-07's instructions. Filed as `epic-00/task-10-epic-04-task-07-08-collapse-clientproxy-use-case-into-publisher-port.md`, recommending the two tasks be collapsed.
+
+**ADR-009** — Port-and-adapter split at the API gateway.
+- Code: 9 binding rules CONFIRMED (per-module hexagonal split under `apps/api-gateway/src/modules/{retail,inventory,auth}`; gateway retail + inventory have no `domain/`, only `auth` does; `ClientProxy` only in `infrastructure/messaging/*-rabbitmq.adapter.ts` — `grep ClientProxy apps/api-gateway/src/modules/` returns only the two adapter files; `OrderConfirmPipe` injects `RETAIL_GATEWAY_PORT`, not `ClientProxy`; `IRetailGatewayPort.getOrderStatus(id)` exists; `common/utils/throw-rpc-error.util.ts` present; `main.ts` first import is `observability/tracer`; modules named after downstream service not URL).
+- Tasks: 0 TASK-CONTRADICTIONs. New gateway adapters in `epic-02/task-06` and `epic-04/task-09` follow the fresh-write rule — `ClientProxy` is injected only into adapter files, and adapters use `ROUTING_KEYS.*` (not the legacy enum). The two TASK-CONTRADICTIONs that touch the gateway's wider boundary surface are filed under ADR-007 / ADR-008, not here.
+
+**Summary for this batch:**
+- 3 ADRs processed (ADR-007, ADR-008, ADR-009).
+- 2 CODE-DISCREPANCIES filed (one task: epic-00/task-06 covers both ADR-007 items + the stale-narrative fold).
+- 3 TASK-CONTRADICTIONs filed (epic-00/task-08 for ADR-007, epic-00/task-09 + epic-00/task-10 for ADR-008).
+- 0 ALREADY-FIXED in this batch.
+- 1 stale-narrative item folded into the ADR-008 amend task (epic-00/task-07).
+- ADR-009 is CONFIRMED-CLEAN — the only ADR in this batch with no findings.
+- 14 ADRs remain (ADR-010 through ADR-023).

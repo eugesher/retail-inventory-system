@@ -26,6 +26,11 @@ Tasks under this epic are **mutually independent**. Pick them in any order.
 | 03  | [Add `**Date**` header to ADR-001](task-03-adr-001-add-date-header.md)                                                              | `docs/adr/001-…md`    | ADR-001 / ADR-003 |
 | 04  | [Correct ADR-004's ports location — `domain/ports/` → `application/ports/`](task-04-adr-004-correct-ports-location-from-domain-to-application.md) | `docs/adr/004-…md`    | ADR-004     |
 | 05  | [Add ADR-006 supersession pointer for port-surface + key-shape evolution](task-05-adr-006-add-supersession-pointer-for-port-surface-and-key-shape-evolution.md) | `docs/adr/006-…md`    | ADR-006     |
+| 06  | [Amend ADR-007 example log shape (`trace_id` → `traceId`) + fold stale `task-10 fills body` narrative](task-06-adr-007-fix-example-log-shape-trace-id-camel-case.md) | `docs/adr/007-…md`    | ADR-007     |
+| 07  | [Fold ADR-008 stale narrative (Notification client module + table scope)](task-07-adr-008-add-references-section-and-fold-notification-client-module-stale-narrative.md) | `docs/adr/008-…md`    | ADR-008     |
+| 08  | [Fix `epic-02/task-01` app-local `otel.setup.ts` (ADR-007 host-rule violation)](task-08-epic-02-task-01-otel-setup-violates-libs-observability-host-rule.md) | `tmp/tasks/epic-02-…/task-01-…md` + `task-09-…md` | ADR-007     |
+| 09  | [Fix `epic-03/task-03` legacy-enum usage (ADR-008 new-callers rule)](task-09-epic-03-task-03-pricing-replace-legacy-enum-with-routing-keys.md) | `tmp/tasks/epic-03-…/task-03-…md` | ADR-008     |
+| 10  | [Fix `epic-04/task-07` `ClientProxy` in use-case (collapse with task-08)](task-10-epic-04-task-07-08-collapse-clientproxy-use-case-into-publisher-port.md) | `tmp/tasks/epic-04-…/task-07-…md` + `task-08-…md` | ADR-008     |
 
 ## Provenance
 
