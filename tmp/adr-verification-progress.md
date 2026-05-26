@@ -76,12 +76,12 @@ Status legend:
 - [x] ADR-021 — Cache Single-Flight + TTL Jitter — **CONFIRMED-CLEAN**
   - [x] code
   - [x] tasks
-- [ ] ADR-022 — Cache Keys Tenant + Schema Version — **PENDING**
-  - [ ] code
-  - [ ] tasks
-- [ ] ADR-023 — Post-Commit Cache Invalidation by Type — **PENDING**
-  - [ ] code
-  - [ ] tasks
+- [x] ADR-022 — Cache Keys Tenant + Schema Version — **HAS-CORRECTIONS** (epic-00/task-18, epic-00/task-19)
+  - [x] code
+  - [x] tasks
+- [x] ADR-023 — Post-Commit Cache Invalidation by Type — **HAS-CORRECTIONS** (epic-00/task-19)
+  - [x] code
+  - [x] tasks
 
 ## Findings log
 
@@ -249,3 +249,33 @@ Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tas
 - 0 ALREADY-FIXED in this batch (the `ClientProxy`-in-use-case items at `epic-04/task-07` + `task-08` matched against ADR-020 but were already filed under ADR-008 in batch 3 — re-counted there, not here).
 - ADR-020 and ADR-021 are both **CONFIRMED-CLEAN** — two of three ADRs in this batch with no findings.
 - 2 ADRs remain (ADR-022 + ADR-023).
+
+### Session 2026-05-27 (batch 8 — final) — ADR-022, ADR-023
+
+Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tasks under `tmp/tasks/**`, all four feature epics + epic-00).
+
+**ADR-022** — Cache-key schema-version + opt-in tenant segments.
+- Code: 11 binding rules CONFIRMED (key shape `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]` at `libs/cache/cache-keys.ts:48-63`; per-aggregate version constants `INVENTORY_STOCK_KEY_VERSION` / `RETAIL_ORDER_KEY_VERSION` = `'v1'` at `cache-keys.ts:33-34`; `rootPrefix(opts)` returns `ris:t:<tenantId>:` when supplied, else `ris:` at `cache-keys.ts:48-49` — no `'default'` fallback; `__all__` sentinel at `cache-keys.ts:38`; three `delByPrefix` calls per productId in `invalidatePrefixes` — v1 / pre-v1 post-ADR-016 / pre-ADR-016 legacy at `stock.cache.ts:147-153`; `inventoryStockLegacyPrefix` exposed for invalidate-only at `cache-keys.ts:80`; `productStockPrefix` retained as pre-ADR-016 legacy at `cache-keys.ts:87`; `CACHE_KEYS.retailOrder` + `retailOrderPrefix` parity at `cache-keys.ts:66-70`; retail microservice does not actively cache today — `grep ICachePort apps/retail-microservice/` returns 0 hits; per-aggregate version constants greppable). 2 CODE-DISCREPANCIES, both stale-narrative drift from same-day ADR-023: (i) §"3. Tenant is opt-in by argument, never defaulted" (`docs/adr/022-…md:138-142`) cites `IStockCacheInvalidatePayload` as carrying the optional `tenantId` field — type was retired by ADR-023 §"2. Implementation" and `grep IStockCacheInvalidatePayload apps libs` returns zero hits; the optional `tenantId` now lives on `IStockWithInvalidationOptions` (`stock-cache.port.ts:36-41`); (ii) ADR-022's existing `## References` block (`docs/adr/022-…md:267-274`) lists ADR-002 / 006 / 016 / 021 but no forward pointer to ADR-023, while ADR-023 already references ADR-022 — the graph is one-directional today. Both folded into `epic-00/task-18-adr-022-add-supersession-pointer-for-port-surface-and-references-to-adr-023.md` (single supersession-pointer task per the established ADR-002/006/012/016 pattern).
+- Tasks: 1 TASK-CONTRADICTION — `tmp/tasks/epic-04-inventory-stock-level-and-location/task-06-…:41` and `:337` cite "the ADR-023 §'transition window' decision is 'keep wiping until two epochs have elapsed since the last write under the prefix'" and "cite the project's 'two epochs' rule from ADR-022 §'transition window'" respectively. Neither ADR has a §"transition window" section, neither defines a "two epochs" rule, and the string "epoch" does not appear in either ADR (verified by grep). ADR-022 §4 actually says "**one rolling deploy**" + Consequences says "zero hits for **one full TTL**". Folded into `epic-00/task-19-epic-04-task-06-correct-two-epochs-mis-citation-of-adr-022-023.md`. Same regression family as `epic-00/task-11` (epic-01/task-10's "no new ADR is required" claim) — a decomposed task asserting a confident, citation-backed fact about an Accepted ADR that simply is not in the ADR's text.
+
+**ADR-023** — Post-commit cache invalidation enforced by the type system.
+- Code: 16 binding rules CONFIRMED (public `IStockCachePort.invalidate(...)` removed — port surface at `stock-cache.port.ts:47-62` exposes only `get` / `set` / `getOrLoad` / `withInvalidation`; `IStockWithInvalidationOptions` replaces `IStockCacheInvalidatePayload` at `stock-cache.port.ts:36-41`; `IStockCacheInvalidateItem` stays at `stock-cache.port.ts:23-26`; private `invalidatePrefixes(items, opts)` on `StockCache` at `stock.cache.ts:134`, reachable only from inside `withInvalidation` at line 129; helper awaits `work()` first, derives items on resolution, rethrows on rejection at `stock.cache.ts:121-132`; `ReserveStockForOrderUseCase` wraps `transactionPort.runInTransaction(...)` inside `withInvalidation(...)` at `reserve-stock-for-order.use-case.ts:65-135`; `work` callback closes over `acc: IStockAppendDeltaItem[]` returned to `resolveItems` at lines 67-92, 112, 130-133; thirteen-line post-commit comment block from the prior implementation is gone; `AUDIT-2026-05-08 [CODE-001]` comment block preserved at line 129 next to the `!!item.storageId` filter; ADR-021 single-flight + jitter behavior unchanged at `stock.cache.ts:74-103, 111-115`; `invalidatePrefixes` swallows backend errors with a warn log at `stock.cache.ts:155-161`; use-case test `"error-logs and rethrows when the transaction rejects, and does not invalidate"` at `reserve-stock-for-order.use-case.spec.ts:280`; adapter test `"does not invoke the prefix delete when work rejects"` at `stock.cache.spec.ts:354`; companion test `"does not invoke invalidatePrefixes when work rejects after partial appendDeltas"` at `reserve-stock-for-order.use-case.spec.ts:323`; order-of-operations test `"runs appendDeltas (in-transaction) before invalidatePrefixes (post-commit)"` at `reserve-stock-for-order.use-case.spec.ts:303`; References block forward-links to ADR-002 / 016 / 017 / 022 + audit doc at lines 233-250 — fully bidirectional with ADR-022's predecessor links). 0 CODE-DISCREPANCIES.
+- Tasks: 1 TASK-CONTRADICTION already filed under ADR-022 — `task-06`'s `epic-04/task-06:41` cites "the ADR-023 §'transition window' decision" by name, but ADR-023 has no §"transition window" section. Counted once (under ADR-022) per the supersession-pointer pattern; the `epic-00/task-19` correction task covers both ADRs in the same edit. `task-06`'s other ADR references (the version constant pattern, the `withInvalidation` shape preservation, the three-prefix invalidate concept) are all consistent with the ADR text — only the "two epochs" framing is fabricated. Otherwise ADR-023 is the *cleanest* ADR audited in this entire eight-batch verification: every binding rule (`invalidate` removed from port, private `invalidatePrefixes`, type-enforced ordering via the closure shape, negative-path tests at both the adapter seam *and* the use-case seam, full bidirectional References graph) is verifiable in the code, and the helper's composition with the post-ADR-017 `ITransactionPort` shows the architectural seam was robust to the transaction-port retrofit without changing the cache contract.
+
+**Summary for this batch:**
+- 2 ADRs processed (ADR-022, ADR-023).
+- 2 CODE-DISCREPANCIES filed (both folded into `epic-00/task-18` for ADR-022 per the supersession-pointer pattern).
+- 1 TASK-CONTRADICTION filed (`epic-00/task-19` — task-06's "two epochs" mis-citation; counts against both ADR-022 and ADR-023 because task-06 attributes the fabricated rule to both).
+- 0 ALREADY-FIXED in this batch.
+- 0 ADRs remain. **Verification complete.**
+
+### Verification complete — closing summary (sessions 1-8)
+
+- **23 ADRs processed** (ADR-001 through ADR-023 — all 23 audited against both surfaces A + B).
+- **HAS-CORRECTIONS**: 16 ADRs — 001, 002, 003, 004, 006, 007, 008, 010, 012, 013, 015, 016, 017, 019, 022, 023.
+- **CONFIRMED-CLEAN**: 7 ADRs — 005, 009, 011, 014, 018, 020, 021.
+- **Total epic-00 correction tasks filed**: 19 (task-01 through task-19 under `tmp/tasks/epic-00/`).
+- **Total CODE-DISCREPANCIES** (across ADR prose): ~23 individual findings, mostly folded into per-ADR supersession-pointer / amendment tasks (one task per ADR is the established pattern; the ADR-001 Date-line gap is filed as a standalone task-03 because it surfaces against ADR-003's format rule rather than ADR-001 itself).
+- **Total TASK-CONTRADICTIONs (non-ALREADY-FIXED)**: 6 tasks filed (epic-00/task-08 against ADR-007; task-09 + task-10 against ADR-008; task-11 against ADR-010; task-17 against ADR-019 — covering 8 task-file instances of the same root cause; task-19 against ADR-022 + ADR-023).
+- **ALREADY-FIXED (Prompt 1) acknowledgements**: 1 (ADR-001 logger → PinoLogger remediation, batch 1).
+- Every epic-00 task created in batches 1-8 carries the `## Required reading` block per the established convention.
