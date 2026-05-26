@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/
 
 # Task 05 — Rewrite the use case layer
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Replace the three legacy use cases (`AddStockUseCase`, `GetStockUseCase`, `ReserveStockForOrderUseCase`) with the three new use cases the epic charters (`ReceiveStockUseCase`, `AdjustStockUseCase`, `QueryAvailabilityUseCase`). The `Reserve Stock` flow goes away entirely from this epic — it is owned by `epic-07`. The legacy `@MessagePattern` handlers in `stock.controller.ts` go away too (their RMQ routing keys remain registered through this task; task-08 retires `inventory.product-stock.get` and reshapes `inventory.order.confirm` into a deprecation handler). The three new use cases are not wired to RMQ at all in this epic — they are called directly from the api-gateway side (task-09) via a port that ultimately resolves to either an in-process direct call (if the api-gateway and inventory-microservice are colocated for dev/test) or an RMQ adapter (currently the production wiring). Task-09 owns that adapter rewrite; this task focuses on the use case layer inside the inventory microservice.

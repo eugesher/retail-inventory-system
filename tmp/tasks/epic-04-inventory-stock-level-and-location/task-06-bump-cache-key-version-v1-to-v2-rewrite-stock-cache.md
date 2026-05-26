@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/
 
 # Task 06 — Bump the cache key `v1` → `v2` and rewrite `StockCache`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Land the ADR-022-style version bump: `INVENTORY_STOCK_KEY_VERSION` changes from `'v1'` to `'v2'`, the `inventoryStockPrefix` / `inventoryStock` builders rekey from `productId` to `variantId`, the legacy `v1` shape is retained as **invalidate-only** so any in-flight pre-bump entries get wiped during the rolling deploy that adopts v2, and `StockCache` is rewritten to the full v2 implementation: real `get` / `set` / `getOrLoad` / `withInvalidation` against the new `IStockAvailabilityProjection` payload, single-flight + TTL jitter inherited, the three-prefix invalidate scan (v2 + legacy v1 + pre-ADR-016 `productStock`). Cached value shape changes from a SUM aggregate to the `IStockAvailabilityProjection` from task-05.

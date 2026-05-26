@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/04-p
 
 # Task 04 — Update `Publish Product` to hard-fail on missing active Price
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Convert the deferred precondition from epic-02 task-04 — a logged warning of the form "publish proceeded but variants lack a Price" — into a hard rule. After this task, `Publish Product` rejects with a domain error (mapped to `409 Conflict` at the gateway) if any variant attached to the product does not have an active `Price` in the `DEFAULT_CURRENCY` (env var, default `USD`) at the moment of the publish attempt. This is the first cross-module dependency wired in the epic: the catalog module's `PublishProductUseCase` injects `SelectApplicablePriceUseCase` from the pricing module via its exported provider.

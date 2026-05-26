@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/05-s
 
 # Task 03 — Implement Set Price + Schedule Price + Select Applicable Price use cases
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Land the three core pricing use cases on top of the domain + repository ports from task-02. After this task, the `catalog-microservice` answers RPC calls on `catalog_queue` for `catalog.price.set`, `catalog.price.schedule`, `catalog.price.select`, `catalog.price.list`, `catalog.tax-category.list`, and `catalog.tax-category.create`. The Set / Schedule paths emit `catalog.price.changed` / `catalog.price.scheduled` events on the message bus. The Select path is the resolution algorithm that downstream consumers (api-gateway read, `Publish Product` precondition in task-04, future `epic-05` cart line snapshot) all call to answer "what is the current price for this variant?"

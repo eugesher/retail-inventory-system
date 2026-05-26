@@ -8,6 +8,11 @@ doc_deliverable: closing append to docs/implementation/epic-04-inventory-stock-l
 
 # Task 10 — Seed + documentation pass
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Close out epic-04. Extend the test seed so each seeded variant from epic-02 has a `StockLevel = 100` row at `default-warehouse`. Add the two e2e specs the epic requires (`test/inventory-receive-and-adjust.e2e-spec.ts` and `test/inventory-cache.e2e-spec.ts`). Update `README.md` (System diagram + API → Stock section + Caching section + Database section). Update `CLAUDE.md` (stock-module file-listing + Message patterns + Shared Libraries → cache + Operational notes). Extend `spec/architecture-lint.spec.ts` to govern the new directory shape under `apps/inventory-microservice/src/modules/stock/`. Write the closing append to `docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` — the cumulative "after" schema diagram snapshot referenced from the introductory half written in task-01.

@@ -8,6 +8,11 @@ doc_deliverable: appended to docs/implementation/epic-04-inventory-stock-level-a
 
 # Task 08 — Wire the new RMQ publisher
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Consolidate the inventory microservice's emit-side wiring around a single `StockRabbitmqPublisher` class that emits all four `inventory.*` events the epic introduces or preserves: `stock.received`, `stock.adjusted`, `stock-level.initialized` (the three new ones), and `stock.low` (the pre-existing one — payload reshaped to be `variantId`-keyed, target consumer unchanged). The three new routing keys are registered in `libs/messaging/routing-keys.constants.ts`. The legacy `inventory.product-stock.get` routing key is removed entirely. The legacy `inventory.order.confirm` routing key is **kept but reshaped into a deprecation handler** — any caller still hitting it gets a deterministic typed error rather than a missing-handler 404; `epic-07` repurposes the routing key for the Reservation flow.

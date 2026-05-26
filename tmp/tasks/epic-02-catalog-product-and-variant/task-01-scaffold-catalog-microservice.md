@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/01-new-
 
 # Task 01 — Scaffold the new `catalog-microservice`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Stand up an empty, boot-ready fifth Nest application — `apps/catalog-microservice/` — that mirrors the canonical per-module shape of `apps/notification-microservice/` (the cleanest existing reference per ADR-004/009/012/013). After this task the app starts under `yarn start:dev:catalog-microservice`, registers an empty Nest microservice on a new `catalog_queue` RabbitMQ queue, owns its DB connection, emits OTel traces under the service name `catalog-microservice`, and is recognised by ESLint's `eslint-plugin-boundaries` configuration. **No catalog domain code exists yet** — that arrives in task-02.

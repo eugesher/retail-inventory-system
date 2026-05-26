@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-custome
 
 # Task 02 — Rename `user` → `staff_user`, drop `simple-array` roles, add `staff_user_roles`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Convert the `User` aggregate into `StaffUser` and the `user` table into `staff_user`. Drop the `roles: simple-array` column and replace it with a relational `staff_user_roles` join that points at the `role` table seeded in task-01. Delete `RoleVO` — the domain now references `RoleAggregate` (from task-01) directly. Repoint every existing import site (auth use cases, admin controller, JWT strategy, mapper, repo, test setup) to the new names. Add a `status` enum column and a `last_login_at` column per the epic.

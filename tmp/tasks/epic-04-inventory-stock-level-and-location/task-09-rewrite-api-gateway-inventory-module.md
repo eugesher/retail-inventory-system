@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/
 
 # Task 09 — Rewrite the api-gateway `modules/inventory/` + author `http/inventory.http`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Replace the legacy `productId`-keyed inventory module on the api-gateway with the new `variantId`-keyed module that surfaces the four HTTP endpoints the epic charters: `GET /api/inventory/locations` (list locations), `GET /api/inventory/variants/:variantId/stock` (read availability — public), `POST /api/inventory/variants/:variantId/stock/receive` (Receive Stock — admin), `POST /api/inventory/variants/:variantId/stock/adjust` (Adjust Stock — admin). Delete the legacy `product.controller.ts` plus `http/product.http`; author `http/inventory.http` as the replacement Kulala flow. Each new endpoint gets a DTO with class-validator decorators + an optional pipe; the controller's responses are typed by the projection shapes from `libs/contracts/inventory/stock-availability/`.

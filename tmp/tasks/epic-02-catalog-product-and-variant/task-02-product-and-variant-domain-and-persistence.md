@@ -9,6 +9,11 @@ doc_deliverable_secondary: docs/implementation/epic-02-catalog-product-and-varia
 
 # Task 02 — `Product` + `ProductVariant` domain + persistence + repository port/adapter
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Fill the empty `apps/catalog-microservice/src/modules/catalog/` tree with the catalog write-side data model. Add the `Product` aggregate (root) and the `ProductVariant` child entity, their value objects, the matching TypeORM entities + mappers, the repository port + adapter, and the migration that creates `product` and `product_variant`. No use cases are added here — task-03 onward consumes the repository port introduced in this task.

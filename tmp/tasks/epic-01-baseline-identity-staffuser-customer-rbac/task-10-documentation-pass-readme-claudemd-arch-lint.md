@@ -8,6 +8,11 @@ doc_deliverable: none
 
 # Task 10 — Documentation pass (`README.md`, `CLAUDE.md`, `spec/architecture-lint.spec.ts`)
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Land the public-facing documentation surface for what epic-01 changed. Three artifacts:

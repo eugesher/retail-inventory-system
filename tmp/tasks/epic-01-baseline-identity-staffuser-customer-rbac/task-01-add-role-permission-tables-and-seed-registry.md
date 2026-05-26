@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-custome
 
 # Task 01 — Add the relational `Role` + `Permission` tables and seed the permission code registry
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Introduce the relational RBAC schema (tables `role`, `permission`, `role_permissions`) and the single source of truth for permission codes (`libs/contracts/auth/permission.enum.ts`). This task is **strictly additive**: no controller behaviour changes, no existing endpoint is altered, no existing import is broken. The old `User` aggregate and its `RoleVO`/`simple-array` `roles` column remain untouched — they will be replaced in task-02 once the new tables and aggregates are in place.

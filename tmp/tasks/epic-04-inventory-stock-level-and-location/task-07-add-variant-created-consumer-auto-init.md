@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/
 
 # Task 07 — Add the `catalog.variant.created` consumer + `AutoInitStockLevelUseCase`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Wire the inventory microservice to subscribe to `catalog.variant.created` (the event registered by epic-02 task-03) and, on each receipt, **insert a `StockLevel` row at the default warehouse with `quantityOnHand = 0`** for the new variant. The operation is idempotent — repeat events do not duplicate rows, because the `(variant_id, stock_location_id)` unique index in `stock_level` plus an `INSERT ... ON DUPLICATE KEY UPDATE id = id` (or the TypeORM equivalent) guarantees insert-or-noop. The use case also emits an `inventory.stock-level.initialized` RMQ event so downstream consumers (audit log in `epic-11`) can observe the initialization. The emit-side wiring of that routing key lives in task-08; this task uses an inline string literal with a TODO marker.

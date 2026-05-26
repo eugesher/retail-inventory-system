@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/
 
 # Task 01 — Drop the old inventory tables + entity files
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Remove the entire ledger-as-source schema from the inventory microservice: drop the four MySQL tables (`product_stock`, `product_stock_action`, `storage`, `product`), delete the four TypeORM entity files plus the now-orphaned mapper, and **rewrite `StockTypeormRepository` into a method-by-method throwing stub** so the build keeps compiling while tasks 02–05 reassemble the real implementation behind it. Delete the domain `storage.model.ts` (no replacement in domain — `StockLocation` lives in `domain/stock-location.model.ts` per task-02, with a slightly different shape).

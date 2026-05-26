@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-custome
 
 # Task 08 — Author `http/auth.http` and `http/iam.http` (Kulala)
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Backfill first-class HTTP documentation for the entire auth + IAM surface. The existing `http/` folder has `order.http` and `product.http` but no `auth.http` — this task corrects that gap and adds `iam.http` for the endpoints task-06 introduced. The files are consumed by the Kulala Neovim plugin (the user works in Neovim, per project context) and double as living documentation for what each endpoint expects.

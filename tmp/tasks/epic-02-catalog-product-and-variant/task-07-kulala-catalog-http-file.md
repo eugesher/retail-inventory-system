@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/07-kula
 
 # Task 07 — Author `http/catalog.http`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Add the first-class HTTP documentation file for the catalog surface. Mirror the conventions used by `http/order.http`, `http/product.http`, and the two `epic-01` files (`http/auth.http`, `http/iam.http`). The file is consumed by the Kulala Neovim plugin (the user works in Neovim) and doubles as living documentation for what each catalog endpoint expects.

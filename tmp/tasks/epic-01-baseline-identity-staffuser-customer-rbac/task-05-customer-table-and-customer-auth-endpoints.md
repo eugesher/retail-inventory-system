@@ -9,6 +9,11 @@ doc_deliverable_secondary: docs/implementation/epic-01-baseline-identity-staffus
 
 # Task 05 — `customer` table + `Customer` aggregate + customer-side register/login/me endpoints
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Introduce the buyer-side identity baseline. Add a `customer` table (gateway-side), a `Customer` domain aggregate, and three new HTTP endpoints under `/api/auth/customer/*` for register, login, and "me". The table shape must already accommodate the Q7 guest path (`password_hash` nullable, `email_verified_at` nullable, `status='guest'` legal) and the Q6 tombstone path (every PII column nullable) — even though neither flow is implemented in this epic.

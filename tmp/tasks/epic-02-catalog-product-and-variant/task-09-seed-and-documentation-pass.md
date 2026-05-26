@@ -8,6 +8,11 @@ doc_deliverable: —
 
 # Task 09 — Seed + documentation pass
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Close out the epic. Extend `scripts/test-db-seed.ts` so the seeded DB carries the catalog permissions, the `catalog-manager` role binding, and two example Products with two Variants each (so the next epics can address them by id without re-seeding). Bring `README.md`, `CLAUDE.md`, and `spec/architecture-lint.spec.ts` in sync with the new microservice. Flip the `xit` markers introduced by task-06 (permission-failure e2e blocks) and task-07 (disabled http blocks) back to `it` now that the seed supports them.

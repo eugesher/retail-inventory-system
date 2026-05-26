@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/01-p
 
 # Task 01 — Scaffold the `pricing/` sibling module inside `catalog-microservice`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Add a second per-module hexagonal tree — `apps/catalog-microservice/src/modules/pricing/` — beside the existing `catalog/` module from epic-02. After this task the new module loads (an empty `PricingModule` is wired into `app.module.ts`), is governed by the same `eslint-plugin-boundaries` rules as `catalog/`, exposes its placeholder shape (`domain/`, `application/`, `infrastructure/`, `presentation/`) to the file-system linter, registers two new routing keys (`catalog.price.changed`, `catalog.price.scheduled`) up front so task-03's event publisher has somewhere to cite from, and registers a cache-key builder for the future `ris:catalog:price:v1:<variantId>:<currency>` shape. **No Price or TaxCategory code exists yet** — those land in task-02.

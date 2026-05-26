@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-custome
 
 # Task 07 — `AUDIT_LOG_PUBLISHER` port + no-op default adapter
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Forward-compatibility scaffolding for the audit-log work that lands in epic-11. Introduce an application-port interface (`IAuditLogPublisher`), a DI symbol (`AUDIT_LOG_PUBLISHER`), and a default no-op adapter that writes a Pino debug line. Wire the call sites into every auth + IAM use case the epic flags as audit-relevant — so when epic-11 swaps in the real RMQ publisher, no use case has to change.
