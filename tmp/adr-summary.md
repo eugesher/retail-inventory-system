@@ -13,7 +13,7 @@ will fail CI if violated.
 
 ## ADR-001 — Structured Logging with Pino and Correlation IDs
 
-Status: Accepted. [ADR-001](../docs/adr/001-structured-logging-with-pino.md)
+Status: Accepted (logger relocation superseded in part by ADR-005 / ADR-007 — see References). [ADR-001](../docs/adr/001-structured-logging-with-pino.md)
 
 - **Decision:** Use Pino via `nestjs-pino` for JSON structured logs across every service; an `x-correlation-id` HTTP middleware at the gateway threads a UUID through every log line and every outbound RabbitMQ payload.
 - **Binding rules for implementers:**
@@ -25,7 +25,7 @@ Status: Accepted. [ADR-001](../docs/adr/001-structured-logging-with-pino.md)
 
 ## ADR-002 — Use Redis Cache-Aside for Product Stock Queries
 
-Status: Accepted (2026-05-08). [ADR-002](../docs/adr/002-redis-cache-aside-product-stock.md)
+Status: Accepted (2026-05-08; mechanism superseded in part by ADR-006 → ADR-023 — see References). [ADR-002](../docs/adr/002-redis-cache-aside-product-stock.md)
 
 - **Decision:** Stock reads use Redis cache-aside (read-through on miss, write-back, explicit post-commit invalidation, TTL safety net) over the append-only `product_stock` ledger to avoid repeating the `SUM/GROUP BY` aggregation.
 - **Binding rules for implementers:**
@@ -48,7 +48,7 @@ Status: Accepted (2026-05-08). [ADR-003](../docs/adr/003-record-architecture-dec
 
 ## ADR-004 — Adopt Hexagonal Architecture Per Service
 
-Status: Accepted (2026-05-09). [ADR-004](../docs/adr/004-adopt-hexagonal-architecture-per-service.md)
+Status: Accepted (2026-05-09; ports-location wording superseded — ports live under `application/ports/`; see References). [ADR-004](../docs/adr/004-adopt-hexagonal-architecture-per-service.md)
 
 - **Decision:** Every service in `apps/` uses per-module hexagonal layout: `modules/<name>/{domain,application,infrastructure,presentation}/`.
 - **Binding rules for implementers:**
@@ -72,7 +72,7 @@ Status: Accepted (2026-05-09). [ADR-005](../docs/adr/005-split-shared-common-int
 
 ## ADR-006 — Cache-aside via `libs/cache` port and adapter
 
-Status: Accepted (2026-05-10). [ADR-006](../docs/adr/006-cache-aside-via-libs-cache.md)
+Status: Accepted (2026-05-10; port surface and key shape superseded in part by ADR-016 → ADR-023 — see References). [ADR-006](../docs/adr/006-cache-aside-via-libs-cache.md)
 
 - **Decision:** Introduce `libs/cache` with `ICachePort` (`get`/`set`/`del`/`wrap`), `CACHE_PORT` DI symbol, `RedisCacheAdapter`, `CacheModule`, `CACHE_KEYS` registry, and `@Cacheable` decorator; preserve ADR-002's contract unchanged.
 - **Binding rules for implementers:**
@@ -82,7 +82,7 @@ Status: Accepted (2026-05-10). [ADR-006](../docs/adr/006-cache-aside-via-libs-ca
 
 ## ADR-007 — Pino structured logs + OpenTelemetry trace correlation
 
-Status: Accepted (2026-05-10). [ADR-007](../docs/adr/007-pino-and-opentelemetry.md)
+Status: Accepted (2026-05-10; example log shape + bootstrap narrative superseded in part by ADR-014 / ADR-015 — see References). [ADR-007](../docs/adr/007-pino-and-opentelemetry.md)
 
 - **Decision:** Co-locate Pino and OTel in `libs/observability`; **the first executable import in every app's `main.ts` is `@retail-inventory-system/observability/tracer`** so auto-instrumentation patches happen before any HTTP/MySQL/Redis/amqplib module is required.
 - **Binding rules for implementers:**
@@ -92,7 +92,7 @@ Status: Accepted (2026-05-10). [ADR-007](../docs/adr/007-pino-and-opentelemetry.
 
 ## ADR-008 — RabbitMQ wiring via `libs/messaging` and dotted routing keys
 
-Status: Accepted (2026-05-10). [ADR-008](../docs/adr/008-rabbitmq-via-libs-messaging.md)
+Status: Accepted (2026-05-10; client-module table extended by ADR-011). [ADR-008](../docs/adr/008-rabbitmq-via-libs-messaging.md)
 
 - **Decision:** All RabbitMQ wiring lives in `libs/messaging` (`MicroserviceClientConfiguration`, the per-service `MicroserviceClient{Retail,Inventory,Notification}Module`, `MessagingModule`, `RabbitmqClientFactory`, `ROUTING_KEYS`, `EXCHANGES`); routing-key wire format is dotted `<service>.<aggregate>.<action>`.
 - **Binding rules for implementers:**
@@ -138,9 +138,9 @@ Status: Accepted (2026-05-13). [ADR-011](../docs/adr/011-notifier-port-and-adapt
 
 ## ADR-012 — Stock aggregate and the inventory port/adapter split
 
-Status: Accepted (2026-05-13). [ADR-012](../docs/adr/012-stock-aggregate-and-port-adapter.md)
+Status: Accepted (2026-05-13; cache port + adapter generalized by ADR-016 → ADR-021 → ADR-022 → ADR-023; fourth `ITransactionPort` added to ring-fence `ARCH-LINT-EX-01` — see References). [ADR-012](../docs/adr/012-stock-aggregate-and-port-adapter.md)
 
-- **Decision:** Inventory has one bounded context, `stock`, at `apps/inventory-microservice/src/modules/stock/`. Three ports: `IStockRepositoryPort` (`STOCK_REPOSITORY`), `IStockCachePort` (`STOCK_CACHE`), `IStockEventsPublisherPort` (`STOCK_EVENTS_PUBLISHER`). `StockItem` is a plain class enforcing `quantity ≥ 0`, `reservedQuantity ≥ 0`, `reservedQuantity ≤ quantity`.
+- **Decision:** Inventory has one bounded context, `stock`, at `apps/inventory-microservice/src/modules/stock/`. Four ports: `IStockRepositoryPort` (`STOCK_REPOSITORY`), `IStockCachePort` (`STOCK_CACHE`), `IStockEventsPublisherPort` (`STOCK_EVENTS_PUBLISHER`), and `ITransactionPort` (`TRANSACTION_PORT`) — the fourth was added to ring-fence the now-closed `ARCH-LINT-EX-01` exception (see ADR-017 §6 / ADR-019). `StockItem` is a plain class enforcing `quantity ≥ 0`, `reservedQuantity ≥ 0`, `reservedQuantity ≤ quantity`.
 - **Binding rules for implementers:**
   - `StockItem` is *not* an `AggregateRoot` — `StockLowEvent` and friends are emitted from the use case after commit, not pulled from the aggregate. Don't add `pullDomainEvents()` calls in stock paths.
   - Low-stock threshold is the constant `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD` in `libs/contracts/inventory` — don't read it from env or a DB column.
@@ -149,7 +149,7 @@ Status: Accepted (2026-05-13). [ADR-012](../docs/adr/012-stock-aggregate-and-por
 
 ## ADR-013 — Order aggregate and the cross-service confirm flow
 
-Status: Accepted (2026-05-14). [ADR-013](../docs/adr/013-order-aggregate-and-cross-service-confirm.md)
+Status: Accepted (2026-05-14; pipe-loader methods added to `IOrderRepositoryPort` post-ADR — see References). [ADR-013](../docs/adr/013-order-aggregate-and-cross-service-confirm.md)
 
 - **Decision:** Retail has one bounded context, `orders`, at `apps/retail-microservice/src/modules/orders/`. `Order extends AggregateRoot<number | null>`. Three ports: `IOrderRepositoryPort` (`ORDER_REPOSITORY`), `IOrderEventsPublisherPort` (`ORDER_EVENTS_PUBLISHER`), and `IInventoryConfirmGatewayPort` (`INVENTORY_CONFIRM_GATEWAY`) — the seam that lets `ConfirmOrderUseCase` be unit-tested without RabbitMQ.
 - **Binding rules for implementers:**
@@ -172,7 +172,7 @@ Status: Accepted (2026-05-14). [ADR-014](../docs/adr/014-otel-exporter-otlp-http
 
 ## ADR-015 — Pino log lines carry OTel `traceId` / `spanId`
 
-Status: Accepted (2026-05-14). [ADR-015](../docs/adr/015-pino-trace-correlation.md)
+Status: Accepted (2026-05-14; the "not installed today" sentence in §"Field naming" is dated — see References). [ADR-015](../docs/adr/015-pino-trace-correlation.md)
 
 - **Decision:** `LoggerModuleConfig.pinoHttp.hooks.logMethod` reads `trace.getActiveSpan()?.spanContext()` per log call and merges `{ traceId, spanId }` into the record when the span context is valid; when no span is active, the call passes through cleanly.
 - **Binding rules for implementers:**
@@ -182,7 +182,7 @@ Status: Accepted (2026-05-14). [ADR-015](../docs/adr/015-pino-trace-correlation.
 
 ## ADR-016 — Generalized cache-aside — `ris:<service>:<aggregate>:<id>` keys + port-based invalidation
 
-Status: Accepted (2026-05-14). [ADR-016](../docs/adr/016-cache-aside-generalized.md)
+Status: Accepted (2026-05-14; key shape, invalidation seam, and the "Still open" register superseded in part by ADR-021 → ADR-022 → ADR-023 — see References). [ADR-016](../docs/adr/016-cache-aside-generalized.md)
 
 - **Decision:** Cache keys follow `ris:<service>:<aggregate>:<id>[:<facet>]`; `ICachePort` gains `delByPrefix(prefix): Promise<number>`; the only place that reaches through to `KeyvRedis` is `libs/cache/redis-cache.adapter.ts`; `ReserveStockForOrderUseCase` now `await`s the post-commit invalidate.
 - **Binding rules for implementers:**
@@ -216,13 +216,13 @@ Status: Accepted (2026-05-14). [ADR-018](../docs/adr/018-nestjs-monorepo-apps-an
 
 ## ADR-019 — TypeORM + MySQL as the persistence stack
 
-Status: Accepted (2026-05-14). [ADR-019](../docs/adr/019-typeorm-and-mysql-for-persistence.md)
+Status: Accepted (2026-05-14; amended 2026-05-27 — see §"Amendment (2026-05-27)" for the module-wiring rule re-scope). [ADR-019](../docs/adr/019-typeorm-and-mysql-for-persistence.md)
 
 - **Decision:** TypeORM (registered via `@nestjs/typeorm`) over MySQL (via `mysql2`) is the persistence stack for every durable-state service. `BaseEntity` from `libs/database` (auto-increment integer `id`, `createdAt`/`updatedAt`/`deletedAt`); `SnakeNamingStrategy`; migrations under `migrations/` applied via TypeORM CLI; `synchronize: true` is **off** in every environment.
 - **Binding rules for implementers:**
   - Entities declare fields in camelCase; the naming strategy maps them to `snake_case` columns. Don't write `@Column({ name: '...' })` overrides unless the auto-mapping is genuinely wrong.
   - Schema changes ship as hand-authored migration files (`yarn migration:create` scaffolds; `yarn migration:run` applies). Never use `synchronize: true`.
-  - Repository implementations extend `BaseTypeormRepository<TEntity, TDomain>` and are the only files allowed to import `typeorm`, `@nestjs/typeorm`, or use `InjectRepository`.
+  - Repository implementations extend `BaseTypeormRepository<TEntity, TDomain>` and live under `infrastructure/persistence/`; they are the only files allowed to use `InjectRepository`. Per the 2026-05-27 amendment, `@nestjs/typeorm` as an *import surface* is permitted across the wider `infrastructure/` tree — e.g. `TypeOrmModule.forFeature(...)` inline inside `infrastructure/<module>.module.ts` (as `auth.module.ts` does for `UserEntity`); for microservice modules without an inline-imports requirement, `DatabaseModule.forFeature(entities)` is the preferred passthrough. The application layer (`application/{use-cases,ports,dto}`), `presentation/`, `domain/`, `lib-contracts`, and `lib-ddd` remain TypeORM-free — enforced by the boundaries lint denylists.
   - Transactional work in application layer goes through `ITransactionPort` (opaque `ITransactionScope`); the TypeORM downcast lives only in `TypeormTransactionAdapter` and the repository adapter.
   - Test seeds are SQL files under `scripts/seeds/` applied by `yarn test:seed` after migrations.
 
@@ -251,7 +251,7 @@ Status: Accepted (2026-05-20). [ADR-021](../docs/adr/021-cache-single-flight-and
 
 ## ADR-022 — Cache-key schema-version and opt-in tenant segments
 
-Status: Accepted (2026-05-20). [ADR-022](../docs/adr/022-cache-keys-tenant-and-schema-version.md)
+Status: Accepted (2026-05-20; port-surface mention superseded in part by ADR-023 — see References). [ADR-022](../docs/adr/022-cache-keys-tenant-and-schema-version.md)
 
 - **Decision:** Cache-key shape is `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]`. Per-aggregate version constants (`INVENTORY_STOCK_KEY_VERSION = 'v1'`, `RETAIL_ORDER_KEY_VERSION = 'v1'`) sit next to the builders. Tenant segment is opt-in by argument; never defaulted.
 - **Binding rules for implementers:**
