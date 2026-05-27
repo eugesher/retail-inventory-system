@@ -38,7 +38,7 @@ Tasks 1–9 complete. Every entity, controller, doc, .http file, and seed extens
 
 **Out:**
 
-- New ADRs. The epic-01 changes fit inside ADRs 004, 010, 017, 019; no new ADR is required (per the epic, "Exclusions Register documents owned by this epic: None").
+- Filing the new "RBAC v2" ADR itself. That ADR (slug `NNN-rbac-v2-staffuser-customer-and-permissions.md`) is the doc deliverable of **task-01** — epic-01 substantively supersedes ADR-010's RBAC model along four axes (the `User` → `StaffUser` + `Customer` split per task-02 + task-05; the relational `role`/`permission`/`role_permissions`/`staff_user_roles` schema per task-01; the third global guard `PermissionsGuard` per task-04 — extending ADR-010 §5's two-guard pipeline to three; and the customer-side `@Public()` register endpoint per task-05, which lands the public-registration surface ADR-010 §7 explicitly deferred behind rate-limiting / email-verification / CAPTCHA). Per ADR-003 cadence ("When making an architectural decision, write an ADR"), this scale of change needs its own ADR with a one-line forward-supersession pointer on ADR-010's `**Status**` line. See [epic-00/task-11](../epic-00/task-11-epic-01-task-10-rbac-claims-no-new-adr-but-supersedes-adr-010.md) for the full contradiction analysis.
 - Changes to the `docs/implementation/.../*.md` files written by tasks 1–7 — those are signed-off in their respective tasks.
 
 ## `README.md` — concrete edits

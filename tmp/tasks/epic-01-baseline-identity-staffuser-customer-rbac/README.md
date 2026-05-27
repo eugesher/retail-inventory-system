@@ -13,7 +13,7 @@ Each task depends on every task before it via the `Carryover Between Tasks` tabl
 
 | #   | Task                                                                | Touches                                                | Doc deliverable                                                       |
 | --- | ------------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
-| 01  | [Add `role` + `permission` tables and seed registry](task-01-add-role-permission-tables-and-seed-registry.md) | `libs/contracts/auth/`, `auth/domain/`, `auth/infrastructure/persistence/`, `migrations/`, `scripts/test-db-seed.ts` | `02-role-and-permission-relational-model.md` |
+| 01  | [Add `role` + `permission` tables and seed registry](task-01-add-role-permission-tables-and-seed-registry.md) | `libs/contracts/auth/`, `auth/domain/`, `auth/infrastructure/persistence/`, `migrations/`, `scripts/test-db-seed.ts`, **`docs/adr/`** | `02-role-and-permission-relational-model.md` **+ new ADR `NNN-rbac-v2-staffuser-customer-and-permissions.md` (supersedes ADR-010's RBAC model)** |
 | 02  | [Rename `user` → `staff_user`, drop `simple-array` roles, add `staff_user_roles`](task-02-rename-user-to-staff-user-and-drop-simple-array-roles.md) | `auth/domain/`, `auth/infrastructure/persistence/`, `auth/application/ports/`, `migrations/`, `apps/api-gateway/src/app/app.module.ts`, all auth use-case import sites | `01-staffuser-customer-split.md` (staff half) |
 | 03  | [Inflate JWT permissions claim on login + refresh](task-03-inflate-jwt-permissions-claim-on-login.md) | `libs/contracts/auth/jwt-payload.dto.ts`, `libs/contracts/auth/current-user.dto.ts`, `libs/auth/jwt.strategy.ts`, login/refresh use cases, `ValidateUserUseCase`, related specs | `03-permissions-guard-and-decorator.md` (inflation half) |
 | 04  | [Add `PermissionsGuard` + `@RequiresPermission()` and re-gate `/auth/admin/ping`](task-04-permissions-guard-and-requires-permission-decorator.md) | `libs/auth/permissions.guard.ts`, `libs/auth/requires-permission.decorator.ts`, `libs/auth/index.ts`, `apps/api-gateway/src/app/app.module.ts`, `auth-admin.controller.ts` | `03-…md` (guard + decorator half) |
@@ -36,6 +36,10 @@ The epic's `Documentation Deliverables` lists seven topic-numbered docs. Several
 - **`06-audit-log-publisher-port-skeleton.md`** — task-07.
 - **`07-kulala-auth-and-iam-files.md`** — task-08.
 
+In addition, the epic's cumulative architectural decision is recorded as a new ADR (per [epic-00/task-11](../epic-00/task-11-epic-01-task-10-rbac-claims-no-new-adr-but-supersedes-adr-010.md)):
+
+- **`docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md`** — owned by task-01. Supersedes ADR-010 §4 (unitary `User`), §5 (two-guard pipeline), §7 (deferred public registration), and the Consequences `RoleEnum` discussion (two-element enum, three-file role-edit rationale). ADR-010 itself receives a one-line forward-supersession pointer on its `**Status**` line; the original body is otherwise untouched (ADR-003 immutability).
+
 ## Self-containment rule
 
 > Outputs produced by these tasks must not reference any path under `tmp/`. The task files themselves live in `tmp/tasks/...` and are scaffolding; the artifacts they produce (entities, migrations, docs, controllers, http files) live under `apps/`, `libs/`, `migrations/`, `http/`, `docs/`, `scripts/`, `spec/`, `README.md`, `CLAUDE.md` — and none of those files may cite `tmp/`.
@@ -51,5 +55,6 @@ Mirrors the epic's `Exit Criteria` section. Each task carries its own per-task e
 - [ ] `GET /api/auth/admin/ping` is gated behind `audit:read`; a StaffUser lacking the permission gets `403`, the seeded admin gets `200`.
 - [ ] The old `user.roles` simple-array column is gone (MySQL `DESCRIBE staff_user;` shows no `roles` column).
 - [ ] Per-task docs present under `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/`.
+- [ ] New ADR `docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md` present (number allocated at task-01 first commit); `docs/adr/010-jwt-rbac-at-the-gateway.md` `**Status**` line carries the one-line forward-supersession pointer and nothing else has changed in the file; `docs/adr/index.md` lists the new ADR.
 - [ ] `README.md` Authentication section reflects the relational RBAC model; `CLAUDE.md` modules/auth listing matches the new file set.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
