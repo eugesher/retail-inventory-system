@@ -294,6 +294,18 @@ After this execution:
 - No live code or `package.json` / `yarn.lock` changes — the hook stays, the bundle wiring stays, `getNodeAutoInstrumentations()` stays without per-instrumentation overrides.
 - Exit criteria from `epic-00/task-14` checked: `grep -n "auto-instrumentations-node\|instrumentation-pino" docs/adr/015-pino-trace-correlation.md` returns matches inside the new `## References` block (4 new hits at lines 148-164, alongside the 3 pre-existing matches in the historical §"Field naming" and §"Alternatives considered" paragraphs); `yarn lint` passes (markdown-only edit).
 
+### Session 2026-05-27 (resolution log) — epic-00/task-15 (ADR-016)
+
+**Findings reflected back into the ADR surface.** `epic-00/task-15` was executed against ADR-016 §1 / §2 / §3 / §"Still open". Resolution shape chosen: **Option A** — the §Decision and §"Still open" bodies stay intact per the ADR-003 immutability rule; the `**Status**` line carries a short forward-pointer ("key shape, invalidation seam, and the 'Still open' register superseded in part by ADR-021 → ADR-022 → ADR-023; see References"), and a new `## References` section at the bottom of `docs/adr/016-cache-aside-generalized.md` enumerates the three-ADR forward graph + a fourth pointer for `CACHE-005` (the `available` flag on `IStockCachePort.get`).
+
+After this execution:
+
+- `docs/adr/016-cache-aside-generalized.md` `**Status**` line is `Accepted (key shape, invalidation seam, and the "Still open" register superseded in part by ADR-021 → ADR-022 → ADR-023; see References)`.
+- `docs/adr/016-cache-aside-generalized.md` ends with a `## References` section containing four bullets: ADR-021 (closes `CACHE-001` / `CACHE-004` + the §3 caveat), ADR-022 (replaces the §1 key shape, closes `CACHE-003` / `CACHE-009`), ADR-023 (replaces the §3 `await this.stockCache.invalidate(...)` pattern with `withInvalidation`, captures the three-prefix fan-out, closes `CACHE-002`), and a standalone `CACHE-005` line pointing to CLAUDE.md §"Operational notes" for the `available`-flag runtime statement.
+- §1 / §2 / §3 / §"Still open" body text is unchanged — the historical task-11 snapshot is preserved. The new References block carries a one-line preamble distinguishing the snapshot from the forward graph.
+- No live code, no other ADR text, and no CLAUDE.md text was edited.
+- Exit criteria from `epic-00/task-15` checked: a reader landing on ADR-016 sees the supersession signal in the Status line and a complete ADR-021 → ADR-022 → ADR-023 forward chain in References; `grep -n "ADR-021\|ADR-022\|ADR-023" docs/adr/016-cache-aside-generalized.md` returns matches inside the new References block (4 new hits at lines 75-78); `yarn lint` passes (markdown-only edit).
+
 ### Verification complete — closing summary (sessions 1-8)
 
 - **23 ADRs processed** (ADR-001 through ADR-023 — all 23 audited against both surfaces A + B).

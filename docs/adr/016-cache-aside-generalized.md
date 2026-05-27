@@ -1,7 +1,7 @@
 # ADR-016: Generalized cache-aside — `ris:<service>:<aggregate>:<id>` keys + port-based invalidation
 
 - **Date**: 2026-05-14
-- **Status**: Accepted
+- **Status**: Accepted (key shape, invalidation seam, and the "Still open" register superseded in part by ADR-021 → ADR-022 → ADR-023; see References)
 
 ---
 
@@ -68,3 +68,12 @@ This does NOT close `CACHE-001` (the read/write race between a reader's DB read 
 - `CACHE-007` / `CACHE-008` (missing skip-cache / tx-failure coverage)
 - `CACHE-009` (no tenant segment)
 - `CACHE-012` (combo-key fallback only covers single-storage keys; no longer reachable because `delByPrefix`'s non-Redis path is a documented no-op)
+
+## References
+
+The §Decision and §"Still open" sections above are the historical task-11 snapshot. The three forward pointers below redirect a reader to the current state of the cache layer.
+
+- [ADR-021](021-cache-single-flight-and-ttl-jitter.md) — adds `ICachePort.singleFlight(key, fn)` (in-process leader/follower coalescing on the miss path) and ±10% TTL jitter on the `StockCache` write path. The "DOES NOT close `CACHE-001`" caveat in §3 above and the `CACHE-001` / `CACHE-004` rows of §"Still open" are closed here. `IStockCachePort.getOrLoad(payload, loader)` composes `get → singleFlight(loader+set)` so stock read paths no longer compose the steps by hand.
+- [ADR-022](022-cache-keys-tenant-and-schema-version.md) — inserts a per-aggregate schema-version segment and an opt-in `t:<tenantId>:` segment into every key. The `ris:<service>:<aggregate>:<id>[:<facet>]` literal in §1 above is now `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]`, reachable only via `CACHE_KEYS.*` builders. Per-aggregate version constants (`INVENTORY_STOCK_KEY_VERSION`, `RETAIL_ORDER_KEY_VERSION`) sit next to the builders in `libs/cache/cache-keys.ts`. The `CACHE-003` / `CACHE-009` rows of §"Still open" are closed here.
+- [ADR-023](023-cache-invalidate-post-commit-by-type.md) — replaces the `await this.stockCache.invalidate(...)` pattern in §3 above with a type-enforced `IStockCachePort.withInvalidation(work, resolveItems, opts)` seam. `IStockCachePort` no longer exposes a public `invalidate(...)`; the post-commit ordering is enforced by the helper's signature, not by comment. The "once for the new prefix and once for the legacy `stock:` prefix" fan-out in §2 above is now three calls per productId during the ADR-022 transition window (current v1 `inventoryStockPrefix`, pre-v1 post-ADR-016 `inventoryStockLegacyPrefix`, pre-ADR-016 `productStockPrefix`), all private to `StockCache.invalidatePrefixes(...)`. The `CACHE-002` row of §"Still open" is closed here.
+- `CACHE-005` (duplicate warn logs on Redis-down) is closed by the `IStockCachePort.get` return shape carrying an `{ value, available }` tuple — `getOrLoad` skips the write-back path when Redis is unreachable, collapsing the per-request warn-log count from three to one. No separate ADR documents this change; see CLAUDE.md §"Operational notes" for the runtime statement.
