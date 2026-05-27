@@ -1,7 +1,7 @@
 # ADR-013: Order aggregate and the cross-service confirm flow
 
 - **Date**: 2026-05-14
-- **Status**: Accepted
+- **Status**: Accepted (pipe-loader methods added to `IOrderRepositoryPort` post-ADR; see References)
 
 ---
 
@@ -223,3 +223,13 @@ added.
 - [ADR-020](020-rabbitmq-as-inter-service-bus.md) — the broker the
   cross-service `inventory.order.confirm` RPC and the
   `retail.order.created` event travel over.
+- **§3 `IOrderRepositoryPort` method enumeration.** The live port at
+  `apps/retail-microservice/src/modules/orders/application/ports/order.repository.port.ts`
+  has eight methods rather than the five enumerated here. The
+  additional three — `findConfirmableOrder`, `customerExists`,
+  `findExistingProductIds` — are pipe-time lookups added to support
+  `OrderCreatePipe` / `OrderConfirmPipe` so the pipes can short-circuit
+  invalid input at the presentation boundary without injecting the
+  repository through a use case. The role of the port (inbound
+  persistence behind `ORDER_REPOSITORY`, adapter `OrderTypeormRepository`)
+  is unchanged.
