@@ -1,7 +1,7 @@
 # ADR-008: RabbitMQ wiring via `libs/messaging` and dotted routing keys
 
 - **Date**: 2026-05-10
-- **Status**: Accepted
+- **Status**: Accepted (client-module table extended by [ADR-011](011-notifier-port-and-adapters.md))
 
 ---
 
@@ -145,3 +145,6 @@ diff.
   choice this ADR's wiring conventions sit on top of.
 - [ADR-004](004-adopt-hexagonal-architecture-per-service.md) — the
   hexagonal layout the publisher-port follow-up lands inside.
+- [ADR-011](011-notifier-port-and-adapters.md) — introduces
+  `MicroserviceClientNotificationModule`, the third pre-wired
+  client module that joins the two listed in §Decision.
