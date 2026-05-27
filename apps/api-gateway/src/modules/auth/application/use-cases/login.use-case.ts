@@ -43,11 +43,15 @@ export class LoginUseCase {
     const accessJti = randomUUID();
     const refreshJti = randomUUID();
     const roles = user.roles.map((role) => role.name as RoleEnum);
+    const permissions = Array.from(
+      new Set(user.roles.flatMap((role) => Array.from(role.permissions))),
+    ).sort();
 
     const accessToken = await this.tokens.issueAccessToken({
       sub: user.id,
       email: user.email,
       roles,
+      permissions,
       jti: accessJti,
     });
     const refreshToken = await this.tokens.issueRefreshToken({
@@ -66,7 +70,7 @@ export class LoginUseCase {
       refreshToken,
       refreshTokenJti: refreshJti,
       expiresIn: this.tokens.accessTokenExpiresInSeconds(),
-      user: { id: user.id, email: user.email, roles },
+      user: { id: user.id, email: user.email, roles, permissions },
     };
   }
 }

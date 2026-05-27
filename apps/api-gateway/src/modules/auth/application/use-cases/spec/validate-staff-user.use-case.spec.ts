@@ -1,6 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 
-import { RoleEnum } from '@retail-inventory-system/contracts';
+import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts';
 
 import { RoleAggregate } from '../../../domain/role.aggregate';
 import { StaffUser } from '../../../domain/staff-user.model';
@@ -20,6 +20,7 @@ describe('ValidateStaffUserUseCase', () => {
     sub: 'user-1',
     email: 'user@example.com',
     roles: [RoleEnum.ADMIN],
+    permissions: [PermissionCodeEnum.AUDIT_READ, PermissionCodeEnum.CATALOG_READ],
     jti: 'jti-1',
   };
 
@@ -36,7 +37,7 @@ describe('ValidateStaffUserUseCase', () => {
     return user;
   };
 
-  it('returns the current user when active', async () => {
+  it('returns the current user when active and forwards payload permissions', async () => {
     await seedActiveUser();
 
     const current = await useCase.validate(payload);
@@ -45,7 +46,23 @@ describe('ValidateStaffUserUseCase', () => {
       id: 'user-1',
       email: 'user@example.com',
       roles: [RoleEnum.ADMIN],
+      permissions: [PermissionCodeEnum.AUDIT_READ, PermissionCodeEnum.CATALOG_READ],
     });
+  });
+
+  it('defaults permissions to [] when the payload predates this deploy', async () => {
+    await seedActiveUser();
+
+    const legacyPayload = {
+      sub: 'user-1',
+      email: 'user@example.com',
+      roles: [RoleEnum.ADMIN],
+      jti: 'jti-1',
+    } as unknown as Parameters<typeof useCase.validate>[0];
+
+    const current = await useCase.validate(legacyPayload);
+
+    expect(current.permissions).toEqual([]);
   });
 
   it('rejects when the user no longer exists', async () => {

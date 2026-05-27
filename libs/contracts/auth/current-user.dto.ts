@@ -4,4 +4,5 @@ export interface ICurrentUser {
   id: string;
   email: string;
   roles: RoleEnum[];
+  permissions: string[];
 }

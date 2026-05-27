@@ -1,7 +1,7 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 
 import { IAuthUserValidator } from '@retail-inventory-system/auth';
-import { ICurrentUser, IJwtAccessPayload, RoleEnum } from '@retail-inventory-system/contracts';
+import { ICurrentUser, IJwtAccessPayload } from '@retail-inventory-system/contracts';
 
 import {
   IStaffUserRepositoryPort,
@@ -19,9 +19,10 @@ export class ValidateStaffUserUseCase implements IAuthUserValidator {
     }
 
     return {
-      id: user.id,
-      email: user.email,
-      roles: user.roles.map((role) => role.name as RoleEnum),
+      id: payload.sub,
+      email: payload.email,
+      roles: payload.roles,
+      permissions: payload.permissions ?? [],
     };
   }
 }

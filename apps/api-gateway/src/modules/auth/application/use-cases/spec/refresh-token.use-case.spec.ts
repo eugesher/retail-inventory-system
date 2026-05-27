@@ -1,7 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 
-import { RoleEnum } from '@retail-inventory-system/contracts';
+import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { RoleAggregate } from '../../../domain/role.aggregate';
@@ -25,7 +25,10 @@ describe('RefreshTokenUseCase', () => {
       email: `${id}@example.com`,
       passwordHash,
       roles: [
-        RoleAggregate.create('00000000-0000-4000-c000-000000000001', { name: RoleEnum.ADMIN }),
+        RoleAggregate.create('00000000-0000-4000-c000-000000000001', {
+          name: RoleEnum.ADMIN,
+          permissions: [PermissionCodeEnum.AUDIT_READ, PermissionCodeEnum.CATALOG_READ],
+        }),
       ],
     });
     users.seed(user);
@@ -58,6 +61,19 @@ describe('RefreshTokenUseCase', () => {
 
     const reloaded = await users.findById(user.id);
     expect(reloaded?.refreshTokenHash).toBe(`hash:${rotated.refreshToken}`);
+  });
+
+  it('re-inflates permissions on the rotated access token', async () => {
+    const user = await seed();
+    const first = await login.execute({ email: user.email, password: 'password123' });
+
+    const issuedDuringLogin = tokens.issuedAccess.length;
+    await refresh.execute({ refreshToken: first.refreshToken });
+
+    const rotatedAccess = tokens.issuedAccess[issuedDuringLogin];
+    expect(rotatedAccess.permissions).toEqual(
+      [PermissionCodeEnum.AUDIT_READ, PermissionCodeEnum.CATALOG_READ].sort(),
+    );
   });
 
   it('rejects rotation reuse and clears the stored hash', async () => {

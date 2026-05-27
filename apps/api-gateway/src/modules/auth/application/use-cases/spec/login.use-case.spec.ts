@@ -64,10 +64,36 @@ describe('LoginUseCase', () => {
       id: 'user-1',
       email: 'user@example.com',
       roles: [RoleEnum.ADMIN],
+      permissions: [PermissionCodeEnum.AUDIT_READ],
     });
+
+    const issued = tokens.issuedAccess[0];
+    expect(issued.permissions).toEqual([PermissionCodeEnum.AUDIT_READ]);
 
     const reloaded = await users.findById(user.id);
     expect(reloaded?.refreshTokenHash).toBe(`hash:${result.refreshToken}`);
+  });
+
+  it('flattens, dedupes, and sorts permissions across multiple roles', async () => {
+    const adminRole = RoleAggregate.create('00000000-0000-4000-c000-000000000001', {
+      name: RoleEnum.ADMIN,
+      permissions: [PermissionCodeEnum.AUDIT_READ, PermissionCodeEnum.CATALOG_READ],
+    });
+    const catalogManager = RoleAggregate.create('00000000-0000-4000-c000-000000000002', {
+      name: RoleEnum.CATALOG_MANAGER,
+      permissions: [PermissionCodeEnum.CATALOG_READ, PermissionCodeEnum.CATALOG_WRITE],
+    });
+    const user = await seedUser({ roles: [adminRole, catalogManager] });
+
+    const result = await useCase.execute({ email: user.email, password: 'password123' });
+
+    const expected = [
+      PermissionCodeEnum.AUDIT_READ,
+      PermissionCodeEnum.CATALOG_READ,
+      PermissionCodeEnum.CATALOG_WRITE,
+    ].sort();
+    expect(result.user.permissions).toEqual(expected);
+    expect(tokens.issuedAccess[0].permissions).toEqual(expected);
   });
 
   it('updates lastLoginAt on successful login', async () => {

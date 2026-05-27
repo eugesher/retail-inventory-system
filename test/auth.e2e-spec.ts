@@ -6,7 +6,16 @@ import * as supertest from 'supertest';
 import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
 import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
-import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
+import { MicroserviceQueueEnum, PermissionCodeEnum } from '@retail-inventory-system/contracts';
+
+// Decode the JWT body without verifying the signature — the assertions only
+// care about the claim shape, and the unit suite already covers verification.
+const decodeJwtBody = (token: string): Record<string, unknown> => {
+  const [, body] = token.split('.');
+  if (!body) throw new Error('malformed JWT');
+  const json = Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+  return JSON.parse(json) as Record<string, unknown>;
+};
 
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
@@ -116,6 +125,21 @@ describe('Auth flow (e2e)', () => {
       expect(body.refreshToken).toEqual(expect.any(String));
       expect(body.expiresIn).toEqual(expect.any(Number));
     });
+
+    it('inflates the permissions claim on the admin access JWT', async () => {
+      const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
+
+      const payload = decodeJwtBody(tokens.accessToken);
+      expect(Array.isArray(payload.permissions)).toBe(true);
+      const codes = payload.permissions as string[];
+      // Admin is seeded with every code in the registry (see scripts/test-db-seed.ts).
+      for (const code of Object.values(PermissionCodeEnum)) {
+        expect(codes).toContain(code);
+      }
+      // Determinism: sorted ASC and free of duplicates.
+      expect(codes).toEqual([...codes].sort());
+      expect(new Set(codes).size).toBe(codes.length);
+    });
   });
 
   // TODO(task-05): customer login flow lives at /api/auth/customer/login
@@ -163,6 +187,8 @@ describe('Auth flow (e2e)', () => {
       expect(status).toBe(HttpStatus.OK);
       expect(body.email).toBe(ADMIN_EMAIL);
       expect(body.roles).toEqual(['admin']);
+      expect(Array.isArray(body.permissions)).toBe(true);
+      expect(body.permissions).toContain(PermissionCodeEnum.AUDIT_READ);
     });
   });
 

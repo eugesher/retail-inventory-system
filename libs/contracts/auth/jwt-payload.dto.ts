@@ -4,6 +4,7 @@ export interface IJwtAccessPayload {
   sub: string;
   email: string;
   roles: RoleEnum[];
+  permissions: string[];
   jti: string;
   iat?: number;
   exp?: number;

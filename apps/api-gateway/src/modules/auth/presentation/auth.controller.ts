@@ -71,6 +71,11 @@ export class AuthController {
   @ApiOperation({ summary: 'Return the authenticated user' })
   @ApiOkResponse({ type: CurrentUserResponseDto })
   public me(@CurrentUser() user: ICurrentUser): CurrentUserResponseDto {
-    return { id: user.id, email: user.email, roles: user.roles };
+    return {
+      id: user.id,
+      email: user.email,
+      roles: user.roles,
+      permissions: user.permissions,
+    };
   }
 }
