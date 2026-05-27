@@ -1,6 +1,7 @@
 # ADR-001: Structured Logging with Pino and Correlation IDs
 
-**Status:** Accepted (logger relocation superseded in part by ADR-005 / ADR-007 — see References)
+- **Date**: 2026-03-31
+- **Status**: Accepted (logger relocation superseded in part by ADR-005 / ADR-007 — see References)
 
 ---
 
