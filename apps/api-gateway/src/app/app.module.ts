@@ -9,7 +9,7 @@ import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import { CorrelationMiddleware, LoggerModuleConfig } from '@retail-inventory-system/observability';
 
-import { AuthModule, UserEntity } from '../modules/auth';
+import { AuthModule, PermissionEntity, RoleEntity, UserEntity } from '../modules/auth';
 import { InventoryModule } from '../modules/inventory';
 import { RetailModule } from '../modules/retail';
 
@@ -17,7 +17,7 @@ import { RetailModule } from '../modules/retail';
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.API_GATEWAY)),
-    DatabaseModule.forRoot([UserEntity]),
+    DatabaseModule.forRoot([UserEntity, RoleEntity, PermissionEntity]),
     AuthModule,
     RetailModule,
     InventoryModule,

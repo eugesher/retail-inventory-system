@@ -4,6 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule as AuthLibModule, AUTH_USER_VALIDATOR } from '@retail-inventory-system/auth';
 
 import { PASSWORD_HASHER } from '../application/ports/password.port';
+import { PERMISSION_REPOSITORY } from '../application/ports/permission.repository.port';
+import { ROLE_REPOSITORY } from '../application/ports/role.repository.port';
 import { TOKEN_SERVICE } from '../application/ports/token.port';
 import { USER_REPOSITORY } from '../application/ports/user.repository.port';
 import { LoginUseCase } from '../application/use-cases/login.use-case';
@@ -15,6 +17,10 @@ import { AuthAdminController } from '../presentation/auth-admin.controller';
 import { AuthController } from '../presentation/auth.controller';
 import { Argon2PasswordAdapter } from './argon2/argon2-password.adapter';
 import { JwtTokenAdapter } from './jwt/jwt-token.adapter';
+import { PermissionEntity } from './persistence/permission.entity';
+import { PermissionTypeormRepository } from './persistence/permission-typeorm.repository';
+import { RoleEntity } from './persistence/role.entity';
+import { RoleTypeormRepository } from './persistence/role-typeorm.repository';
 import { UserEntity } from './persistence/user.entity';
 import { UserTypeormRepository } from './persistence/user-typeorm.repository';
 
@@ -30,7 +36,7 @@ const authLibProviders = [
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([UserEntity]),
+    TypeOrmModule.forFeature([UserEntity, RoleEntity, PermissionEntity]),
     AuthLibModule.forRootAsync({
       imports: [TypeOrmModule.forFeature([UserEntity])],
       providers: authLibProviders,
@@ -45,11 +51,23 @@ const authLibProviders = [
     JwtTokenAdapter,
     { provide: TOKEN_SERVICE, useExisting: JwtTokenAdapter },
 
+    RoleTypeormRepository,
+    { provide: ROLE_REPOSITORY, useExisting: RoleTypeormRepository },
+
+    PermissionTypeormRepository,
+    { provide: PERMISSION_REPOSITORY, useExisting: PermissionTypeormRepository },
+
     LoginUseCase,
     LogoutUseCase,
     RefreshTokenUseCase,
     RegisterUserUseCase,
   ],
-  exports: [PASSWORD_HASHER, TOKEN_SERVICE, RegisterUserUseCase],
+  exports: [
+    PASSWORD_HASHER,
+    TOKEN_SERVICE,
+    RegisterUserUseCase,
+    ROLE_REPOSITORY,
+    PERMISSION_REPOSITORY,
+  ],
 })
 export class AuthModule {}

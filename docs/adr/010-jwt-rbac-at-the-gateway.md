@@ -1,7 +1,7 @@
 # ADR-010: JWT authentication and RBAC at the API gateway
 
 - **Date**: 2026-05-10
-- **Status**: Accepted
+- **Status**: Accepted (RBAC model superseded by [ADR-024](024-rbac-v2-staffuser-customer-and-permissions.md))
 
 ---
 
