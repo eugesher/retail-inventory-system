@@ -1,12 +1,14 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import { IUserRepositoryPort, USER_REPOSITORY } from '../ports/user.repository.port';
 
 @Injectable()
 export class LogoutUseCase {
-  private readonly logger = new Logger(LogoutUseCase.name);
-
-  constructor(@Inject(USER_REPOSITORY) private readonly users: IUserRepositoryPort) {}
+  constructor(
+    @Inject(USER_REPOSITORY) private readonly users: IUserRepositoryPort,
+    @InjectPinoLogger(LogoutUseCase.name) private readonly logger: PinoLogger,
+  ) {}
 
   public async execute(userId: string): Promise<void> {
     const user = await this.users.findById(userId);
@@ -17,6 +19,6 @@ export class LogoutUseCase {
     user.rotateRefreshTokenHash(null);
     await this.users.save(user);
 
-    this.logger.log({ userId }, 'LogoutPerformed');
+    this.logger.info({ userId }, 'LogoutPerformed');
   }
 }

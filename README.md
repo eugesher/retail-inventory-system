@@ -171,16 +171,17 @@ apps/inventory-microservice/src/
     │   ├── ports/
     │   │   ├── stock.repository.port.ts       # IStockRepositoryPort + STOCK_REPOSITORY symbol
     │   │   ├── stock-cache.port.ts            # IStockCachePort + STOCK_CACHE symbol
-    │   │   └── stock-events.publisher.port.ts # IStockEventsPublisherPort + STOCK_EVENTS_PUBLISHER symbol
+    │   │   ├── stock-events.publisher.port.ts # IStockEventsPublisherPort + STOCK_EVENTS_PUBLISHER symbol
+    │   │   └── transaction.port.ts            # ITransactionPort + TRANSACTION_PORT symbol (opaque ITransactionScope; closes ARCH-LINT-EX-01)
     │   └── use-cases/
     │       ├── get-stock.use-case.ts          # cache-aside read
     │       ├── reserve-stock-for-order.use-case.ts
     │       └── add-stock.use-case.ts          # internal-only ledger append
     ├── infrastructure/
     │   ├── persistence/                       # TypeORM entities + StockTypeormRepository + StockItemMapper
-    │   ├── cache/stock-redis.cache.ts         # STOCK_CACHE adapter; preserves ADR-002 cache-aside contract
+    │   ├── cache/stock.cache.ts               # STOCK_CACHE adapter; preserves ADR-002 cache-aside contract
     │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (emit → notification queue)
-    │   └── stock.module.ts                    # binds all three port symbols → adapters
+    │   └── stock.module.ts                    # binds all four port symbols → adapters (TRANSACTION_PORT → TypeormTransactionAdapter)
     └── presentation/
         └── stock.controller.ts                # @MessagePattern handlers for INVENTORY_PRODUCT_STOCK_GET / INVENTORY_ORDER_CONFIRM
 ```
@@ -295,7 +296,7 @@ What the boundaries rules cover today:
 
 - `domain/` may import only `@retail-inventory-system/ddd`, `lib-common`, and `lib-contracts` (enums/types). No `@nestjs/*`, no TypeORM, no Redis, no AMQP, no logging.
 - `application/use-cases/` may import its own module's `domain`, `application/ports`, `application/dto`, plus the same lib set as domain — plus `lib-auth` for port interfaces. Concrete adapters and `@nestjs/cache-manager`/`@keyv/redis`/`@nestjs/typeorm` imports are rejected.
-- `application/ports/` may import only `domain` types and `lib-contracts`. (One narrow exception is documented as a TODO in `apps/inventory-microservice/.../stock.repository.port.ts`; see ADR-017 §6.)
+- `application/ports/` may import only `domain` types and `lib-contracts`. (The previous `ARCH-LINT-EX-01` exception in `apps/inventory-microservice/.../stock.repository.port.ts` is **closed**: `ITransactionPort` now hides TypeORM's `EntityManager` behind an opaque `ITransactionScope`, and the `application-use-case` denylist tightened to forbid both `@nestjs/typeorm` and bare `typeorm`. See [ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md) §6.)
 - `infrastructure/` is the only layer allowed to touch concrete adapters (`typeorm`, `@keyv/redis`, `amqplib`, etc.).
 - `presentation/` may import `application` layers + `lib-{auth,contracts,messaging,observability}`. Direct TypeORM repositories and Redis clients are rejected.
 - `libs/contracts/` is plain TypeScript (`class-validator`, `class-transformer`, and `@nestjs/swagger` are the documented exceptions for HTTP/RPC DTOs).
@@ -450,9 +451,9 @@ The following shows the full log output for a `PUT /api/order/1/confirm` request
 ```json lines
 {"level":30,"time":1748000000010,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","req":{"method":"PUT","url":"/api/order/1/confirm"},"msg":"incoming request"}
 {"level":30,"time":1748000000015,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"msg":"Order confirmation in progress"}
-{"level":30,"time":1748000000016,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"retail_order_confirm","msg":"Sending RPC to retail service"}
+{"level":30,"time":1748000000016,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"retail.order.confirm","msg":"Sending RPC to retail service"}
 {"level":30,"time":1748000000020,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"productCount":2,"msg":"Received RPC: confirm order"}
-{"level":30,"time":1748000000021,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"inventory_order_confirm","msg":"Sending RPC to inventory service"}
+{"level":30,"time":1748000000021,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"inventory.order.confirm","msg":"Sending RPC to inventory service"}
 {"level":30,"time":1748000000025,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ReserveStockForOrderUseCase","totalProducts":2,"pendingCount":2,"msg":"Received RPC: reserve order product stock"}
 {"level":30,"time":1748000000040,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ReserveStockForOrderUseCase","confirmedCount":2,"skippedCount":0,"msg":"Stock reserved for order products"}
 {"level":30,"time":1748000000045,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"confirmedCount":2,"msg":"Inventory stock confirmation received"}
@@ -535,13 +536,13 @@ Reads inside a caller-owned `EntityManager` (i.e., inside an open transaction) b
 ### Cache key
 
 ```
-ris:inventory:stock:<productId>:__all__                       # no storageIds filter
-ris:inventory:stock:<productId>:<storageIds-joined-by-comma>  # e.g. ris:inventory:stock:42:storage-a,storage-b
+ris:inventory:stock:v1:<productId>:__all__                       # no storageIds filter
+ris:inventory:stock:v1:<productId>:<storageIds-joined-by-comma>  # e.g. ris:inventory:stock:v1:42:storage-a,storage-b
 ```
 
-Storage IDs are sorted with `localeCompare` so callers passing the same set in different orders generate identical keys. Built by `CACHE_KEYS.inventoryStock(productId, storageIds)` in `libs/cache/cache-keys.ts`. The legacy `stock:<productId>:*` builder is retained so the SCAN-based invalidate path can wipe entries written under the previous prefix during a rolling deploy.
+Storage IDs are sorted with `localeCompare` so callers passing the same set in different orders generate identical keys. The `v1` segment is the per-aggregate schema-version constant (`INVENTORY_STOCK_KEY_VERSION` in `libs/cache/cache-keys.ts`); a breaking DTO shape change bumps it in one line and pre-bump entries become unreachable on the next deploy. Built by `CACHE_KEYS.inventoryStock(productId, storageIds, opts?)`; an optional `{ tenantId }` argument prefixes the key with `t:<tenantId>:` for future multi-tenant use (omitted entirely when absent — never defaulted). Two legacy prefixes are still wiped by the SCAN-based invalidate path so a rolling deploy can sweep entries written under the pre-v1 (`ris:inventory:stock:<productId>:`) and pre-ADR-016 (`stock:<productId>:`) conventions.
 
-The general key convention is `ris:<service>:<aggregate>:<id>[:<facet>]`. `CACHE_KEYS.retailOrder(orderId)` follows the same shape (no caller today; reserved for a future read path).
+The general key convention is `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]` (see [ADR-022](docs/adr/022-cache-keys-tenant-and-schema-version.md)). `CACHE_KEYS.retailOrder(orderId)` follows the same shape (no caller today; reserved for a future read path).
 
 ### TTL
 
@@ -560,9 +561,9 @@ Per [ADR-021](docs/adr/021-cache-single-flight-and-ttl-jitter.md), concurrent ca
 
 ### Invalidation
 
-When `ReserveStockForOrderUseCase` reserves stock for a confirmed order, it inserts ledger rows inside a transaction and — **after the transaction commits** — awaits an invalidation pass for every `(productId, storageId)` pair that was written. The await means the confirm RPC's post-state includes "cache cleared for the mutated products", so the next GET reads the fresh DB row.
+When `ReserveStockForOrderUseCase` reserves stock for a confirmed order, it wraps the transaction in `stockCache.withInvalidation(work, resolveItems, { correlationId })` — a callback-based helper that awaits `work()` first and only then derives the invalidation items and fans out the prefix deletes. The post-commit ordering is enforced by the helper's type signature ([ADR-023](docs/adr/023-cache-invalidate-post-commit-by-type.md)): `IStockCachePort` has no public `invalidate(...)`, so a future contributor cannot accidentally call it from inside the transaction body, and a rejected `work` propagates without touching the cache.
 
-Invalidation issues two `delByPrefix` calls per affected `productId` (new + legacy prefixes). Each `delByPrefix` does `SCAN MATCH <prefix>*` and `UNLINK`s every matching key. `UNLINK` (vs `DEL`) frees memory asynchronously on the Redis side, avoiding a blocking O(N) delete on Redis's main thread. Calling invalidation before commit would race with concurrent readers and let them re-populate the cache from uncommitted state.
+Invalidation issues three `delByPrefix` calls per affected `productId` during the transition window (the current `v1` prefix, the pre-v1 `inventoryStockLegacyPrefix`, and the pre-ADR-016 `productStockPrefix` — see [ADR-022](docs/adr/022-cache-keys-tenant-and-schema-version.md) §4). Each `delByPrefix` does `SCAN MATCH <prefix>*` and `UNLINK`s every matching key. `UNLINK` (vs `DEL`) frees memory asynchronously on the Redis side, avoiding a blocking O(N) delete on Redis's main thread.
 
 ### Tracing
 
@@ -582,16 +583,16 @@ A Redis outage degrades latency, never correctness — no path throws to the cli
 
 ```bash
 # List every cached stock entry across all products
-redis-cli --scan --pattern 'ris:inventory:stock:*'
+redis-cli --scan --pattern 'ris:inventory:stock:v1:*'
 
 # Read a specific entry
-redis-cli GET 'ris:inventory:stock:42:__all__'
+redis-cli GET 'ris:inventory:stock:v1:42:__all__'
 
 # Check remaining TTL (in ms) for a key
-redis-cli PTTL 'ris:inventory:stock:42:__all__'
+redis-cli PTTL 'ris:inventory:stock:v1:42:__all__'
 
 # Manually invalidate every cached entry for a single product
-redis-cli --scan --pattern 'ris:inventory:stock:42:*' | xargs -r redis-cli UNLINK
+redis-cli --scan --pattern 'ris:inventory:stock:v1:42:*' | xargs -r redis-cli UNLINK
 ```
 
 See [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md) for the original design and [ADR-016](docs/adr/016-cache-aside-generalized.md) for the generalized key convention + port-based invalidation.

@@ -1,5 +1,6 @@
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import { IJwtRefreshPayload } from '@retail-inventory-system/contracts';
 
@@ -10,12 +11,11 @@ import { IUserRepositoryPort, USER_REPOSITORY } from '../ports/user.repository.p
 
 @Injectable()
 export class RefreshTokenUseCase {
-  private readonly logger = new Logger(RefreshTokenUseCase.name);
-
   constructor(
     @Inject(USER_REPOSITORY) private readonly users: IUserRepositoryPort,
     @Inject(PASSWORD_HASHER) private readonly hasher: IPasswordPort,
     @Inject(TOKEN_SERVICE) private readonly tokens: ITokenPort,
+    @InjectPinoLogger(RefreshTokenUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   public async execute(command: IRefreshCommand): Promise<IIssuedTokens> {
@@ -62,7 +62,7 @@ export class RefreshTokenUseCase {
     user.rotateRefreshTokenHash(await this.hasher.hash(refreshToken));
     await this.users.save(user);
 
-    this.logger.log({ userId: user.id }, 'RefreshTokenRotated');
+    this.logger.info({ userId: user.id }, 'RefreshTokenRotated');
 
     return {
       accessToken,

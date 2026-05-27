@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-custome
 
 # Task 03 — Inflate JWT permissions claim on login + refresh, surface on `ICurrentUser`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Turn the relational role-to-permission binding (task-01) into a per-request bit of metadata that downstream guards can read without a DB hit. At login and at refresh, flatten the StaffUser's roles → permissions and embed `permissions: string[]` in the access JWT. Surface the same array on `ICurrentUser` (which `request.user` resolves to) so `PermissionsGuard` (task-04) can simply read `request.user.permissions` and intersect with `@RequiresPermission()` metadata.

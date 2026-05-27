@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/07-c
 
 # Task 07 — Seed + documentation pass
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Close out the epic. Three categories of work:

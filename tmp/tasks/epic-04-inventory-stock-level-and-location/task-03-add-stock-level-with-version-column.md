@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/
 
 # Task 03 — Add `stock_level` with the `@VersionColumn()` token
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Land the `stock_level` table and the TypeORM/repository plumbing around it, **shipping the `version` column from day one** so the OCC retrofit in `epic-07` and `epic-12` is a non-destructive additive change rather than a schema migration. The `StockLevel` domain class is added in this task as a **placeholder** with the constructor + getters wired, but the mutator methods (`receive(amount)`, `applySignedDelta(delta, reasonCode)`, `version` bump on every mutation) and the event-emission stubs are written end-to-end in task-04 — this task focuses on persistence so task-04 has a real row to load and save against. The repository methods land here too: `findByVariantAndLocation`, `findByVariant`, `save`, `incrementOnHand`, `applySignedDelta`.

@@ -1,7 +1,7 @@
 # ADR-019: TypeORM + MySQL as the persistence stack
 
 - **Date**: 2026-05-14
-- **Status**: Accepted
+- **Status**: Accepted (amended 2026-05-27 — see §"Amendment (2026-05-27)" for the module-wiring rule re-scope)
 
 ---
 
@@ -104,6 +104,57 @@ leaked `EntityManager` typing on the stock repository port — has since
 been closed by the `ITransactionPort` abstraction: the port now accepts
 an opaque `ITransactionScope`, and the TypeORM downcast lives only in
 `TypeormTransactionAdapter` and `StockTypeormRepository`.
+
+### Amendment (2026-05-27)
+
+This amendment re-scopes the §"Module wiring" rule's binding intent —
+*"applications never import `@nestjs/typeorm` directly"* — and the
+§"Repository surface" rule's *"the only files allowed to import
+`typeorm`, `@nestjs/typeorm`, or use `InjectRepository`"* — without
+changing the decision they encode. The intent is preserved (keep
+TypeORM types out of the application layer); the original phrasing was
+over-broad about which layer counts as the boundary.
+
+**Binding intent (clarified).** No `@nestjs/typeorm` or `typeorm` import
+in `application/use-cases/`, `application/ports/`, `application/dto/`,
+`presentation/`, `domain/`, `lib-contracts`, or `lib-ddd`. This matches
+what the [ADR-017](017-architecture-lint-via-eslint-boundaries.md)
+`boundaries/dependencies` per-source `disallow.dependency.module` lists
+enforce today (`eslint.config.mjs`). The infrastructure layer —
+including `infrastructure/<module>.module.ts` files that wire
+feature-level entity registration — is intentionally **not** in scope.
+
+**Module wiring (revised).** `DatabaseModule.forRoot(entities)` at the
+AppModule level remains the single factory for `TypeOrmModuleOptions`
+from `ConfigService` (unchanged). For per-module entity registration,
+both forms are valid at the `infrastructure/<module>.module.ts` layer:
+
+- `DatabaseModule.forFeature(entities)` — preferred when the call site
+  has no shared-imports requirement. The wrapper is a one-line
+  passthrough (`libs/database/database.module.ts:31-33`); the three
+  microservice infrastructure modules use this form
+  (`stock.module.ts`, `orders.module.ts`, the notification template).
+- `TypeOrmModule.forFeature(entities)` — preferred when the call site
+  needs to wire the resulting `DynamicModule` inline into a third-party
+  callee's `imports: [...]`. The motivating case is
+  `AuthLibModule.forRootAsync({ imports: [TypeOrmModule.forFeature([UserEntity])] })`
+  in `apps/api-gateway/src/modules/auth/infrastructure/auth.module.ts` —
+  the working idiom since the ADR-010 landing.
+
+**Repository surface (unchanged for the application layer).**
+Per-aggregate ports remain TypeORM-free; the `ITransactionPort` +
+opaque `ITransactionScope` seam (closing `ARCH-LINT-EX-01`) is the
+binding mechanism that keeps the application layer ORM-agnostic.
+Repository implementations under `infrastructure/persistence/` are
+still the only place that uses `InjectRepository`, but `@nestjs/typeorm`
+as an *import surface* is permitted across the wider `infrastructure/`
+tree (the lint rules in `eslint.config.mjs` reflect this).
+
+No code changes are required by this amendment; the `auth.module.ts`
+precedent and the eight follow-on tasks under `tmp/tasks/**` that
+instruct `TypeOrmModule.forFeature(...)` at the infrastructure-module
+layer become compliant by the clarification. Filed under
+`tmp/tasks/epic-00/task-17-adr-019-reconcile-typeorm-vs-database-module-for-feature.md`.
 
 ---
 

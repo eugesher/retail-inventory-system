@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/
 
 # Task 02 — Add `stock_location` + auto-provision the default warehouse
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Introduce the `StockLocation` aggregate (replacing the deleted `Storage` model) end-to-end: domain model + spec, TypeORM entity + mapper, repository methods, and a migration that **creates the `stock_location` table and idempotently inserts the single seeded row** `id = 'default-warehouse'`, `code = 'DEFAULT-WAREHOUSE'`, `type = 'warehouse'`, `active = true`. This is Open Question Q8 made concrete (one default, auto-provisioned at install). The repository surface is small in this task — `findById`, `findByCode`, `list({ activeOnly })`, `save` — because no use case touches it yet; tasks 05 + 09 add the read endpoint.

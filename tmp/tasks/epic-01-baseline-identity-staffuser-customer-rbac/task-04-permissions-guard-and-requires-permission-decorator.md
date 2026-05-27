@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-custome
 
 # Task 04 — `PermissionsGuard` + `@RequiresPermission()` + global wiring
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Make role-bundled atomic permission codes the authoritative gating mechanism. Introduce a third global guard (downstream of `JwtAuthGuard` and `RolesGuard`) that reads `@RequiresPermission(...)` metadata off the handler and intersects it with `request.user.permissions`. Re-gate the existing `/api/auth/admin/ping` smoke endpoint behind `@RequiresPermission('audit:read')` so a non-admin StaffUser hits 403 even if their role passes `RolesGuard`.

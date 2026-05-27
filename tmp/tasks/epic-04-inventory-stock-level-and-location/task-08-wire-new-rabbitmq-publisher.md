@@ -8,34 +8,41 @@ doc_deliverable: appended to docs/implementation/epic-04-inventory-stock-level-a
 
 # Task 08 — Wire the new RMQ publisher
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
-Consolidate the inventory microservice's emit-side wiring around a single `StockRabbitmqPublisher` class that emits all four `inventory.*` events the epic introduces or preserves: `stock.received`, `stock.adjusted`, `stock-level.initialized` (the three new ones), and `stock.low` (the pre-existing one — payload reshaped to be `variantId`-keyed, target consumer unchanged). The three new routing keys are registered in `libs/messaging/routing-keys.constants.ts`. The legacy `inventory.product-stock.get` routing key is removed entirely. The legacy `inventory.order.confirm` routing key is **kept but reshaped into a deprecation handler** — any caller still hitting it gets a deterministic typed error rather than a missing-handler 404; `epic-07` repurposes the routing key for the Reservation flow.
+Consolidate the inventory microservice's emit-side wiring around a single `StockRabbitmqPublisher` class that emits all four `inventory.*` events the epic introduces or preserves: `stock.received`, `stock.adjusted` (the two new ones added in this task), `stock-level.initialized` (added in task-07 — kept as is here), and `stock.low` (the pre-existing one — payload reshaped to be `variantId`-keyed, target consumer unchanged). The two new routing keys added by this task are registered in `libs/messaging/routing-keys.constants.ts` (`INVENTORY_STOCK_LEVEL_INITIALIZED` was registered in task-07 — keep it). The legacy `inventory.product-stock.get` routing key is removed entirely. The legacy `inventory.order.confirm` routing key is **kept but reshaped into a deprecation handler** — any caller still hitting it gets a deterministic typed error rather than a missing-handler 404; `epic-07` repurposes the routing key for the Reservation flow.
 
-Three call sites get swept up: the two mutator use cases (`receive-stock` and `adjust-stock`) get a publisher-port injection point that emits the corresponding event after the cache-invalidation completes; the auto-init use case (task-07) gets its inline routing-key literal replaced with the constant + delegates to the publisher class instead of calling `ClientProxy.emit()` directly; the existing `publishStockLow` call site is updated to consume the new event-class shape. The legacy `inventory.product-stock.get` RPC handler in `stock.controller.ts` is deleted.
+Two call sites get swept up: the two mutator use cases (`receive-stock` and `adjust-stock`) get a publisher-port injection point that emits the corresponding event after the cache-invalidation completes; the existing `publishStockLow` call site is updated to consume the new event-class shape. The auto-init use case (task-07) already routes through the publisher port — this task does not touch it (the original "inline literal swap" step was moved forward into task-07 because the deferred-`ClientProxy`-in-use-case shape contradicted ADR-008 §"Domain code depends on a publisher port (deferred)"; see `epic-00/task-10`). The legacy `inventory.product-stock.get` RPC handler in `stock.controller.ts` is deleted.
 
 ## Entry state assumed
 
 Task-07 carryover present:
 
-- `AutoInitStockLevelUseCase` exists and emits `inventory.stock-level.initialized` via an **inline string literal** routing key, calling `ClientProxy.emit()` directly (no publisher port).
+- `AutoInitStockLevelUseCase` exists and routes its emit through `IStockEventsPublisherPort.publishStockLevelInitialized` (no `ClientProxy` injection in the use case; no inline routing-key literal). This task **does not touch** the auto-init use case.
+- `ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized'` is already registered in `libs/messaging/routing-keys.constants.ts` (added by task-07). This task **does not** re-register it.
+- `IStockEventsPublisherPort` carries three methods after task-07: `publishStockLow`, `publishStockReserved` (the pre-epic no-op), and `publishStockLevelInitialized` (added by task-07). This task drops `publishStockReserved` and adds two more (`publishStockReceived`, `publishStockAdjusted`); the net surface after this task is **four methods**.
+- `StockRabbitmqPublisher` already implements `publishStockLevelInitialized` (added by task-07). This task adds the two new methods and reshapes the `publishStockLow` payload mapping; the `publishStockLevelInitialized` body is left as-is.
+- `IInventoryStockLevelInitializedEvent` already lives at `libs/contracts/inventory/events/stock-level-initialized.event.ts` (added by task-07). This task **does not** re-add or modify it.
 - `VariantCreatedConsumer` is wired and consuming `catalog.variant.created`.
 - `ReceiveStockUseCase` and `AdjustStockUseCase` have **no event-emission call** today (task-05 leaves the emit-line as a TODO comment).
-- `StockRabbitmqPublisher` (the pre-epic-04 file) still exists at `apps/inventory-microservice/src/modules/stock/infrastructure/messaging/stock-rabbitmq.publisher.ts`. Its `publishStockLow` method emits against `ROUTING_KEYS.INVENTORY_STOCK_LOW` — payload shape uses `productId` (legacy).
 - `libs/messaging/routing-keys.constants.ts` carries `INVENTORY_PRODUCT_STOCK_GET`, `INVENTORY_ORDER_CONFIRM`, `INVENTORY_STOCK_LOW` from before the epic. The first two are due for retirement / reshape in this task; the third is preserved with a reshaped payload.
 - `libs/contracts/inventory/events/stock-low.event.ts` exists. Restructured by task-04 to be `variantId`-keyed.
 - `stock.controller.ts` carries the three new `@MessagePattern` handlers from task-05, the inline routing-key strings still TODO.
-- `IStockEventsPublisherPort` (the port file) carries `publishStockLow` and `publishStockReserved` only — the latter is a no-op.
 
 ## Scope
 
 **In:**
 
 - `libs/messaging/routing-keys.constants.ts`:
-  - **Add** three new entries inside `ROUTING_KEYS`:
+  - **Add** two new entries inside `ROUTING_KEYS`:
     - `INVENTORY_STOCK_RECEIVED: 'inventory.stock.received'`
     - `INVENTORY_STOCK_ADJUSTED: 'inventory.stock.adjusted'`
-    - `INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized'`
+  - (`INVENTORY_STOCK_LEVEL_INITIALIZED` was added by task-07 — keep it; this task **does not** re-add it.)
   - **Add** three new entries for the RPC-style routing keys the use cases use (the controller's `@MessagePattern` handlers reference them; in task-05 they were inline strings):
     - `INVENTORY_STOCK_RECEIVE: 'inventory.stock.receive'`
     - `INVENTORY_STOCK_ADJUST: 'inventory.stock.adjust'`
@@ -46,20 +53,20 @@ Task-07 carryover present:
 - New event-payload interfaces at `libs/contracts/inventory/events/`:
   - `stock-received.event.ts` exporting `IInventoryStockReceivedEvent`.
   - `stock-adjusted.event.ts` exporting `IInventoryStockAdjustedEvent`.
-  - `stock-level-initialized.event.ts` exporting `IInventoryStockLevelInitializedEvent`.
+  - (`stock-level-initialized.event.ts` exporting `IInventoryStockLevelInitializedEvent` was added by task-07 — this task **does not** re-add or modify it.)
   - `stock-low.event.ts` already exists; reshape its `IInventoryStockLowEvent` interface to use `variantId` + `stockLocationId` (was `productId` + `storageId`).
 - Rewrite `apps/inventory-microservice/src/modules/stock/infrastructure/messaging/stock-rabbitmq.publisher.ts`:
-  - Four methods: `publishStockReceived`, `publishStockAdjusted`, `publishStockLevelInitialized`, `publishStockLow`. (The pre-existing no-op `publishStockReserved` is removed entirely — `epic-07` will add it back when the Reservation flow lands; carrying a no-op stub forward bloats the port surface for no benefit.)
+  - Net result is four methods: `publishStockReceived` (new), `publishStockAdjusted` (new), `publishStockLevelInitialized` (already added by task-07 — kept), `publishStockLow` (existing — payload mapping reshaped to `variantId` / `stockLocationId`). (The pre-existing no-op `publishStockReserved` is removed entirely — `epic-07` will add it back when the Reservation flow lands; carrying a no-op stub forward bloats the port surface for no benefit.)
   - All four methods route through the same `notificationClient.emit()` pattern (the project ships one queue per microservice; the notification microservice's `stock-low` consumer was the only downstream listener before this epic, and the new audit-log consumer in `epic-11` will subscribe to all four).
   - Each method maps from the domain event class (`StockReceivedEvent`, etc.) to the wire-shape interface (`IInventoryStockReceivedEvent`, etc.).
   - The publisher conserves the project's `correlationId` convention — the second argument carries the per-call correlation id; empty string default matches the existing publisher style.
 - Rewrite `apps/inventory-microservice/src/modules/stock/application/ports/stock-events.publisher.port.ts`:
-  - `IStockEventsPublisherPort` now exports four method signatures matching the four publisher methods above.
+  - `IStockEventsPublisherPort` now exports four method signatures matching the four publisher methods above. The `publishStockLevelInitialized` signature (added by task-07) is preserved verbatim; the `publishStockReserved` no-op is dropped.
   - The `STOCK_EVENTS_PUBLISHER` DI token is unchanged.
 - Inject the publisher into:
   - `ReceiveStockUseCase`: after `cache.withInvalidation` returns the projection, the use case calls `eventsPublisher.publishStockReceived(...)`. The emit is fire-and-forget — `await` is preserved (matches `publishStockLow`'s style) but the use case treats publish-failure as a logged warning, not a hard failure (the row is already committed; the cache is invalidated; a missed audit-log event is recoverable).
   - `AdjustStockUseCase`: same pattern with `publishStockAdjusted`.
-  - `AutoInitStockLevelUseCase`: replace the inline `notificationClient.emit('inventory.stock-level.initialized', …)` with `eventsPublisher.publishStockLevelInitialized(...)`. The inline routing-key literal is gone.
+  - (`AutoInitStockLevelUseCase` was already wired against the publisher port in task-07 — this task does **not** modify it. The original "swap inline literal" step is no longer in scope here.)
 - Reshape the legacy `inventory.order.confirm` RPC handler. The current `stock.controller.ts` (post-task-05) has three new handlers (`receive` / `adjust` / `query-availability`) and the old `@MessagePattern(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM)` from before task-05. This task:
   - Deletes the old `@MessagePattern(ROUTING_KEYS.INVENTORY_PRODUCT_STOCK_GET)` handler (already throwing the stub from task-01, deleted by task-05 — verify it is gone).
   - **Replaces** the old `@MessagePattern(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM)` handler with a typed deprecation handler:
@@ -73,10 +80,10 @@ Task-07 carryover present:
     ```
   - `DeprecatedRpcError` is added to `apps/inventory-microservice/src/modules/stock/domain/errors/`. RPC callers receive a typed error frame (the project's RMQ adapter materializes the throw as an exception in the caller).
 - Update `stock.controller.ts`'s three new handler bodies to point at the constants (`ROUTING_KEYS.INVENTORY_STOCK_RECEIVE`, etc.) instead of the inline strings from task-05. Each `// TODO(epic-04 task-08)` comment is removed in lockstep.
-- Update `auto-init-stock-level.use-case.ts`: drop the `MicroserviceClientTokenEnum.NOTIFICATION_MICROSERVICE` injection; inject `STOCK_EVENTS_PUBLISHER` instead; the emit-line becomes `await this.eventsPublisher.publishStockLevelInitialized(...)`.
+- (`auto-init-stock-level.use-case.ts` is already on the publisher port from task-07 — this task does **not** modify it.)
 - Update `stock.module.ts`: no provider changes (the publisher is already registered); only the consumer-of-publisher dependency graph gets wider.
-- Update `libs/messaging/spec/routing-keys.constants.spec.ts` to assert (a) the three new keys exist, (b) the three new RPC-style keys exist, (c) `INVENTORY_PRODUCT_STOCK_GET` is gone, (d) `INVENTORY_ORDER_CONFIRM` is still present.
-- **Append** sections to two existing doc files: `06-receive-and-adjust-use-cases.md` (the emitted-event shape for `inventory.stock.received` and `inventory.stock.adjusted`) and `05-auto-init-on-variant-created.md` (the routing-key constant for the level-initialized event + the deprecation handler note for `inventory.order.confirm`).
+- Update `libs/messaging/spec/routing-keys.constants.spec.ts` to assert (a) the two new event-style keys (`INVENTORY_STOCK_RECEIVED`, `INVENTORY_STOCK_ADJUSTED`) exist, (b) the three new RPC-style keys exist, (c) `INVENTORY_PRODUCT_STOCK_GET` is gone, (d) `INVENTORY_ORDER_CONFIRM` is still present. (The level-initialized key assertion was added by task-07; this task does **not** rewrite that assertion.)
+- **Append** sections to two existing doc files: `06-receive-and-adjust-use-cases.md` (the emitted-event shape for `inventory.stock.received` and `inventory.stock.adjusted`) and `05-auto-init-on-variant-created.md` (the cross-event consistency note: all four `inventory.*` events route through `IStockEventsPublisherPort` + the deprecation-handler note for `inventory.order.confirm`).
 
 **Out:**
 
@@ -104,7 +111,7 @@ export const ROUTING_KEYS = {
   // Event-style (fire-and-forget broadcast) — used by stock-rabbitmq.publisher.ts
   INVENTORY_STOCK_RECEIVED: 'inventory.stock.received',
   INVENTORY_STOCK_ADJUSTED: 'inventory.stock.adjusted',
-  INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized',
+  INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized', // registered in task-07; shown here for completeness
   INVENTORY_STOCK_LOW: 'inventory.stock.low',
   // Deprecation gate — epic-07 will repurpose for the Reservation flow.
   INVENTORY_ORDER_CONFIRM: 'inventory.order.confirm',
@@ -299,35 +306,35 @@ The `StockLowEvent` emission is governed by the threshold — for this task, the
 
 Same pattern for `AdjustStockUseCase` with `StockAdjustedEvent`.
 
-## `AutoInitStockLevelUseCase` — publisher injection
+## `AutoInitStockLevelUseCase` — already publisher-port-wired by task-07
 
-Replace the inline `notificationClient.emit(...)` with `await this.eventsPublisher.publishStockLevelInitialized(event, correlationId)`. The constructor drops the `MicroserviceClientTokenEnum.NOTIFICATION_MICROSERVICE` injection. The domain event is constructed from `{ variantId, stockLocationId }`.
+This task does **not** modify `auto-init-stock-level.use-case.ts`. Task-07 already wires the use case against `IStockEventsPublisherPort.publishStockLevelInitialized`; the original "swap inline literal for the constant + drop `ClientProxy` injection" step is gone from this task's scope, moved forward to task-07 per `epic-00/task-10`. The publisher-port body (`publishStockLevelInitialized` on `StockRabbitmqPublisher`) is preserved verbatim through this task's reshape — the four-method net surface is `publishStockReceived` (new) + `publishStockAdjusted` (new) + `publishStockLevelInitialized` (from task-07) + `publishStockLow` (reshaped payload mapping).
 
 ## Files to add
 
 - `libs/contracts/inventory/events/stock-received.event.ts`
 - `libs/contracts/inventory/events/stock-adjusted.event.ts`
-- `libs/contracts/inventory/events/stock-level-initialized.event.ts`
+- (`libs/contracts/inventory/events/stock-level-initialized.event.ts` was added by task-07 — not added here.)
 - `apps/inventory-microservice/src/modules/stock/domain/errors/deprecated-rpc.error.ts`
 
 ## Files to modify
 
-- `libs/messaging/routing-keys.constants.ts` — per the after-state above.
-- `libs/messaging/spec/routing-keys.constants.spec.ts` — assertions updated.
+- `libs/messaging/routing-keys.constants.ts` — per the after-state above. (`INVENTORY_STOCK_LEVEL_INITIALIZED` was registered in task-07 — keep it.)
+- `libs/messaging/spec/routing-keys.constants.spec.ts` — assertions updated for the two new event-style keys + the three new RPC-style keys + the `INVENTORY_PRODUCT_STOCK_GET` removal.
 - `libs/contracts/inventory/events/stock-low.event.ts` — field rename to `variantId` / `stockLocationId` + the `eventVersion` / `occurredAt` additions.
-- `libs/contracts/inventory/events/index.ts` — re-export the new event interfaces.
-- `apps/inventory-microservice/src/modules/stock/infrastructure/messaging/stock-rabbitmq.publisher.ts` — four-method rewrite.
-- `apps/inventory-microservice/src/modules/stock/application/ports/stock-events.publisher.port.ts` — four-method port shape.
+- `libs/contracts/inventory/events/index.ts` — re-export the two new event interfaces (`IInventoryStockReceivedEvent`, `IInventoryStockAdjustedEvent`). (`IInventoryStockLevelInitializedEvent` was re-exported by task-07 — keep the existing re-export.)
+- `apps/inventory-microservice/src/modules/stock/infrastructure/messaging/stock-rabbitmq.publisher.ts` — add `publishStockReceived` and `publishStockAdjusted`; reshape the `publishStockLow` payload mapping to `variantId` / `stockLocationId`; drop the `publishStockReserved` no-op. (`publishStockLevelInitialized` was added by task-07 — keep it verbatim.)
+- `apps/inventory-microservice/src/modules/stock/application/ports/stock-events.publisher.port.ts` — drop `publishStockReserved`; add `publishStockReceived` + `publishStockAdjusted`. Net surface = four methods. (`publishStockLevelInitialized` was added by task-07 — keep it.)
 - `apps/inventory-microservice/src/modules/stock/application/use-cases/receive-stock.use-case.ts` — publisher injection + emit.
 - `apps/inventory-microservice/src/modules/stock/application/use-cases/adjust-stock.use-case.ts` — same.
-- `apps/inventory-microservice/src/modules/stock/application/use-cases/auto-init-stock-level.use-case.ts` — publisher injection; inline-string + ClientProxy injection both gone.
+- (`apps/inventory-microservice/src/modules/stock/application/use-cases/auto-init-stock-level.use-case.ts` is **not** modified here — it was already wired against `STOCK_EVENTS_PUBLISHER` in task-07.)
 - `apps/inventory-microservice/src/modules/stock/application/use-cases/spec/receive-stock.use-case.spec.ts` — assert the publisher port is called with the right arguments.
 - `apps/inventory-microservice/src/modules/stock/application/use-cases/spec/adjust-stock.use-case.spec.ts` — same.
-- `apps/inventory-microservice/src/modules/stock/application/use-cases/spec/auto-init-stock-level.use-case.spec.ts` — assertion updates (publisher port instead of `ClientProxy`).
+- (`spec/auto-init-stock-level.use-case.spec.ts` was already publisher-port-aware in task-07 — not modified here.)
 - `apps/inventory-microservice/src/modules/stock/presentation/stock.controller.ts` — three handler routing keys swap from inline literals to constants; deprecation handler for `INVENTORY_ORDER_CONFIRM` added.
 - `apps/notification-microservice/.../<stock-low consumer file>` — type imports realign with the reshaped `IInventoryStockLowEvent`.
 - `docs/implementation/epic-04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md` — append emitted-event section.
-- `docs/implementation/epic-04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md` — append routing-key + deprecation paragraph.
+- `docs/implementation/epic-04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md` — append the cross-event-consistency paragraph + deprecation-handler note.
 
 ## Files to delete
 
@@ -335,10 +342,10 @@ None (the deprecated `inventory.order.confirm` routing key is kept; the deprecat
 
 ## Tests
 
-- `libs/messaging/spec/routing-keys.constants.spec.ts` — ≥4 new assertions (three keys exist, one is gone, `INVENTORY_ORDER_CONFIRM` is still present).
+- `libs/messaging/spec/routing-keys.constants.spec.ts` — extend with assertions covering: the two new event-style keys (`INVENTORY_STOCK_RECEIVED`, `INVENTORY_STOCK_ADJUSTED`) exist, the three new RPC-style keys exist, `INVENTORY_PRODUCT_STOCK_GET` is gone, `INVENTORY_ORDER_CONFIRM` is still present. (The `INVENTORY_STOCK_LEVEL_INITIALIZED` assertion landed in task-07 — preserve it; don't duplicate.)
 - `receive-stock.use-case.spec.ts` — extend with publisher-call assertion: ≥1 case asserts `publishStockReceived` was called exactly once with the expected payload. ≥1 case asserts publish failure does not propagate (caught and logged).
 - `adjust-stock.use-case.spec.ts` — same pattern with `publishStockAdjusted`.
-- `auto-init-stock-level.use-case.spec.ts` — update the existing case to assert `publishStockLevelInitialized` was called (replacing the `ClientProxy.emit` assertion).
+- (`auto-init-stock-level.use-case.spec.ts` already asserts `publishStockLevelInitialized` was called — set up in task-07. This task does **not** modify that spec.)
 - `yarn build` passes across all microservices (notification consumer is updated).
 - Manual smoke: receive 50 units → `rabbitmqctl list_bindings` shows the new `inventory.stock.received` key in flight via the notification queue's bindings (or wherever the audit log will eventually bind); the existing `stock.low` flow still fires when the new threshold check trips.
 
@@ -355,22 +362,22 @@ Heading: `## Emitted events`. Subsections:
 
 ### Appended to `05-auto-init-on-variant-created.md` (≥20 lines)
 
-Heading: `## Routing-key constants`. Subsections:
+Heading: `## Cross-event consistency`. Subsections:
 
-1. `ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED` — the constant for the inline literal previously in `auto-init-stock-level.use-case.ts`.
-2. The publisher port discipline — the use case no longer carries a direct `ClientProxy` injection; all RMQ emits go through `IStockEventsPublisherPort`.
-3. Forward link to `epic-11`'s audit-log consumer.
+1. After this task lands, **all four** `inventory.*` events (`stock.received`, `stock.adjusted`, `stock-level.initialized`, `stock.low`) route through the same `IStockEventsPublisherPort` surface — single port, single adapter, single set of `ROUTING_KEYS.*` constants. The level-initialized routing key + port method shipped in task-07; this task adds the other two new keys and reshapes `publishStockLow`'s payload to be `variantId`-keyed.
+2. The deprecation handler for `inventory.order.confirm` — any RPC caller still hitting the legacy routing key receives a typed `DeprecatedRpcError`. `epic-07` will repurpose the same routing key for the Reservation flow.
+3. Forward link to `epic-11`'s audit-log consumer (which subscribes to all four `inventory.*` events).
 
 ## Carryover produced (consumed by task-09 onward)
 
-- Three new routing-key constants in `libs/messaging/routing-keys.constants.ts`.
-- Three new event-payload interfaces in `libs/contracts/inventory/events/`.
-- `StockRabbitmqPublisher` has four methods; `IStockEventsPublisherPort` matches.
-- Three use cases emit through the publisher port; no inline routing-key literals remain.
+- Two new event-style routing-key constants (`INVENTORY_STOCK_RECEIVED`, `INVENTORY_STOCK_ADJUSTED`) + three new RPC-style constants in `libs/messaging/routing-keys.constants.ts`. (`INVENTORY_STOCK_LEVEL_INITIALIZED` was already carryover from task-07.)
+- Two new event-payload interfaces in `libs/contracts/inventory/events/` (`IInventoryStockReceivedEvent`, `IInventoryStockAdjustedEvent`). (`IInventoryStockLevelInitializedEvent` was task-07 carryover.) `IInventoryStockLowEvent` reshaped to `variantId` / `stockLocationId`.
+- `StockRabbitmqPublisher` has four methods (`publishStockReceived`, `publishStockAdjusted`, `publishStockLevelInitialized`, `publishStockLow`); `IStockEventsPublisherPort` matches. The pre-epic no-op `publishStockReserved` is gone.
+- Three use cases (`ReceiveStockUseCase`, `AdjustStockUseCase`, `AutoInitStockLevelUseCase`) emit through the publisher port; no inline routing-key literals remain anywhere under `apps/inventory-microservice/src/modules/stock/application/`.
 - `INVENTORY_PRODUCT_STOCK_GET` constant gone.
 - `INVENTORY_ORDER_CONFIRM` constant reshaped to a deprecation handler.
 - Notification microservice's stock-low consumer realigned to the `variantId` field names.
-- Docs 06 + 05 carry the emitted-event sections.
+- Docs 06 + 05 carry the emitted-event sections / cross-event-consistency appendix.
 
 ## Exit criteria
 
@@ -378,7 +385,7 @@ Heading: `## Routing-key constants`. Subsections:
 - [ ] `yarn test:unit` passes; the publisher assertion cases are green; routing-keys constants spec passes.
 - [ ] `yarn build` passes for all microservices including notification.
 - [ ] `grep -nR "ROUTING_KEYS.INVENTORY_PRODUCT_STOCK_GET" apps libs` returns zero hits.
-- [ ] `grep -nR "'inventory\\.stock-level\\.initialized'" apps` returns zero hits (the inline literal is gone; only the constant remains).
+- [ ] `grep -nR "ClientProxy" apps/inventory-microservice/src/modules/stock/application/` returns zero hits (the application layer is `@nestjs/microservices`-free per ADR-008 + ADR-017 — preserved from task-07's carryover and not regressed here).
 - [ ] Manual smoke: `docker compose up -d && yarn start:dev`, then `rabbitmqctl list_bindings | grep inventory.stock.received` shows the binding (or, depending on the project's exchange topology, the routing-key registration shows up where the audit log will eventually bind).
 - [ ] An end-to-end Receive Stock flow (via the api-gateway's pending endpoint from task-09 — verified after task-09 lands) produces one `inventory.stock.received` event observable via `rabbitmqadmin get queue=…`.
 - [ ] No file outside `tmp/` references `tmp/`.

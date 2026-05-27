@@ -1,7 +1,7 @@
 # ADR-022: Cache-key schema-version and opt-in tenant segments
 
 - **Date**: 2026-05-20
-- **Status**: Accepted
+- **Status**: Accepted (port-surface mention superseded in part by ADR-023; see References)
 
 ---
 
@@ -272,3 +272,12 @@ ships.
   [ADR-006](006-cache-aside-via-libs-cache.md),
   [ADR-016](016-cache-aside-generalized.md),
   [ADR-021](021-cache-single-flight-and-ttl-jitter.md)
+- Successor in the cache lineage:
+  [ADR-023](023-cache-invalidate-post-commit-by-type.md) — retires the public
+  `IStockCacheInvalidatePayload` referenced in §"3. Tenant is opt-in by
+  argument, never defaulted"; the optional `tenantId` field now lives on the
+  `IStockWithInvalidationOptions` interface that
+  `IStockCachePort.withInvalidation(work, resolveItems, opts)` accepts.
+  ADR-022's per-aggregate schema-version segment and opt-in tenant segment are
+  unchanged; only the type that carries the tenant on the invalidate path
+  moved.

@@ -1,7 +1,7 @@
 # ADR-012: Stock aggregate and the inventory port/adapter split
 
 - **Date**: 2026-05-13
-- **Status**: Accepted
+- **Status**: Accepted (cache port + adapter generalized by [ADR-016](016-cache-aside-generalized.md) → [ADR-021](021-cache-single-flight-and-ttl-jitter.md) → [ADR-022](022-cache-keys-tenant-and-schema-version.md) → [ADR-023](023-cache-invalidate-post-commit-by-type.md); fourth `ITransactionPort` added to ring-fence `ARCH-LINT-EX-01`; see References)
 
 ---
 
@@ -181,3 +181,59 @@ generalization pass for these items; this ADR explicitly does not.
   TypeORM/MySQL stack `StockTypeormRepository` builds on.
 - [ADR-020](020-rabbitmq-as-inter-service-bus.md) — the broker the
   `inventory.stock.low` publisher emits onto.
+
+### Forward-supersession pointers
+
+The five bullets below catalogue the drift between this ADR's §3 / §4 / §8
+prose and the live code. Per ADR-003's immutability rule the §3 / §4 / §8
+text stays intact above; the pointers here are the forward graph a reader
+follows when the historical prose disagrees with the source of truth.
+
+- **§3 cache adapter name.** Live class is `StockCache` at
+  `apps/inventory-microservice/src/modules/stock/infrastructure/cache/stock.cache.ts`.
+  The `Redis` qualifier was dropped when the adapter stopped reaching
+  `@nestjs/cache-manager` / `@keyv/redis` directly (next bullet); the file
+  is `stock.cache.ts`, not `stock-redis.cache.ts`.
+- **§3 cache adapter mechanism ("reaches through `@nestjs/cache-manager` +
+  `@keyv/redis`").** Generalized by
+  [ADR-016](016-cache-aside-generalized.md) — the adapter now delegates to
+  `CACHE_PORT` from `@retail-inventory-system/cache`. Direct imports of
+  `@nestjs/cache-manager`, `@keyv/redis`, or `cacheable` from any
+  `apps/*/src` file are forbidden per CLAUDE.md §"Cache-key convention"
+  (verification gate: `grep -rE 'redis|cache-manager|keyv' apps/*/src` must
+  return zero matches).
+- **§3 "preserves the ADR-002 SCAN+UNLINK contract verbatim + named-key
+  fallback for non-Redis backends".** Replaced in two steps:
+  [ADR-016](016-cache-aside-generalized.md) added the `delByPrefix`
+  primitive to `ICachePort`, and
+  [ADR-023](023-cache-invalidate-post-commit-by-type.md) made the
+  post-commit ordering type-enforced via `IStockCachePort.withInvalidation`
+  (the public `invalidate(...)` is gone). The named-key fallback for
+  non-Redis backends is now the responsibility of the concrete `CACHE_PORT`
+  adapter (`RedisCacheAdapter` in `libs/cache`, or a future non-Redis
+  adapter), not `StockCache`.
+- **§3 "three application ports".** The stock module's
+  `application/ports/` directory now has four files —
+  `stock.repository.port.ts`, `stock-cache.port.ts`,
+  `stock-events.publisher.port.ts`, and `transaction.port.ts`. The fourth
+  was introduced to ring-fence the `ARCH-LINT-EX-01` `EntityManager`-leak
+  exception documented in CLAUDE.md §"Operational notes"; `IStockRepositoryPort`
+  method signatures now take an optional `scope?: ITransactionScope`
+  instead of a raw `EntityManager`. The exception is partially closed —
+  `ITransactionPort` is in place, but removing the inline `@InjectEntityManager`
+  / `EntityManager` ESLint disables in the repository + use-case lock-step
+  remains pending.
+- **§4 / §8 "post-commit fire-and-forget invalidation" + "`AUDIT-2026-05-08
+  [CACHE-NNN]` annotations preserved verbatim".** Both superseded by the
+  generalization pass §8 forecast. Audit closures: CACHE-006 / CACHE-010
+  / CACHE-011 / CACHE-012 by [ADR-016](016-cache-aside-generalized.md);
+  CACHE-001 / CACHE-004 by [ADR-021](021-cache-single-flight-and-ttl-jitter.md);
+  CACHE-003 / CACHE-009 by [ADR-022](022-cache-keys-tenant-and-schema-version.md);
+  CACHE-002 by [ADR-023](023-cache-invalidate-post-commit-by-type.md)
+  (post-commit ordering type-enforced — no public `invalidate`, no
+  fire-and-forget); CACHE-005 by the `available` flag on
+  `IStockCachePort.get`'s return shape (a Redis-down read collapses the
+  per-request warn count from three to one). The closure register is in
+  CLAUDE.md §"Operational notes"; the only `AUDIT-2026-05-08` annotation
+  surviving in the stock module today is `[CODE-001]` inside
+  `reserve-stock-for-order.use-case.ts`.

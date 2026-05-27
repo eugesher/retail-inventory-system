@@ -1,6 +1,8 @@
 import { UnauthorizedException } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 
 import { RoleEnum } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { RoleVO } from '../../../domain/role.model';
 import { User } from '../../../domain/user.model';
@@ -11,6 +13,7 @@ describe('LoginUseCase', () => {
   let users: InMemoryUserRepository;
   let hasher: FakeHasher;
   let tokens: FakeTokenAdapter;
+  let logger: PinoLoggerMock;
   let useCase: LoginUseCase;
 
   const seedUser = async (
@@ -32,7 +35,8 @@ describe('LoginUseCase', () => {
     users = new InMemoryUserRepository();
     hasher = new FakeHasher();
     tokens = new FakeTokenAdapter();
-    useCase = new LoginUseCase(users, hasher, tokens);
+    logger = makePinoLoggerMock();
+    useCase = new LoginUseCase(users, hasher, tokens, logger as unknown as PinoLogger);
   });
 
   it('issues tokens and stores a refresh-token hash on valid credentials', async () => {

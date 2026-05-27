@@ -1,7 +1,7 @@
 # ADR-002: Use Redis Cache-Aside for Product Stock Queries
 
 - **Date**: 2026-05-08
-- **Status**: Accepted
+- **Status**: Accepted (mechanism superseded in part by ADR-006 → ADR-023; see References for the chain)
 
 ---
 
@@ -79,4 +79,7 @@ Calling invalidation before commit was rejected: a concurrent reader could re-po
 - [ADR-006](006-cache-aside-via-libs-cache.md) — refines the abstraction behind an `ICachePort` / `RedisCacheAdapter` without changing this ADR's contract.
 - [ADR-016](016-cache-aside-generalized.md) — generalizes the key convention to `ris:<service>:<aggregate>:<id>`, moves SCAN+UNLINK into `libs/cache`, and closes `CACHE-006/010/011/012`.
 - [ADR-019](019-typeorm-and-mysql-for-persistence.md) — the TypeORM / MySQL stack the cached aggregation runs against.
+- [ADR-021](021-cache-single-flight-and-ttl-jitter.md) — adds the in-process `singleFlight(key, fn)` miss-dedupe primitive and ±10 % TTL jitter on writes. The cache-aside race trade-off this ADR's §Negative tracks as `CACHE-001` is closed here.
+- [ADR-022](022-cache-keys-tenant-and-schema-version.md) — moves key shape to `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]`. The `stock:<productId>:*` literal in §Decision is now `ris:inventory:stock:v1:<productId>:*` and is reachable only via `CACHE_KEYS.inventoryStock(...)`. The DTO-shape trade-off §Negative tracks as `CACHE-003` is closed here.
+- [ADR-023](023-cache-invalidate-post-commit-by-type.md) — replaces the fire-and-forget invalidate described in §Decision with a type-enforced post-commit `IStockCachePort.withInvalidation(work, resolveItems, opts)` helper. The "fire-and-forget" wording above is now historical.
 - [`docs/audits/audit-2026-05-08.md`](../audits/audit-2026-05-08.md) — open items `CACHE-001` and `CACHE-003` referenced above.

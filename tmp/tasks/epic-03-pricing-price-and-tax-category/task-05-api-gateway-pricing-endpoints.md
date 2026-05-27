@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/06-p
 
 # Task 05 — Add the api-gateway pricing endpoints
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Surface the pricing operations from task-03 as HTTP endpoints on `api-gateway`. Extend the existing `apps/api-gateway/src/modules/catalog/` module from epic-02 task-06 with new use cases, controllers, DTOs, and pipes. After this task, an authenticated admin can `POST` a new Price for a variant, `GET` the current Price or the list of Prices in effect, manage `TaxCategory` codes, and attach a TaxCategory to a variant — all via the public HTTP surface. The api-gateway layer is itself a thin pass-through: each new controller method validates the input, calls the matching RPC pattern on `catalog_queue`, and serialises the response.

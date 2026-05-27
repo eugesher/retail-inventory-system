@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/06-p
 
 # Task 06 — Author `http/pricing.http`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Add a Kulala HTTP file that exercises every pricing endpoint end-to-end. The file is a living reproduction of the pricing surface — a developer should be able to clone the repo, run `docker compose up -d && yarn migration:run && yarn start:dev && yarn test:seed`, then execute the file top-to-bottom and observe the full Set / Schedule / Select / TaxCategory / Attach flow. The file also serves as the Kulala half of doc `06-pricing-api-and-kulala.md` — task-05 wrote the api description; this task appends the Kulala flow section pointing at the new file.

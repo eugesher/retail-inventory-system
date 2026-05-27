@@ -9,6 +9,11 @@ doc_deliverable_secondary: docs/implementation/epic-02-catalog-product-and-varia
 
 # Task 03 — `Register Product` + `Add Variant` use cases + catalog event wiring
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Add the two creation-side use cases (`Register Product`, `Add Variant`) and the supporting messaging plumbing: the event-publisher port, the RabbitMQ publisher adapter, the new routing-key constants, and a "catalog command" RPC handler shell that lets the gateway send commands to the catalog-microservice. After this task, registering a Product and adding a Variant works end-to-end inside the catalog-microservice (driven by spec tests), and `VariantCreated` rides the bus so `epic-04` can later attach an inventory consumer.
@@ -60,7 +65,7 @@ Tasks 1–2 carryover present:
 export class RegisterProductUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: IProductRepositoryPort,
-    private readonly logger: Logger,
+    @InjectPinoLogger(RegisterProductUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   async execute(input: { name: string; slug: string; description?: string }): Promise<Product> {
@@ -84,7 +89,7 @@ export class AddVariantUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: IProductRepositoryPort,
     @Inject(CATALOG_EVENT_PUBLISHER) private readonly events: ICatalogEventPublisherPort,
-    private readonly logger: Logger,
+    @InjectPinoLogger(AddVariantUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   async execute(input: {

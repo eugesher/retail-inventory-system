@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-custome
 
 # Task 06 — IAM admin controller (`/api/iam/roles`, `/api/iam/staff/:id/roles`)
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Expose admin-only endpoints to manage roles (list / create / patch) and to assign or revoke roles on a StaffUser. These are the runtime knobs that make the relational RBAC schema useful — without them, the only way to change a role's permission set or a staff member's role list is by editing seed scripts and re-running migrations.

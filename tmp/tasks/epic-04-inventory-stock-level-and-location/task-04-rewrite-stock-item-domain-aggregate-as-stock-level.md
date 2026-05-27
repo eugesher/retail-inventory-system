@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/
 
 # Task 04 — Rewrite the `StockItem` aggregate as `StockLevel`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Replace the `StockItem` aggregate with the full `StockLevel` aggregate. The placeholder model put in place in task-03 grows two mutator methods (`receive(amount)`, `applySignedDelta(delta, reasonCode)`), one event-emission contract per mutator (`StockReceivedEvent` and `StockAdjustedEvent` plus the existing `StockLowEvent`), the **per-mutation `version` bump** that gives the `@VersionColumn()` column truthful contents from this commit onward, and the invariant enforcement that prevents `quantityOnHand` from going negative via the aggregate path. The deferred Reservation methods (`reserve(amount)` / `release(amount)`) are **not** added — they land in `epic-07`. The `StockReservedEvent` and `StockReleasedEvent` files in `domain/events/` are kept as files (already on disk from the pre-epic-04 era), but their payloads are restructured to be `variantId`-keyed instead of `productId`-keyed; they remain unused in this epic's emit-side wiring.

@@ -1,7 +1,7 @@
 # ADR-004: Adopt Hexagonal Architecture Per Service
 
 - **Date**: 2026-05-09
-- **Status**: Accepted
+- **Status**: Accepted (ports-location wording superseded — ports live under `application/ports/`; see References)
 
 ---
 
@@ -192,3 +192,20 @@ and the libs we already have (`common`, `config`, `inventory`,
   split that gives the hexagonal layout its shared seams.
 - [ADR-017](017-architecture-lint-via-eslint-boundaries.md) — the
   lint rules that enforce the layer boundaries this ADR commits to.
+  The `application/ports/**` glob is the binding port-surface element
+  type; a `domain/ports/**` file has no element type and would fail
+  the boundary rules.
+- [ADR-009](009-port-adapter-at-the-gateway.md) — establishes the API
+  gateway's port/adapter shape with ports under `application/ports/`.
+- [ADR-011](011-notifier-port-and-adapters.md) — `INotifierPort`
+  lives under `application/ports/`; the notification microservice is
+  the canonical per-module template.
+- [ADR-012](012-stock-aggregate-and-port-adapter.md) —
+  `IStockRepositoryPort`, `IStockCachePort`, and
+  `IStockEventsPublisherPort` all live under `application/ports/`.
+- [ADR-013](013-order-aggregate-and-cross-service-confirm.md) —
+  `IOrderRepositoryPort`, `IOrderEventsPublisherPort`, and
+  `IInventoryConfirmGatewayPort` all live under `application/ports/`.
+- `CLAUDE.md` §"Service Structure" — the live authority on the
+  per-module layout; treats `application/ports/` as the binding
+  location for every active module.

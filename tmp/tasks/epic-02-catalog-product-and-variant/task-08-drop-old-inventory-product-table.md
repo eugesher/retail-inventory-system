@@ -8,6 +8,11 @@ doc_deliverable: —
 
 # Task 08 — Drop the obsolete inventory-microservice `product` table
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Remove the three-column `product` table (`id`, `name`, `created_at`/`updated_at`) that the inventory-microservice introduced in the pre-`epic-02` schema. The new catalog-microservice's `product` + `product_variant` tables (created in task-02) are the source of truth from here on. The inventory bounded context's reads/writes shift from `productId` to `variantId` — but that shift is **owned by `epic-04`**; this task only drops the obsolete table and explicitly flags the resulting dangling FK reference in the inventory adapter for `epic-04` to reshape.

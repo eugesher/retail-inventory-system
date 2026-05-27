@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/06-api-
 
 # Task 06 — `apps/api-gateway/src/modules/catalog/` module
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Wire the buyer-facing and admin-facing HTTP surface for the catalog. Add the gateway's `modules/catalog/` per-module hexagonal tree, mirroring the existing shapes of `apps/api-gateway/src/modules/retail/` and `apps/api-gateway/src/modules/inventory/`. The controller exposes the seven HTTP endpoints listed in the epic's API Surface table; the messaging adapter RPCs into the catalog-microservice using the seven `@MessagePattern` handlers introduced by tasks 03–05.

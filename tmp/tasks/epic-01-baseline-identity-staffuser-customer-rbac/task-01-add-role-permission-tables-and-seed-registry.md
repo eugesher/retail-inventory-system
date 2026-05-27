@@ -4,9 +4,15 @@ task_number: 1
 title: Add the relational Role + Permission tables and seed the permission code registry
 depends_on: []
 doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md
+adr_deliverable: docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md
 ---
 
 # Task 01 — Add the relational `Role` + `Permission` tables and seed the permission code registry
+
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
 
 ## Goal
 
@@ -105,6 +111,7 @@ These four `name` values become the typed registry that `libs/contracts/auth/rol
   - Charset `utf8mb4_unicode_ci`.
   - Generate via `yarn migration:create migrations/CreateRoleAndPermissionTables` and then fill the `up`/`down` bodies.
 - `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md` — see "Doc deliverable" below.
+- `docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md` — see "ADR deliverable" below. Allocate the next free 3-digit number at first commit (ADR-003); do not reserve in advance.
 
 ## Files to modify
 
@@ -112,6 +119,8 @@ These four `name` values become the typed registry that `libs/contracts/auth/rol
 - `apps/api-gateway/src/app/app.module.ts` — extend `DatabaseModule.forRoot([UserEntity])` to `DatabaseModule.forRoot([UserEntity, RoleEntity, PermissionEntity])`.
 - `scripts/test-db-seed.ts` — add `seedPermissions(connection)` (INSERT IGNORE one row per `PermissionCodeEnum` value, deterministic UUID per code) and `seedRoles(connection)` (INSERT IGNORE the four canonical roles with deterministic UUIDs, plus INSERT IGNORE into `role_permissions` per the table in "Role registry — what to seed"). Call both before `seedUsers`. Do **not** touch the existing `seedUsers` body in this task.
 - `libs/contracts/auth/index.ts` — `export * from './permission.enum';`.
+- `docs/adr/010-jwt-rbac-at-the-gateway.md` — **one-line edit only**, on the `**Status**` line. Change `**Status**: Accepted` → `**Status**: Accepted (RBAC model superseded by [ADR-NNN](NNN-rbac-v2-staffuser-customer-and-permissions.md))`. Do **not** touch any other line in the file — ADR-003 immutability applies; the original decision text is the historical record.
+- `docs/adr/index.md` — append a row for the new ADR.
 
 ## Files to delete
 
@@ -136,6 +145,25 @@ Write `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-
 5. **The JWT inflation path (preview).** A one-paragraph forward reference: at login time (task-03), the access JWT will carry `permissions: string[]` so guards (task-04) don't need a DB hit per request. The relational schema makes this inflation deterministic — `JOIN role_permissions` once per login.
 6. **What this task did NOT do.** Cross-references to task-02 (rename), task-03 (JWT inflation), task-04 (guard).
 
+## ADR deliverable
+
+Write a new ADR at `docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md` recording the cumulative epic-01 architectural decision that supersedes ADR-010's RBAC model. Allocate the next free number at first commit per ADR-003 (do not pre-reserve). Nygard hybrid layout (Status, Context, Decision, Alternatives Considered, Consequences). Status line: `Accepted (supersedes ADR-010 §4, §5, §7, and the Consequences `RoleEnum` discussion)`. The Decision section covers at minimum:
+
+1. **Aggregate split: `User` → `StaffUser` + `Customer`.** Why two aggregates rather than one with a `kind` discriminator (different lifecycle — staff lives behind admin onboarding + soft-delete via `status`; customer lives behind self-register + tombstone-friendly nullability per Q6/Q7). ADR-010 §4 anticipated this split in spirit ("a future store manager admin may have no `customer` row…"); this ADR commits the implementation.
+2. **Relational role/permission model.** Why `role` + `permission` + `role_permissions` + `staff_user_roles` instead of the `simple-array` column on a single `user.roles` field. The runtime-mutability rationale (admin can grant a permission to an existing role without a redeploy — see task-06's IAM admin controller). The four canonical role names — `admin`, `catalog-manager`, `warehouse-staff`, `order-support` — and the 12-code permission registry. This is the direct reversal of ADR-010 Consequences "no further indirection is warranted today".
+3. **Three-guard composition + the `@RequiresPermission` decorator.** Why `JwtAuthGuard → RolesGuard → PermissionsGuard` rather than collapsing into one or extending `@Roles()` to take permission codes. The decision text states what `@RequiresPermission(<code>)` checks (`request.user.permissions`, populated by JWT inflation in `LoginUseCase` / `RefreshTokenUseCase` per task-03) versus what `@Roles(<RoleEnum>)` checks (the coarse role-bundle), and which is the default for new endpoints (the permission decorator). ADR-010 §5 committed to a two-guard pipeline; this ADR commits to three.
+4. **Customer-side public register (`POST /auth/customer/register` as `@Public()`).** ADR-010 §7 explicitly deferred public registration until rate-limiting + email-verification + CAPTCHA exist. This ADR records the new decision: ship register without those safeguards (or with which of the three the implementer chooses to land in-epic), the trade-off accepted, and any known-gap items that move to a follow-up. Naming a deferred safeguard a "known gap" is itself an architectural decision and belongs in this ADR rather than buried in a task body.
+
+Cross-references in the new ADR's body MUST include forward links to the epic-01 task chain that lands each decision (task-01 → relational schema; task-02 → staff split + drop of `simple-array`; task-03 → JWT inflation; task-04 → `PermissionsGuard` + decorator; task-05 → customer aggregate + public register; task-06 → IAM admin controller).
+
+Per ADR-003 immutability, add a single one-line forward-supersession pointer to ADR-010's `**Status**` line at first commit of the new ADR — exactly:
+
+```
+**Status**: Accepted (RBAC model superseded by [ADR-NNN](NNN-rbac-v2-staffuser-customer-and-permissions.md))
+```
+
+No other change to ADR-010's body. The original decision text remains the historical record per ADR-003.
+
 ## Carryover produced (consumed by task-02 onward)
 
 - New TypeORM entities `RoleEntity`, `PermissionEntity` registered in `auth.module.ts` and `DatabaseModule.forRoot([...])`.
@@ -144,6 +172,7 @@ Write `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-
 - New migration adds three tables; seed script populates 12 permissions + 4 roles + 24 role_permission bindings.
 - `libs/contracts/auth/permission.enum.ts` and its re-export.
 - Doc `02-role-and-permission-relational-model.md`.
+- New ADR `docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md` (allocated at first commit) + one-line forward-supersession pointer added to ADR-010's `**Status**` line.
 
 ## Exit criteria
 
@@ -154,3 +183,6 @@ Write `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-
 - [ ] The existing `yarn test:e2e` suite still passes (no regression — task-01 is additive).
 - [ ] No file outside `tmp/` references `tmp/`.
 - [ ] Doc `02-role-and-permission-relational-model.md` exists at the path above and is filled per the section list.
+- [ ] New ADR `docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md` exists with the next free 3-digit number allocated at first commit, the Nygard hybrid layout, Status `Accepted (supersedes ADR-010 §4, §5, §7, and the Consequences `RoleEnum` discussion)`, and the four Decision-section topics enumerated in §"ADR deliverable".
+- [ ] `docs/adr/010-jwt-rbac-at-the-gateway.md` `**Status**` line has been updated **only** with the one-line forward-supersession pointer; no other body text touched. `git diff docs/adr/010-jwt-rbac-at-the-gateway.md` shows a single-line change.
+- [ ] `docs/adr/index.md` lists the new ADR at the bottom of the catalogue with the chosen 3-digit number.

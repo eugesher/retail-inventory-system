@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/05-cata
 
 # Task 04 — `Publish Product` + `Archive Product` use cases
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Wire the two state-transition write operations against the existing `Product` aggregate. `Publish Product` flips `draft → active` and emits `catalog.product.published`; `Archive Product` flips `active → archived` and emits `catalog.product.archived`. Both use cases call the existing `ICatalogEventPublisherPort` introduced in task-03; this task implements the two emitter methods that task-03 stubbed.
@@ -56,7 +61,7 @@ export class PublishProductUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: IProductRepositoryPort,
     @Inject(CATALOG_EVENT_PUBLISHER) private readonly events: ICatalogEventPublisherPort,
-    private readonly logger: Logger,
+    @InjectPinoLogger(PublishProductUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   async execute(input: { productId: number; correlationId: string }): Promise<Product> {
@@ -94,7 +99,7 @@ export class ArchiveProductUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: IProductRepositoryPort,
     @Inject(CATALOG_EVENT_PUBLISHER) private readonly events: ICatalogEventPublisherPort,
-    private readonly logger: Logger,
+    @InjectPinoLogger(ArchiveProductUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   async execute(input: { productId: number; correlationId: string }): Promise<Product> {

@@ -10,6 +10,11 @@ doc_deliverable:
 
 # Task 02 — Add `Price` + `TaxCategory` domain + persistence + repositories
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Fill the empty `pricing/` skeleton from task-01 with the two domain aggregates this epic owns: `Price` (the time-bounded, append-only money record) and `TaxCategory` (a small classification table). Create their TypeORM entities, mappers, and repository ports + adapters. Land a single migration that creates both tables and adds the nullable `tax_category_id` column on `product_variant` from epic-02. **No use cases or controllers in this task** — those are task-03 (use cases) and task-05 (api-gateway). The exit state is "schema + domain + ports are in place; the read/write methods do nothing yet beyond passing the model in and out of TypeORM."

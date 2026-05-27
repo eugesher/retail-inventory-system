@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/04-cata
 
 # Task 05 — `Query Catalog` read path (RPC handlers + read use cases)
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Add the public-facing browse path: the buyer-facing customer queries paged active products with their variants, fetches a single product by slug, and fetches a single variant by id. The read path is exposed via three new `@MessagePattern` RPC handlers (the api-gateway in task-06 wraps these behind HTTP); the read projections deliberately bypass the aggregate hydration cost where it's cheap to do so.

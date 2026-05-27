@@ -8,6 +8,11 @@ doc_deliverable: none
 
 # Task 09 — Extend `scripts/test-db-seed.ts` with the full epic-01 seed set
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 The seed script today only writes the admin StaffUser (task-02 reduced it from the original two-user set when the `customer@example.com` row moved to the `customer` table). The epic-01 acceptance set requires four StaffUsers (one per canonical role) and one Customer. This task fills out the seed.

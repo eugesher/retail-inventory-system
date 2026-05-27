@@ -8,6 +8,11 @@ doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/01-new-
 
 # Task 01 — Scaffold the new `catalog-microservice`
 
+## Required reading
+
+- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
+- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+
 ## Goal
 
 Stand up an empty, boot-ready fifth Nest application — `apps/catalog-microservice/` — that mirrors the canonical per-module shape of `apps/notification-microservice/` (the cleanest existing reference per ADR-004/009/012/013). After this task the app starts under `yarn start:dev:catalog-microservice`, registers an empty Nest microservice on a new `catalog_queue` RabbitMQ queue, owns its DB connection, emits OTel traces under the service name `catalog-microservice`, and is recognised by ESLint's `eslint-plugin-boundaries` configuration. **No catalog domain code exists yet** — that arrives in task-02.
@@ -49,7 +54,7 @@ Pristine repo at the commit `afdaf02 RIS-43 Batch-01` (or any later commit that 
 - Any domain code (Product/ProductVariant) — task-02.
 - Any migration — task-02.
 - Routing key constants for `catalog.product.*` — task-03.
-- Tracer instrumentation specifics (the `otel.setup.ts` first-import is part of task-01 because it must run before any Nest import; subsequent OTel decisions belong to ADR-014/015, not here).
+- Tracer instrumentation specifics (the shared-library tracer first-import via `@retail-inventory-system/observability/tracer` is part of task-01 because it must run before any Nest import — see ADR-007 §"Side-effect import for OTel bootstrap"; subsequent OTel decisions belong to ADR-014/015, not here).
 
 ## Layout to create
 
@@ -60,7 +65,6 @@ apps/catalog-microservice/
 ├── tsconfig.app.json
 ├── src/
 │   ├── main.ts
-│   ├── otel.setup.ts          # tracer-first-import — MUST be imported before any @nestjs/* import in main.ts
 │   ├── app/
 │   │   ├── app.module.ts      # imports MessagingModule, DatabaseModule.forRoot([]), LoggerModule, the empty CatalogModule placeholder
 │   │   └── index.ts           # re-exports AppModule
@@ -74,7 +78,7 @@ apps/catalog-microservice/
 │           └── presentation/   # empty dir + .gitkeep
 ```
 
-`main.ts` opens with `import './otel.setup';` as the very first line (matches the convention used by the existing microservices for `OTEL_SERVICE_NAME=catalog-microservice` trace routing). After OTel, the file bootstraps a `NestFactory.createMicroservice(AppModule, { transport: Transport.RMQ, options: { urls: [process.env.RABBITMQ_URL!], queue: MicroserviceQueueEnum.CATALOG_QUEUE, queueOptions: { durable: true }, noAck: false } })`. Mirror the exact options block from `apps/inventory-microservice/src/main.ts`.
+`main.ts` opens with `import '@retail-inventory-system/observability/tracer';` as the very first line (matches the convention used by the four existing microservices — see ADR-007 §"`libs/observability` is the host for both Pino and OTel"; runtime trace routing follows from `OTEL_SERVICE_NAME=catalog-microservice` set in the docker-compose env block, not from any app-local bootstrap file). After the tracer side-effect import, the file bootstraps a `NestFactory.createMicroservice(AppModule, { transport: Transport.RMQ, options: { urls: [process.env.RABBITMQ_URL!], queue: MicroserviceQueueEnum.CATALOG_QUEUE, queueOptions: { durable: true }, noAck: false } })`. Mirror the exact options block from `apps/inventory-microservice/src/main.ts`.
 
 `app.module.ts` imports — in this order, matching the existing apps — `LoggerModule`, `DatabaseModule.forRoot([])` (empty entity list; task-02 adds `ProductEntity` + `ProductVariantEntity`), `MessagingModule`, the empty `CatalogModule` placeholder. The empty `CatalogModule` is intentional — its presence asserts the per-module tree exists so the boundaries config "sees" it; task-02 fills it.
 
@@ -187,7 +191,6 @@ Add a new `describe('catalog-microservice boundaries', ...)` block that runs at 
 
 - `apps/catalog-microservice/tsconfig.app.json` (copy from `apps/notification-microservice/tsconfig.app.json` and adjust the `outDir` path).
 - `apps/catalog-microservice/src/main.ts`.
-- `apps/catalog-microservice/src/otel.setup.ts`.
 - `apps/catalog-microservice/src/app/app.module.ts`.
 - `apps/catalog-microservice/src/app/index.ts`.
 - `apps/catalog-microservice/src/modules/catalog/index.ts` (empty barrel).
@@ -228,7 +231,7 @@ Write `docs/implementation/epic-02-catalog-product-and-variant/01-new-catalog-mi
 2. **The per-module shape, recapped.** Reference ADR-004/009/012/013 and the canonical `apps/notification-microservice/src/modules/notifications/` template. The new tree mirrors it line-for-line.
 3. **Monorepo wiring summary.** What changed in `nest-cli.json`, `package.json`, `docker-compose.yml`, the OTel collector. Why the same `DATABASE_URL` is reused (single MySQL instance, single schema; the catalog tables live alongside the rest by deliberate choice — split is a Day-2 question).
 4. **MessagingModule + the new `catalog_queue`.** The new `MicroserviceClientCatalogModule` mirrors the three existing client modules. The queue name `catalog_queue` lands in `MicroserviceQueueEnum`. Routing keys are deferred to task-03.
-5. **Tracer-first-import discipline.** Why `otel.setup.ts` is the very first line of `main.ts` (ADR-014/015): the OTel SDK must wrap the Node module loader before any Nest import. Failure to honour this silently disables trace correlation.
+5. **Tracer-first-import discipline.** Why `import '@retail-inventory-system/observability/tracer';` is the very first line of `main.ts` ([ADR-007](../../adr/007-pino-and-opentelemetry.md) §"Side-effect import for OTel bootstrap" — the binding ADR for the import-order rule and for the single-host invariant; ADR-014/015 layer on top of that decision but do not redefine it): the OTel SDK must wrap the Node module loader before any Nest import. Failure to honour this silently disables trace correlation. No app-local `otel.setup.ts` is created — every microservice in the repo imports the shared library, and the catalog scaffold follows that convention.
 6. **Boundaries lint coverage.** The existing `eslint-plugin-boundaries` configuration already matches the new tree via the `apps/*/...` glob. The arch-lint spec is extended with a new fixture block to assert this guarantee under CI.
 7. **What this task did NOT do.** Cross-references to task-02 (domain + persistence + migration), task-03 (write-side use cases + events + routing keys), and task-08 (drop the old inventory `product` table).
 
