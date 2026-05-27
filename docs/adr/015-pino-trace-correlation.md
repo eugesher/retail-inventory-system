@@ -1,7 +1,7 @@
 # ADR-015: Pino log lines carry OTel `traceId` / `spanId`
 
 - **Date**: 2026-05-14
-- **Status**: Accepted
+- **Status**: Accepted (the "not installed today" sentence in §"Field naming" is dated; see References)
 
 ---
 
@@ -141,3 +141,27 @@ a smoke test rather than this unit suite.
 - **Drop `correlationId` after OTel lands.** Rejected: tests assert on
   `correlationId` for determinism (the client picks the value), and
   operators have been trained on it since ADR-001.
+
+## References
+
+- **§"Field naming" — "Today the auto-instrumentation package is not
+  installed".** Dated. `@opentelemetry/instrumentation-pino@0.64.0`
+  is in `yarn.lock`, pulled transitively by
+  `@opentelemetry/auto-instrumentations-node@^0.76.0` (a direct
+  dependency in `package.json`). `libs/observability/tracer.ts`
+  activates the full `getNodeAutoInstrumentations()` bundle without
+  disabling any member, so `instrumentation-pino` patches Pino at
+  boot and injects snake_case `trace_id` / `span_id` onto every
+  record inside an active span. The custom `logMethod` hook in
+  `libs/observability/logger.module.ts` is **not** redundant — it is
+  the only source of the camelCase `traceId` / `spanId` pair the
+  rest of the codebase greps for, and the §"Field naming"
+  coexistence trade-off the ADR anticipates ("Having both shapes
+  co-exist on the same line is acceptable") is already in
+  production logs.
+- [ADR-014](014-otel-exporter-otlp-http-and-jaeger.md) — the SDK
+  bootstrap that registers the auto-instrumentations bundle, which
+  is the activation seam for `instrumentation-pino`.
+- [ADR-007](007-pino-and-opentelemetry.md) — the parent decision
+  committing to Pino + OTel; `epic-00/task-06` already amends its
+  example log shape from snake_case to camelCase.

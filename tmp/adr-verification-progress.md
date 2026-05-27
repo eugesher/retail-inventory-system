@@ -281,6 +281,19 @@ After this execution:
 - Exit criteria from `epic-00/task-10` checked: `grep -nR "import.*ClientProxy.*@nestjs/microservices" tmp/tasks/epic-04-inventory-stock-level-and-location/` returns zero hits (the violating import is gone from both task-07 and task-08's body); `grep -nR "MicroserviceClientTokenEnum.NOTIFICATION_MICROSERVICE" tmp/tasks/epic-04-inventory-stock-level-and-location/task-07-…md tmp/tasks/epic-04-inventory-stock-level-and-location/task-08-…md` returns zero hits; the only `ClientProxy` references left in tmp/tasks/epic-04 are the gateway adapter at task-09 (correct per ADR-009) and the publisher adapter file in task-08's `stock-rabbitmq.publisher.ts` example (correct per ADR-008 + ADR-020 — adapter-layer file).
 - `yarn lint` is unaffected — the edits are markdown-only.
 
+### Session 2026-05-27 (resolution log) — epic-00/task-14 (ADR-015)
+
+**Findings reflected back into the ADR surface.** `epic-00/task-14` was executed against ADR-015 §"Field naming". Resolution shape chosen: **Option A** — the original §"Field naming" paragraph stays untouched per the ADR-003 Nygard immutability rule; the `**Status**` line carries a short forward-pointer ("the 'not installed today' sentence in §'Field naming' is dated; see References"), and a new `## References` section at the bottom of `docs/adr/015-pino-trace-correlation.md` enumerates (a) the dated footnote with a one-paragraph explanation that `@opentelemetry/instrumentation-pino@0.64.0` is transitively-installed-and-active via `@opentelemetry/auto-instrumentations-node@^0.76.0` and that the custom `logMethod` hook is **not** redundant because it is the only source of the camelCase pair the rest of the codebase greps for, (b) a forward link to ADR-014 as the SDK bootstrap that registers the auto-instrumentations bundle, and (c) a forward link to ADR-007 noting `epic-00/task-06` already amends its example log shape from snake_case to camelCase.
+
+After this execution:
+
+- `docs/adr/015-pino-trace-correlation.md` `**Status**` line is `Accepted (the "not installed today" sentence in §"Field naming" is dated; see References)`.
+- `docs/adr/015-pino-trace-correlation.md` ends with a `## References` section that explicitly names `@opentelemetry/instrumentation-pino@0.64.0` as transitively installed and active at runtime, with a forward link to ADR-014 and ADR-007.
+- §"Field naming" body text is unchanged — the coexistence trade-off it anticipates ("Having both shapes co-exist on the same line is acceptable") is preserved verbatim, since the §"Field naming" reasoning was always correct and only the closing installation-status footnote was dated.
+- §"Alternatives considered" entry "`@opentelemetry/instrumentation-pino`. Auto-injects `trace_id` / `span_id`. Rejected today because it adds a dependency…" is unchanged. The historical rejection rationale is intact; the new References block is the place where the runtime-truth update lives.
+- No live code or `package.json` / `yarn.lock` changes — the hook stays, the bundle wiring stays, `getNodeAutoInstrumentations()` stays without per-instrumentation overrides.
+- Exit criteria from `epic-00/task-14` checked: `grep -n "auto-instrumentations-node\|instrumentation-pino" docs/adr/015-pino-trace-correlation.md` returns matches inside the new `## References` block (4 new hits at lines 148-164, alongside the 3 pre-existing matches in the historical §"Field naming" and §"Alternatives considered" paragraphs); `yarn lint` passes (markdown-only edit).
+
 ### Verification complete — closing summary (sessions 1-8)
 
 - **23 ADRs processed** (ADR-001 through ADR-023 — all 23 audited against both surfaces A + B).
