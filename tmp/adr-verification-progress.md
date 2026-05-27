@@ -269,6 +269,18 @@ Surfaces checked: A (codebase under `apps/**` + `libs/**`) and B (decomposed tas
 - 0 ALREADY-FIXED in this batch.
 - 0 ADRs remain. **Verification complete.**
 
+### Session 2026-05-27 (resolution log) — epic-00/task-10 (ADR-008)
+
+**Findings reflected back into the task surface.** `epic-00/task-10` was executed against ADR-008 §"Domain code depends on a publisher port (deferred)". Resolution shape chosen: **Option A, shape 2** — keep `task-07` and `task-08` as separate task files, move only the `stock-level.initialized` slice (routing-key constant + port method + adapter method + wire-shape contract + use-case publisher-port injection) forward from `task-08` into `task-07`. This is the minimum-blast-radius shape: task numbering, `depends_on` arrows, and downstream cross-references all stay intact; only two cells in the README's task table needed adjustment.
+
+After this execution:
+
+- `tmp/tasks/epic-04-inventory-stock-level-and-location/task-07-…md` now instructs the implementer to inject `STOCK_EVENTS_PUBLISHER` (the existing port symbol) into `AutoInitStockLevelUseCase`, not `ClientProxy`. The routing-key constant `INVENTORY_STOCK_LEVEL_INITIALIZED` is registered as part of task-07's scope; the publisher port + adapter grow one method (`publishStockLevelInitialized`) additively alongside the pre-epic surface (`publishStockLow` + `publishStockReserved`). No `TODO(epic-04 task-08)` markers remain in the task body.
+- `tmp/tasks/epic-04-inventory-stock-level-and-location/task-08-…md` no longer instructs editing `auto-init-stock-level.use-case.ts`. The routing-key constant + event-payload contract for level-initialized are explicitly carryover-from-task-07 in task-08's "Entry state assumed". The four-method publisher port shape after task-08 is preserved (`publishStockReceived` + `publishStockAdjusted` added; `publishStockReserved` no-op dropped; `publishStockLow` payload reshaped; `publishStockLevelInitialized` kept verbatim from task-07).
+- `tmp/tasks/epic-04-inventory-stock-level-and-location/README.md` task table cells for #7 and #8 reflect the moved scope; the sequence-and-dependencies prose paragraph also cites `epic-00/task-10` as the rationale for the move.
+- Exit criteria from `epic-00/task-10` checked: `grep -nR "import.*ClientProxy.*@nestjs/microservices" tmp/tasks/epic-04-inventory-stock-level-and-location/` returns zero hits (the violating import is gone from both task-07 and task-08's body); `grep -nR "MicroserviceClientTokenEnum.NOTIFICATION_MICROSERVICE" tmp/tasks/epic-04-inventory-stock-level-and-location/task-07-…md tmp/tasks/epic-04-inventory-stock-level-and-location/task-08-…md` returns zero hits; the only `ClientProxy` references left in tmp/tasks/epic-04 are the gateway adapter at task-09 (correct per ADR-009) and the publisher adapter file in task-08's `stock-rabbitmq.publisher.ts` example (correct per ADR-008 + ADR-020 — adapter-layer file).
+- `yarn lint` is unaffected — the edits are markdown-only.
+
 ### Verification complete — closing summary (sessions 1-8)
 
 - **23 ADRs processed** (ADR-001 through ADR-023 — all 23 audited against both surfaces A + B).
