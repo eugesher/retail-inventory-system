@@ -1,7 +1,7 @@
 # ADR-006: Cache-aside via `libs/cache` port and adapter
 
 - **Date**: 2026-05-10
-- **Status**: Accepted
+- **Status**: Accepted (port surface and key shape superseded in part by ADR-016 → ADR-023; see References)
 
 ---
 
@@ -91,3 +91,13 @@ without changing its contract:
   service wrapper.** Rejected: the wrapper would still be in the app
   layer, every consumer would re-wrap, and the boundary rule
   enforcement in task-12 would have nothing to grep for.
+
+---
+
+## References
+
+- [ADR-016](016-cache-aside-generalized.md) — generalises the cache-aside pattern beyond product stock, adds `ICachePort.delByPrefix(prefix)` to the port surface, and moves the key shape to `ris:<service>:<aggregate>:<id>[:<facet>]`. The `ICachePort` four-method enumeration in this ADR's §Decision table and the "SCAN+UNLINK invalidation in the inventory façade — unchanged" line in §"Relationship to ADR-002" are superseded here.
+- [ADR-021](021-cache-single-flight-and-ttl-jitter.md) — adds `ICachePort.singleFlight(key, fn)` to the port surface and ±10% TTL jitter on the `StockCache` write path. The "stampede protection" framing in this ADR's §Decision ("Adapters are free to add jitter, schema-version prefixes, or stampede protection without changing the call site") is no longer aspirational — single-flight and jitter ship behind the port today.
+- [ADR-022](022-cache-keys-tenant-and-schema-version.md) — inserts a per-aggregate schema-version segment and an opt-in tenant segment into every key. The `stock:<productId>:` prefix and `*` sentinel cited as "unchanged" in §"Relationship to ADR-002" are now `ris:[t:<tenantId>:]inventory:stock:v1:<productId>:` and `__all__` respectively, reachable only via `CACHE_KEYS.inventoryStock(...)`.
+- [ADR-023](023-cache-invalidate-post-commit-by-type.md) — replaces ad-hoc invalidation with a type-enforced post-commit `IStockCachePort.withInvalidation(work, resolveItems, opts)` helper. The "task-08 migrates the façade onto `ICachePort` and decides whether `del` should grow a `delByPattern` overload" line in §"Relationship to ADR-002" is resolved here: the public `invalidate` is gone, the prefix-delete fan-out is private to `StockCache`, and the post-commit ordering is enforced by the helper's signature, not by comment.
+- `CacheHelper`'s removal — the "Kept for one release; the inventory façade migrates off it in task-08" promise in this ADR's §Decision table has expired in practice (no consumers remain). The deletion is queued in [`tmp/tasks/epic-04-inventory-stock-level-and-location/task-06-bump-cache-key-version-v1-to-v2-rewrite-stock-cache.md`](../../tmp/tasks/epic-04-inventory-stock-level-and-location/task-06-bump-cache-key-version-v1-to-v2-rewrite-stock-cache.md); do not import `CacheHelper` into new code.
