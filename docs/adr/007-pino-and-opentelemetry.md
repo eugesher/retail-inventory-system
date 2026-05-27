@@ -1,7 +1,7 @@
 # ADR-007: Pino structured logs + OpenTelemetry trace correlation
 
 - **Date**: 2026-05-10
-- **Status**: Accepted
+- **Status**: Accepted (example log shape + bootstrap narrative superseded in part by ADR-014 / ADR-015 — see References)
 
 ---
 
@@ -132,3 +132,11 @@ trace plumbing.
 - **Pino-only, defer OTel indefinitely.** Rejected: per-request
   correlation does not give per-call latency, and ADR-004 commits to
   hexagonal boundaries that benefit from explicit span structure.
+
+---
+
+## References
+
+- [ADR-014](014-otel-exporter-otlp-http-and-jaeger.md) — chooses `@opentelemetry/exporter-trace-otlp-http` against a local OTel collector + Jaeger all-in-one, fills in the SDK config that this ADR's §Decision describes as a task-10 follow-up, and binds resource attributes to `process.env.OTEL_SERVICE_NAME` (Joi-enforced per service). The sentence "Task-10 fills in the SDK config (OTLP exporter, W3C trace-context propagator, resource attributes keyed off `AppNameEnum`)" in this ADR's §"Side-effect import for OTel bootstrap" is superseded here: the body is no longer empty (`libs/observability/tracer.ts` is fully populated) and resource attributes are not keyed off `AppNameEnum`.
+- [ADR-015](015-pino-trace-correlation.md) — codifies the implemented enrichment as camelCase `traceId` / `spanId` on every log line emitted inside an active span, via `LoggerModuleConfig.pinoHttp.hooks.logMethod`. The example JSON block in this ADR's §"Pino enrichment hook for `traceId` / `spanId`" uses snake_case `trace_id` / `span_id`; the live shape is camelCase per ADR-015 (and CLAUDE.md §"Operational notes" cites the camelCase pair as the authority). Treat the snake_case example as historical — operators writing Loki/Grafana queries should grep for `traceId` / `spanId`.
+- [ADR-001](001-structured-logging-with-pino.md) — the upstream Pino-configuration ADR (level, redaction, transport, formatter, `correlationId` middleware + RMQ propagation). This ADR explicitly does **not** supersede ADR-001; the hand-off rule in §"Relationship to ADR-001" stands — ADR-001 wins on log shape, ADR-007 wins on trace plumbing — with ADR-015 now the binding authority on the trace-field naming inside that log shape.
