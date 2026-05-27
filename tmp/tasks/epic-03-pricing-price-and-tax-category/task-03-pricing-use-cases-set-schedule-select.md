@@ -52,14 +52,14 @@ Task-02 complete. Specifically:
 - RPC `@MessagePattern` controller(s) under `…/modules/pricing/presentation/`:
   - `pricing.controller.ts` carrying handlers for `catalog.price.set`, `catalog.price.schedule`, `catalog.price.select`, `catalog.price.list`, `catalog.tax-category.list`, `catalog.tax-category.create`, `catalog.variant.attach-tax-category`.
   - The DTO shapes are TypeScript interfaces in `…/application/dto/` (or wherever the existing catalog module places its RPC DTOs — clone the layout). The api-gateway side defines the HTTP DTOs with `class-validator` decorators in task-05; the microservice side speaks plain TypeScript interfaces over the wire.
-- Extend `libs/contracts/microservices/microservice-message-pattern.enum.ts` with the new patterns:
-  - `CATALOG_PRICE_SET = 'catalog.price.set'`
-  - `CATALOG_PRICE_SCHEDULE = 'catalog.price.schedule'`
-  - `CATALOG_PRICE_SELECT = 'catalog.price.select'`
-  - `CATALOG_PRICE_LIST = 'catalog.price.list'`
-  - `CATALOG_TAX_CATEGORY_LIST = 'catalog.tax-category.list'`
-  - `CATALOG_TAX_CATEGORY_CREATE = 'catalog.tax-category.create'`
-  - `CATALOG_VARIANT_ATTACH_TAX_CATEGORY = 'catalog.variant.attach-tax-category'`
+- Extend `libs/messaging/routing-keys.constants.ts` with the new patterns (ADR-008 §Decision table: `ROUTING_KEYS` is the idiomatic constants object for new callers):
+  - `CATALOG_PRICE_SET: 'catalog.price.set'`
+  - `CATALOG_PRICE_SCHEDULE: 'catalog.price.schedule'`
+  - `CATALOG_PRICE_SELECT: 'catalog.price.select'`
+  - `CATALOG_PRICE_LIST: 'catalog.price.list'`
+  - `CATALOG_TAX_CATEGORY_LIST: 'catalog.tax-category.list'`
+  - `CATALOG_TAX_CATEGORY_CREATE: 'catalog.tax-category.create'`
+  - `CATALOG_VARIANT_ATTACH_TAX_CATEGORY: 'catalog.variant.attach-tax-category'`
 - Wire all new providers in `PricingModule.providers` + export `SelectApplicablePriceUseCase` so task-04's `Publish Product` (in `catalog/` module) can inject it.
 - Unit specs for the four behavioural use cases (Set, Schedule, Select, Attach).
 - Doc deliverable `05-select-applicable-price.md`.
@@ -156,7 +156,7 @@ export class PricingController {
     private readonly attachTaxCategory: AttachTaxCategoryToVariantUseCase,
   ) {}
 
-  @MessagePattern(MicroserviceMessagePatternEnum.CATALOG_PRICE_SET)
+  @MessagePattern(ROUTING_KEYS.CATALOG_PRICE_SET)
   setPriceHandler(@Payload() input: SetPriceDto) { return this.setPrice.execute(input); }
 
   // … one handler per pattern …
@@ -292,7 +292,7 @@ The concurrency test for the `validTo IS NULL` invariant lives in the e2e file (
 
 - `apps/catalog-microservice/src/modules/pricing/infrastructure/persistence/price.typeorm.repository.ts` — implement `findApplicable`, `findCurrentlyOpenFor` (with `setLock('pessimistic_write')`), `findScheduledOverlapping`, `findAllInEffect`, `closePredecessor`. (Skeleton present from task-02; this task fills the methods.)
 - `apps/catalog-microservice/src/modules/pricing/infrastructure/pricing.module.ts` — extend `providers:`, `controllers:`, `exports:`.
-- `libs/contracts/microservices/microservice-message-pattern.enum.ts` — add the seven new patterns.
+- `libs/messaging/routing-keys.constants.ts` — add the seven new `CATALOG_*` patterns (ADR-008 new-callers rule).
 - `apps/catalog-microservice/src/modules/catalog/application/ports/index.ts` — re-export `ProductVariantRepositoryPort` if not already exported (needed by `AttachTaxCategoryToVariantUseCase`).
 - `libs/messaging/microservice-client-catalog.module.ts` — if epic-02 task-01 stubbed the client module without the new RPC bindings, extend the `ClientsModule` registration. Concretely, the api-gateway already speaks to `catalog_queue`; the new patterns ride that same queue, so the client wiring should not need to change. **Verify** by reading the existing client module after task-01 of epic-02 landed; modify only if a new binding is required.
 
