@@ -99,7 +99,7 @@ The fix introduces an `ITransactionPort` abstraction (`apps/inventory-microservi
 
 ### 7. Regression test
 
-`tests/lint/architecture-lint.spec.ts` runs ESLint's `Linter` programmatically against hand-crafted fixture source strings, asserting that each rule fires the expected `boundaries/dependencies` ruleId. It covers:
+`spec/architecture-lint.spec.ts` runs ESLint's `Linter` programmatically against hand-crafted fixture source strings, asserting that each rule fires the expected `boundaries/dependencies` ruleId. It covers:
 
 - the per-layer external denylists (domain, use-case, port, presentation, lib-contracts, lib-ddd);
 - the per-layer element-type denials (domain ↛ infrastructure, port ↛ infrastructure, presentation ↛ infrastructure, presentation ↛ lib-database);
@@ -108,7 +108,7 @@ The fix introduces an `ITransactionPort` abstraction (`apps/inventory-microservi
 
 The fixture file paths are virtual — `Linter.verify(code, config, { filename })` accepts a synthetic path and the boundaries plugin matches it against the element patterns the same way it matches real files. The cross-element tests aim their imports at real production files (so the plugin's module resolver can map the import back to an element-typed target).
 
-The spec is added to `apps/**/*.ts` + `libs/**/*.ts` lint scope via the `tests/**/*.ts` relaxation block in `eslint.config.mjs` (same shape as the existing `test/**/*.ts` relaxation), so the strict typing rules don't fire on the fixture source strings.
+The spec is added to `apps/**/*.ts` + `libs/**/*.ts` lint scope via the `spec/**/*.ts` glob inside the `files: ['test/**/*.ts', 'spec/**/*.ts']` relaxation block in `eslint.config.mjs`, so the strict typing rules don't fire on the fixture source strings.
 
 ## Consequences
 
