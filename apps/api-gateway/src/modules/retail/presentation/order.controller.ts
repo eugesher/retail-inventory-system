@@ -21,7 +21,7 @@ import { OrderConfirmPipe } from './pipes';
 
 @ApiTags('Order')
 @ApiBearerAuth()
-@Roles(RoleEnum.CUSTOMER, RoleEnum.ADMIN)
+@Roles(RoleEnum.ADMIN)
 @Controller('order')
 export class OrderController {
   constructor(

@@ -26,17 +26,19 @@ describe('Retail Inventory System API', () => {
   let inventoryMicroservice: INestMicroservice;
   let dataSource: SystemApiE2ESpecDataSource;
   let cache: Cache;
-  let customerAccessToken: string;
+  let staffAccessToken: string;
   // Memory-backed Pino capture (TEST-002) — install lives in `jest.setup.ts`;
   // records from all three apps share one array, distinguishable by `app`.
   const capturedLogs = (globalThis as { __RIS_E2E_CAPTURED_LOGS__?: Record<string, unknown>[] })
     .__RIS_E2E_CAPTURED_LOGS__!;
 
-  // `customer@example.com` is established by `yarn test:seed`; one login,
-  // reused across every assertion below.
+  // `admin@example.com` is established by `yarn test:seed`; one login,
+  // reused across every assertion below as a bearer-token source.
+  // TODO(task-05): once the Customer aggregate lands, the order/product
+  // flows below switch to customer credentials via `/api/auth/customer/login`.
   const httpClient = () => {
     const agent = supertest.agent(apiGatewayApp.getHttpServer());
-    agent.set('Authorization', `Bearer ${customerAccessToken}`);
+    agent.set('Authorization', `Bearer ${staffAccessToken}`);
     return agent;
   };
 
@@ -95,8 +97,8 @@ describe('Retail Inventory System API', () => {
 
     const loginResponse = await supertest(apiGatewayApp.getHttpServer())
       .post('/api/auth/login')
-      .send({ email: 'customer@example.com', password: 'customer1234' });
-    customerAccessToken = loginResponse.body.accessToken;
+      .send({ email: 'admin@example.com', password: 'admin1234' });
+    staffAccessToken = loginResponse.body.accessToken;
   }, timeout);
 
   afterAll(async () => {

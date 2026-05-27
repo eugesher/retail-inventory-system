@@ -12,11 +12,11 @@ for (const file of ['.env.local', '.env']) {
   if (result.parsed) break;
 }
 
-interface ITestUserSeed {
+interface ITestStaffUserSeed {
   id: string;
   email: string;
   password: string;
-  roles: string[];
+  roleNames: string[];
 }
 
 // Stable UUIDs so test fixtures and assertions can rely on them. UUID
@@ -131,18 +131,15 @@ const ROLE_SEEDS: {
   },
 ];
 
-const TEST_USERS: ITestUserSeed[] = [
+// Customer seeding is intentionally deferred — task-05 introduces the
+// `customer` table and re-adds `customer@example.com` against it. Task-02
+// only seeds StaffUsers into `staff_user`.
+const TEST_STAFF_USERS: ITestStaffUserSeed[] = [
   {
     id: '00000000-0000-4000-a000-000000000001',
     email: 'admin@example.com',
     password: 'admin1234',
-    roles: ['admin', 'customer'],
-  },
-  {
-    id: '00000000-0000-4000-a000-000000000002',
-    email: 'customer@example.com',
-    password: 'customer1234',
-    roles: ['customer'],
+    roleNames: ['admin'],
   },
 ];
 
@@ -185,17 +182,31 @@ async function seedRoles(connection: mysql.Connection): Promise<void> {
   }
 }
 
-async function seedUsers(connection: mysql.Connection): Promise<void> {
-  for (const user of TEST_USERS) {
+async function seedStaffUsers(connection: mysql.Connection): Promise<void> {
+  const roleNameToId = new Map(ROLE_SEEDS.map((r) => [r.name, r.id] as const));
+
+  for (const user of TEST_STAFF_USERS) {
     const passwordHash = await argon2.hash(user.password, argonOptions);
     await connection.execute(
-      `INSERT INTO user (id, email, password_hash, roles, refresh_token_hash)
-       VALUES (?, ?, ?, ?, NULL)
-       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash),
-                               roles = VALUES(roles),
+      `INSERT INTO staff_user (id, email, password_hash, status, last_login_at, refresh_token_hash)
+       VALUES (?, ?, ?, 'active', NULL, NULL)
+       ON DUPLICATE KEY UPDATE password_hash      = VALUES(password_hash),
+                               status             = VALUES(status),
+                               last_login_at      = VALUES(last_login_at),
                                refresh_token_hash = NULL`,
-      [user.id, user.email, passwordHash, user.roles.join(',')],
+      [user.id, user.email, passwordHash],
     );
+
+    for (const roleName of user.roleNames) {
+      const roleId = roleNameToId.get(roleName);
+      if (!roleId) {
+        throw new Error(`seedStaffUsers: unknown role name ${roleName}`);
+      }
+      await connection.execute(
+        'INSERT IGNORE INTO staff_user_roles (staff_user_id, role_id) VALUES (?, ?)',
+        [user.id, roleId],
+      );
+    }
   }
 }
 
@@ -214,7 +225,7 @@ async function seed(): Promise<void> {
 
     await seedPermissions(connection);
     await seedRoles(connection);
-    await seedUsers(connection);
+    await seedStaffUsers(connection);
 
     console.log('✓ Database seeded successfully');
   } finally {

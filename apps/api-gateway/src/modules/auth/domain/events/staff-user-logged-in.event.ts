@@ -1,6 +1,6 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-export class UserLoggedInEvent extends DomainEvent<string> {
+export class StaffUserLoggedInEvent extends DomainEvent<string> {
   public readonly email: string;
 
   constructor(aggregateId: string, email: string) {

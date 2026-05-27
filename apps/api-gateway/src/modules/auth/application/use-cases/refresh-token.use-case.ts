@@ -2,17 +2,20 @@ import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { IJwtRefreshPayload } from '@retail-inventory-system/contracts';
+import { IJwtRefreshPayload, RoleEnum } from '@retail-inventory-system/contracts';
 
 import { IRefreshCommand } from '../dto/refresh.command';
 import { PASSWORD_HASHER, IPasswordPort } from '../ports/password.port';
+import {
+  IStaffUserRepositoryPort,
+  STAFF_USER_REPOSITORY,
+} from '../ports/staff-user.repository.port';
 import { IIssuedTokens, ITokenPort, TOKEN_SERVICE } from '../ports/token.port';
-import { IUserRepositoryPort, USER_REPOSITORY } from '../ports/user.repository.port';
 
 @Injectable()
 export class RefreshTokenUseCase {
   constructor(
-    @Inject(USER_REPOSITORY) private readonly users: IUserRepositoryPort,
+    @Inject(STAFF_USER_REPOSITORY) private readonly users: IStaffUserRepositoryPort,
     @Inject(PASSWORD_HASHER) private readonly hasher: IPasswordPort,
     @Inject(TOKEN_SERVICE) private readonly tokens: ITokenPort,
     @InjectPinoLogger(RefreshTokenUseCase.name) private readonly logger: PinoLogger,
@@ -46,7 +49,7 @@ export class RefreshTokenUseCase {
 
     const accessJti = randomUUID();
     const refreshJti = randomUUID();
-    const roles = user.roles.map((role) => role.value);
+    const roles = user.roles.map((role) => role.name as RoleEnum);
 
     const accessToken = await this.tokens.issueAccessToken({
       sub: user.id,

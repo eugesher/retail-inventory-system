@@ -1,38 +1,51 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 
-import { RoleEnum } from '@retail-inventory-system/contracts';
+import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { RoleVO } from '../../../domain/role.model';
-import { User } from '../../../domain/user.model';
+import { RoleAggregate } from '../../../domain/role.aggregate';
+import { StaffUser } from '../../../domain/staff-user.model';
 import { LoginUseCase } from '../login.use-case';
-import { FakeHasher, FakeTokenAdapter, InMemoryUserRepository } from './test-doubles';
+import { FakeHasher, FakeTokenAdapter, InMemoryStaffUserRepository } from './test-doubles';
+
+const ADMIN_ROLE_ID = '00000000-0000-4000-c000-000000000001';
+
+const buildAdminRole = (): RoleAggregate =>
+  RoleAggregate.create(ADMIN_ROLE_ID, {
+    name: RoleEnum.ADMIN,
+    permissions: [PermissionCodeEnum.AUDIT_READ],
+  });
 
 describe('LoginUseCase', () => {
-  let users: InMemoryUserRepository;
+  let users: InMemoryStaffUserRepository;
   let hasher: FakeHasher;
   let tokens: FakeTokenAdapter;
   let logger: PinoLoggerMock;
   let useCase: LoginUseCase;
 
   const seedUser = async (
-    overrides: Partial<{ id: string; email: string; password: string; roles: RoleEnum[] }> = {},
-  ): Promise<User> => {
+    overrides: Partial<{
+      id: string;
+      email: string;
+      password: string;
+      roles: RoleAggregate[];
+    }> = {},
+  ): Promise<StaffUser> => {
     const id = overrides.id ?? 'user-1';
     const password = overrides.password ?? 'password123';
     const passwordHash = await hasher.hash(password);
-    const user = User.register(id, {
+    const user = StaffUser.register(id, {
       email: overrides.email ?? 'user@example.com',
       passwordHash,
-      roles: (overrides.roles ?? [RoleEnum.CUSTOMER]).map((role) => new RoleVO(role)),
+      roles: overrides.roles ?? [buildAdminRole()],
     });
     users.seed(user);
     return user;
   };
 
   beforeEach(() => {
-    users = new InMemoryUserRepository();
+    users = new InMemoryStaffUserRepository();
     hasher = new FakeHasher();
     tokens = new FakeTokenAdapter();
     logger = makePinoLoggerMock();
@@ -50,11 +63,21 @@ describe('LoginUseCase', () => {
     expect(result.user).toEqual({
       id: 'user-1',
       email: 'user@example.com',
-      roles: [RoleEnum.CUSTOMER],
+      roles: [RoleEnum.ADMIN],
     });
 
     const reloaded = await users.findById(user.id);
     expect(reloaded?.refreshTokenHash).toBe(`hash:${result.refreshToken}`);
+  });
+
+  it('updates lastLoginAt on successful login', async () => {
+    const user = await seedUser();
+    expect(user.lastLoginAt).toBeNull();
+
+    await useCase.execute({ email: user.email, password: 'password123' });
+
+    const reloaded = await users.findById(user.id);
+    expect(reloaded?.lastLoginAt).toBeInstanceOf(Date);
   });
 
   it('rejects with 401 when no user matches the email', async () => {
@@ -67,6 +90,15 @@ describe('LoginUseCase', () => {
     await seedUser();
     await expect(
       useCase.execute({ email: 'user@example.com', password: 'WRONG' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejects with 401 when the user is suspended', async () => {
+    const user = await seedUser();
+    user.suspend();
+
+    await expect(
+      useCase.execute({ email: user.email, password: 'password123' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

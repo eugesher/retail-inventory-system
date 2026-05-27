@@ -10,8 +10,11 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
-const CUSTOMER_EMAIL = 'customer@example.com';
-const CUSTOMER_PASSWORD = 'customer1234';
+// TODO(task-05): customer credentials move under the `customer` aggregate;
+// task-05 re-adds the seed against the `customer` table and re-enables the
+// commented blocks below.
+// const CUSTOMER_EMAIL = 'customer@example.com';
+// const CUSTOMER_PASSWORD = 'customer1234';
 
 interface ITokenResponse {
   accessToken: string;
@@ -93,11 +96,11 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  describe('POST /api/auth/login', () => {
+  describe('POST /api/auth/login (admin)', () => {
     it('returns 401 when the password is wrong', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/login')
-        .send({ email: CUSTOMER_EMAIL, password: 'WRONG-PASSWORD' });
+        .send({ email: ADMIN_EMAIL, password: 'WRONG-PASSWORD' });
 
       expect(status).toBe(HttpStatus.UNAUTHORIZED);
       expect(body).not.toHaveProperty('accessToken');
@@ -106,7 +109,7 @@ describe('Auth flow (e2e)', () => {
     it('returns access + refresh tokens on success', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/login')
-        .send({ email: CUSTOMER_EMAIL, password: CUSTOMER_PASSWORD });
+        .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
 
       expect(status).toBe(HttpStatus.OK);
       expect(body.accessToken).toEqual(expect.any(String));
@@ -115,9 +118,33 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  describe('Authenticated requests', () => {
+  // TODO(task-05): customer login flow lives at /api/auth/customer/login
+  // once the Customer aggregate lands. Re-enable then.
+  // describe('POST /api/auth/customer/login', () => {
+  //   it('returns 401 when the password is wrong', async () => {
+  //     const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+  //       .post('/api/auth/customer/login')
+  //       .send({ email: CUSTOMER_EMAIL, password: 'WRONG-PASSWORD' });
+  //
+  //     expect(status).toBe(HttpStatus.UNAUTHORIZED);
+  //     expect(body).not.toHaveProperty('accessToken');
+  //   });
+  //
+  //   it('returns access + refresh tokens on success', async () => {
+  //     const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+  //       .post('/api/auth/customer/login')
+  //       .send({ email: CUSTOMER_EMAIL, password: CUSTOMER_PASSWORD });
+  //
+  //     expect(status).toBe(HttpStatus.OK);
+  //     expect(body.accessToken).toEqual(expect.any(String));
+  //     expect(body.refreshToken).toEqual(expect.any(String));
+  //     expect(body.expiresIn).toEqual(expect.any(Number));
+  //   });
+  // });
+
+  describe('Authenticated admin requests', () => {
     it('passes through to the route when a valid Bearer token is supplied', async () => {
-      const tokens = await login(CUSTOMER_EMAIL, CUSTOMER_PASSWORD);
+      const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
       const { status } = await supertest(apiGatewayApp.getHttpServer())
         .get('/api/product/1/stock')
@@ -127,21 +154,21 @@ describe('Auth flow (e2e)', () => {
     });
 
     it('returns the current user from GET /api/auth/me', async () => {
-      const tokens = await login(CUSTOMER_EMAIL, CUSTOMER_PASSWORD);
+      const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .get('/api/auth/me')
         .set('Authorization', `Bearer ${tokens.accessToken}`);
 
       expect(status).toBe(HttpStatus.OK);
-      expect(body.email).toBe(CUSTOMER_EMAIL);
-      expect(body.roles).toEqual(['customer']);
+      expect(body.email).toBe(ADMIN_EMAIL);
+      expect(body.roles).toEqual(['admin']);
     });
   });
 
   describe('Refresh-token rotation', () => {
     it('rejects the original refresh token after a rotation', async () => {
-      const tokens = await login(CUSTOMER_EMAIL, CUSTOMER_PASSWORD);
+      const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
       // First refresh — succeeds and returns new tokens.
       const rotated = await supertest(apiGatewayApp.getHttpServer())
@@ -158,17 +185,22 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  describe('Role guard', () => {
-    it('rejects a customer hitting an admin-only route with 403', async () => {
-      const tokens = await login(CUSTOMER_EMAIL, CUSTOMER_PASSWORD);
+  // TODO(task-05): with the customer fixture restored, this re-asserts that a
+  // non-admin (`customer` role) gets 403 from the admin-only ping. Until then,
+  // the negative branch of RolesGuard is exercised by unit tests in libs/auth.
+  // describe('Role guard', () => {
+  //   it('rejects a customer hitting an admin-only route with 403', async () => {
+  //     const tokens = await login(CUSTOMER_EMAIL, CUSTOMER_PASSWORD);
+  //
+  //     const { status } = await supertest(apiGatewayApp.getHttpServer())
+  //       .get('/api/auth/admin/ping')
+  //       .set('Authorization', `Bearer ${tokens.accessToken}`);
+  //
+  //     expect(status).toBe(HttpStatus.FORBIDDEN);
+  //   });
+  // });
 
-      const { status } = await supertest(apiGatewayApp.getHttpServer())
-        .get('/api/auth/admin/ping')
-        .set('Authorization', `Bearer ${tokens.accessToken}`);
-
-      expect(status).toBe(HttpStatus.FORBIDDEN);
-    });
-
+  describe('Role guard (admin)', () => {
     it('admits an admin to the admin-only route', async () => {
       const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
@@ -183,7 +215,7 @@ describe('Auth flow (e2e)', () => {
 
   describe('Logout', () => {
     it('clears the refresh-token hash so subsequent refreshes fail', async () => {
-      const tokens = await login(CUSTOMER_EMAIL, CUSTOMER_PASSWORD);
+      const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
       const logout = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/logout')

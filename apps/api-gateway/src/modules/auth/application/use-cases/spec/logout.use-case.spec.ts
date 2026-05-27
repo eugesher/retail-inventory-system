@@ -4,28 +4,30 @@ import { PinoLogger } from 'nestjs-pino';
 import { RoleEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { RoleVO } from '../../../domain/role.model';
-import { User } from '../../../domain/user.model';
+import { RoleAggregate } from '../../../domain/role.aggregate';
+import { StaffUser } from '../../../domain/staff-user.model';
 import { LogoutUseCase } from '../logout.use-case';
-import { FakeHasher, InMemoryUserRepository } from './test-doubles';
+import { FakeHasher, InMemoryStaffUserRepository } from './test-doubles';
 
 describe('LogoutUseCase', () => {
-  let users: InMemoryUserRepository;
+  let users: InMemoryStaffUserRepository;
   let logger: PinoLoggerMock;
   let useCase: LogoutUseCase;
 
   beforeEach(() => {
-    users = new InMemoryUserRepository();
+    users = new InMemoryStaffUserRepository();
     logger = makePinoLoggerMock();
     useCase = new LogoutUseCase(users, logger as unknown as PinoLogger);
   });
 
-  const seedActiveUser = async (): Promise<User> => {
+  const seedActiveUser = async (): Promise<StaffUser> => {
     const passwordHash = await new FakeHasher().hash('password123');
-    const user = User.register('user-1', {
+    const user = StaffUser.register('user-1', {
       email: 'user@example.com',
       passwordHash,
-      roles: [new RoleVO(RoleEnum.CUSTOMER)],
+      roles: [
+        RoleAggregate.create('00000000-0000-4000-c000-000000000001', { name: RoleEnum.ADMIN }),
+      ],
       refreshTokenHash: 'hash:some-token',
     });
     users.seed(user);

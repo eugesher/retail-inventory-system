@@ -4,14 +4,14 @@ import { PinoLogger } from 'nestjs-pino';
 import { RoleEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { RoleVO } from '../../../domain/role.model';
-import { User } from '../../../domain/user.model';
+import { RoleAggregate } from '../../../domain/role.aggregate';
+import { StaffUser } from '../../../domain/staff-user.model';
 import { LoginUseCase } from '../login.use-case';
 import { RefreshTokenUseCase } from '../refresh-token.use-case';
-import { FakeHasher, FakeTokenAdapter, InMemoryUserRepository } from './test-doubles';
+import { FakeHasher, FakeTokenAdapter, InMemoryStaffUserRepository } from './test-doubles';
 
 describe('RefreshTokenUseCase', () => {
-  let users: InMemoryUserRepository;
+  let users: InMemoryStaffUserRepository;
   let hasher: FakeHasher;
   let tokens: FakeTokenAdapter;
   let loginLogger: PinoLoggerMock;
@@ -19,19 +19,21 @@ describe('RefreshTokenUseCase', () => {
   let login: LoginUseCase;
   let refresh: RefreshTokenUseCase;
 
-  const seed = async (id = 'user-1'): Promise<User> => {
+  const seed = async (id = 'user-1'): Promise<StaffUser> => {
     const passwordHash = await hasher.hash('password123');
-    const user = User.register(id, {
+    const user = StaffUser.register(id, {
       email: `${id}@example.com`,
       passwordHash,
-      roles: [new RoleVO(RoleEnum.CUSTOMER)],
+      roles: [
+        RoleAggregate.create('00000000-0000-4000-c000-000000000001', { name: RoleEnum.ADMIN }),
+      ],
     });
     users.seed(user);
     return user;
   };
 
   beforeEach(() => {
-    users = new InMemoryUserRepository();
+    users = new InMemoryStaffUserRepository();
     hasher = new FakeHasher();
     tokens = new FakeTokenAdapter();
     loginLogger = makePinoLoggerMock();
