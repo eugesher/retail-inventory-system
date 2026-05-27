@@ -8,6 +8,8 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum, PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
+import { RegisterStaffUserUseCase } from '../apps/api-gateway/src/modules/auth/application/use-cases/register-staff-user.use-case';
+
 // Decode the JWT body without verifying the signature — the assertions only
 // care about the claim shape, and the unit suite already covers verification.
 const decodeJwtBody = (token: string): Record<string, unknown> => {
@@ -19,6 +21,14 @@ const decodeJwtBody = (token: string): Record<string, unknown> => {
 
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
+// One-off fixture: a `warehouse-staff` StaffUser registered in `beforeAll`
+// to exercise the PermissionsGuard 403 path on `/api/auth/admin/ping`. The
+// `warehouse-staff` role is seeded but bundles only `inventory:*` codes —
+// it does NOT carry `audit:read`. Once task-09 ships the broader seed set
+// this fixture step can be deleted and the assertion can log in against
+// the seeded `warehouse@example.com` directly.
+const WAREHOUSE_EMAIL = 'warehouse-staff@example.com';
+const WAREHOUSE_PASSWORD = 'warehouse1234';
 // TODO(task-05): customer credentials move under the `customer` aggregate;
 // task-05 re-adds the seed against the `customer` table and re-enables the
 // commented blocks below.
@@ -83,6 +93,16 @@ describe('Auth flow (e2e)', () => {
     );
 
     await apiGatewayApp.init();
+
+    // Register a one-off non-admin StaffUser so the PermissionsGuard 403 path
+    // on /api/auth/admin/ping has a caller without `audit:read`. Drop this in
+    // favor of the seeded warehouse@example.com once task-09 ships.
+    const register = apiGatewayApp.get(RegisterStaffUserUseCase);
+    await register.execute({
+      email: WAREHOUSE_EMAIL,
+      password: WAREHOUSE_PASSWORD,
+      roleNames: ['warehouse-staff'],
+    });
   }, timeout);
 
   afterAll(async () => {
@@ -211,23 +231,11 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  // TODO(task-05): with the customer fixture restored, this re-asserts that a
-  // non-admin (`customer` role) gets 403 from the admin-only ping. Until then,
-  // the negative branch of RolesGuard is exercised by unit tests in libs/auth.
-  // describe('Role guard', () => {
-  //   it('rejects a customer hitting an admin-only route with 403', async () => {
-  //     const tokens = await login(CUSTOMER_EMAIL, CUSTOMER_PASSWORD);
-  //
-  //     const { status } = await supertest(apiGatewayApp.getHttpServer())
-  //       .get('/api/auth/admin/ping')
-  //       .set('Authorization', `Bearer ${tokens.accessToken}`);
-  //
-  //     expect(status).toBe(HttpStatus.FORBIDDEN);
-  //   });
-  // });
-
-  describe('Role guard (admin)', () => {
-    it('admits an admin to the admin-only route', async () => {
+  // TODO(task-05): with the customer fixture restored, also assert that a
+  // customer JWT (carrying an empty `permissions` claim) gets 403 here for
+  // free — no `@RequiresPermission()`-gated route ever admits a customer.
+  describe('Permissions guard (/api/auth/admin/ping)', () => {
+    it('admits an admin (audit:read present in bundled permissions) with 200', async () => {
       const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
@@ -236,6 +244,17 @@ describe('Auth flow (e2e)', () => {
 
       expect(status).toBe(HttpStatus.OK);
       expect(body).toEqual({ ok: true });
+    });
+
+    it('rejects a non-admin StaffUser (no audit:read) with 403 and "Insufficient permissions"', async () => {
+      const tokens = await login(WAREHOUSE_EMAIL, WAREHOUSE_PASSWORD);
+
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        .get('/api/auth/admin/ping')
+        .set('Authorization', `Bearer ${tokens.accessToken}`);
+
+      expect(status).toBe(HttpStatus.FORBIDDEN);
+      expect(body.message).toBe('Insufficient permissions');
     });
   });
 

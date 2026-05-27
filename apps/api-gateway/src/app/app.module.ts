@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 
-import { JwtAuthGuard, RolesGuard } from '@retail-inventory-system/auth';
+import { JwtAuthGuard, PermissionsGuard, RolesGuard } from '@retail-inventory-system/auth';
 import { configModuleConfig } from '@retail-inventory-system/config';
 import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
@@ -25,6 +25,7 @@ import { RetailModule } from '../modules/retail';
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule implements NestModule {
