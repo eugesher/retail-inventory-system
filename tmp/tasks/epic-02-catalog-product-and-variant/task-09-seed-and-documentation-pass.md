@@ -99,7 +99,7 @@ Mirror the API → Retail section. Include the seven endpoints in the same table
 
 Mirror the notification-microservice section. Include:
 
-- The boot file (`apps/catalog-microservice/src/main.ts` opens with `import './otel.setup';`).
+- The boot file (`apps/catalog-microservice/src/main.ts` opens with `import '@retail-inventory-system/observability/tracer';`).
 - The module tree (`modules/catalog/{domain,application,infrastructure,presentation}`).
 - The seven `@MessagePattern` handlers.
 - The three events.
