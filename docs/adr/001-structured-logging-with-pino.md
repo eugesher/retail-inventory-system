@@ -1,6 +1,6 @@
 # ADR-001: Structured Logging with Pino and Correlation IDs
 
-**Status:** Accepted
+**Status:** Accepted (logger relocation superseded in part by ADR-005 / ADR-007 — see References)
 
 ---
 
@@ -65,3 +65,10 @@ Adopted [Pino](https://github.com/pinojs/pino) via `nestjs-pino` for structured 
 - Log volume increases slightly compared to plaintext logging due to per-line JSON field overhead.
 - Microservice services cannot use `logger.assign()` because they run outside the HTTP request scope. `correlationId` must be passed explicitly in every log call — a minor discipline requirement.
 - `pino-pretty` is a dev dependency that must not run in production (enforced by the `NODE_ENV` guard in `LoggerConfig`).
+
+---
+
+## References
+
+- [ADR-005](005-split-shared-common-into-bounded-libs.md) — splits `libs/common` into bounded libs; logger config moves out of `libs/config/`.
+- [ADR-007](007-pino-and-opentelemetry.md) — co-locates Pino with OpenTelemetry in `libs/observability/`; the file referenced as `libs/config/logger/logger.config.ts` is now `libs/observability/logger.module.ts`.
