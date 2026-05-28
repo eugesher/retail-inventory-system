@@ -1,0 +1,147 @@
+# Auth endpoints
+# (apps/api-gateway/src/modules/auth/presentation/staff-login.controller.ts,
+#  apps/api-gateway/src/modules/auth/presentation/auth.controller.ts,
+#  apps/api-gateway/src/modules/auth/presentation/auth-admin.controller.ts,
+#  apps/api-gateway/src/modules/auth/presentation/customer-auth.controller.ts)
+#
+# Routes here cover the gateway's full auth surface:
+#   1. Staff login — canonical /auth/staff/login and the deprecated /auth/login alias.
+#   2. Refresh, logout, me, admin/ping — refresh-token rotation + permission gating.
+#   3. Customer register/login/me — the parallel customer auth lane.
+#
+# All endpoints sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Send the blocks in order: staffLogin first establishes the access/refresh
+# pair every later block substitutes via {{staffLogin.response.body.$....}}.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name staffLogin
+# POST /api/auth/staff/login
+# Canonical staff login. Returns access + refresh tokens. The access JWT
+# carries `permissions: string[]` (task-03 inflation): the seeded admin user
+# holds every code in the registry, so this token unlocks the whole IAM
+# surface in http/iam.http.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+
+# @name staffLoginDeprecated
+# POST /api/auth/login
+# Deprecated alias for back-compat (one release; remove after epic-02 lands).
+# Same handler, same body, same response shape — only the URL differs. The
+# multi-prefix wiring is on StaffLoginController via @Controller(['auth',
+# 'auth/staff']).
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+
+# @name refresh
+# POST /api/auth/refresh
+# Rotates BOTH the access and refresh tokens and emits RefreshTokenRotated.
+# Reusing an already-rotated refresh token triggers
+#   `RefreshFailed: rotation reuse detected`
+# and clears the live hash on the user row (ADR-010 — every successful
+# refresh persists a new hash, so a stale token can never replay).
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{staffLogin.response.body.$.refreshToken}}"
+}
+
+###
+
+# @name me
+# GET /api/auth/me
+# Returns the authenticated subject. AuthUserValidator routes by id — staff
+# or customer, the same endpoint works for both. Response shape
+# (CurrentUserResponseDto): { id, email, roles, permissions }. The
+# `permissions` field is the source of truth for PermissionsGuard checks
+# downstream (task-03 / ADR-024).
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{staffLogin.response.body.$.accessToken}}
+
+###
+
+# @name logout
+# POST /api/auth/logout
+# Clears the server-side refresh-token hash on the user row. The access JWT
+# remains technically valid until expiry — clients should drop it from local
+# storage themselves. After this call, `refresh` with the previously-issued
+# refresh token will fail with 401.
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{staffLogin.response.body.$.accessToken}}
+
+###
+
+# @name adminPing
+# GET /api/auth/admin/ping
+# Smoke endpoint for the global guard chain (JwtAuthGuard → RolesGuard →
+# PermissionsGuard). Gated behind `audit:read` (task-04 / ADR-024):
+#   • Admin succeeds → 200 { "ok": true }
+#   • StaffUser without `audit:read` → 403
+#   • Anonymous → 401
+GET {{baseUrl}}/auth/admin/ping
+Authorization: Bearer {{staffLogin.response.body.$.accessToken}}
+
+###
+
+# @name customerRegister
+# POST /api/auth/customer/register
+# Creates a Customer in `status='active'`, `email_verified_at: null`. Email is
+# case-folded and uniqueness-checked at the repository layer — duplicates →
+# 409. Password is hashed with argon2id (OWASP 2024 defaults — see
+# AUTH_ARGON2_* env in CLAUDE.md).
+POST {{baseUrl}}/auth/customer/register
+Content-Type: application/json
+
+{
+  "email": "buyer@example.com",
+  "password": "buyer1234",
+  "firstName": "Buy",
+  "lastName": "Er"
+}
+
+###
+
+# @name customerLogin
+# POST /api/auth/customer/login
+# Same JWT envelope as staff login, but the access token carries `roles: []`
+# and `permissions: []` — the customer is not an RBAC actor. Any
+# @RequiresPermission(...) endpoint returns 403 when called with a customer
+# JWT.
+POST {{baseUrl}}/auth/customer/login
+Content-Type: application/json
+
+{
+  "email": "buyer@example.com",
+  "password": "buyer1234"
+}
+
+###
+
+# @name customerMe
+# GET /api/auth/customer/me
+# Returns the Customer's profile (CurrentCustomerResponseDto). The same JWT
+# that succeeds here is rejected by /auth/admin/ping because the customer
+# lacks the `audit:read` permission code — and any other code, since their
+# permission set is empty.
+GET {{baseUrl}}/auth/customer/me
+Authorization: Bearer {{customerLogin.response.body.$.accessToken}}
