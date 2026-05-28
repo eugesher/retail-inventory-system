@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { DynamicModule, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule as AuthLibModule, AUTH_USER_VALIDATOR } from '@retail-inventory-system/auth';
@@ -34,8 +34,13 @@ import { StaffUserTypeormRepository } from './persistence/staff-user-typeorm.rep
 
 // AUTH_USER_VALIDATOR + STAFF_USER_REPOSITORY + CUSTOMER_REPOSITORY are bound
 // inside libs/auth's `forRootAsync` so its JwtStrategy can resolve them; the
-// validator now spans both subject kinds (task-05). Re-exported so the use
-// cases below inject the same providers without re-registering them.
+// validator now spans both subject kinds (task-05). Capturing the
+// DynamicModule reference (rather than inlining the call) lets AuthModule
+// *re-export* the whole dynamic module so its exports — STAFF_USER_REPOSITORY
+// in particular — propagate to AuthModule's downstream consumers (today: IAM).
+// NestJS does not permit re-exporting an individual token from an imported
+// dynamic module via the outer module's `exports` array; the workaround is
+// to re-export the module itself, which is what this constant enables.
 const authLibProviders = [
   StaffUserTypeormRepository,
   { provide: STAFF_USER_REPOSITORY, useExisting: StaffUserTypeormRepository },
@@ -45,19 +50,21 @@ const authLibProviders = [
   { provide: AUTH_USER_VALIDATOR, useExisting: ValidateJwtSubjectUseCase },
 ];
 
+const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
+  imports: [TypeOrmModule.forFeature([StaffUserEntity, CustomerEntity])],
+  providers: authLibProviders,
+  exports: [
+    STAFF_USER_REPOSITORY,
+    CUSTOMER_REPOSITORY,
+    AUTH_USER_VALIDATOR,
+    ValidateJwtSubjectUseCase,
+  ],
+});
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([StaffUserEntity, RoleEntity, PermissionEntity, CustomerEntity]),
-    AuthLibModule.forRootAsync({
-      imports: [TypeOrmModule.forFeature([StaffUserEntity, CustomerEntity])],
-      providers: authLibProviders,
-      exports: [
-        STAFF_USER_REPOSITORY,
-        CUSTOMER_REPOSITORY,
-        AUTH_USER_VALIDATOR,
-        ValidateJwtSubjectUseCase,
-      ],
-    }),
+    authLibDynamicModule,
   ],
   controllers: [AuthController, AuthAdminController, CustomerAuthController, StaffLoginController],
   providers: [
@@ -88,6 +95,10 @@ const authLibProviders = [
     RegisterCustomerUseCase,
     ROLE_REPOSITORY,
     PERMISSION_REPOSITORY,
+    // Re-export the dynamic AuthLibModule so STAFF_USER_REPOSITORY (and the
+    // other AuthLib-bound tokens) are visible to AuthModule's consumers.
+    // See the comment above `authLibDynamicModule` for why this is needed.
+    authLibDynamicModule,
   ],
 })
 export class AuthModule {}

@@ -17,6 +17,13 @@ class InMemoryRoleRepository implements IRoleRepositoryPort {
     this.byName.set(role.name, role);
   }
 
+  public findById(id: string): Promise<RoleAggregate | null> {
+    for (const role of this.byName.values()) {
+      if (role.id === id) return Promise.resolve(role);
+    }
+    return Promise.resolve(null);
+  }
+
   public findByName(name: string): Promise<RoleAggregate | null> {
     return Promise.resolve(this.byName.get(name) ?? null);
   }
@@ -37,6 +44,21 @@ class InMemoryRoleRepository implements IRoleRepositoryPort {
   public save(role: RoleAggregate): Promise<RoleAggregate> {
     this.register(role);
     return Promise.resolve(role);
+  }
+
+  public replacePermissions(
+    role: RoleAggregate,
+    codes: PermissionCodeEnum[],
+  ): Promise<RoleAggregate> {
+    const stored = this.byName.get(role.name);
+    if (!stored) return Promise.resolve(role);
+    for (const code of [...stored.permissions]) {
+      stored.removePermission(code);
+    }
+    for (const code of codes) {
+      stored.addPermission(code);
+    }
+    return Promise.resolve(stored);
   }
 }
 

@@ -2,6 +2,8 @@ import { AggregateRoot } from '@retail-inventory-system/ddd';
 
 import { StaffUserLoggedInEvent } from './events/staff-user-logged-in.event';
 import { StaffUserRegisteredEvent } from './events/staff-user-registered.event';
+import { StaffUserRoleRevokedEvent } from './events/staff-user-role-revoked.event';
+import { StaffUserRolesAssignedEvent } from './events/staff-user-roles-assigned.event';
 import { RoleAggregate } from './role.aggregate';
 
 export interface IPasswordHasher {
@@ -130,6 +132,18 @@ export class StaffUser extends AggregateRoot<string> {
   public recordLoggedIn(at: Date = new Date()): void {
     this._lastLoginAt = at;
     this.addDomainEvent(new StaffUserLoggedInEvent(this.id, this._email));
+  }
+
+  // The IAM use case computes the diff (the *added* names after dedupe) and
+  // hands it in — keeping the diff calculation out of the aggregate avoids
+  // baking IAM-specific logic into the domain. The aggregate just records.
+  public recordRolesAssigned(addedRoleNames: readonly string[]): void {
+    if (addedRoleNames.length === 0) return;
+    this.addDomainEvent(new StaffUserRolesAssignedEvent(this.id, addedRoleNames));
+  }
+
+  public recordRoleRevoked(roleName: string): void {
+    this.addDomainEvent(new StaffUserRoleRevokedEvent(this.id, roleName));
   }
 
   // `passwordHash` and `refreshTokenHash` must never leak through structured

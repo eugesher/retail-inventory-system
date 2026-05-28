@@ -1,0 +1,53 @@
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+
+import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
+
+import {
+  IPermissionRepositoryPort,
+  IRoleRepositoryPort,
+  PERMISSION_REPOSITORY,
+  ROLE_REPOSITORY,
+  RoleAggregate,
+} from '../../../auth';
+import { IUpdateRoleCommand } from '../dto/update-role.command';
+
+@Injectable()
+export class UpdateRoleUseCase {
+  constructor(
+    @Inject(ROLE_REPOSITORY) private readonly roles: IRoleRepositoryPort,
+    @Inject(PERMISSION_REPOSITORY) private readonly permissions: IPermissionRepositoryPort,
+  ) {}
+
+  public async execute(command: IUpdateRoleCommand): Promise<RoleAggregate> {
+    if (command.description === undefined && command.permissionCodes === undefined) {
+      throw new BadRequestException('No-op patch');
+    }
+
+    const role = await this.roles.findById(command.id);
+    if (!role) {
+      throw new NotFoundException(`Role ${command.id} not found`);
+    }
+
+    if (command.description !== undefined) {
+      role.setDescription(command.description ?? null);
+      await this.roles.save(role);
+    }
+
+    if (command.permissionCodes !== undefined) {
+      await this.assertPermissionsExist(command.permissionCodes);
+      return this.roles.replacePermissions(role, command.permissionCodes);
+    }
+
+    return role;
+  }
+
+  private async assertPermissionsExist(codes: PermissionCodeEnum[]): Promise<void> {
+    if (codes.length === 0) return;
+    const found = await this.permissions.findByCodes(codes);
+    const foundSet = new Set(found.map((p) => p.code));
+    const missing = codes.filter((c) => !foundSet.has(c));
+    if (missing.length > 0) {
+      throw new BadRequestException(`Unknown permission codes: ${missing.join(', ')}`);
+    }
+  }
+}

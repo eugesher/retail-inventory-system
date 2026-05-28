@@ -50,6 +50,10 @@ export class RoleAggregate extends AggregateRoot<string> {
     return this._permissions;
   }
 
+  public setDescription(description: string | null): void {
+    this._description = description;
+  }
+
   public addPermission(code: PermissionCodeEnum): void {
     this._permissions.add(code);
   }

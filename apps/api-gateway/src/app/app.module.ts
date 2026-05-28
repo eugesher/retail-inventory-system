@@ -16,6 +16,7 @@ import {
   RoleEntity,
   StaffUserEntity,
 } from '../modules/auth';
+import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
 import { RetailModule } from '../modules/retail';
 
@@ -25,6 +26,7 @@ import { RetailModule } from '../modules/retail';
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.API_GATEWAY)),
     DatabaseModule.forRoot([StaffUserEntity, RoleEntity, PermissionEntity, CustomerEntity]),
     AuthModule,
+    IamModule,
     RetailModule,
     InventoryModule,
   ],
