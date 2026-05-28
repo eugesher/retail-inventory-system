@@ -19,6 +19,15 @@ interface ITestStaffUserSeed {
   roleNames: string[];
 }
 
+interface ITestCustomerSeed {
+  id: string;
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  status: 'active' | 'suspended' | 'guest' | 'deleted';
+}
+
 // Stable UUIDs so test fixtures and assertions can rely on them. UUID
 // prefixes namespace the seed type:
 //   ...-a000-... → users
@@ -131,15 +140,45 @@ const ROLE_SEEDS: {
   },
 ];
 
-// Customer seeding is intentionally deferred — task-05 introduces the
-// `customer` table and re-adds `customer@example.com` against it. Task-02
-// only seeds StaffUsers into `staff_user`.
+// The epic-01 acceptance set: one StaffUser per canonical role and one
+// Customer. UUIDs follow the `...-a000-...` user-namespace convention so
+// e2e tests can reference these fixtures by id without first looking them
+// up by email.
 const TEST_STAFF_USERS: ITestStaffUserSeed[] = [
   {
     id: '00000000-0000-4000-a000-000000000001',
     email: 'admin@example.com',
     password: 'admin1234',
     roleNames: ['admin'],
+  },
+  {
+    id: '00000000-0000-4000-a000-000000000003',
+    email: 'catalog@example.com',
+    password: 'catalog1234',
+    roleNames: ['catalog-manager'],
+  },
+  {
+    id: '00000000-0000-4000-a000-000000000004',
+    email: 'warehouse@example.com',
+    password: 'warehouse1234',
+    roleNames: ['warehouse-staff'],
+  },
+  {
+    id: '00000000-0000-4000-a000-000000000005',
+    email: 'support@example.com',
+    password: 'support1234',
+    roleNames: ['order-support'],
+  },
+];
+
+const TEST_CUSTOMERS: ITestCustomerSeed[] = [
+  {
+    id: '00000000-0000-4000-a000-000000000002',
+    email: 'customer@example.com',
+    password: 'customer1234',
+    firstName: 'Test',
+    lastName: 'Customer',
+    status: 'active',
   },
 ];
 
@@ -210,6 +249,31 @@ async function seedStaffUsers(connection: mysql.Connection): Promise<void> {
   }
 }
 
+async function seedCustomers(connection: mysql.Connection): Promise<void> {
+  for (const customer of TEST_CUSTOMERS) {
+    const passwordHash = await argon2.hash(customer.password, argonOptions);
+    await connection.execute(
+      `INSERT INTO customer (id, email, phone, first_name, last_name, password_hash,
+                             status, email_verified_at, refresh_token_hash)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, NULL)
+       ON DUPLICATE KEY UPDATE password_hash      = VALUES(password_hash),
+                               first_name         = VALUES(first_name),
+                               last_name          = VALUES(last_name),
+                               status             = VALUES(status),
+                               email_verified_at  = NULL,
+                               refresh_token_hash = NULL`,
+      [
+        customer.id,
+        customer.email,
+        customer.firstName,
+        customer.lastName,
+        passwordHash,
+        customer.status,
+      ],
+    );
+  }
+}
+
 async function seed(): Promise<void> {
   const url = process.env.DATABASE_URL ?? 'mysql://retail:retailpass@localhost:3306/retail_db';
   const connection = await mysql.createConnection(url);
@@ -226,6 +290,7 @@ async function seed(): Promise<void> {
     await seedPermissions(connection);
     await seedRoles(connection);
     await seedStaffUsers(connection);
+    await seedCustomers(connection);
 
     console.log('✓ Database seeded successfully');
   } finally {

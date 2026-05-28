@@ -1,4 +1,4 @@
-INSERT INTO order_product (id, product_id, order_id, status_id)
+INSERT IGNORE INTO order_product (id, product_id, order_id, status_id)
 VALUES (1, 1, 1, 'pending'),
        (2, 1, 1, 'pending'),
        (3, 2, 1, 'pending'),

@@ -8,17 +8,19 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum, PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { RegisterStaffUserUseCase } from '../apps/api-gateway/src/modules/auth/application/use-cases/register-staff-user.use-case';
-
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 
-// A fixture staff user we own end-to-end: created with `order-support`
-// (no `audit:read`), then granted a custom role that re-includes
-// `audit:read` via the IAM endpoints under test, then revoked again to
-// prove the round-trip closes.
-const FIXTURE_EMAIL = 'iam-fixture@example.com';
-const FIXTURE_PASSWORD = 'fixture1234';
+// The seeded `warehouse-staff` StaffUser (scripts/test-db-seed.ts) is the
+// round-trip's assign/revoke target. `warehouse-staff` bundles only
+// `inventory:*` codes — no `audit:read` — which gives the same "lacks the
+// admin permission then gains it" arc the round-trip needs without an
+// inline fixture. The id matches the seed's stable UUID so URL paths
+// don't need a lookup step.
+const FIXTURE_EMAIL = 'warehouse@example.com';
+const FIXTURE_PASSWORD = 'warehouse1234';
+const FIXTURE_STAFF_USER_ID = '00000000-0000-4000-a000-000000000004';
+const FIXTURE_SEED_ROLE_NAME = 'warehouse-staff';
 
 interface ITokenResponse {
   accessToken: string;
@@ -32,8 +34,6 @@ describe('IAM admin endpoints (e2e)', () => {
   let apiGatewayApp: INestApplication;
   let retailMicroservice: INestMicroservice;
   let inventoryMicroservice: INestMicroservice;
-
-  let fixtureStaffUserId: string;
 
   const login = async (email: string, password: string): Promise<ITokenResponse> => {
     const { body } = await supertest(apiGatewayApp.getHttpServer())
@@ -84,14 +84,6 @@ describe('IAM admin endpoints (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
     );
     await apiGatewayApp.init();
-
-    const register = apiGatewayApp.get(RegisterStaffUserUseCase);
-    const fixture = await register.execute({
-      email: FIXTURE_EMAIL,
-      password: FIXTURE_PASSWORD,
-      roleNames: ['order-support'],
-    });
-    fixtureStaffUserId = fixture.id;
   }, timeout);
 
   afterAll(async () => {
@@ -182,25 +174,25 @@ describe('IAM admin endpoints (e2e)', () => {
     it('admin assigns the new role to the fixture staff user', async () => {
       const auth = await adminAuth();
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .post(`/api/iam/staff/${fixtureStaffUserId}/roles`)
+        .post(`/api/iam/staff/${FIXTURE_STAFF_USER_ID}/roles`)
         .set('Authorization', auth)
         .send({ roleNames: ['iam-test-audit'] });
 
       expect(status).toBe(HttpStatus.OK);
       const out = body as { roleNames: string[] };
-      expect(out.roleNames.sort()).toEqual(['iam-test-audit', 'order-support']);
+      expect(out.roleNames.sort()).toEqual(['iam-test-audit', FIXTURE_SEED_ROLE_NAME].sort());
     });
 
     it('re-assigning the same role is idempotent', async () => {
       const auth = await adminAuth();
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .post(`/api/iam/staff/${fixtureStaffUserId}/roles`)
+        .post(`/api/iam/staff/${FIXTURE_STAFF_USER_ID}/roles`)
         .set('Authorization', auth)
         .send({ roleNames: ['iam-test-audit'] });
 
       expect(status).toBe(HttpStatus.OK);
       const out = body as { roleNames: string[] };
-      expect(out.roleNames.sort()).toEqual(['iam-test-audit', 'order-support']);
+      expect(out.roleNames.sort()).toEqual(['iam-test-audit', FIXTURE_SEED_ROLE_NAME].sort());
     });
 
     it('fixture user can now hit /api/auth/admin/ping (audit:read inflated on login)', async () => {
@@ -229,7 +221,7 @@ describe('IAM admin endpoints (e2e)', () => {
     it('admin revokes the role from the fixture staff user', async () => {
       const auth = await adminAuth();
       const { status } = await supertest(apiGatewayApp.getHttpServer())
-        .delete(`/api/iam/staff/${fixtureStaffUserId}/roles/iam-test-audit`)
+        .delete(`/api/iam/staff/${FIXTURE_STAFF_USER_ID}/roles/iam-test-audit`)
         .set('Authorization', auth);
       expect(status).toBe(HttpStatus.NO_CONTENT);
     });
@@ -237,7 +229,7 @@ describe('IAM admin endpoints (e2e)', () => {
     it('revoking a role that is not bound returns 404 "Role not bound"', async () => {
       const auth = await adminAuth();
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .delete(`/api/iam/staff/${fixtureStaffUserId}/roles/iam-test-audit`)
+        .delete(`/api/iam/staff/${FIXTURE_STAFF_USER_ID}/roles/iam-test-audit`)
         .set('Authorization', auth);
       expect(status).toBe(HttpStatus.NOT_FOUND);
       expect((body as { message: string }).message).toBe('Role not bound');
@@ -246,7 +238,7 @@ describe('IAM admin endpoints (e2e)', () => {
     it('revoking the last remaining role returns 409', async () => {
       const auth = await adminAuth();
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .delete(`/api/iam/staff/${fixtureStaffUserId}/roles/order-support`)
+        .delete(`/api/iam/staff/${FIXTURE_STAFF_USER_ID}/roles/${FIXTURE_SEED_ROLE_NAME}`)
         .set('Authorization', auth);
       expect(status).toBe(HttpStatus.CONFLICT);
       expect((body as { message: string }).message).toBe('Cannot revoke the last remaining role');

@@ -8,8 +8,6 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum, PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { RegisterStaffUserUseCase } from '../apps/api-gateway/src/modules/auth/application/use-cases/register-staff-user.use-case';
-
 // Decode the JWT body without verifying the signature — the assertions only
 // care about the claim shape, and the unit suite already covers verification.
 const decodeJwtBody = (token: string): Record<string, unknown> => {
@@ -21,14 +19,15 @@ const decodeJwtBody = (token: string): Record<string, unknown> => {
 
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
-// One-off fixture: a `warehouse-staff` StaffUser registered in `beforeAll`
-// to exercise the PermissionsGuard 403 path on `/api/auth/admin/ping`. The
-// `warehouse-staff` role is seeded but bundles only `inventory:*` codes —
-// it does NOT carry `audit:read`. Once task-09 ships the broader seed set
-// this fixture step can be deleted and the assertion can log in against
-// the seeded `warehouse@example.com` directly.
-const WAREHOUSE_EMAIL = 'warehouse-staff@example.com';
+// Seeded by `yarn test:seed` (scripts/test-db-seed.ts) — the canonical
+// `warehouse-staff` StaffUser. That role bundles only `inventory:*` codes,
+// so the caller does NOT carry `audit:read` and the PermissionsGuard 403
+// path on `/api/auth/admin/ping` is exercised without inline fixturing.
+const WAREHOUSE_EMAIL = 'warehouse@example.com';
 const WAREHOUSE_PASSWORD = 'warehouse1234';
+// Stable id matches the seed script so future tests can reference the
+// fixture by id without first looking it up by email.
+const WAREHOUSE_STAFF_USER_ID = '00000000-0000-4000-a000-000000000004';
 // Customer-side coverage lives in `test/auth-customer.e2e-spec.ts` — that
 // spec drives the buyer aggregate through HTTP (register → login → me) and
 // asserts the customer JWT is rejected by /api/auth/admin/ping.
@@ -91,16 +90,6 @@ describe('Auth flow (e2e)', () => {
     );
 
     await apiGatewayApp.init();
-
-    // Register a one-off non-admin StaffUser so the PermissionsGuard 403 path
-    // on /api/auth/admin/ping has a caller without `audit:read`. Drop this in
-    // favor of the seeded warehouse@example.com once task-09 ships.
-    const register = apiGatewayApp.get(RegisterStaffUserUseCase);
-    await register.execute({
-      email: WAREHOUSE_EMAIL,
-      password: WAREHOUSE_PASSWORD,
-      roleNames: ['warehouse-staff'],
-    });
   }, timeout);
 
   afterAll(async () => {
@@ -222,6 +211,12 @@ describe('Auth flow (e2e)', () => {
 
     it('rejects a non-admin StaffUser (no audit:read) with 403 and "Insufficient permissions"', async () => {
       const tokens = await login(WAREHOUSE_EMAIL, WAREHOUSE_PASSWORD);
+
+      // Sanity-check: the access JWT resolves to the seeded warehouse staff
+      // user id — guards against an accidental email collision masking the
+      // 403 assertion below.
+      const payload = decodeJwtBody(tokens.accessToken);
+      expect(payload.sub).toBe(WAREHOUSE_STAFF_USER_ID);
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .get('/api/auth/admin/ping')
