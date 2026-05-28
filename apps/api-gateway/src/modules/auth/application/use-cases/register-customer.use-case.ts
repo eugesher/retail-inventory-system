@@ -1,6 +1,8 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 
+import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
+
 import { Customer } from '../../domain/customer.model';
 import { CUSTOMER_REPOSITORY, ICustomerRepositoryPort } from '../ports/customer.repository.port';
 import { IPasswordPort, PASSWORD_HASHER } from '../ports/password.port';
@@ -11,6 +13,7 @@ export class RegisterCustomerUseCase {
   constructor(
     @Inject(CUSTOMER_REPOSITORY) private readonly customers: ICustomerRepositoryPort,
     @Inject(PASSWORD_HASHER) private readonly hasher: IPasswordPort,
+    @Inject(AUDIT_LOG_PUBLISHER) private readonly audit: IAuditLogPublisher,
   ) {}
 
   public async execute(command: IRegisterCustomerCommand): Promise<Customer> {
@@ -32,6 +35,18 @@ export class RegisterCustomerUseCase {
       emailVerifiedAt: null,
     });
 
-    return this.customers.save(customer);
+    const saved = await this.customers.save(customer);
+
+    await this.audit.publish({
+      name: 'CustomerRegistered',
+      actorId: saved.id,
+      actorKind: 'customer',
+      targetId: saved.id,
+      targetKind: 'customer',
+      payload: { email: saved.email },
+      correlationId: command.correlationId ?? null,
+    });
+
+    return saved;
   }
 }

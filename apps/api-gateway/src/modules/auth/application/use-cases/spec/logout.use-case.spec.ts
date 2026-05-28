@@ -7,17 +7,19 @@ import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/obs
 import { RoleAggregate } from '../../../domain/role.aggregate';
 import { StaffUser } from '../../../domain/staff-user.model';
 import { LogoutUseCase } from '../logout.use-case';
-import { FakeHasher, InMemoryStaffUserRepository } from './test-doubles';
+import { FakeAuditLogPublisher, FakeHasher, InMemoryStaffUserRepository } from './test-doubles';
 
 describe('LogoutUseCase', () => {
   let users: InMemoryStaffUserRepository;
+  let audit: FakeAuditLogPublisher;
   let logger: PinoLoggerMock;
   let useCase: LogoutUseCase;
 
   beforeEach(() => {
     users = new InMemoryStaffUserRepository();
+    audit = new FakeAuditLogPublisher();
     logger = makePinoLoggerMock();
-    useCase = new LogoutUseCase(users, logger as unknown as PinoLogger);
+    useCase = new LogoutUseCase(users, audit, logger as unknown as PinoLogger);
   });
 
   const seedActiveUser = async (): Promise<StaffUser> => {
@@ -38,13 +40,41 @@ describe('LogoutUseCase', () => {
     const user = await seedActiveUser();
     expect(user.refreshTokenHash).toBe('hash:some-token');
 
-    await useCase.execute(user.id);
+    await useCase.execute({ userId: user.id });
 
     const reloaded = await users.findById(user.id);
     expect(reloaded?.refreshTokenHash).toBeNull();
   });
 
   it('throws 404 when the user does not exist', async () => {
-    await expect(useCase.execute('missing-id')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(useCase.execute({ userId: 'missing-id' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  describe('audit-log publishing', () => {
+    it('publishes LogoutPerformed exactly once with the staff actor + target', async () => {
+      const user = await seedActiveUser();
+
+      await useCase.execute({ userId: user.id, correlationId: 'cid-logout' });
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'LogoutPerformed',
+        actorId: user.id,
+        actorKind: 'staff',
+        targetId: user.id,
+        targetKind: 'staff-user',
+        correlationId: 'cid-logout',
+        payload: {},
+      });
+    });
+
+    it('does not publish when the user is missing (404 short-circuit)', async () => {
+      await expect(useCase.execute({ userId: 'missing-id' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(audit.published).toEqual([]);
+    });
   });
 });

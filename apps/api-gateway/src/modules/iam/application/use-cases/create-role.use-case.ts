@@ -1,7 +1,11 @@
 import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 
-import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
+import {
+  AUDIT_LOG_PUBLISHER,
+  IAuditLogPublisher,
+  PermissionCodeEnum,
+} from '@retail-inventory-system/contracts';
 
 import {
   IPermissionRepositoryPort,
@@ -17,6 +21,7 @@ export class CreateRoleUseCase {
   constructor(
     @Inject(ROLE_REPOSITORY) private readonly roles: IRoleRepositoryPort,
     @Inject(PERMISSION_REPOSITORY) private readonly permissions: IPermissionRepositoryPort,
+    @Inject(AUDIT_LOG_PUBLISHER) private readonly audit: IAuditLogPublisher,
   ) {}
 
   public async execute(command: ICreateRoleCommand): Promise<RoleAggregate> {
@@ -32,7 +37,23 @@ export class CreateRoleUseCase {
       description: command.description ?? null,
       permissions: command.permissionCodes,
     });
-    return this.roles.save(role);
+    const saved = await this.roles.save(role);
+
+    await this.audit.publish({
+      name: 'RoleCreated',
+      actorId: command.actorId ?? null,
+      actorKind: command.actorId ? 'staff' : 'anonymous',
+      targetId: saved.id,
+      targetKind: 'role',
+      payload: {
+        name: saved.name,
+        description: saved.description,
+        permissionCodes: Array.from(saved.permissions),
+      },
+      correlationId: command.correlationId ?? null,
+    });
+
+    return saved;
   }
 
   private async assertPermissionsExist(codes: PermissionCodeEnum[]): Promise<void> {

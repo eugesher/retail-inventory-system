@@ -2,6 +2,7 @@ import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 
 import { Public } from '@retail-inventory-system/auth';
+import { CorrelationId } from '@retail-inventory-system/observability';
 
 import { LoginUseCase } from '../application/use-cases/login.use-case';
 import { LoginRequestDto } from './dto/login.request.dto';
@@ -22,8 +23,15 @@ export class StaffLoginController {
   @ApiOperation({ summary: 'Authenticate a staff user with email + password' })
   @ApiOkResponse({ type: TokenResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  public async login(@Body() dto: LoginRequestDto): Promise<TokenResponseDto> {
-    const result = await this.loginUseCase.execute(dto);
+  public async login(
+    @Body() dto: LoginRequestDto,
+    @CorrelationId() correlationId: string,
+  ): Promise<TokenResponseDto> {
+    const result = await this.loginUseCase.execute({
+      email: dto.email,
+      password: dto.password,
+      correlationId,
+    });
     return {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,

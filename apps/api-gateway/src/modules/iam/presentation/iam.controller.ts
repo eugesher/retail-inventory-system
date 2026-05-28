@@ -21,8 +21,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
-import { RequiresPermission } from '@retail-inventory-system/auth';
-import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
+import { CurrentUser, RequiresPermission } from '@retail-inventory-system/auth';
+import { ICurrentUser, PermissionCodeEnum } from '@retail-inventory-system/contracts';
+import { CorrelationId } from '@retail-inventory-system/observability';
 
 import { AssignStaffRoleUseCase } from '../application/use-cases/assign-staff-role.use-case';
 import { CreateRoleUseCase } from '../application/use-cases/create-role.use-case';
@@ -67,11 +68,17 @@ export class IamController {
   @ApiCreatedResponse({ type: RoleResponseDto })
   @ApiConflictResponse({ description: 'A role with that name already exists' })
   @ApiBadRequestResponse({ description: 'Unknown permission codes' })
-  public async create(@Body() dto: CreateRoleRequestDto): Promise<RoleResponseDto> {
+  public async create(
+    @Body() dto: CreateRoleRequestDto,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<RoleResponseDto> {
     const role = await this.createRole.execute({
       name: dto.name,
       description: dto.description ?? null,
       permissionCodes: dto.permissionCodes,
+      actorId: actor.id,
+      correlationId,
     });
     return {
       id: role.id,
@@ -90,11 +97,15 @@ export class IamController {
   public async update(
     @Param('id') id: string,
     @Body() dto: UpdateRoleRequestDto,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
   ): Promise<RoleResponseDto> {
     const role = await this.updateRole.execute({
       id,
       description: dto.description,
       permissionCodes: dto.permissionCodes,
+      actorId: actor.id,
+      correlationId,
     });
     return {
       id: role.id,
@@ -114,10 +125,14 @@ export class IamController {
   public async assign(
     @Param('id') id: string,
     @Body() dto: AssignStaffRoleRequestDto,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
   ): Promise<StaffRolesResponseDto> {
     const staffUser = await this.assignStaffRole.execute({
       staffUserId: id,
       roleNames: dto.roleNames,
+      actorId: actor.id,
+      correlationId,
     });
     return {
       id: staffUser.id,
@@ -133,7 +148,17 @@ export class IamController {
   @ApiNotFoundResponse({ description: 'StaffUser not found or role not bound to user' })
   @ApiConflictResponse({ description: 'Cannot revoke the last remaining role' })
   @HttpCode(HttpStatus.NO_CONTENT)
-  public async revoke(@Param('id') id: string, @Param('roleName') roleName: string): Promise<void> {
-    await this.revokeStaffRole.execute({ staffUserId: id, roleName });
+  public async revoke(
+    @Param('id') id: string,
+    @Param('roleName') roleName: string,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<void> {
+    await this.revokeStaffRole.execute({
+      staffUserId: id,
+      roleName,
+      actorId: actor.id,
+      correlationId,
+    });
   }
 }

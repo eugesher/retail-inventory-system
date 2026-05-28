@@ -1,6 +1,10 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 
-import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
+import {
+  AUDIT_LOG_PUBLISHER,
+  IAuditLogPublisher,
+  PermissionCodeEnum,
+} from '@retail-inventory-system/contracts';
 
 import {
   IPermissionRepositoryPort,
@@ -16,6 +20,7 @@ export class UpdateRoleUseCase {
   constructor(
     @Inject(ROLE_REPOSITORY) private readonly roles: IRoleRepositoryPort,
     @Inject(PERMISSION_REPOSITORY) private readonly permissions: IPermissionRepositoryPort,
+    @Inject(AUDIT_LOG_PUBLISHER) private readonly audit: IAuditLogPublisher,
   ) {}
 
   public async execute(command: IUpdateRoleCommand): Promise<RoleAggregate> {
@@ -33,12 +38,29 @@ export class UpdateRoleUseCase {
       await this.roles.save(role);
     }
 
+    let result = role;
     if (command.permissionCodes !== undefined) {
       await this.assertPermissionsExist(command.permissionCodes);
-      return this.roles.replacePermissions(role, command.permissionCodes);
+      result = await this.roles.replacePermissions(role, command.permissionCodes);
     }
 
-    return role;
+    await this.audit.publish({
+      name: 'RolePermissionsReplaced',
+      actorId: command.actorId ?? null,
+      actorKind: command.actorId ? 'staff' : 'anonymous',
+      targetId: result.id,
+      targetKind: 'role',
+      payload: {
+        name: result.name,
+        description: result.description,
+        permissionCodes: Array.from(result.permissions),
+        descriptionUpdated: command.description !== undefined,
+        permissionsReplaced: command.permissionCodes !== undefined,
+      },
+      correlationId: command.correlationId ?? null,
+    });
+
+    return result;
   }
 
   private async assertPermissionsExist(codes: PermissionCodeEnum[]): Promise<void> {

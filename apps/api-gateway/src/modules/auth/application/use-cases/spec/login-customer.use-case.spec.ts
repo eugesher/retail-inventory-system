@@ -5,12 +5,18 @@ import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/obs
 
 import { Customer } from '../../../domain/customer.model';
 import { LoginCustomerUseCase } from '../login-customer.use-case';
-import { FakeHasher, FakeTokenAdapter, InMemoryCustomerRepository } from './test-doubles';
+import {
+  FakeAuditLogPublisher,
+  FakeHasher,
+  FakeTokenAdapter,
+  InMemoryCustomerRepository,
+} from './test-doubles';
 
 describe('LoginCustomerUseCase', () => {
   let customers: InMemoryCustomerRepository;
   let hasher: FakeHasher;
   let tokens: FakeTokenAdapter;
+  let audit: FakeAuditLogPublisher;
   let logger: PinoLoggerMock;
   let useCase: LoginCustomerUseCase;
 
@@ -33,8 +39,15 @@ describe('LoginCustomerUseCase', () => {
     customers = new InMemoryCustomerRepository();
     hasher = new FakeHasher();
     tokens = new FakeTokenAdapter();
+    audit = new FakeAuditLogPublisher();
     logger = makePinoLoggerMock();
-    useCase = new LoginCustomerUseCase(customers, hasher, tokens, logger as unknown as PinoLogger);
+    useCase = new LoginCustomerUseCase(
+      customers,
+      hasher,
+      tokens,
+      audit,
+      logger as unknown as PinoLogger,
+    );
   });
 
   it('issues tokens with empty roles + permissions on valid credentials', async () => {
@@ -79,5 +92,72 @@ describe('LoginCustomerUseCase', () => {
     await expect(
       useCase.execute({ email: customer.email, password: 'password123' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  describe('audit-log publishing', () => {
+    it('publishes CustomerLoggedIn with the customer as actor + target', async () => {
+      const customer = await seedCustomer();
+
+      await useCase.execute({
+        email: customer.email,
+        password: 'password123',
+        correlationId: 'cid-c-ok',
+      });
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'CustomerLoggedIn',
+        actorId: customer.id,
+        actorKind: 'customer',
+        targetId: customer.id,
+        targetKind: 'customer',
+        correlationId: 'cid-c-ok',
+        payload: { email: customer.email },
+      });
+    });
+
+    it('publishes CustomerLoginFailed (customer-not-found) with anonymous actor + null target', async () => {
+      await expect(
+        useCase.execute({
+          email: 'nope@example.com',
+          password: 'password123',
+          correlationId: 'cid-c-miss',
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'CustomerLoginFailed',
+        actorId: null,
+        actorKind: 'anonymous',
+        targetId: null,
+        targetKind: null,
+        correlationId: 'cid-c-miss',
+        payload: { email: 'nope@example.com', reason: 'customer-not-found' },
+      });
+    });
+
+    it('publishes CustomerLoginFailed (bad-password) carrying the customer id as target', async () => {
+      const customer = await seedCustomer();
+
+      await expect(
+        useCase.execute({
+          email: customer.email,
+          password: 'WRONG',
+          correlationId: 'cid-c-bad',
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'CustomerLoginFailed',
+        actorId: null,
+        actorKind: 'anonymous',
+        targetId: customer.id,
+        targetKind: 'customer',
+        correlationId: 'cid-c-bad',
+        payload: { email: customer.email, reason: 'bad-password' },
+      });
+    });
   });
 });

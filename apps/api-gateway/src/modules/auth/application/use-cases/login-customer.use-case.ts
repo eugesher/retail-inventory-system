@@ -2,7 +2,11 @@ import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { ICurrentUser } from '@retail-inventory-system/contracts';
+import {
+  AUDIT_LOG_PUBLISHER,
+  IAuditLogPublisher,
+  ICurrentUser,
+} from '@retail-inventory-system/contracts';
 
 import { ILoginCustomerCommand } from '../dto/login-customer.command';
 import { CUSTOMER_REPOSITORY, ICustomerRepositoryPort } from '../ports/customer.repository.port';
@@ -19,21 +23,41 @@ export class LoginCustomerUseCase {
     @Inject(CUSTOMER_REPOSITORY) private readonly customers: ICustomerRepositoryPort,
     @Inject(PASSWORD_HASHER) private readonly hasher: IPasswordPort,
     @Inject(TOKEN_SERVICE) private readonly tokens: ITokenPort,
+    @Inject(AUDIT_LOG_PUBLISHER) private readonly audit: IAuditLogPublisher,
     @InjectPinoLogger(LoginCustomerUseCase.name) private readonly logger: PinoLogger,
   ) {}
 
   public async execute(command: ILoginCustomerCommand): Promise<ILoginCustomerResult> {
     const email = command.email.trim().toLowerCase();
+    const correlationId = command.correlationId ?? null;
     const customer = await this.customers.findByEmail(email);
 
     if (!customer?.isActive) {
       this.logger.warn({ email }, 'CustomerLoginFailed: not found or inactive');
+      await this.audit.publish({
+        name: 'CustomerLoginFailed',
+        actorId: null,
+        actorKind: 'anonymous',
+        targetId: null,
+        targetKind: null,
+        payload: { email, reason: 'customer-not-found' },
+        correlationId,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const passwordValid = await customer.validatePassword(command.password, this.hasher);
     if (!passwordValid) {
       this.logger.warn({ customerId: customer.id, email }, 'CustomerLoginFailed: bad password');
+      await this.audit.publish({
+        name: 'CustomerLoginFailed',
+        actorId: null,
+        actorKind: 'anonymous',
+        targetId: customer.id,
+        targetKind: 'customer',
+        payload: { email, reason: 'bad-password' },
+        correlationId,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -57,6 +81,15 @@ export class LoginCustomerUseCase {
     await this.customers.save(customer);
 
     this.logger.info({ customerId: customer.id }, 'CustomerLoggedIn');
+    await this.audit.publish({
+      name: 'CustomerLoggedIn',
+      actorId: customer.id,
+      actorKind: 'customer',
+      targetId: customer.id,
+      targetKind: 'customer',
+      payload: { email: customer.email },
+      correlationId,
+    });
 
     return {
       accessToken,

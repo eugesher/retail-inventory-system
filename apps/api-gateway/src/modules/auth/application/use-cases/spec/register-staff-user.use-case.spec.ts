@@ -5,7 +5,7 @@ import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts
 import { RoleAggregate } from '../../../domain/role.aggregate';
 import { IRoleRepositoryPort } from '../../ports/role.repository.port';
 import { RegisterStaffUserUseCase } from '../register-staff-user.use-case';
-import { FakeHasher, InMemoryStaffUserRepository } from './test-doubles';
+import { FakeAuditLogPublisher, FakeHasher, InMemoryStaffUserRepository } from './test-doubles';
 
 const ADMIN_ROLE_ID = '00000000-0000-4000-c000-000000000001';
 const SUPPORT_ROLE_ID = '00000000-0000-4000-c000-000000000004';
@@ -66,12 +66,14 @@ describe('RegisterStaffUserUseCase', () => {
   let users: InMemoryStaffUserRepository;
   let roles: InMemoryRoleRepository;
   let hasher: FakeHasher;
+  let audit: FakeAuditLogPublisher;
   let useCase: RegisterStaffUserUseCase;
 
   beforeEach(() => {
     users = new InMemoryStaffUserRepository();
     roles = new InMemoryRoleRepository();
     hasher = new FakeHasher();
+    audit = new FakeAuditLogPublisher();
 
     roles.register(
       RoleAggregate.create(ADMIN_ROLE_ID, {
@@ -86,7 +88,7 @@ describe('RegisterStaffUserUseCase', () => {
       }),
     );
 
-    useCase = new RegisterStaffUserUseCase(users, roles, hasher);
+    useCase = new RegisterStaffUserUseCase(users, roles, hasher, audit);
   });
 
   it('persists a new staff user with the resolved roles', async () => {
@@ -131,5 +133,36 @@ describe('RegisterStaffUserUseCase', () => {
         roleNames: [RoleEnum.ADMIN],
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  describe('audit-log publishing', () => {
+    it('publishes StaffUserRegistered exactly once with the new user as target', async () => {
+      const user = await useCase.execute({
+        email: 'audit@example.com',
+        password: 'password123',
+        roleNames: [RoleEnum.ADMIN],
+        actorId: 'staff-admin-1',
+        correlationId: 'cid-staff-reg',
+      });
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'StaffUserRegistered',
+        actorId: 'staff-admin-1',
+        actorKind: 'staff',
+        targetId: user.id,
+        targetKind: 'staff-user',
+        correlationId: 'cid-staff-reg',
+        payload: { email: user.email, roleNames: [RoleEnum.ADMIN] },
+      });
+    });
+
+    it('does not publish on the bad-request branches', async () => {
+      await expect(
+        useCase.execute({ email: 'x@example.com', password: 'pw', roleNames: [] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(audit.published).toEqual([]);
+    });
   });
 });

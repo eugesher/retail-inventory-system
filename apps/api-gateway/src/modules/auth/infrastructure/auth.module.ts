@@ -2,6 +2,7 @@ import { DynamicModule, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule as AuthLibModule, AUTH_USER_VALIDATOR } from '@retail-inventory-system/auth';
+import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
 
 import { CUSTOMER_REPOSITORY } from '../application/ports/customer.repository.port';
 import { PASSWORD_HASHER } from '../application/ports/password.port';
@@ -22,6 +23,7 @@ import { AuthController } from '../presentation/auth.controller';
 import { CustomerAuthController } from '../presentation/customer-auth.controller';
 import { StaffLoginController } from '../presentation/staff-login.controller';
 import { Argon2PasswordAdapter } from './argon2/argon2-password.adapter';
+import { NoOpAuditLogPublisher } from './audit/no-op-audit-log.publisher';
 import { JwtTokenAdapter } from './jwt/jwt-token.adapter';
 import { CustomerEntity } from './persistence/customer.entity';
 import { CustomerTypeormRepository } from './persistence/customer-typeorm.repository';
@@ -74,6 +76,9 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     JwtTokenAdapter,
     { provide: TOKEN_SERVICE, useExisting: JwtTokenAdapter },
 
+    NoOpAuditLogPublisher,
+    { provide: AUDIT_LOG_PUBLISHER, useExisting: NoOpAuditLogPublisher },
+
     RoleTypeormRepository,
     { provide: ROLE_REPOSITORY, useExisting: RoleTypeormRepository },
 
@@ -91,6 +96,7 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
   exports: [
     PASSWORD_HASHER,
     TOKEN_SERVICE,
+    AUDIT_LOG_PUBLISHER,
     RegisterStaffUserUseCase,
     RegisterCustomerUseCase,
     ROLE_REPOSITORY,

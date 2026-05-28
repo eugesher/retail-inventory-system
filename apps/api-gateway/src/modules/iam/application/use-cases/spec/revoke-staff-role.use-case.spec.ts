@@ -5,10 +5,11 @@ import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 import { RoleAggregate, StaffUser } from '../../../../auth';
 import { StaffUserRoleRevokedEvent } from '../../../../auth/domain/events/staff-user-role-revoked.event';
 import { RevokeStaffRoleUseCase } from '../revoke-staff-role.use-case';
-import { InMemoryStaffUserRepository } from './test-doubles';
+import { FakeAuditLogPublisher, InMemoryStaffUserRepository } from './test-doubles';
 
 describe('RevokeStaffRoleUseCase', () => {
   let staffUsers: InMemoryStaffUserRepository;
+  let audit: FakeAuditLogPublisher;
   let useCase: RevokeStaffRoleUseCase;
 
   let adminRole: RoleAggregate;
@@ -16,6 +17,7 @@ describe('RevokeStaffRoleUseCase', () => {
 
   beforeEach(() => {
     staffUsers = new InMemoryStaffUserRepository();
+    audit = new FakeAuditLogPublisher();
     adminRole = RoleAggregate.create('role-admin', {
       name: 'admin',
       permissions: [PermissionCodeEnum.AUDIT_READ],
@@ -25,7 +27,7 @@ describe('RevokeStaffRoleUseCase', () => {
       permissions: [PermissionCodeEnum.ORDER_READ],
     });
 
-    useCase = new RevokeStaffRoleUseCase(staffUsers);
+    useCase = new RevokeStaffRoleUseCase(staffUsers, audit);
   });
 
   it('revokes a role and records the event', async () => {
@@ -88,5 +90,45 @@ describe('RevokeStaffRoleUseCase', () => {
     }
     expect(captured).toBeInstanceOf(ConflictException);
     expect(captured?.message).toBe('Cannot revoke the last remaining role');
+  });
+
+  describe('audit-log publishing', () => {
+    it('publishes StaffUserRoleRevoked exactly once with the revoked name', async () => {
+      staffUsers.seed(
+        StaffUser.register('staff-1', {
+          email: 'staff@example.com',
+          passwordHash: 'hash:pw',
+          roles: [adminRole, supportRole],
+        }),
+      );
+
+      await useCase.execute({
+        staffUserId: 'staff-1',
+        roleName: 'order-support',
+        actorId: 'staff-admin-1',
+        correlationId: 'cid-revoke',
+      });
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'StaffUserRoleRevoked',
+        actorId: 'staff-admin-1',
+        actorKind: 'staff',
+        targetId: 'staff-1',
+        targetKind: 'staff-user',
+        correlationId: 'cid-revoke',
+        payload: {
+          revokedRoleName: 'order-support',
+          currentRoleNames: ['admin'],
+        },
+      });
+    });
+
+    it('does not publish on the not-found / conflict branches', async () => {
+      await expect(
+        useCase.execute({ staffUserId: 'missing', roleName: 'admin' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(audit.published).toEqual([]);
+    });
   });
 });

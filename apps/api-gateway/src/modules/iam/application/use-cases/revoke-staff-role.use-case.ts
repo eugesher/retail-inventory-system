@@ -1,5 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 
+import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
+
 import { IStaffUserRepositoryPort, STAFF_USER_REPOSITORY, StaffUser } from '../../../auth';
 import { IRevokeStaffRoleCommand } from '../dto/revoke-staff-role.command';
 
@@ -7,6 +9,7 @@ import { IRevokeStaffRoleCommand } from '../dto/revoke-staff-role.command';
 export class RevokeStaffRoleUseCase {
   constructor(
     @Inject(STAFF_USER_REPOSITORY) private readonly staffUsers: IStaffUserRepositoryPort,
+    @Inject(AUDIT_LOG_PUBLISHER) private readonly audit: IAuditLogPublisher,
   ) {}
 
   public async execute(command: IRevokeStaffRoleCommand): Promise<StaffUser> {
@@ -33,6 +36,21 @@ export class RevokeStaffRoleUseCase {
     }
 
     staffUser.recordRoleRevoked(bound.name);
-    return this.staffUsers.save(staffUser);
+    const saved = await this.staffUsers.save(staffUser);
+
+    await this.audit.publish({
+      name: 'StaffUserRoleRevoked',
+      actorId: command.actorId ?? null,
+      actorKind: command.actorId ? 'staff' : 'anonymous',
+      targetId: saved.id,
+      targetKind: 'staff-user',
+      payload: {
+        revokedRoleName: bound.name,
+        currentRoleNames: saved.roles.map((r) => r.name),
+      },
+      correlationId: command.correlationId ?? null,
+    });
+
+    return saved;
   }
 }

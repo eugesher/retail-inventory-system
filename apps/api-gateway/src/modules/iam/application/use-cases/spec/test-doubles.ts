@@ -1,4 +1,8 @@
-import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
+import {
+  IAuditLogEvent,
+  IAuditLogPublisher,
+  PermissionCodeEnum,
+} from '@retail-inventory-system/contracts';
 
 import {
   IPermissionRepositoryPort,
@@ -8,6 +12,20 @@ import {
   RoleAggregate,
   StaffUser,
 } from '../../../../auth';
+
+// Recording fake for IAuditLogPublisher — collects published events so specs
+// can assert event-name + payload shape per audit point. Kept here (not
+// re-exported from auth's test-doubles) because IAM specs live in a sibling
+// module and the eslint boundaries rules forbid spec-to-sibling-module deep
+// imports.
+export class FakeAuditLogPublisher implements IAuditLogPublisher {
+  public readonly published: IAuditLogEvent[] = [];
+
+  public publish(event: IAuditLogEvent): Promise<void> {
+    this.published.push(event);
+    return Promise.resolve();
+  }
+}
 
 export class InMemoryRoleRepository implements IRoleRepositoryPort {
   private byId = new Map<string, RoleAggregate>();

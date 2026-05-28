@@ -4,21 +4,27 @@ import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
 import { PermissionAggregate, RoleAggregate } from '../../../../auth';
 import { CreateRoleUseCase } from '../create-role.use-case';
-import { InMemoryPermissionRepository, InMemoryRoleRepository } from './test-doubles';
+import {
+  FakeAuditLogPublisher,
+  InMemoryPermissionRepository,
+  InMemoryRoleRepository,
+} from './test-doubles';
 
 describe('CreateRoleUseCase', () => {
   let roles: InMemoryRoleRepository;
   let permissions: InMemoryPermissionRepository;
+  let audit: FakeAuditLogPublisher;
   let useCase: CreateRoleUseCase;
 
   beforeEach(() => {
     roles = new InMemoryRoleRepository();
     permissions = new InMemoryPermissionRepository();
+    audit = new FakeAuditLogPublisher();
 
     permissions.seed(PermissionAggregate.create('p1', { code: PermissionCodeEnum.AUDIT_READ }));
     permissions.seed(PermissionAggregate.create('p2', { code: PermissionCodeEnum.IAM_ROLE_EDIT }));
 
-    useCase = new CreateRoleUseCase(roles, permissions);
+    useCase = new CreateRoleUseCase(roles, permissions, audit);
   });
 
   it('persists a new role with the bound permissions', async () => {
@@ -56,5 +62,44 @@ describe('CreateRoleUseCase', () => {
     }
     expect(captured).toBeInstanceOf(BadRequestException);
     expect(captured?.message).toContain('inventory:nope');
+  });
+
+  describe('audit-log publishing', () => {
+    it('publishes RoleCreated exactly once with the actor + new role as target', async () => {
+      const role = await useCase.execute({
+        name: 'audit-reader',
+        description: 'Read-only auditor',
+        permissionCodes: [PermissionCodeEnum.AUDIT_READ],
+        actorId: 'staff-admin-1',
+        correlationId: 'cid-role-create',
+      });
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'RoleCreated',
+        actorId: 'staff-admin-1',
+        actorKind: 'staff',
+        targetId: role.id,
+        targetKind: 'role',
+        correlationId: 'cid-role-create',
+        payload: {
+          name: 'audit-reader',
+          description: 'Read-only auditor',
+          permissionCodes: [PermissionCodeEnum.AUDIT_READ],
+        },
+      });
+    });
+
+    it('does not publish on conflict / bad-request branches', async () => {
+      roles.seed(RoleAggregate.create('existing-id', { name: 'audit-reader', permissions: [] }));
+      await expect(
+        useCase.execute({
+          name: 'audit-reader',
+          permissionCodes: [PermissionCodeEnum.AUDIT_READ],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(audit.published).toEqual([]);
+    });
   });
 });

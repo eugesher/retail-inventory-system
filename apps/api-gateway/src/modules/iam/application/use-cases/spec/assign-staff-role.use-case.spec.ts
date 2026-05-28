@@ -5,7 +5,11 @@ import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 import { RoleAggregate, StaffUser } from '../../../../auth';
 import { StaffUserRolesAssignedEvent } from '../../../../auth/domain/events/staff-user-roles-assigned.event';
 import { AssignStaffRoleUseCase } from '../assign-staff-role.use-case';
-import { InMemoryRoleRepository, InMemoryStaffUserRepository } from './test-doubles';
+import {
+  FakeAuditLogPublisher,
+  InMemoryRoleRepository,
+  InMemoryStaffUserRepository,
+} from './test-doubles';
 
 const seedStaffUser = (roles: RoleAggregate[]): StaffUser =>
   StaffUser.register('staff-1', {
@@ -17,6 +21,7 @@ const seedStaffUser = (roles: RoleAggregate[]): StaffUser =>
 describe('AssignStaffRoleUseCase', () => {
   let staffUsers: InMemoryStaffUserRepository;
   let roles: InMemoryRoleRepository;
+  let audit: FakeAuditLogPublisher;
   let useCase: AssignStaffRoleUseCase;
 
   let adminRole: RoleAggregate;
@@ -25,6 +30,7 @@ describe('AssignStaffRoleUseCase', () => {
   beforeEach(() => {
     staffUsers = new InMemoryStaffUserRepository();
     roles = new InMemoryRoleRepository();
+    audit = new FakeAuditLogPublisher();
 
     adminRole = RoleAggregate.create('role-admin', {
       name: 'admin',
@@ -38,7 +44,7 @@ describe('AssignStaffRoleUseCase', () => {
     roles.seed(supportRole);
     staffUsers.seed(seedStaffUser([supportRole]));
 
-    useCase = new AssignStaffRoleUseCase(staffUsers, roles);
+    useCase = new AssignStaffRoleUseCase(staffUsers, roles, audit);
   });
 
   it('assigns a new role and records the diff in the domain event', async () => {
@@ -86,5 +92,58 @@ describe('AssignStaffRoleUseCase', () => {
     await expect(
       useCase.execute({ staffUserId: 'staff-1', roleNames: ['admin'] }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  describe('audit-log publishing', () => {
+    it('publishes StaffUserRolesAssigned with the *added* role-name diff', async () => {
+      await useCase.execute({
+        staffUserId: 'staff-1',
+        roleNames: ['admin'],
+        actorId: 'staff-admin-1',
+        correlationId: 'cid-assign',
+      });
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'StaffUserRolesAssigned',
+        actorId: 'staff-admin-1',
+        actorKind: 'staff',
+        targetId: 'staff-1',
+        targetKind: 'staff-user',
+        correlationId: 'cid-assign',
+        payload: {
+          requestedRoleNames: ['admin'],
+          addedRoleNames: ['admin'],
+        },
+      });
+      expect(
+        (audit.published[0].payload as { currentRoleNames: string[] }).currentRoleNames.sort(),
+      ).toEqual(['admin', 'order-support']);
+    });
+
+    it('publishes StaffUserRolesAssigned with an empty addedRoleNames on idempotent re-assign', async () => {
+      await useCase.execute({
+        staffUserId: 'staff-1',
+        roleNames: ['order-support'],
+        actorId: 'staff-admin-1',
+      });
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'StaffUserRolesAssigned',
+        payload: {
+          requestedRoleNames: ['order-support'],
+          addedRoleNames: [],
+          currentRoleNames: ['order-support'],
+        },
+      });
+    });
+
+    it('does not publish on the validation-failure branches', async () => {
+      await expect(
+        useCase.execute({ staffUserId: 'staff-1', roleNames: ['nope'] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(audit.published).toEqual([]);
+    });
   });
 });

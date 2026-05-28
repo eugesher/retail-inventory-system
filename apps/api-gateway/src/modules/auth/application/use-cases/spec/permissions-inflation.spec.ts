@@ -6,7 +6,12 @@ import { makePinoLoggerMock } from '@retail-inventory-system/observability/testi
 import { RoleAggregate } from '../../../domain/role.aggregate';
 import { StaffUser } from '../../../domain/staff-user.model';
 import { LoginUseCase } from '../login.use-case';
-import { FakeHasher, FakeTokenAdapter, InMemoryStaffUserRepository } from './test-doubles';
+import {
+  FakeAuditLogPublisher,
+  FakeHasher,
+  FakeTokenAdapter,
+  InMemoryStaffUserRepository,
+} from './test-doubles';
 
 describe('Permissions inflation on the access JWT', () => {
   let users: InMemoryStaffUserRepository;
@@ -18,7 +23,13 @@ describe('Permissions inflation on the access JWT', () => {
     users = new InMemoryStaffUserRepository();
     hasher = new FakeHasher();
     tokens = new FakeTokenAdapter();
-    login = new LoginUseCase(users, hasher, tokens, makePinoLoggerMock() as unknown as PinoLogger);
+    login = new LoginUseCase(
+      users,
+      hasher,
+      tokens,
+      new FakeAuditLogPublisher(),
+      makePinoLoggerMock() as unknown as PinoLogger,
+    );
   });
 
   it('merges admin + catalog-manager permission sets — distinct codes, sorted ASC, no duplicates', async () => {

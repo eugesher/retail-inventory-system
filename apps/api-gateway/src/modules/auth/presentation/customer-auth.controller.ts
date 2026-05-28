@@ -10,6 +10,7 @@ import {
 
 import { CurrentUser, Public } from '@retail-inventory-system/auth';
 import { ICurrentUser } from '@retail-inventory-system/contracts';
+import { CorrelationId } from '@retail-inventory-system/observability';
 
 import { GetCurrentCustomerUseCase } from '../application/use-cases/get-current-customer.use-case';
 import { LoginCustomerUseCase } from '../application/use-cases/login-customer.use-case';
@@ -35,6 +36,7 @@ export class CustomerAuthController {
   @ApiCreatedResponse({ type: CurrentCustomerResponseDto })
   public async register(
     @Body() dto: RegisterCustomerRequestDto,
+    @CorrelationId() correlationId: string,
   ): Promise<CurrentCustomerResponseDto> {
     const customer = await this.registerUseCase.execute({
       email: dto.email,
@@ -42,6 +44,7 @@ export class CustomerAuthController {
       firstName: dto.firstName ?? null,
       lastName: dto.lastName ?? null,
       phone: dto.phone ?? null,
+      correlationId,
     });
 
     return {
@@ -61,8 +64,15 @@ export class CustomerAuthController {
   @ApiOperation({ summary: 'Authenticate a customer with email + password' })
   @ApiOkResponse({ type: TokenResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  public async login(@Body() dto: LoginCustomerRequestDto): Promise<TokenResponseDto> {
-    const result = await this.loginUseCase.execute(dto);
+  public async login(
+    @Body() dto: LoginCustomerRequestDto,
+    @CorrelationId() correlationId: string,
+  ): Promise<TokenResponseDto> {
+    const result = await this.loginUseCase.execute({
+      email: dto.email,
+      password: dto.password,
+      correlationId,
+    });
     return {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,

@@ -4,4 +4,5 @@ export interface IRegisterCustomerCommand {
   firstName?: string | null;
   lastName?: string | null;
   phone?: string | null;
+  correlationId?: string | null;
 }

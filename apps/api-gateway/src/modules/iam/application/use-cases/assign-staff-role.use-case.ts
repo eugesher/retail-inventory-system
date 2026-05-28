@@ -1,5 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 
+import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
+
 import {
   IRoleRepositoryPort,
   IStaffUserRepositoryPort,
@@ -14,6 +16,7 @@ export class AssignStaffRoleUseCase {
   constructor(
     @Inject(STAFF_USER_REPOSITORY) private readonly staffUsers: IStaffUserRepositoryPort,
     @Inject(ROLE_REPOSITORY) private readonly roles: IRoleRepositoryPort,
+    @Inject(AUDIT_LOG_PUBLISHER) private readonly audit: IAuditLogPublisher,
   ) {}
 
   public async execute(command: IAssignStaffRoleCommand): Promise<StaffUser> {
@@ -43,6 +46,22 @@ export class AssignStaffRoleUseCase {
       staffUser.recordRolesAssigned(addedRoleNames);
     }
 
-    return this.staffUsers.save(staffUser);
+    const saved = await this.staffUsers.save(staffUser);
+
+    await this.audit.publish({
+      name: 'StaffUserRolesAssigned',
+      actorId: command.actorId ?? null,
+      actorKind: command.actorId ? 'staff' : 'anonymous',
+      targetId: saved.id,
+      targetKind: 'staff-user',
+      payload: {
+        requestedRoleNames: command.roleNames,
+        addedRoleNames,
+        currentRoleNames: saved.roles.map((r) => r.name),
+      },
+      correlationId: command.correlationId ?? null,
+    });
+
+    return saved;
   }
 }

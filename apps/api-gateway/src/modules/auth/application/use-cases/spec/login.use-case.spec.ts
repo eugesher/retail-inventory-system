@@ -7,7 +7,12 @@ import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/obs
 import { RoleAggregate } from '../../../domain/role.aggregate';
 import { StaffUser } from '../../../domain/staff-user.model';
 import { LoginUseCase } from '../login.use-case';
-import { FakeHasher, FakeTokenAdapter, InMemoryStaffUserRepository } from './test-doubles';
+import {
+  FakeAuditLogPublisher,
+  FakeHasher,
+  FakeTokenAdapter,
+  InMemoryStaffUserRepository,
+} from './test-doubles';
 
 const ADMIN_ROLE_ID = '00000000-0000-4000-c000-000000000001';
 
@@ -21,6 +26,7 @@ describe('LoginUseCase', () => {
   let users: InMemoryStaffUserRepository;
   let hasher: FakeHasher;
   let tokens: FakeTokenAdapter;
+  let audit: FakeAuditLogPublisher;
   let logger: PinoLoggerMock;
   let useCase: LoginUseCase;
 
@@ -48,8 +54,9 @@ describe('LoginUseCase', () => {
     users = new InMemoryStaffUserRepository();
     hasher = new FakeHasher();
     tokens = new FakeTokenAdapter();
+    audit = new FakeAuditLogPublisher();
     logger = makePinoLoggerMock();
-    useCase = new LoginUseCase(users, hasher, tokens, logger as unknown as PinoLogger);
+    useCase = new LoginUseCase(users, hasher, tokens, audit, logger as unknown as PinoLogger);
   });
 
   it('issues tokens and stores a refresh-token hash on valid credentials', async () => {
@@ -126,5 +133,76 @@ describe('LoginUseCase', () => {
     await expect(
       useCase.execute({ email: user.email, password: 'password123' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  describe('audit-log publishing', () => {
+    it('publishes UserLoggedIn exactly once on success with the staff actor + payload', async () => {
+      const user = await seedUser();
+
+      await useCase.execute({
+        email: user.email,
+        password: 'password123',
+        correlationId: 'cid-success',
+      });
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'UserLoggedIn',
+        actorId: user.id,
+        actorKind: 'staff',
+        targetId: user.id,
+        targetKind: 'staff-user',
+        correlationId: 'cid-success',
+        payload: {
+          email: user.email,
+          roles: [RoleEnum.ADMIN],
+          permissions: [PermissionCodeEnum.AUDIT_READ],
+        },
+      });
+    });
+
+    it('publishes LoginFailed (user-not-found) with anonymous actor + null target', async () => {
+      await expect(
+        useCase.execute({
+          email: 'missing@example.com',
+          password: 'password123',
+          correlationId: 'cid-missing',
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'LoginFailed',
+        actorId: null,
+        actorKind: 'anonymous',
+        targetId: null,
+        targetKind: null,
+        correlationId: 'cid-missing',
+        payload: { email: 'missing@example.com', reason: 'user-not-found' },
+      });
+    });
+
+    it('publishes LoginFailed (bad-password) carrying the staff-user id as target', async () => {
+      const user = await seedUser();
+
+      await expect(
+        useCase.execute({
+          email: user.email,
+          password: 'WRONG',
+          correlationId: 'cid-bad-pw',
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+
+      expect(audit.published).toHaveLength(1);
+      expect(audit.published[0]).toMatchObject({
+        name: 'LoginFailed',
+        actorId: null,
+        actorKind: 'anonymous',
+        targetId: user.id,
+        targetKind: 'staff-user',
+        correlationId: 'cid-bad-pw',
+        payload: { email: user.email, reason: 'bad-password' },
+      });
+    });
   });
 });

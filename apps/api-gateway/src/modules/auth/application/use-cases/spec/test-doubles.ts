@@ -1,4 +1,9 @@
-import { IJwtAccessPayload, IJwtRefreshPayload } from '@retail-inventory-system/contracts';
+import {
+  IAuditLogEvent,
+  IAuditLogPublisher,
+  IJwtAccessPayload,
+  IJwtRefreshPayload,
+} from '@retail-inventory-system/contracts';
 
 import { Customer } from '../../../domain/customer.model';
 import { StaffUser } from '../../../domain/staff-user.model';
@@ -107,5 +112,16 @@ export class FakeTokenAdapter implements ITokenPort {
       refreshTokenJti: refresh.jti,
       expiresIn: this.accessTokenExpiresInSeconds(),
     };
+  }
+}
+
+// Recording fake for IAuditLogPublisher — collects the published events so
+// specs can assert event-name + payload shape per audit point.
+export class FakeAuditLogPublisher implements IAuditLogPublisher {
+  public readonly published: IAuditLogEvent[] = [];
+
+  public publish(event: IAuditLogEvent): Promise<void> {
+    this.published.push(event);
+    return Promise.resolve();
   }
 }

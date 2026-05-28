@@ -9,6 +9,7 @@ import {
 
 import { CurrentUser, Public } from '@retail-inventory-system/auth';
 import { ICurrentUser } from '@retail-inventory-system/contracts';
+import { CorrelationId } from '@retail-inventory-system/observability';
 
 import { LogoutUseCase } from '../application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '../application/use-cases/refresh-token.use-case';
@@ -30,8 +31,14 @@ export class AuthController {
   @ApiOperation({ summary: 'Rotate access + refresh tokens' })
   @ApiOkResponse({ type: TokenResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid refresh token' })
-  public async refresh(@Body() dto: RefreshRequestDto): Promise<TokenResponseDto> {
-    const result = await this.refreshTokenUseCase.execute(dto);
+  public async refresh(
+    @Body() dto: RefreshRequestDto,
+    @CorrelationId() correlationId: string,
+  ): Promise<TokenResponseDto> {
+    const result = await this.refreshTokenUseCase.execute({
+      refreshToken: dto.refreshToken,
+      correlationId,
+    });
     return {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
@@ -43,8 +50,11 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Invalidate the current refresh token' })
-  public async logout(@CurrentUser() user: ICurrentUser): Promise<{ success: true }> {
-    await this.logoutUseCase.execute(user.id);
+  public async logout(
+    @CurrentUser() user: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<{ success: true }> {
+    await this.logoutUseCase.execute({ userId: user.id, correlationId });
     return { success: true };
   }
 
