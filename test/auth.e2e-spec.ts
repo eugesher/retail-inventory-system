@@ -29,11 +29,9 @@ const ADMIN_PASSWORD = 'admin1234';
 // the seeded `warehouse@example.com` directly.
 const WAREHOUSE_EMAIL = 'warehouse-staff@example.com';
 const WAREHOUSE_PASSWORD = 'warehouse1234';
-// TODO(task-05): customer credentials move under the `customer` aggregate;
-// task-05 re-adds the seed against the `customer` table and re-enables the
-// commented blocks below.
-// const CUSTOMER_EMAIL = 'customer@example.com';
-// const CUSTOMER_PASSWORD = 'customer1234';
+// Customer-side coverage lives in `test/auth-customer.e2e-spec.ts` — that
+// spec drives the buyer aggregate through HTTP (register → login → me) and
+// asserts the customer JWT is rejected by /api/auth/admin/ping.
 
 interface ITokenResponse {
   accessToken: string;
@@ -162,30 +160,6 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  // TODO(task-05): customer login flow lives at /api/auth/customer/login
-  // once the Customer aggregate lands. Re-enable then.
-  // describe('POST /api/auth/customer/login', () => {
-  //   it('returns 401 when the password is wrong', async () => {
-  //     const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-  //       .post('/api/auth/customer/login')
-  //       .send({ email: CUSTOMER_EMAIL, password: 'WRONG-PASSWORD' });
-  //
-  //     expect(status).toBe(HttpStatus.UNAUTHORIZED);
-  //     expect(body).not.toHaveProperty('accessToken');
-  //   });
-  //
-  //   it('returns access + refresh tokens on success', async () => {
-  //     const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-  //       .post('/api/auth/customer/login')
-  //       .send({ email: CUSTOMER_EMAIL, password: CUSTOMER_PASSWORD });
-  //
-  //     expect(status).toBe(HttpStatus.OK);
-  //     expect(body.accessToken).toEqual(expect.any(String));
-  //     expect(body.refreshToken).toEqual(expect.any(String));
-  //     expect(body.expiresIn).toEqual(expect.any(Number));
-  //   });
-  // });
-
   describe('Authenticated admin requests', () => {
     it('passes through to the route when a valid Bearer token is supplied', async () => {
       const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
@@ -231,9 +205,9 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  // TODO(task-05): with the customer fixture restored, also assert that a
-  // customer JWT (carrying an empty `permissions` claim) gets 403 here for
-  // free — no `@RequiresPermission()`-gated route ever admits a customer.
+  // The "customer JWT gets 403 here" assertion lives in
+  // `test/auth-customer.e2e-spec.ts` so it can ride alongside the customer
+  // register/login fixtures that produce that JWT.
   describe('Permissions guard (/api/auth/admin/ping)', () => {
     it('admits an admin (audit:read present in bundled permissions) with 200', async () => {
       const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);

@@ -4,7 +4,6 @@ import { ICorrelationPayload } from '../../microservices';
 // future cross-service consumers; no producer today (cancel flow unimplemented).
 export interface IRetailOrderCancelledEvent extends ICorrelationPayload {
   orderId: number;
-  customerId: number;
   reason?: string;
   occurredAt: string;
 }

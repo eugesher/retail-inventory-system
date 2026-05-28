@@ -85,7 +85,6 @@ describe('Notification flow (e2e)', () => {
     const event: IRetailOrderCreatedEvent = {
       correlationId: 'e2e-corr-1',
       orderId: 4242,
-      customerId: 7,
       status: OrderStatusEnum.PENDING,
       products: [{ productId: 1, quantity: 2 }],
       occurredAt: '2026-05-13T14:00:00.000Z',
@@ -97,7 +96,7 @@ describe('Notification flow (e2e)', () => {
     await waitForCall(() => sendSpy.mock.calls.length > 0);
 
     const sent = sendSpy.mock.calls[0][0];
-    expect(sent.metadata).toMatchObject({ orderId: 4242, customerId: 7 });
+    expect(sent.metadata).toMatchObject({ orderId: 4242 });
     expect(sent.subject).toContain('4242');
     expect(sent.body).toContain('4242');
   });

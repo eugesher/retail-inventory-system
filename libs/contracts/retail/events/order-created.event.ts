@@ -11,7 +11,6 @@ export interface IOrderCreatedEventProduct {
 // consumers (today: notification-microservice) depend on the interface only.
 export interface IRetailOrderCreatedEvent extends ICorrelationPayload {
   orderId: number;
-  customerId: number;
   status: OrderStatusEnum;
   products: IOrderCreatedEventProduct[];
   occurredAt: string;

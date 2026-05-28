@@ -26,7 +26,6 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
   ): Promise<void> {
     const wire: IRetailOrderCreatedEvent = {
       orderId: event.aggregateId,
-      customerId: event.customerId,
       status: OrderStatusEnum.PENDING,
       products: event.lines.map((line) => ({
         productId: line.productId,
@@ -54,7 +53,6 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
   ): Promise<void> {
     const wire: IRetailOrderConfirmedEvent = {
       orderId: event.aggregateId,
-      customerId: event.customerId,
       status: OrderStatusEnum.CONFIRMED,
       products: event.lines.map((line) => ({
         orderProductId: line.orderProductId,
@@ -78,7 +76,6 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
   ): Promise<void> {
     const wire: IRetailOrderCancelledEvent = {
       orderId: event.aggregateId,
-      customerId: event.customerId,
       reason: event.reason,
       occurredAt: event.occurredAt.toISOString(),
       correlationId: correlationId ?? '',

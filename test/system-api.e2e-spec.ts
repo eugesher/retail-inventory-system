@@ -33,9 +33,10 @@ describe('Retail Inventory System API', () => {
     .__RIS_E2E_CAPTURED_LOGS__!;
 
   // `admin@example.com` is established by `yarn test:seed`; one login,
-  // reused across every assertion below as a bearer-token source.
-  // TODO(task-05): once the Customer aggregate lands, the order/product
-  // flows below switch to customer credentials via `/api/auth/customer/login`.
+  // reused across every assertion below as a bearer-token source. Customer-side
+  // flows (register/login) live in `test/auth-customer.e2e-spec.ts`; the order
+  // endpoints here carry no customer association — epic-05 re-links orders to
+  // the gateway customer aggregate.
   const httpClient = () => {
     const agent = supertest.agent(apiGatewayApp.getHttpServer());
     agent.set('Authorization', `Bearer ${staffAccessToken}`);
@@ -273,7 +274,7 @@ describe('Retail Inventory System API', () => {
       it('creates an order with a single product', async () => {
         const { status, body, headers } = await httpClient()
           .post(apiHref)
-          .send({ customerId: 1, products: [{ productId: 1, quantity: 1 }] });
+          .send({ products: [{ productId: 1, quantity: 1 }] });
 
         const { orderRows, orderProductRows } = await getDataToBeAsserted(body.orderId);
 
@@ -296,7 +297,6 @@ describe('Retail Inventory System API', () => {
         const { status, body, headers } = await httpClient()
           .post(apiHref)
           .send({
-            customerId: 1,
             products: [
               { productId: 1, quantity: 2 },
               { productId: 2, quantity: 1 },
@@ -316,23 +316,10 @@ describe('Retail Inventory System API', () => {
         assertData({ body, orderRows, orderProductRows });
       });
 
-      it('returns 404 when customerId does not exist', async () => {
-        const { status, body, headers } = await httpClient()
-          .post(apiHref)
-          .send({ customerId: 9999, products: [{ productId: 1, quantity: 1 }] });
-
-        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
-        expect(status).toBe(HttpStatus.NOT_FOUND);
-        expect(body.statusCode).toBe(HttpStatus.NOT_FOUND);
-        expect(body.error).toBe('Not Found');
-        expect(body.message).toContain('Customer #9999');
-        expect(body).toMatchSnapshot();
-      });
-
       it('returns 400 when productId does not exist', async () => {
         const { status, body, headers } = await httpClient()
           .post(apiHref)
-          .send({ customerId: 1, products: [{ productId: 9999, quantity: 1 }] });
+          .send({ products: [{ productId: 9999, quantity: 1 }] });
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
@@ -342,33 +329,7 @@ describe('Retail Inventory System API', () => {
       });
 
       it('returns 400 when products array is empty', async () => {
-        const { status, body, headers } = await httpClient()
-          .post(apiHref)
-          .send({ customerId: 1, products: [] });
-
-        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
-        expect(status).toBe(HttpStatus.BAD_REQUEST);
-        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
-        expect(body.error).toBe('Bad Request');
-        expect(body).toMatchSnapshot();
-      });
-
-      it('returns 400 when customerId is missing', async () => {
-        const { status, body, headers } = await httpClient()
-          .post(apiHref)
-          .send({ products: [{ productId: 1, quantity: 1 }] });
-
-        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
-        expect(status).toBe(HttpStatus.BAD_REQUEST);
-        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
-        expect(body.error).toBe('Bad Request');
-        expect(body).toMatchSnapshot();
-      });
-
-      it('returns 400 when customerId is not a positive integer', async () => {
-        const { status, body, headers } = await httpClient()
-          .post(apiHref)
-          .send({ customerId: 0, products: [{ productId: 1, quantity: 1 }] });
+        const { status, body, headers } = await httpClient().post(apiHref).send({ products: [] });
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
@@ -378,7 +339,7 @@ describe('Retail Inventory System API', () => {
       });
 
       it('returns 400 when products is missing', async () => {
-        const { status, body, headers } = await httpClient().post(apiHref).send({ customerId: 1 });
+        const { status, body, headers } = await httpClient().post(apiHref).send({});
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
@@ -390,7 +351,7 @@ describe('Retail Inventory System API', () => {
       it('returns 400 when products[].productId is not a positive integer', async () => {
         const { status, body, headers } = await httpClient()
           .post(apiHref)
-          .send({ customerId: 1, products: [{ productId: 0, quantity: 1 }] });
+          .send({ products: [{ productId: 0, quantity: 1 }] });
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
@@ -402,7 +363,7 @@ describe('Retail Inventory System API', () => {
       it('returns 400 when products[].quantity is not a positive integer', async () => {
         const { status, body, headers } = await httpClient()
           .post(apiHref)
-          .send({ customerId: 1, products: [{ productId: 1, quantity: 0 }] });
+          .send({ products: [{ productId: 1, quantity: 0 }] });
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);
@@ -414,7 +375,7 @@ describe('Retail Inventory System API', () => {
       it('returns 400 when the request body contains an unknown field', async () => {
         const { status, body, headers } = await httpClient()
           .post(apiHref)
-          .send({ customerId: 1, products: [{ productId: 1, quantity: 1 }], unknownField: 'x' });
+          .send({ products: [{ productId: 1, quantity: 1 }], unknownField: 'x' });
 
         expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
         expect(status).toBe(HttpStatus.BAD_REQUEST);

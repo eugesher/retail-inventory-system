@@ -16,7 +16,6 @@ import { OrderController } from '../presentation/orders.controller';
 import { OrderConfirmPipe, OrderCreatePipe } from '../presentation/pipes';
 import { InventoryConfirmRabbitmqAdapter, OrderRabbitmqPublisher } from './messaging';
 import {
-  Customer,
   Order,
   OrderProduct,
   OrderProductStatus,
@@ -28,7 +27,7 @@ import {
 // and concrete-class injectors.
 @Module({
   imports: [
-    DatabaseModule.forFeature([Customer, Order, OrderProduct, OrderProductStatus, OrderStatus]),
+    DatabaseModule.forFeature([Order, OrderProduct, OrderProductStatus, OrderStatus]),
     MicroserviceClientInventoryModule,
     MicroserviceClientNotificationModule,
   ],

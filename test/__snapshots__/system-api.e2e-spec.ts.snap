@@ -11,7 +11,6 @@ exports[`Retail Inventory System API Order POST /api/order creates an order expa
 exports[`Retail Inventory System API Order POST /api/order creates an order expanding each product quantity into individual order_product rows: 1_ORDERS 1`] = `
 [
   {
-    "customer_id": "1",
     "status_id": "pending",
   },
 ]
@@ -48,7 +47,6 @@ exports[`Retail Inventory System API Order POST /api/order creates an order with
 exports[`Retail Inventory System API Order POST /api/order creates an order with a single product: 1_ORDERS 1`] = `
 [
   {
-    "customer_id": "1",
     "status_id": "pending",
   },
 ]
@@ -62,27 +60,6 @@ exports[`Retail Inventory System API Order POST /api/order creates an order with
     "status_id": "pending",
   },
 ]
-`;
-
-exports[`Retail Inventory System API Order POST /api/order returns 400 when customerId is missing 1`] = `
-{
-  "error": "Bad Request",
-  "message": [
-    "customerId must be a positive number",
-    "customerId must be an integer number",
-  ],
-  "statusCode": 400,
-}
-`;
-
-exports[`Retail Inventory System API Order POST /api/order returns 400 when customerId is not a positive integer 1`] = `
-{
-  "error": "Bad Request",
-  "message": [
-    "customerId must be a positive number",
-  ],
-  "statusCode": 400,
-}
 `;
 
 exports[`Retail Inventory System API Order POST /api/order returns 400 when productId does not exist 1`] = `
@@ -144,14 +121,6 @@ exports[`Retail Inventory System API Order POST /api/order returns 400 when the 
 }
 `;
 
-exports[`Retail Inventory System API Order POST /api/order returns 404 when customerId does not exist 1`] = `
-{
-  "error": "Not Found",
-  "message": "Customer #9999 not found",
-  "statusCode": 404,
-}
-`;
-
 exports[`Retail Inventory System API Order PUT /api/order/:id/confirm confirms all products and the order when every product has sufficient stock: 0_RESPONSE_BODY 1`] = `
 {
   "id": 1,
@@ -195,7 +164,6 @@ exports[`Retail Inventory System API Order PUT /api/order/:id/confirm confirms a
 exports[`Retail Inventory System API Order PUT /api/order/:id/confirm confirms all products and the order when every product has sufficient stock: 1_ORDERS 1`] = `
 [
   {
-    "customer_id": "1",
     "status_id": "confirmed",
   },
 ]
@@ -293,7 +261,6 @@ exports[`Retail Inventory System API Order PUT /api/order/:id/confirm confirms o
 exports[`Retail Inventory System API Order PUT /api/order/:id/confirm confirms only products with available stock and leaves the order pending: 1_ORDERS 1`] = `
 [
   {
-    "customer_id": "1",
     "status_id": "pending",
   },
 ]
@@ -365,7 +332,6 @@ exports[`Retail Inventory System API Order PUT /api/order/:id/confirm leaves eve
 exports[`Retail Inventory System API Order PUT /api/order/:id/confirm leaves everything pending when there is no stock for any product: 1_ORDERS 1`] = `
 [
   {
-    "customer_id": "1",
     "status_id": "pending",
   },
 ]
@@ -402,7 +368,6 @@ exports[`Retail Inventory System API Order PUT /api/order/:id/confirm returns 40
 exports[`Retail Inventory System API Order PUT /api/order/:id/confirm returns 400 when the order is already confirmed: 1_ORDERS 1`] = `
 [
   {
-    "customer_id": "1",
     "status_id": "confirmed",
   },
 ]

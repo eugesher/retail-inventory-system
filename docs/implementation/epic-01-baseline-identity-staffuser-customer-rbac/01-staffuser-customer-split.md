@@ -181,4 +181,111 @@ restores the previous-task schema cleanly.
   that keeps audit-log FKs resolvable; epic-13 will decide what
   follows.
 
-<!-- customer-half-anchor -->
+## 6. The customer half
+
+Task-05 introduces the buyer-side identity baseline: a new `customer`
+table, a `Customer` domain aggregate, and a customer-side
+register/login/me trio at `/api/auth/customer/*`. The endpoint contract
+is documented in
+[`04-customer-register-and-login.md`](./04-customer-register-and-login.md);
+this section focuses on the schema and on the two forward-looking
+invariants the table must already accept.
+
+### 6.1 Why a separate `customer` table
+
+The argument from §1 above ("why split") applies symmetrically to the
+customer side. The pre-epic `user.roles: simple-array` column made one
+row stand for both a workforce identity and a buyer identity; the
+relational scaffolding that fixes the staff side
+(`staff_user_roles → role → role_permissions → permission`) is
+*deliberately* not extended to customers, because the conflation —
+not the column type — was the bug. A customer is not an RBAC actor:
+their token carries `roles: []` and `permissions: []` (see
+[`04-…md` §2](./04-customer-register-and-login.md#2-payload-symmetry)),
+and the customer table holds no foreign key into `role`.
+
+Splitting the table also discharges the audit-discipline obligation
+from §1 in the only way the schema layer can: the staff
+`audit_log.actor_id → staff_user.id` FK lands in a different table from
+`customer.id`. Reusing a deleted customer's UUID for a new signup
+(post-Q6 tombstone followed by a fresh register at the same address)
+cannot accidentally re-attach historical staff-side audit rows to a
+buyer principal, because the FK doesn't address the customer table at
+all.
+
+### 6.2 The new `customer` shape
+
+```sql
+CREATE TABLE customer (
+  id                  CHAR(36)                                              PRIMARY KEY,
+  email               VARCHAR(255)                                          NOT NULL UNIQUE,
+  phone               VARCHAR(32)                                           NULL,
+  first_name          VARCHAR(128)                                          NULL,
+  last_name           VARCHAR(128)                                          NULL,
+  password_hash       VARCHAR(255)                                          NULL,
+  status              ENUM('active','suspended','guest','deleted')          NOT NULL DEFAULT 'active',
+  email_verified_at   TIMESTAMP                                             NULL,
+  refresh_token_hash  VARCHAR(255)                                          NULL,
+  created_at          TIMESTAMP                                             NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP                                             NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                                                            ON UPDATE CURRENT_TIMESTAMP
+);
+```
+
+Three column-shape decisions are worth surfacing here, because each
+one accepts a future flow that the current epic does not implement:
+
+- **`password_hash VARCHAR(255) NULL`** — the column is nullable so a
+  future Q7 guest row (epic-05) can exist without a password, and so
+  a Q6 tombstone can null it in place. The Customer aggregate
+  enforces the matching invariant: a `null` `password_hash` is legal
+  only when `status` is `'guest'` or `'deleted'`. The DB column
+  shape *accepts* the broader range; the aggregate is the gate that
+  refuses an impossible combination like
+  `status='active' + password_hash=NULL`.
+- **`status ENUM('active','suspended','guest','deleted')`** — a
+  four-value enum rather than a two-value `('active','suspended')`
+  like `staff_user.status`. Both forward-looking values are required
+  on day one: `'guest'` for epic-05's guest checkout (which produces a
+  row before the buyer has chosen a password) and `'deleted'` for
+  epic-13's tombstone (a soft-deleted row that the application treats
+  as no longer present but the FK from `order.customer_id` can still
+  resolve).
+- **No `deleted_at` column.** The staff side carries a `deleted_at`
+  tombstone alongside `status`; the customer side communicates the
+  same fact through `status='deleted'` only. The reason: epic-13's
+  GDPR-style erasure flow needs to null *every* PII column on the
+  row anyway, and the simplest contract is "one column tells you the
+  row is dead." Adding a redundant `deleted_at` would create two
+  sources of truth for the same fact. Soft-delete is therefore a
+  status transition, not a timestamp stamp.
+
+### 6.3 Q7 — every order creates a Customer (forward reference)
+
+Epic-05 extends the order flow so a checkout produces a `customer` row
+even when the buyer is anonymous (guest checkout). That row lands with
+`status='guest'`, `password_hash=NULL`, and only the PII the buyer
+agreed to share. The shape above already supports that on day one — no
+schema migration is needed when epic-05 ships. The aggregate's
+`Customer.register(...)` is the only path used in this epic and always
+produces `status='active'`; epic-05 will add a `Customer.fromGuestOrder(...)`
+factory that produces `status='guest'` from the same constructor, and
+the constructor's invariant check already accepts it.
+
+### 6.4 Q6 — tombstone-friendliness (forward reference)
+
+Every PII column on `customer` is nullable. The tombstone use case is
+epic-13's; the relevant property here is that *this task* does not
+need to do anything special for it. The migration's column list is the
+contract, and `Customer.suspend()` / a future `Customer.tombstone()`
+flip the in-memory status while the repository writes the nulled-PII
+columns back. The row's `id` is the only field that survives, and
+that's the field every other table FKs against — so historical orders
+keep their resolvable customer reference even after the buyer's
+personal data is erased.
+
+### 6.5 Cross-reference
+
+The customer endpoint surface, the JWT payload symmetry, and the
+single-validator design (`ValidateJwtSubjectUseCase`) are documented in
+[`04-customer-register-and-login.md`](./04-customer-register-and-login.md).

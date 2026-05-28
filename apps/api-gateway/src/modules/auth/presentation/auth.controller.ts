@@ -10,11 +10,9 @@ import {
 import { CurrentUser, Public } from '@retail-inventory-system/auth';
 import { ICurrentUser } from '@retail-inventory-system/contracts';
 
-import { LoginUseCase } from '../application/use-cases/login.use-case';
 import { LogoutUseCase } from '../application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '../application/use-cases/refresh-token.use-case';
 import { CurrentUserResponseDto } from './dto/current-user.response.dto';
-import { LoginRequestDto } from './dto/login.request.dto';
 import { RefreshRequestDto } from './dto/refresh.request.dto';
 import { TokenResponseDto } from './dto/token.response.dto';
 
@@ -22,25 +20,9 @@ import { TokenResponseDto } from './dto/token.response.dto';
 @Controller('auth')
 export class AuthController {
   constructor(
-    private readonly loginUseCase: LoginUseCase,
     private readonly refreshTokenUseCase: RefreshTokenUseCase,
     private readonly logoutUseCase: LogoutUseCase,
   ) {}
-
-  @Public()
-  @Post('login')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Authenticate with email + password' })
-  @ApiOkResponse({ type: TokenResponseDto })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  public async login(@Body() dto: LoginRequestDto): Promise<TokenResponseDto> {
-    const result = await this.loginUseCase.execute(dto);
-    return {
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-      expiresIn: result.expiresIn,
-    };
-  }
 
   @Public()
   @Post('refresh')

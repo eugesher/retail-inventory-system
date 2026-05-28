@@ -1,3 +1,4 @@
+export * from './customer.repository.port';
 export * from './password.port';
 export * from './permission.repository.port';
 export * from './role.repository.port';

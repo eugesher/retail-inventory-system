@@ -8,7 +8,6 @@ describe('OrderMapper round-trip', () => {
   it('maps a persisted Order entity into a domain aggregate with line items and statuses', () => {
     const entity: OrderEntity = Object.assign(new OrderEntity(), {
       id: 42,
-      customerId: 7,
       statusId: OrderStatusEnum.PENDING,
       products: [
         Object.assign(new OrderProductEntity(), {
@@ -29,7 +28,6 @@ describe('OrderMapper round-trip', () => {
     const domain = OrderMapper.toDomain(entity);
 
     expect(domain.id).toBe(42);
-    expect(domain.customer.id).toBe(7);
     expect(domain.statusId).toBe(OrderStatusEnum.PENDING);
     expect(domain.products).toHaveLength(2);
     expect(domain.products[0].id).toBe(421);
@@ -42,7 +40,6 @@ describe('OrderMapper round-trip', () => {
   it('maps a confirmed Order entity (preserves the CONFIRMED header)', () => {
     const entity: OrderEntity = Object.assign(new OrderEntity(), {
       id: 1,
-      customerId: 1,
       statusId: OrderStatusEnum.CONFIRMED,
       products: [
         Object.assign(new OrderProductEntity(), {

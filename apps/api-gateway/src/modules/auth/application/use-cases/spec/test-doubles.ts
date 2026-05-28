@@ -1,6 +1,8 @@
 import { IJwtAccessPayload, IJwtRefreshPayload } from '@retail-inventory-system/contracts';
 
+import { Customer } from '../../../domain/customer.model';
 import { StaffUser } from '../../../domain/staff-user.model';
+import { ICustomerRepositoryPort } from '../../ports/customer.repository.port';
 import { IPasswordPort } from '../../ports/password.port';
 import { IStaffUserRepositoryPort } from '../../ports/staff-user.repository.port';
 import { IIssuedTokens, ITokenPort } from '../../ports/token.port';
@@ -33,6 +35,31 @@ export class InMemoryStaffUserRepository implements IStaffUserRepositoryPort {
   public softDelete(id: string): Promise<void> {
     this.byId.delete(id);
     return Promise.resolve();
+  }
+}
+
+export class InMemoryCustomerRepository implements ICustomerRepositoryPort {
+  private byId = new Map<string, Customer>();
+
+  public seed(customer: Customer): void {
+    this.byId.set(customer.id, customer);
+  }
+
+  public findByEmail(email: string): Promise<Customer | null> {
+    const target = email.toLowerCase();
+    for (const customer of this.byId.values()) {
+      if (customer.email === target) return Promise.resolve(customer);
+    }
+    return Promise.resolve(null);
+  }
+
+  public findById(id: string): Promise<Customer | null> {
+    return Promise.resolve(this.byId.get(id) ?? null);
+  }
+
+  public save(customer: Customer): Promise<Customer> {
+    this.byId.set(customer.id, customer);
+    return Promise.resolve(customer);
   }
 }
 
