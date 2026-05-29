@@ -118,6 +118,10 @@ export class InMemoryStaffUserRepository implements IStaffUserRepositoryPort {
     return Promise.resolve(this.byId.get(id) ?? null);
   }
 
+  public existsActiveById(id: string): Promise<boolean> {
+    return Promise.resolve(this.byId.get(id)?.isActive ?? false);
+  }
+
   public save(user: StaffUser): Promise<StaffUser> {
     this.byId.set(user.id, user);
     return Promise.resolve(user);

@@ -26,6 +26,10 @@ export class CustomerTypeormRepository implements ICustomerRepositoryPort {
     return entity ? CustomerMapper.toDomain(entity) : null;
   }
 
+  public existsActiveById(id: string): Promise<boolean> {
+    return this.repository.existsBy({ id, status: 'active' });
+  }
+
   public async save(customer: Customer): Promise<Customer> {
     const partial = CustomerMapper.toEntity(customer);
     await this.repository.save(partial);

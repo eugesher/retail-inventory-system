@@ -22,26 +22,24 @@ export class ValidateJwtSubjectUseCase implements IAuthUserValidator {
   ) {}
 
   public async validate(payload: IJwtAccessPayload): Promise<ICurrentUser> {
-    const staffUser = await this.staff.findById(payload.sub);
-    if (staffUser?.isActive) {
-      return {
-        id: payload.sub,
-        email: payload.email,
-        roles: payload.roles,
-        permissions: payload.permissions ?? [],
-      };
+    // Identity claims travel in the JWT itself (customer tokens simply carry
+    // `roles: []` / `permissions: []`), so we only need to confirm an active
+    // subject still exists — staff first, customer on miss. An existence check
+    // avoids loading (and discarding) the full role/permission graph on every
+    // authenticated request.
+    const active =
+      (await this.staff.existsActiveById(payload.sub)) ||
+      (await this.customers.existsActiveById(payload.sub));
+
+    if (!active) {
+      throw new UnauthorizedException('Account is no longer active');
     }
 
-    const customer = await this.customers.findById(payload.sub);
-    if (customer?.isActive) {
-      return {
-        id: payload.sub,
-        email: payload.email,
-        roles: payload.roles,
-        permissions: payload.permissions ?? [],
-      };
-    }
-
-    throw new UnauthorizedException('Account is no longer active');
+    return {
+      id: payload.sub,
+      email: payload.email,
+      roles: payload.roles,
+      permissions: payload.permissions ?? [],
+    };
   }
 }

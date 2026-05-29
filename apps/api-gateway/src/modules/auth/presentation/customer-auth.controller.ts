@@ -15,6 +15,7 @@ import { CorrelationId } from '@retail-inventory-system/observability';
 import { GetCurrentCustomerUseCase } from '../application/use-cases/get-current-customer.use-case';
 import { LoginCustomerUseCase } from '../application/use-cases/login-customer.use-case';
 import { RegisterCustomerUseCase } from '../application/use-cases/register-customer.use-case';
+import { Customer } from '../domain/customer.model';
 import { CurrentCustomerResponseDto } from './dto/current-customer.response.dto';
 import { LoginCustomerRequestDto } from './dto/login-customer.request.dto';
 import { RegisterCustomerRequestDto } from './dto/register-customer.request.dto';
@@ -47,15 +48,7 @@ export class CustomerAuthController {
       correlationId,
     });
 
-    return {
-      id: customer.id,
-      email: customer.email,
-      status: customer.status,
-      firstName: customer.firstName,
-      lastName: customer.lastName,
-      phone: customer.phone,
-      emailVerifiedAt: customer.emailVerifiedAt?.toISOString() ?? null,
-    };
+    return this.toDto(customer);
   }
 
   @Public()
@@ -86,6 +79,10 @@ export class CustomerAuthController {
   @ApiOkResponse({ type: CurrentCustomerResponseDto })
   public async me(@CurrentUser() user: ICurrentUser): Promise<CurrentCustomerResponseDto> {
     const customer = await this.getCurrentUseCase.execute(user.id);
+    return this.toDto(customer);
+  }
+
+  private toDto(customer: Customer): CurrentCustomerResponseDto {
     return {
       id: customer.id,
       email: customer.email,

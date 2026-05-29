@@ -1,11 +1,7 @@
-import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 
-import {
-  AUDIT_LOG_PUBLISHER,
-  IAuditLogPublisher,
-  PermissionCodeEnum,
-} from '@retail-inventory-system/contracts';
+import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
 
 import {
   IPermissionRepositoryPort,
@@ -15,6 +11,7 @@ import {
   RoleAggregate,
 } from '../../../auth';
 import { ICreateRoleCommand } from '../dto/create-role.command';
+import { assertPermissionsExist } from './assert-permissions-exist';
 
 @Injectable()
 export class CreateRoleUseCase {
@@ -30,7 +27,7 @@ export class CreateRoleUseCase {
       throw new ConflictException(`Role "${command.name}" already exists`);
     }
 
-    await this.assertPermissionsExist(command.permissionCodes);
+    await assertPermissionsExist(this.permissions, command.permissionCodes);
 
     const role = RoleAggregate.create(randomUUID(), {
       name: command.name,
@@ -54,15 +51,5 @@ export class CreateRoleUseCase {
     });
 
     return saved;
-  }
-
-  private async assertPermissionsExist(codes: PermissionCodeEnum[]): Promise<void> {
-    if (codes.length === 0) return;
-    const found = await this.permissions.findByCodes(codes);
-    const foundSet = new Set(found.map((p) => p.code));
-    const missing = codes.filter((c) => !foundSet.has(c));
-    if (missing.length > 0) {
-      throw new BadRequestException(`Unknown permission codes: ${missing.join(', ')}`);
-    }
   }
 }

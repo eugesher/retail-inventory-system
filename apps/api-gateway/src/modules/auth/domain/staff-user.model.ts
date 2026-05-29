@@ -1,3 +1,4 @@
+import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 import { AggregateRoot } from '@retail-inventory-system/ddd';
 
 import { StaffUserLoggedInEvent } from './events/staff-user-logged-in.event';
@@ -81,6 +82,17 @@ export class StaffUser extends AggregateRoot<string> {
 
   public get roles(): readonly RoleAggregate[] {
     return this._roles;
+  }
+
+  public get roleNames(): string[] {
+    return this._roles.map((role) => role.name);
+  }
+
+  // The JWT permissions claim is the deduped, sorted union of every bound
+  // role's permission set. Login and refresh must mint it identically, so the
+  // computation lives on the aggregate rather than being copied to each caller.
+  public get permissionCodes(): PermissionCodeEnum[] {
+    return Array.from(new Set(this._roles.flatMap((role) => Array.from(role.permissions)))).sort();
   }
 
   public get status(): StaffUserStatus {

@@ -25,6 +25,7 @@ import { CurrentUser, RequiresPermission } from '@retail-inventory-system/auth';
 import { ICurrentUser, PermissionCodeEnum } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
+import { RoleAggregate } from '../../auth';
 import { AssignStaffRoleUseCase } from '../application/use-cases/assign-staff-role.use-case';
 import { CreateRoleUseCase } from '../application/use-cases/create-role.use-case';
 import { ListRolesUseCase } from '../application/use-cases/list-roles.use-case';
@@ -54,12 +55,7 @@ export class IamController {
   @ApiOkResponse({ type: RoleResponseDto, isArray: true })
   public async list(): Promise<RoleResponseDto[]> {
     const roles = await this.listRoles.execute();
-    return roles.map((r) => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      permissionCodes: Array.from(r.permissions),
-    }));
+    return roles.map((r) => this.toDto(r));
   }
 
   @Post('roles')
@@ -80,12 +76,7 @@ export class IamController {
       actorId: actor.id,
       correlationId,
     });
-    return {
-      id: role.id,
-      name: role.name,
-      description: role.description,
-      permissionCodes: Array.from(role.permissions),
-    };
+    return this.toDto(role);
   }
 
   @Patch('roles/:id')
@@ -107,12 +98,7 @@ export class IamController {
       actorId: actor.id,
       correlationId,
     });
-    return {
-      id: role.id,
-      name: role.name,
-      description: role.description,
-      permissionCodes: Array.from(role.permissions),
-    };
+    return this.toDto(role);
   }
 
   @Post('staff/:id/roles')
@@ -160,5 +146,14 @@ export class IamController {
       actorId: actor.id,
       correlationId,
     });
+  }
+
+  private toDto(role: RoleAggregate): RoleResponseDto {
+    return {
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      permissionCodes: Array.from(role.permissions),
+    };
   }
 }

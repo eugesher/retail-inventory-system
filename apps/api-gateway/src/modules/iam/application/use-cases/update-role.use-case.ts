@@ -1,10 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 
-import {
-  AUDIT_LOG_PUBLISHER,
-  IAuditLogPublisher,
-  PermissionCodeEnum,
-} from '@retail-inventory-system/contracts';
+import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
 
 import {
   IPermissionRepositoryPort,
@@ -14,6 +10,7 @@ import {
   RoleAggregate,
 } from '../../../auth';
 import { IUpdateRoleCommand } from '../dto/update-role.command';
+import { assertPermissionsExist } from './assert-permissions-exist';
 
 @Injectable()
 export class UpdateRoleUseCase {
@@ -40,7 +37,7 @@ export class UpdateRoleUseCase {
 
     let result = role;
     if (command.permissionCodes !== undefined) {
-      await this.assertPermissionsExist(command.permissionCodes);
+      await assertPermissionsExist(this.permissions, command.permissionCodes);
       result = await this.roles.replacePermissions(role, command.permissionCodes);
     }
 
@@ -61,15 +58,5 @@ export class UpdateRoleUseCase {
     });
 
     return result;
-  }
-
-  private async assertPermissionsExist(codes: PermissionCodeEnum[]): Promise<void> {
-    if (codes.length === 0) return;
-    const found = await this.permissions.findByCodes(codes);
-    const foundSet = new Set(found.map((p) => p.code));
-    const missing = codes.filter((c) => !foundSet.has(c));
-    if (missing.length > 0) {
-      throw new BadRequestException(`Unknown permission codes: ${missing.join(', ')}`);
-    }
   }
 }

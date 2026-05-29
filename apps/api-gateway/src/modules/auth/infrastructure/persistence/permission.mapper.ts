@@ -1,5 +1,3 @@
-import { DeepPartial } from 'typeorm';
-
 import { PermissionAggregate } from '../../domain/permission.aggregate';
 import { PermissionEntity } from './permission.entity';
 
@@ -9,13 +7,5 @@ export class PermissionMapper {
       code: entity.code,
       description: entity.description,
     });
-  }
-
-  public static toEntity(aggregate: PermissionAggregate): DeepPartial<PermissionEntity> {
-    return {
-      id: aggregate.id,
-      code: aggregate.code,
-      description: aggregate.description,
-    };
   }
 }
