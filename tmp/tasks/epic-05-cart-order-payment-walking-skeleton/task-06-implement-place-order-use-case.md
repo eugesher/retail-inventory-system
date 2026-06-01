@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 6
 title: Implement Place Order use case + authorize-on-place payment flow
 depends_on: [01, 02, 03, 04, 05]
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/04-order-line-snapshot-and-cross-service-lookup.md + 07-authorize-on-place-capture-explicit-q5.md (authorize half) + 08-idempotency-key-header-q10.md (place half) + 09-routing-keys-retired-and-added.md (partial)
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/04-order-line-snapshot-and-cross-service-lookup.md + 07-authorize-on-place-capture-explicit-q5.md (authorize half) + 08-idempotency-key-header-q10.md (place half) + 09-routing-keys-retired-and-added.md (partial)
 ---
 
 # Task 06 — Implement Place Order use case
@@ -404,10 +404,10 @@ Calling `PAYMENT_GATEWAY.authorize(...)` inside the database transaction is the 
 - `libs/contracts/retail/orders/dto/order-line.dto.ts`
 - `libs/contracts/retail/orders/dto/address.dto.ts`
 - `libs/contracts/retail/payment/dto/payment-summary.dto.ts` (fills the task-04 placeholder)
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/04-order-line-snapshot-and-cross-service-lookup.md`
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/07-authorize-on-place-capture-explicit-q5.md` (authorize half — task-07 writes the capture half)
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/08-idempotency-key-header-q10.md` (place half — task-07 writes the capture half; task-12 final-passes)
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/09-routing-keys-retired-and-added.md` (table half — task-11 writes the consumer-side half)
+- `docs/implementation/05-cart-order-payment-walking-skeleton/04-order-line-snapshot-and-cross-service-lookup.md`
+- `docs/implementation/05-cart-order-payment-walking-skeleton/07-authorize-on-place-capture-explicit-q5.md` (authorize half — task-07 writes the capture half)
+- `docs/implementation/05-cart-order-payment-walking-skeleton/08-idempotency-key-header-q10.md` (place half — task-07 writes the capture half; task-12 final-passes)
+- `docs/implementation/05-cart-order-payment-walking-skeleton/09-routing-keys-retired-and-added.md` (table half — task-11 writes the consumer-side half)
 
 ## Files to modify
 

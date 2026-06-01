@@ -140,7 +140,7 @@ const ROLE_SEEDS: {
   },
 ];
 
-// The epic-01 acceptance set: one StaffUser per canonical role and one
+// The baseline identity acceptance set: one StaffUser per canonical role and one
 // Customer. UUIDs follow the `...-a000-...` user-namespace convention so
 // e2e tests can reference these fixtures by id without first looking them
 // up by email.

@@ -1,7 +1,7 @@
 # 04 — Customer register and login
 
-This document records the buyer-side identity baseline landed in
-epic-01 task-05. The staff/customer split argument lives in
+This document records the buyer-side identity baseline. The
+staff/customer split argument lives in
 [`01-staffuser-customer-split.md`](./01-staffuser-customer-split.md);
 the architectural decision this implements is
 [ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md).
@@ -47,7 +47,7 @@ as on a staff JWT; the customer JWT simply lands with `roles: []` and
 Two consequences of keeping the envelope identical:
 
 1. **No `subjectKind` discriminator on the token.** A token issued
-   before this task continues to validate after the rollout — staff
+   before this work continues to validate after the rollout — staff
    tokens validated against the staff repo as before, no re-issue
    needed. The discriminator question moves from "what's in the
    token?" to "which repo answered `findById(payload.sub)`?", and
@@ -57,7 +57,7 @@ Two consequences of keeping the envelope identical:
    pipes, and the global guards never branch on "is this a staff or
    a customer caller" — they read `request.user.permissions` (always a
    `string[]`, possibly empty) and decide. The
-   `PermissionsGuard` from task-04 thus rejects every customer JWT
+   `PermissionsGuard` thus rejects every customer JWT
    from every `@RequiresPermission()`-gated route by construction; the
    customer's empty `permissions` set can never satisfy a non-empty
    required set. That property is asserted by
@@ -91,7 +91,7 @@ the buyer doesn't have a token yet). The use case:
   `refresh_token_hash=NULL`.
 - Returns the profile DTO (no token).
 
-Email verification is *not* implemented in this epic — the column is in
+Email verification is *not* implemented in this baseline — the column is in
 place so the future verification flow can stamp it without a schema
 migration. There is no email-send side-effect today; the route is the
 buyer's first contact with the system and produces a row that can
@@ -106,10 +106,10 @@ also why `customer.roles` does not exist as a column: a non-empty
 ## 4. Forward-compatible columns
 
 The `customer` table's column shape already accepts two flows that this
-epic does *not* implement:
+baseline does *not* implement:
 
-- **Q7 — every order creates a Customer.** Epic-05 extends the order
-  domain so a checkout (including a guest checkout with no password)
+- **Q7 — every order creates a Customer.** Future checkout work extends
+  the order domain so a checkout (including a guest checkout with no password)
   produces a `customer` row with `status='guest'`,
   `password_hash=NULL`, and whatever PII the buyer agreed to share
   (typically `email` + maybe `first_name`/`last_name`). The aggregate
@@ -117,9 +117,9 @@ epic does *not* implement:
   when `status` is `'guest'` or `'deleted'`. A guest row is
   `isActive === false`, so `LoginCustomerUseCase` cannot mint a token
   against it; the guest must claim the row by going through
-  `POST /api/auth/customer/register` later (epic-05's claim flow).
+  `POST /api/auth/customer/register` later (the future guest-claim flow).
 - **Q6 — tombstone-friendly deletion.** Every PII column on `customer`
-  is nullable. Epic-13's GDPR erasure flow flips `status` to
+  is nullable. The future GDPR erasure flow flips `status` to
   `'deleted'` and nulls `email`, `phone`, `first_name`, `last_name`,
   `password_hash`, `refresh_token_hash` — preserving the row's `id`
   for FK resolution from historical order lines. The `customer.email`

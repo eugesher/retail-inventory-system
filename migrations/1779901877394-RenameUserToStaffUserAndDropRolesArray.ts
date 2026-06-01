@@ -1,8 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-// Destructive on the `user` table by design — task-02 of epic-01 splits
+// Destructive on the `user` table by design — the identity split separates
 // StaffUser (admin/catalog-manager/warehouse-staff/order-support) from
-// Customer (task-05). The epic explicitly permits dropping `user` because
+// Customer. Dropping `user` is permitted because
 // nothing in the application depends on its preserved rows.
 export class RenameUserToStaffUserAndDropRolesArray1779901877394 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {

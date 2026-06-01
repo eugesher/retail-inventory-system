@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 6
 title: Bump the cache key version v1 → v2 and rewrite StockCache against the new shape
 depends_on: [01, 02, 03, 04, 05]
-doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/04-cache-key-bump-v1-to-v2.md
+doc_deliverable: docs/implementation/04-inventory-stock-level-and-location/04-cache-key-bump-v1-to-v2.md
 ---
 
 # Task 06 — Bump the cache key `v1` → `v2` and rewrite `StockCache`
@@ -304,7 +304,7 @@ The existing spec exercises `inventoryStockPrefix(productId, …)` / `inventoryS
 
 ## Files to add
 
-- `docs/implementation/epic-04-inventory-stock-level-and-location/04-cache-key-bump-v1-to-v2.md`
+- `docs/implementation/04-inventory-stock-level-and-location/04-cache-key-bump-v1-to-v2.md`
 
 ## Files to modify
 
@@ -327,7 +327,7 @@ The existing spec exercises `inventoryStockPrefix(productId, …)` / `inventoryS
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-04-inventory-stock-level-and-location/04-cache-key-bump-v1-to-v2.md`. Target ~160 lines. Sections:
+Write `docs/implementation/04-inventory-stock-level-and-location/04-cache-key-bump-v1-to-v2.md`. Target ~160 lines. Sections:
 
 1. **ADR-022 recap.** Per-aggregate schema-version constant; bumping it is a one-line edit that re-keys every entry on next deploy. Cross-link `libs/cache/cache-keys.ts` rationale comment block.
 2. **What changed at the key shape.** The `productId` → `variantId` parameter swap. The new key shape: `ris:[t:<tenantId>:]inventory:stock:v2:<variantId>:<facet>`. The facet semantics are unchanged (sorted, comma-joined, `__all__` sentinel).

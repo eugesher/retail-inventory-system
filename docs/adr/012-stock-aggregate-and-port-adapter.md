@@ -7,7 +7,7 @@
 
 ## Context
 
-Pre-task-08 the inventory microservice was on the legacy flat layout:
+Before the inventory microservice's hexagonal migration it was on the legacy flat layout:
 
 - `apps/inventory-microservice/src/app/api/product-stock/`
   - `product-stock.controller.ts` — `@MessagePattern` handlers.
@@ -20,7 +20,7 @@ Pre-task-08 the inventory microservice was on the legacy flat layout:
 
 ADR-002 set the cache-aside contract for product-stock; ADR-004 declared
 hexagonal-per-service as the target layout; ADR-011 elected the notification
-microservice as the canonical per-module template. Task-08 reshapes the
+microservice as the canonical per-module template. This work reshapes the
 inventory microservice in that template, preserving every audit-flagged
 behavior from ADR-002 verbatim. There is only one bounded context to
 migrate today — `stock` — so this ADR is scoped to that single aggregate.
@@ -76,7 +76,7 @@ callers.
 The cache port is intentionally stock-specific (rather than reusing the
 generic `CACHE_PORT` from `libs/cache` directly) because the existing
 SCAN+UNLINK invalidation, KeyvRedis namespace handling, and graceful-
-degradation `try/catch` reach below the generic port's surface. Task-11
+degradation `try/catch` reach below the generic port's surface. The cache-generalization work
 revisits the cache generalization; until then the audit-flagged behavior
 lives in the stock module's adapter, not the use cases.
 
@@ -141,7 +141,7 @@ directly. Topic-exchange routing is a follow-up if multiple consumers of
 Every `AUDIT-2026-05-08 [CACHE-NNN]` and `AUDIT-2026-05-08 [CODE-NNN]`
 comment from the legacy code travels with its production line into the
 new module. Line numbers update where the surrounding code moved, but
-the textual content and the audit identifier do not. Task-11 owns the
+the textual content and the audit identifier do not. The cache-generalization work owns the
 generalization pass for these items; this ADR explicitly does not.
 
 ## Consequences
@@ -163,7 +163,7 @@ generalization pass for these items; this ADR explicitly does not.
 
 ## Alternatives considered
 
-1. **Skip the stock-specific cache port; inject `CACHE_PORT` directly into the use case.** Rejected because the SCAN+UNLINK invalidation and KeyvRedis namespace handling reach below the generic port. The right place to generalize is task-11.
+1. **Skip the stock-specific cache port; inject `CACHE_PORT` directly into the use case.** Rejected because the SCAN+UNLINK invalidation and KeyvRedis namespace handling reach below the generic port. The right place to generalize is the dedicated cache-generalization work.
 2. **Promote `StockItem` to `AggregateRoot` and emit `StockLowEvent` from within the aggregate.** Rejected as premature — see §6. Easy to revisit if domain logic grows.
 3. **Put the low-stock threshold on the `product_stock` row.** Rejected as a migration cost with no current benefit. Easy to lift to the column later by keeping the threshold lookup behind the use case (the constant is referenced in one place).
 4. **Keep emitting `inventory.stock.low` via a fan-out exchange.** Deferred. Today's single-consumer model (notification queue) is sufficient.

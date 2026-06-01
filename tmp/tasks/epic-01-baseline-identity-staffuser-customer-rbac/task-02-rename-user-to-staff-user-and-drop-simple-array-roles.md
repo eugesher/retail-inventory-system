@@ -3,7 +3,7 @@ epic: epic-01
 task_number: 2
 title: Rename `user` → `staff_user`, drop `roles: simple-array`, add `staff_user_roles` join, replace `User` aggregate with `StaffUser`
 depends_on: [task-01]
-doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/01-staffuser-customer-split.md
+doc_deliverable: docs/implementation/01-baseline-identity-staffuser-customer-rbac/01-staffuser-customer-split.md
 ---
 
 # Task 02 — Rename `user` → `staff_user`, drop `simple-array` roles, add `staff_user_roles`
@@ -104,7 +104,7 @@ Task-01 carryover present on disk:
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/01-staffuser-customer-split.md` — **staff half only**. Task-05 will append the customer half to the same file. Target ~120 lines for this half. Sections:
+Write `docs/implementation/01-baseline-identity-staffuser-customer-rbac/01-staffuser-customer-split.md` — **staff half only**. Task-05 will append the customer half to the same file. Target ~120 lines for this half. Sections:
 
 1. **Why split.** The conflated `user` table doubled as StaffUser + Customer with a `roles` column that mixed two ontologies (`admin` = staff role, `customer` = "this is a buyer not a staff member"). Audit-log discipline requires that every action attributed to a StaffUser have a stable, never-recycled internal id distinct from any buyer id — see the epic's "Architectural Decisions Honored" §Q7 / §audit-log discipline.
 2. **The new `staff_user` shape.** Column list, `status` enum rationale (soft-delete-via-status, not row delete — staff actions persist in audit logs that outlive the staff member's tenure), why `last_login_at` joins the table (not a separate observation table — last-login is single-valued and cheap).

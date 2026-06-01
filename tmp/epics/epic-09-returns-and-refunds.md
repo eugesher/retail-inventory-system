@@ -5,7 +5,7 @@ source_stages: [production-core]
 depends_on: [epic-08]
 microservices: [api-gateway, retail-microservice, inventory-microservice]
 task_subfolder: tmp/tasks/epic-09-returns-and-refunds/
-docs_subfolder: docs/implementation/epic-09-returns-and-refunds/
+docs_subfolder: docs/implementation/09-returns-and-refunds/
 ---
 
 # Epic 09 — Returns + Refunds — ReturnRequest, ReturnLine, Refund, RMA lifecycle, Restock from Return
@@ -131,7 +131,7 @@ Close the report's Stage-2 buyer-side loop: a customer (or staff on their behalf
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-09-returns-and-refunds/`:
+**Per-task markdown files** under `docs/implementation/09-returns-and-refunds/`:
 
 - `01-rma-lifecycle.md` — the 6-state machine; status transitions table; cross-link to the report's RMA convergence note (Adobe Commerce / Vendure / ReverseLogix).
 - `02-return-line-disposition-and-restock.md` — `restock` / `scrap` / `quarantine` semantics; the cross-service Restock RPC.
@@ -198,7 +198,7 @@ Close the report's Stage-2 buyer-side loop: a customer (or staff on their behalf
 - [ ] After Issue Refund, Refund.status='issued'; payment.refunded_amount_minor reflects.
 - [ ] Auto-refund consumer issues a Refund for the `flagged_for_refund=true` case.
 - [ ] Every request in `http/returns.http` and `http/refunds.http` executes end-to-end.
-- [ ] Per-task docs present under `docs/implementation/epic-09-returns-and-refunds/`.
+- [ ] Per-task docs present under `docs/implementation/09-returns-and-refunds/`.
 - [ ] `README.md` + `CLAUDE.md` updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

@@ -1,7 +1,7 @@
 # 02 — Role + Permission Relational Model
 
-This document records the design of the relational RBAC schema landed in
-epic-01 task-01. It is the implementation-side companion to
+This document records the design of the relational RBAC schema. It is
+the implementation-side companion to
 [ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md),
 which captures the architectural decision that the simple-array role
 column on `user` is replaced by a relational `role` + `permission` +
@@ -9,7 +9,7 @@ column on `user` is replaced by a relational `role` + `permission` +
 
 ## 1. Why a relational model
 
-The pre-epic schema stored roles as a `simple-array` column on `user`
+The pre-existing schema stored roles as a `simple-array` column on `user`
 (see `apps/api-gateway/src/modules/auth/infrastructure/persistence/user.entity.ts`).
 Two consequences follow from that shape:
 
@@ -23,10 +23,10 @@ Two consequences follow from that shape:
    That collapses two different questions (*what role is this user?* vs.
    *what may this user do?*) into one.
 
-The relational model makes the role set a runtime fact. Admin tooling
-landed in task-06 will let an operator with `iam:role-edit` mutate
-`role_permissions` rows through a controller, and the change takes
-effect on the next JWT refresh — no redeploy required.
+The relational model makes the role set a runtime fact. The IAM admin
+tooling lets an operator with `iam:role-edit` mutate `role_permissions`
+rows through a controller, and the change takes effect on the next JWT
+refresh — no redeploy required.
 
 ## 2. Schema rationale
 
@@ -44,7 +44,7 @@ CREATE TABLE role (
 ```
 
 - **`id` as `CHAR(36)`** matches `user.id` so a future
-  `staff_user_roles` join (task-02) stays in one ID family across the
+  `staff_user_roles` join stays in one ID family across the
   module. The seed allocates deterministic UUIDs from the
   `00000000-0000-4000-c000-…` namespace so fixtures can reference them.
 - **`name VARCHAR(64) UNIQUE`** fits the four canonical kebab-case names
@@ -91,12 +91,12 @@ CREATE TABLE role_permissions (
 - **`ON DELETE CASCADE`** on both foreign keys ensures that deleting a
   `role` or a `permission` does not leave dangling bindings. Refusing to
   delete a role that is currently assigned to a `StaffUser` is enforced
-  at the use-case level in task-06 (`DeleteRoleUseCase` returns 409 when
+  at the use-case level by the IAM admin layer (`DeleteRoleUseCase` returns 409 when
   `staff_user_roles` references the role) — cascade here is about
   schema cleanliness, not about the policy decision.
 - Charset is `utf8mb4_unicode_ci` to match every other table in the
-  schema; the `simple-array` `user.roles` column will be dropped in
-  task-02.
+  schema; the `simple-array` `user.roles` column is dropped when `user`
+  is renamed to `staff_user`.
 
 ## 3. Permission code list (seeded)
 
@@ -117,9 +117,9 @@ CREATE TABLE role_permissions (
 
 These are the values of `PermissionCodeEnum` in
 `libs/contracts/auth/permission.enum.ts`. The enum is the single source
-of truth — the seed reads its values directly, the future
-`@RequiresPermission(<code>)` decorator (task-04) accepts the enum, and
-admin tooling (task-06) validates against the enum keyset before
+of truth — the seed reads its values directly, the
+`@RequiresPermission(<code>)` decorator accepts the enum, and
+the IAM admin tooling validates against the enum keyset before
 inserting into `role_permissions`.
 
 ## 4. Role-to-permission bindings (seeded)
@@ -137,12 +137,12 @@ duplicate-key errors and no duplicate rows.
 
 ## 5. The JWT inflation path (preview)
 
-At login time (task-03), `LoginUseCase` will resolve the authenticated
+At login time, `LoginUseCase` resolves the authenticated
 `StaffUser`'s roles via `IRoleRepositoryPort.findAllByNames(...)`,
 collect the union of their `permissions` sets, and embed
 `permissions: string[]` in the access JWT payload. The relational schema
 makes this inflation deterministic — one `SELECT … JOIN role_permissions`
-per login resolves the full effective permission set. Guards (task-04)
+per login resolves the full effective permission set. Guards
 then read `request.user.permissions` without a per-request DB hit; the
 trade-off is that a permission change does not take effect until the
 user's next refresh (the JWT TTL is the staleness window). This is the
@@ -150,22 +150,22 @@ standard latency-vs-freshness shape for JWT-embedded authorization and
 is recorded in [ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)
 Decision §3.
 
-## 6. What this task did NOT do
+## 6. What this work did NOT do
 
-This task is strictly additive. It does **not**:
+This schema work is strictly additive. It does **not**:
 
 - Rename `user` → `staff_user`, drop the `simple-array` `roles` column,
-  or add the `staff_user_roles` join. Those land in **task-02** along
-  with the `StaffUser` aggregate.
-- Inflate the access JWT with `permissions: string[]` — that is
-  **task-03** (`LoginUseCase` + `RefreshTokenUseCase` updates).
+  or add the `staff_user_roles` join. Those land with the `StaffUser`
+  rename and aggregate.
+- Inflate the access JWT with `permissions: string[]` — that is the
+  JWT-inflation work (`LoginUseCase` + `RefreshTokenUseCase` updates).
 - Add the `PermissionsGuard` or the `@RequiresPermission(<code>)`
-  decorator — those land in **task-04**, after the JWT carries the
-  inflated list.
+  decorator — those land with the guard + decorator work, after the JWT
+  carries the inflated list.
 - Introduce the `Customer` aggregate or the public registration route —
-  those are **task-05**.
+  those are part of the Customer-side work.
 - Expose IAM admin endpoints for mutating role-permission bindings — that
-  is **task-06**.
+  is the IAM admin endpoints work.
 
 The new tables exist, the enum and four seeded roles exist, the new
 domain aggregates compile alongside the surviving `RoleVO` — but no

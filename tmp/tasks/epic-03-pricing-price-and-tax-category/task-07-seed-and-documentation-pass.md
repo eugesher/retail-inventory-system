@@ -3,7 +3,7 @@ epic: epic-03
 task_number: 7
 title: Seed + documentation pass — extend scripts/test-db-seed.ts, README, CLAUDE.md, arch-lint; author the e2e test and the currency-immutability doc
 depends_on: [task-06]
-doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/07-currency-immutability-on-order.md
+doc_deliverable: docs/implementation/03-pricing-price-and-tax-category/07-currency-immutability-on-order.md
 ---
 
 # Task 07 — Seed + documentation pass
@@ -31,7 +31,7 @@ Tasks 1–6 complete. Specifically:
 - The publish hard-fail is live.
 - The api-gateway HTTP surface is live.
 - `http/pricing.http` exercises the surface end-to-end.
-- Six docs (`01-` through `06-`) exist under `docs/implementation/epic-03-pricing-price-and-tax-category/`. The seventh — `07-currency-immutability-on-order.md` — does not exist yet; this task writes it.
+- Six docs (`01-` through `06-`) exist under `docs/implementation/03-pricing-price-and-tax-category/`. The seventh — `07-currency-immutability-on-order.md` — does not exist yet; this task writes it.
 - The existing seed script `scripts/test-db-seed.ts` (post-epic-02 task-09) seeds an admin user, two products with two variants, and an existing role / permission registry from epic-01. The script's structure (transactional, idempotent) is already established.
 - `README.md` has a Services table, an API section with a "Catalog" subsection (from epic-02 task-09), a Caching section, an Environment variables table.
 - `CLAUDE.md` has a Catalog microservice section (from epic-02 task-09).
@@ -76,7 +76,7 @@ The test file owns its own DB cleanup hooks — `beforeAll` truncates the releva
 
 ### Documentation
 
-`docs/implementation/epic-03-pricing-price-and-tax-category/07-currency-immutability-on-order.md` — the forward-looking forward-link to `epic-05`. Target ~120 lines. Sections:
+`docs/implementation/03-pricing-price-and-tax-category/07-currency-immutability-on-order.md` — the forward-looking forward-link to `epic-05`. Target ~120 lines. Sections:
 
 1. **The contract this epic ships for `Order.currency`.** Once `epic-05` lands, the cart snapshot at line-add time captures `{ variantId, currency, amountMinor }` from `SelectApplicablePriceUseCase`. The order header inherits `currency` from the first cart line; subsequent cart lines must share the same currency (or the cart write is rejected). The order's `currency` is set once at place-time and is immutable afterwards.
 2. **Why this rule lives in `epic-03`, not `epic-05`.** Decision provenance: the report cited in the epic charter calls out multi-currency at the "Stage 1 threshold." The order entity in `epic-05` will inherit this rule because it is impossible to mix currencies in a single line-item snapshot — every cart line points at exactly one `Price`, and every `Price` is in exactly one currency.
@@ -89,7 +89,7 @@ The test file owns its own DB cleanup hooks — `beforeAll` truncates the releva
 ### `README.md` updates
 
 - **API → Catalog section**: add a "Catalog → Pricing" subsection listing the six new endpoints (one row per endpoint, mirroring the rows for the existing catalog endpoints). Cite the controller path.
-- **Caching section, "What is NOT cached"**: add a bullet stating that pricing reads are deliberately uncached at the walking-skeleton stage; the cache-key builder `catalogPrice*` exists for the future wire-up; the threshold for switching to cache-aside is documented in `docs/implementation/epic-03-pricing-price-and-tax-category/05-select-applicable-price.md`.
+- **Caching section, "What is NOT cached"**: add a bullet stating that pricing reads are deliberately uncached at the walking-skeleton stage; the cache-key builder `catalogPrice*` exists for the future wire-up; the threshold for switching to cache-aside is documented in `docs/implementation/03-pricing-price-and-tax-category/05-select-applicable-price.md`.
 - **Environment variables table**: add a row for `DEFAULT_CURRENCY` (default `USD`, used by `Publish Product` precondition and by the api-gateway's `/price` default).
 - **Services table** (if exists): no change — `catalog-microservice` already has a row; pricing is a sibling module.
 - **System diagram** (if exists in ASCII or referenced as an asset): no change — the message bus topology is unchanged (the new routing keys ride the existing `catalog_queue`).
@@ -99,7 +99,7 @@ The test file owns its own DB cleanup hooks — `beforeAll` truncates the releva
 - **Catalog microservice section**: extend the file-listing snippet (the inline tree of `apps/catalog-microservice/src/modules/`) to include the `pricing/` sibling module beside `catalog/`. Match the existing indentation / tree-art style.
 - **Message patterns list**: add a row for `catalog.price.changed` (emitted by `Set Price`) and one for `catalog.price.scheduled` (emitted by `Schedule Price`). Include the payload version (`v1`) and the producing use case.
 - **Forbidden-import note**: under the catalog section, add a bullet: "`pricing/domain/**` must not import from `catalog/**`, and vice-versa. The two modules communicate via the variant id (FK in persistence; opaque value in the domain). The `eslint-plugin-boundaries` rule + the `spec/architecture-lint.spec.ts` fixtures enforce this."
-- **Documentation pointer**: add a one-line link to `docs/implementation/epic-03-pricing-price-and-tax-category/` from the catalog section.
+- **Documentation pointer**: add a one-line link to `docs/implementation/03-pricing-price-and-tax-category/` from the catalog section.
 
 ### `spec/architecture-lint.spec.ts` extension
 
@@ -129,7 +129,7 @@ Expected output: no matches. If any match exists, fix it before closing the task
 
 ## Files to add
 
-- `docs/implementation/epic-03-pricing-price-and-tax-category/07-currency-immutability-on-order.md`.
+- `docs/implementation/03-pricing-price-and-tax-category/07-currency-immutability-on-order.md`.
 - `test/pricing.e2e-spec.ts`.
 
 ## Files to modify
@@ -152,7 +152,7 @@ The exit criterion for this task — and for the epic as a whole — is that `ya
 
 ## Doc deliverable
 
-`docs/implementation/epic-03-pricing-price-and-tax-category/07-currency-immutability-on-order.md`. Content per §"Documentation" above.
+`docs/implementation/03-pricing-price-and-tax-category/07-currency-immutability-on-order.md`. Content per §"Documentation" above.
 
 ## Carryover produced
 
@@ -173,7 +173,7 @@ This is the final task — the carryover is the entire delivered epic. Concretel
 - [ ] Every request in `http/pricing.http` executes end-to-end against the seeded data with the documented status codes.
 - [ ] `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded Price for both seeded variants.
 - [ ] At-most-one-`validTo IS NULL`-per-`(variantId, currency)` invariant is asserted by the concurrency e2e test against the live MySQL.
-- [ ] All seven per-task docs exist under `docs/implementation/epic-03-pricing-price-and-tax-category/`:
+- [ ] All seven per-task docs exist under `docs/implementation/03-pricing-price-and-tax-category/`:
   - `01-pricing-module-scaffold.md`
   - `02-price-domain-and-append-only-history.md`
   - `03-tax-category-and-variant-attachment.md`

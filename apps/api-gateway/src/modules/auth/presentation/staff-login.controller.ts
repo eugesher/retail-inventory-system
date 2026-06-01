@@ -9,7 +9,7 @@ import { LoginRequestDto } from './dto/login.request.dto';
 import { TokenResponseDto } from './dto/token.response.dto';
 
 // Multi-prefix: `/auth/login` is the deprecated alias kept for one release
-// (epic-01 §"Old route kept as deprecated alias"); `/auth/staff/login` is the
+// (the old route kept as a deprecated alias); `/auth/staff/login` is the
 // new canonical path. Both delegate to the same LoginUseCase, so behaviour is
 // identical — only the URL differs, which is what "deprecation" means here.
 @ApiTags('Auth — Staff')

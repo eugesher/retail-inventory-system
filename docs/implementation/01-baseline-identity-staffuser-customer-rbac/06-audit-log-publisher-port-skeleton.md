@@ -1,11 +1,11 @@
 # 06 — Audit-log publisher port skeleton
 
-This document records the forward-compatibility scaffolding for the
-audit-log work that lands in epic-11. Epic-01 ships the application-port
+This document records the forward-compatibility scaffolding for future
+audit-log delivery work. This baseline ships the application-port
 interface, a DI symbol, and a default *no-op* adapter that writes a Pino
-debug line; epic-11 will swap the binding to an RMQ publisher and stand
-up the `audit_log_entry` table without re-touching a single auth/IAM use
-case.
+debug line; the future work will swap the binding to an RMQ publisher and
+stand up the `audit_log_entry` table without re-touching a single
+auth/IAM use case.
 
 Sibling implementation notes:
 [`01-staffuser-customer-split.md`](./01-staffuser-customer-split.md),
@@ -18,7 +18,7 @@ Sibling implementation notes:
 
 Audit-log call sites are *cross-cutting* — they live inside every
 mutation use case in the auth + IAM modules. If the port were introduced
-in epic-11 alongside the real RMQ publisher, that PR would have to touch
+later alongside the real RMQ publisher, that change would have to touch
 every one of those use cases:
 
 - `LoginUseCase`, `RefreshTokenUseCase`, `LogoutUseCase`
@@ -26,17 +26,18 @@ every one of those use cases:
 - `CreateRoleUseCase`, `UpdateRoleUseCase`,
   `AssignStaffRoleUseCase`, `RevokeStaffRoleUseCase`
 
-By landing the port + no-op adapter inside epic-01 (alongside the
+By landing the port + no-op adapter now (alongside the
 StaffUser/Customer split, the relational RBAC schema, the permissions
-guard, and the IAM admin surface), epic-11's scope reduces to:
+guard, and the IAM admin surface), the future audit-log delivery work's
+scope reduces to:
 
 1. Swap the `AUDIT_LOG_PUBLISHER` binding from `NoOpAuditLogPublisher`
    to an RMQ-publisher adapter.
 2. Stand up the event-store microservice and the `audit_log_entry`
    table.
 3. Wire `GET /audit-log` behind the existing `audit:read` permission
-   (seeded by task-02; today only the `/api/auth/admin/ping` smoke
-   endpoint exercises it).
+   (seeded with the role/permission schema; today only the
+   `/api/auth/admin/ping` smoke endpoint exercises it).
 
 None of the auth + IAM use cases change.
 
@@ -104,7 +105,7 @@ yarn start:dev:api-gateway 2>&1 | grep '"context":"AuditLog"'
 
 The no-op is **not** a stub waiting to be replaced. Its semantics are
 "this deployment has no durable audit log yet, so route the event to
-logs." When the real adapter lands in epic-11, that's a *deployment*
+logs." When the real adapter lands, that's a *deployment*
 change (`useClass`/`useExisting` swap), not a code change at the call
 sites.
 
@@ -131,7 +132,7 @@ expected `{ name, actorId, actorKind, targetId, targetKind, payload,
 correlationId }` shape (see `*.use-case.spec.ts` files under
 `apps/api-gateway/src/modules/{auth,iam}/application/use-cases/spec/`).
 
-## 5. What epic-11 will change
+## 5. What the audit-log delivery work will change
 
 | Change                                    | Where                                                                  |
 | ----------------------------------------- | ---------------------------------------------------------------------- |
@@ -141,7 +142,7 @@ correlationId }` shape (see `*.use-case.spec.ts` files under
 | `GET /audit-log` endpoint                 | A new presentation controller, gated by the existing `audit:read` code |
 
 The use cases, the port shape, the no-op adapter file, and the existing
-spec files **do not change** — epic-11 deletes the no-op binding line
+spec files **do not change** — that work deletes the no-op binding line
 and adds the RMQ binding line. That's the whole point of investing in
 this skeleton up front.
 
@@ -166,6 +167,6 @@ This is a *deliberate shortcut*. The cleaner long-term solution is a
 request-scoped `CorrelationContext` provider injected into the use
 cases directly — that removes the `correlationId` field from every
 command DTO and avoids the "controller is now responsible for stitching
-in a request-bound primitive" coupling. Epic-11 should replace the
-command-field plumbing with that provider in the same PR that swaps in
-the RMQ adapter; this doc is the audit record so we don't forget.
+in a request-bound primitive" coupling. That future work should replace
+the command-field plumbing with that provider in the same change that
+swaps in the RMQ adapter; this doc is the audit record so we don't forget.

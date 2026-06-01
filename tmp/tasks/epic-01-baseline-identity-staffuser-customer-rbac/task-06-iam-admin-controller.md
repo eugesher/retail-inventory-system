@@ -3,7 +3,7 @@ epic: epic-01
 task_number: 6
 title: Add the IAM admin controller — `/api/iam/roles` and `/api/iam/staff/:id/roles` endpoints
 depends_on: [task-01, task-02, task-03, task-04, task-05]
-doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/05-iam-admin-endpoints.md
+doc_deliverable: docs/implementation/01-baseline-identity-staffuser-customer-rbac/05-iam-admin-endpoints.md
 ---
 
 # Task 06 — IAM admin controller (`/api/iam/roles`, `/api/iam/staff/:id/roles`)
@@ -143,7 +143,7 @@ Same approach for `AssignStaffRoleUseCase` if it needs to handle the multi-role-
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/05-iam-admin-endpoints.md`. Target ~150 lines. Sections:
+Write `docs/implementation/01-baseline-identity-staffuser-customer-rbac/05-iam-admin-endpoints.md`. Target ~150 lines. Sections:
 
 1. **Endpoint table.** Copy of the epic's API Surface IAM rows + the permission code each requires.
 2. **Request/response shapes.** Compact OpenAPI-style snippets for each endpoint.

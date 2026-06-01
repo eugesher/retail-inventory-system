@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 3
 title: Add `order` + `order_line` + `address` tables, domain, persistence, mappers
 depends_on: [01, 02]
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/03-order-three-status-and-q4-decision.md and 06-address-polymorphic-snapshot.md
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/03-order-three-status-and-q4-decision.md and 06-address-polymorphic-snapshot.md
 ---
 
 # Task 03 — Add `order` + `order_line` + `address` domain and persistence
@@ -483,8 +483,8 @@ export class OrderTypeormRepository implements IOrderRepositoryPort {
 - `libs/contracts/retail/orders/events/order-confirmed.event.ts`
 - `libs/contracts/retail/orders/events/index.ts`
 - `libs/contracts/retail/orders/index.ts`
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/03-order-three-status-and-q4-decision.md`
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/06-address-polymorphic-snapshot.md`
+- `docs/implementation/05-cart-order-payment-walking-skeleton/03-order-three-status-and-q4-decision.md`
+- `docs/implementation/05-cart-order-payment-walking-skeleton/06-address-polymorphic-snapshot.md`
 
 ## Files to modify
 

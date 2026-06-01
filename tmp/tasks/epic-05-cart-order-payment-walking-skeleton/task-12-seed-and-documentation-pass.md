@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 12
 title: Seed + documentation pass — README, CLAUDE.md, arch-lint, test seed, e2e
 depends_on: [01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11]
-doc_deliverable: closing appends to docs/implementation/epic-05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md + 02-cart-aggregate-and-q1-q3-decisions.md + 03-order-three-status-and-q4-decision.md + 06-address-polymorphic-snapshot.md + 08-idempotency-key-header-q10.md + 10-cart-and-order-http-files.md
+doc_deliverable: closing appends to docs/implementation/05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md + 02-cart-aggregate-and-q1-q3-decisions.md + 03-order-three-status-and-q4-decision.md + 06-address-polymorphic-snapshot.md + 08-idempotency-key-header-q10.md + 10-cart-and-order-http-files.md
 ---
 
 # Task 12 — Seed + documentation pass
@@ -140,12 +140,12 @@ Tasks 01–11 complete:
 - `spec/architecture-lint.spec.ts` — extend with the new fixtures.
 - `README.md` — System diagram + API → Orders + API → Cart + API → Payment gateway + Authentication → Roles + Database sections.
 - `CLAUDE.md` — Retail microservice + Message patterns + Forbidden imports + Operational notes sections.
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md` — append the after-snapshot section.
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md` — final-pass.
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/03-order-three-status-and-q4-decision.md` — final-pass.
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/06-address-polymorphic-snapshot.md` — final-pass.
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/08-idempotency-key-header-q10.md` — final-pass + section 4.
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/10-cart-and-order-http-files.md` — final-pass.
+- `docs/implementation/05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md` — append the after-snapshot section.
+- `docs/implementation/05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md` — final-pass.
+- `docs/implementation/05-cart-order-payment-walking-skeleton/03-order-three-status-and-q4-decision.md` — final-pass.
+- `docs/implementation/05-cart-order-payment-walking-skeleton/06-address-polymorphic-snapshot.md` — final-pass.
+- `docs/implementation/05-cart-order-payment-walking-skeleton/08-idempotency-key-header-q10.md` — final-pass + section 4.
+- `docs/implementation/05-cart-order-payment-walking-skeleton/10-cart-and-order-http-files.md` — final-pass.
 
 ## Tests
 
@@ -176,7 +176,7 @@ Light-touch: verify cross-links, ensure no broken references, ensure the doc tex
 
 ## Carryover produced (closes the epic)
 
-- All ten topic-numbered docs under `docs/implementation/epic-05-cart-order-payment-walking-skeleton/` exist + complete.
+- All ten topic-numbered docs under `docs/implementation/05-cart-order-payment-walking-skeleton/` exist + complete.
 - `README.md` and `CLAUDE.md` reflect the new shape.
 - `spec/architecture-lint.spec.ts` covers the new element types + the defensive negative fixtures.
 - Three e2e specs green.
@@ -190,7 +190,7 @@ Light-touch: verify cross-links, ensure no broken references, ensure the doc tex
 - [ ] `docker compose up -d && yarn migration:run && yarn test:seed` runs clean; the example cart + permission codes are present.
 - [ ] `docker compose up -d && yarn start:dev` boots the full stack; all six new tables present; legacy 5 tables gone; RabbitMQ shows the new routing keys; the notification microservice logs an order-placed line when an order is placed.
 - [ ] Every request in `http/cart.http` and `http/order.http` executes end-to-end against the seeded customer + seeded variants.
-- [ ] The ten topic-numbered docs (01 through 10) exist under `docs/implementation/epic-05-cart-order-payment-walking-skeleton/`.
+- [ ] The ten topic-numbered docs (01 through 10) exist under `docs/implementation/05-cart-order-payment-walking-skeleton/`.
 - [ ] `README.md` System diagram + API → Cart + API → Orders + API → Payment gateway + Authentication → Roles sections rewritten.
 - [ ] `CLAUDE.md` Retail microservice + Message patterns + Forbidden imports + Operational notes sections rewritten.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.

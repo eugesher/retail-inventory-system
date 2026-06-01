@@ -7,7 +7,7 @@
 
 ## Context
 
-Pre-task-04 the RabbitMQ wiring lived in three places:
+Before the integration-libs split, the RabbitMQ wiring lived in three places:
 
 - `libs/common/config/microservice-client-configuration.ts` — async
   factory producing `RmqOptions` from `ConfigService`.
@@ -101,10 +101,10 @@ the long-term shape is:
   `ClientProxy`.
 - Domain code never imports `@nestjs/microservices`.
 
-That port lands in task-08/task-09 when the per-service hexagonal
-re-organisation runs. Task-04 deliberately stops at relocating the
-existing wiring; introducing a publisher port in the same task
-would conflate "structural move" with "API change" and balloon the
+That port lands with the per-service hexagonal re-organisation of the
+inventory and retail microservices. This work deliberately stops at
+relocating the existing wiring; introducing a publisher port at the same
+time would conflate "structural move" with "API change" and balloon the
 diff.
 
 ## Consequences
@@ -119,7 +119,7 @@ diff.
 - **−** Wire-format break requires gateway and every microservice
   to ship together. Acceptable given the all-in-one deploy.
 - **−** No publisher port today. Domain code in retail/inventory
-  still imports `@nestjs/microservices`. Tracked for task-08/09.
+  still imports `@nestjs/microservices`. Tracked for the inventory and retail hexagonal alignments.
 
 ## Alternatives considered
 
@@ -134,8 +134,8 @@ diff.
   the wiring code that consumes them keeps the mental model
   simpler.
 - **Introduce the publisher port now.** Rejected: scope creep.
-  Better as a focused step in task-08/task-09 alongside the
-  hexagonal re-org of the consuming services.
+  Better as a focused step in the inventory and retail hexagonal
+  alignments, alongside the hexagonal re-org of the consuming services.
 
 ---
 

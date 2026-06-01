@@ -23,7 +23,7 @@ Tasks depend on each other through the `Carryover Between Tasks` table in the ep
 
 ## Document-deliverable map
 
-The epic lists seven topic-numbered docs under `docs/implementation/epic-03-pricing-price-and-tax-category/`. Each doc is owned by exactly one task (no append patterns this epic, except doc-06 which task-06 appends to):
+The epic lists seven topic-numbered docs under `docs/implementation/03-pricing-price-and-tax-category/`. Each doc is owned by exactly one task (no append patterns this epic, except doc-06 which task-06 appends to):
 
 - **`01-pricing-module-scaffold.md`** — task-01 writes the entire file (sibling-module rationale, boundaries lint rules, new routing keys registered up front).
 - **`02-price-domain-and-append-only-history.md`** — task-02 writes the entire file (append-only-for-history rationale, `(variantId, currency)` scope, the closed/open interval ledger, invariants).
@@ -57,6 +57,6 @@ Mirrors the epic's `Exit Criteria` section. Each task carries its own per-task e
 - [ ] Every request in `http/pricing.http` executes end-to-end against the seeded data.
 - [ ] `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded current Price for both seeded variants.
 - [ ] At-most-one-`validTo IS NULL`-per-`(variantId, currency)` invariant verified by the concurrency test in `test/pricing.e2e-spec.ts`.
-- [ ] Per-task docs present under `docs/implementation/epic-03-pricing-price-and-tax-category/` (seven `*.md` files).
+- [ ] Per-task docs present under `docs/implementation/03-pricing-price-and-tax-category/` (seven `*.md` files).
 - [ ] `README.md` API → Catalog section reflects the new pricing endpoints; the Caching note explicitly excludes pricing reads; `DEFAULT_CURRENCY=USD` is documented in the Environment variables table. `CLAUDE.md` Catalog microservice section lists the new `pricing/` sibling module + the two new routing keys + the cross-module import ban (pricing/`domain/` must not import from `catalog/`).
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.

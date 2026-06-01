@@ -5,7 +5,7 @@ source_stages: [production-core]
 depends_on: [epic-01, epic-05]
 microservices: [api-gateway, retail-microservice, inventory-microservice, notification-microservice, catalog-microservice, event-store-microservice]
 task_subfolder: tmp/tasks/epic-11-event-store-and-audit-log/
-docs_subfolder: docs/implementation/epic-11-event-store-and-audit-log/
+docs_subfolder: docs/implementation/11-event-store-and-audit-log/
 ---
 
 # Epic 11 — Event-store microservice — DomainEvent firehose + AuditLogEntry write paths
@@ -95,7 +95,7 @@ Stand up a new `event-store-microservice` that owns two append-only logs: `Domai
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-11-event-store-and-audit-log/`:
+**Per-task markdown files** under `docs/implementation/11-event-store-and-audit-log/`:
 
 - `01-new-event-store-microservice-scaffold.md` — the third new microservice; topology + DB choice.
 - `02-topic-exchange-ris-events-and-dual-publish.md` — why a new topic exchange; why dual-publish on producers instead of re-binding existing consumers.
@@ -155,7 +155,7 @@ Stand up a new `event-store-microservice` that owns two append-only logs: `Domai
 - [ ] After an `Assign Role` admin action, querying the `audit_log_entry` table shows the expected row with before/after snapshots.
 - [ ] Republishing the same event twice produces exactly one `domain_event` row (idempotency proof).
 - [ ] All producer services have their `AUDIT_LOG_PUBLISHER` bindings switched from no-op to real RMQ adapter; the no-op adapter file is deleted from each service.
-- [ ] Per-task docs present under `docs/implementation/epic-11-event-store-and-audit-log/`.
+- [ ] Per-task docs present under `docs/implementation/11-event-store-and-audit-log/`.
 - [ ] `README.md` Services + System diagram + Audit/event-store section added; `CLAUDE.md` event-store section added.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

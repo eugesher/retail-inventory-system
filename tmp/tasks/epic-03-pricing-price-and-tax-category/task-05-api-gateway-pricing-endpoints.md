@@ -3,7 +3,7 @@ epic: epic-03
 task_number: 5
 title: Add the api-gateway pricing endpoints (Set Price, list/get Price, TaxCategory CRUD, attach TaxCategory to Variant)
 depends_on: [task-04]
-doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md
+doc_deliverable: docs/implementation/03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md
 ---
 
 # Task 05 — Add the api-gateway pricing endpoints
@@ -201,7 +201,7 @@ This task does not author the e2e pricing test (that is task-07). Unit-level cov
 - `apps/api-gateway/src/modules/catalog/application/dto/price-response.dto.ts`.
 - `apps/api-gateway/src/modules/catalog/application/dto/tax-category-response.dto.ts`.
 - `apps/api-gateway/src/modules/catalog/presentation/catalog-pricing.controller.ts` (only if a split is chosen).
-- `docs/implementation/epic-03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md` (api half — task-06 appends).
+- `docs/implementation/03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md` (api half — task-06 appends).
 
 ## Files to modify
 
@@ -219,7 +219,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md` — **api half only** in this task; task-06 appends the Kulala half. Target the api half at ~150 lines. Sections:
+Write `docs/implementation/03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md` — **api half only** in this task; task-06 appends the Kulala half. Target the api half at ~150 lines. Sections:
 
 1. **Why pricing endpoints live under `/api/catalog`.** Mirrors the microservice-side module colocation. URL design honesty: a future reader of the URL can predict the bounded context.
 2. **Endpoint table, full reference.** Reproduce the §"Endpoint table" content; expand each row with a one-paragraph note on intent.

@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 7
 title: Add the catalog.variant.created consumer + auto-init StockLevel
 depends_on: [01, 02, 03, 04, 05, 06]
-doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md
+doc_deliverable: docs/implementation/04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md
 ---
 
 # Task 07 — Add the `catalog.variant.created` consumer + `AutoInitStockLevelUseCase`
@@ -282,7 +282,7 @@ The `VariantCreatedConsumer` is registered as a controller (Nest's `@Controller(
 - `apps/inventory-microservice/src/modules/stock/infrastructure/consumers/variant-created.consumer.ts`
 - `apps/inventory-microservice/src/modules/stock/infrastructure/consumers/index.ts`
 - `libs/contracts/inventory/events/stock-level-initialized.event.ts`
-- `docs/implementation/epic-04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md`
+- `docs/implementation/04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md`
 
 ## Files to modify
 
@@ -316,7 +316,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md`. Target ~160 lines. Sections:
+Write `docs/implementation/04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md`. Target ~160 lines. Sections:
 
 1. **The auto-init contract.** On `catalog.variant.created`, the inventory microservice inserts a `StockLevel = 0` row at the auto-provisioned `default-warehouse`. This is the only path by which a `StockLevel` row is created in normal operation. The test seed (task-10) is the out-of-band exception, and the e2e tests assert both paths.
 2. **The two-call idempotency dance.** The find-then-save approach. Why not `INSERT ... ON DUPLICATE KEY UPDATE`: that idiom makes it ambiguous whether the row was created or already existed, and the event-emission decision needs that signal. Why the errno-1062 race fallback is correctness-preserving (both racers achieve the same end-state; only the winner emits; if both somehow emit, downstream consumers use event IDs).

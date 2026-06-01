@@ -44,7 +44,7 @@ Both files mirror the shape of `http/order.http`:
   `{{handlerName.response.body.$.field}}`. The `$.` prefix is the JSONPath
   root.
 - A `#`-prefixed comment names the route and explains the contract: body
-  shape, status codes, and the relevant ADR or task where applicable.
+  shape, status codes, and the relevant ADR where applicable.
 
 A subtle detail in `iam.http`: the staff-login response (`TokenResponseDto`)
 deliberately omits user info, so an `adminMe` block (`GET /api/auth/me`) sits
@@ -84,7 +84,7 @@ Two follow-up cleanups are out of scope here but worth flagging:
 - `http/order.http` and `http/product.http` have no chained auth block.
   Operators currently send the request unauthenticated (the global guard
   rejects it) or hand-paste a token into the `Authorization` header. A
-  follow-up task could either add a leading login block to each file
+  follow-up could either add a leading login block to each file
   (matching the iam.http pattern) or factor a shared login fragment when
   Kulala supports request includes.
 - `http/http-client.env.json` could grow `adminEmail` / `adminPassword`

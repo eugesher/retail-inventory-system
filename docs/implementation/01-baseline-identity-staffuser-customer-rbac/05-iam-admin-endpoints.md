@@ -1,7 +1,7 @@
 # 05 — IAM admin endpoints
 
 This document records the runtime admin surface over the relational RBAC
-schema landed in tasks 02-05. Without these endpoints, the only way to
+schema. Without these endpoints, the only way to
 change a role's permission set or a staff user's role list would be by
 editing the seed script and re-running migrations. The IAM module sits
 on top of the auth module's `Role`, `Permission`, and `StaffUser`
@@ -32,8 +32,9 @@ code (the global `PermissionsGuard` enforces both).
 
 Both permission codes were already in the registry
 (`libs/contracts/auth/permission.enum.ts`) and seeded into the
-`permission` table by task-02; the seeded `admin` role bundles all
-twelve codes, so the e2e fixture admin can hit every endpoint here.
+`permission` table when the role/permission schema was seeded; the
+seeded `admin` role bundles all twelve codes, so the e2e fixture admin
+can hit every endpoint here.
 
 ## 2. Request/response shapes
 
@@ -80,7 +81,7 @@ Either field may be omitted. Both omitted → 400 `"No-op patch"`.
 `permissionCodes` is a **replace**, not a merge; the old `role_permissions`
 rows are cleared and the new ones inserted in a single transaction so
 observers can't see an empty join set mid-edit (see §4 below). Name is
-read-only — the epic explicitly forbids renaming a seeded role.
+read-only — renaming a seeded role is explicitly disallowed.
 
 ### `POST /api/iam/staff/:id/roles` — 200
 
@@ -145,8 +146,8 @@ in `application/`, ADR-017 §4). Two adapter methods open transactions:
   emits one INSERT and zero-or-one DELETE.
 
 Concurrency model is last-writer-wins. There is no `version` column on
-`role` or `staff_user`; the epic explicitly defers optimistic-concurrency
-checks to epic-12. Until then, two simultaneous PATCHes that disagree
+`role` or `staff_user`; optimistic-concurrency checks are explicitly
+deferred to future concurrency-control work. Until then, two simultaneous PATCHes that disagree
 on the final permission set will both succeed and the later commit
 wins. For the IAM admin surface this is acceptable — operator
 mutations are rare and human-initiated.
@@ -159,28 +160,27 @@ the user. The use case computes the post-resolution diff (which role
 names were *actually* added after dedupe) and only emits a
 `StaffUserRolesAssignedEvent` when that diff is non-empty.
 
-This is important for retried POSTs — until epic-12 ships
-idempotency-key support, the safest behavior at the domain boundary is
+This is important for retried POSTs — until idempotency-key support
+ships, the safest behavior at the domain boundary is
 that re-running the same `roleNames` payload always converges to the
 same state with no side-effects.
 
 ## 6. Audit-log call sites — forward reference
 
-The five use cases each represent an auditable mutation. Task-07
-introduces the `AUDIT_LOG_PUBLISHER` port (a no-op publisher for
-epic-01; the real publisher lands in epic-11) and wraps the call sites
-this task adds — `CreateRoleUseCase`, `UpdateRoleUseCase`,
+The five use cases each represent an auditable mutation. The
+`AUDIT_LOG_PUBLISHER` port (a no-op publisher today; the real publisher
+arrives with the audit-log delivery work) wraps the call sites these use
+cases add — `CreateRoleUseCase`, `UpdateRoleUseCase`,
 `AssignStaffRoleUseCase`, `RevokeStaffRoleUseCase` — in
-`AUDIT_LOG_PUBLISHER.publish(...)` calls. The wiring belongs to task-07
-on purpose: this task lands first so the use cases exist for task-07 to
-decorate.
+`AUDIT_LOG_PUBLISHER.publish(...)` calls. The use cases exist first so
+the publisher wiring has something to decorate.
 
-Until task-07 lands, the two new domain events
+Until the publisher wiring lands, the two new domain events
 (`StaffUserRolesAssignedEvent`, `StaffUserRoleRevokedEvent`, in
 `apps/api-gateway/src/modules/auth/domain/events/`) are the only audit
 surface — they're attached to the aggregate's pending events queue and
 drained by the repository on save. Today nothing dispatches them off
-the queue; task-07 will hand them to the audit-log publisher.
+the queue; the audit-log publisher will hand them on.
 
 ## 7. Why a separate `iam` module
 

@@ -3,7 +3,7 @@ epic: epic-01
 task_number: 7
 title: Introduce `AUDIT_LOG_PUBLISHER` port + no-op default adapter; wire call sites in auth + IAM use cases
 depends_on: [task-01, task-02, task-03, task-04, task-05, task-06]
-doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/06-audit-log-publisher-port-skeleton.md
+doc_deliverable: docs/implementation/01-baseline-identity-staffuser-customer-rbac/06-audit-log-publisher-port-skeleton.md
 ---
 
 # Task 07 — `AUDIT_LOG_PUBLISHER` port + no-op default adapter
@@ -160,7 +160,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/06-audit-log-publisher-port-skeleton.md`. Target ~100 lines. Sections:
+Write `docs/implementation/01-baseline-identity-staffuser-customer-rbac/06-audit-log-publisher-port-skeleton.md`. Target ~100 lines. Sections:
 
 1. **Why ship the port now.** Audit-log call sites are *cross-cutting* — they live inside every mutation use case. Adding them in epic-11 after-the-fact would mean a follow-on PR that touches every auth + IAM use case. By introducing the port + no-op adapter in this epic, epic-11's PR scope reduces to "swap the adapter binding" + "stand up the event-store microservice".
 2. **Port shape.** Snippet of `IAuditLogEvent` + `IAuditLogPublisher`. Explain the `actorKind` field (staff vs customer ids share no namespace).

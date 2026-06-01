@@ -23,7 +23,7 @@
 # @name staffLogin
 # POST /api/auth/staff/login
 # Canonical staff login. Returns access + refresh tokens. The access JWT
-# carries `permissions: string[]` (task-03 inflation): the seeded admin user
+# carries `permissions: string[]`, inflated at login: the seeded admin user
 # holds every code in the registry, so this token unlocks the whole IAM
 # surface in http/iam.http.
 POST {{baseUrl}}/auth/staff/login
@@ -38,7 +38,7 @@ Content-Type: application/json
 
 # @name staffLoginDeprecated
 # POST /api/auth/login
-# Deprecated alias for back-compat (one release; remove after epic-02 lands).
+# Deprecated alias for back-compat (one release; remove in a future release).
 # Same handler, same body, same response shape — only the URL differs. The
 # multi-prefix wiring is on StaffLoginController via @Controller(['auth',
 # 'auth/staff']).
@@ -74,7 +74,7 @@ Content-Type: application/json
 # or customer, the same endpoint works for both. Response shape
 # (CurrentUserResponseDto): { id, email, roles, permissions }. The
 # `permissions` field is the source of truth for PermissionsGuard checks
-# downstream (task-03 / ADR-024).
+# downstream (inflated at login; see ADR-024).
 GET {{baseUrl}}/auth/me
 Authorization: Bearer {{staffLogin.response.body.$.accessToken}}
 
@@ -94,7 +94,7 @@ Authorization: Bearer {{staffLogin.response.body.$.accessToken}}
 # @name adminPing
 # GET /api/auth/admin/ping
 # Smoke endpoint for the global guard chain (JwtAuthGuard → RolesGuard →
-# PermissionsGuard). Gated behind `audit:read` (task-04 / ADR-024):
+# PermissionsGuard). Gated behind `audit:read` (see ADR-024):
 #   • Admin succeeds → 200 { "ok": true }
 #   • StaffUser without `audit:read` → 403
 #   • Anonymous → 401

@@ -7,7 +7,7 @@
 
 ## Context
 
-Pre-task-09 the retail microservice was on the legacy flat layout:
+Before the retail microservice's hexagonal migration it was on the legacy flat layout:
 
 - `apps/retail-microservice/src/app/api/order/`
   - `order.controller.ts` — `@MessagePattern` handlers for `RETAIL_ORDER_CREATE`, `RETAIL_ORDER_CONFIRM`, `RETAIL_ORDER_GET`.
@@ -83,8 +83,8 @@ newly-confirmed line ids the persistence adapter needs.
   wraps `ClientProxy.emit()` and the `firstValueFrom` materialization
   so application code awaits a plain Promise. Targets the
   `NOTIFICATION_MICROSERVICE` ClientProxy from
-  `MicroserviceClientNotificationModule` (added in task-08 for the
-  inventory `stock.low` flow).
+  `MicroserviceClientNotificationModule` (added during the inventory
+  hexagonal alignment for the `stock.low` flow).
 - `IInventoryConfirmGatewayPort` (DI symbol `INVENTORY_CONFIRM_GATEWAY`)
   — outbound cross-service call to the inventory microservice's
   `inventory.order.confirm` handler. Adapter:
@@ -146,8 +146,8 @@ outbox) can lift both paths into a unified pattern.
 
 ### 6. Wire-format contracts: events live in `libs/contracts/retail/events/`
 
-`IRetailOrderCreatedEvent` was already in place from task-07. Task-09
-adds:
+`IRetailOrderCreatedEvent` was already in place from the notification
+microservice build. This work adds:
 
 - `IRetailOrderConfirmedEvent` — published when an Order flips to
   `CONFIRMED`. Reserved for future cross-service consumers; no
@@ -194,7 +194,7 @@ added.
   deleted; their TypeORM entities are relocated under
   `modules/orders/infrastructure/persistence/`.
 - `retail.order.created` now has a real producer for the first time —
-  task-07's notification consumer was running against a synthetic
+  the notification consumer was running against a synthetic
   publish in `test/notification.e2e-spec.ts` until now.
 - The cross-service confirm flow `gateway → retail.order.confirm →
   inventory.order.confirm → notification (retail.order.created from

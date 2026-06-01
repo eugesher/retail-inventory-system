@@ -165,7 +165,7 @@ The transition window for the v1 cut-over is **one rolling deploy**.
 After the slowest replica has restarted onto v1 and at least one
 invalidate has fired for each affected `productId`, the pre-v1 prefix
 is unreachable from production code; any remaining entries age out
-via TTL. The pre-v1 fan-out can be removed in a follow-up task once
+via TTL. The pre-v1 fan-out can be removed in a follow-up once
 the dashboards confirm zero pre-v1 hits.
 
 ### 5. Retail-side parity
@@ -232,7 +232,7 @@ ships.
   no SCAN fan-out across services. Easy GDPR / offboarding story.
 - **One transition window, three prefixes.** The rolling deploy that
   ships this ADR is the only deploy that needs the pre-v1 fan-out.
-  Subsequent deploys carry the same three calls until the cleanup task
+  Subsequent deploys carry the same three calls until a later cleanup
   removes the pre-v1 entry; the runtime cost is one extra no-op SCAN
   per productId per invalidate, paid once per confirm RPC.
 - **Per-aggregate version constants** decouple shape evolution: bumping
@@ -243,8 +243,8 @@ ships.
 
 - **Three `delByPrefix` calls per productId per invalidate** during the
   transition window (vs two before). The extra cost is one no-op SCAN
-  per productId — small in absolute terms but worth removing in the
-  follow-up cleanup task once dashboards confirm no pre-v1 hits.
+  per productId — small in absolute terms but worth removing in a
+  follow-up cleanup once dashboards confirm no pre-v1 hits.
 - **Tenant segment is dormant.** Until a domain-level tenant model
   exists, the segment is always absent in production. The plumbing
   cost (port field, builder argument) is paid up front.

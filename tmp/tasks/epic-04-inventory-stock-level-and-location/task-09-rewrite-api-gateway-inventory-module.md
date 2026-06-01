@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 9
 title: Rewrite the api-gateway modules/inventory + Kulala HTTP file
 depends_on: [01, 02, 03, 04, 05, 06, 07, 08]
-doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/08-inventory-http-file.md
+doc_deliverable: docs/implementation/04-inventory-stock-level-and-location/08-inventory-http-file.md
 ---
 
 # Task 09 — Rewrite the api-gateway `modules/inventory/` + author `http/inventory.http`
@@ -416,7 +416,7 @@ The `adjustStockExcessiveNegative` request is what the e2e test in task-10 maps 
 - `apps/inventory-microservice/src/modules/stock/application/use-cases/list-stock-locations.use-case.ts` + spec
 - `libs/contracts/inventory/stock-availability/stock-location.projection.ts`
 - `http/inventory.http`
-- `docs/implementation/epic-04-inventory-stock-level-and-location/08-inventory-http-file.md`
+- `docs/implementation/04-inventory-stock-level-and-location/08-inventory-http-file.md`
 
 ## Files to modify
 
@@ -451,7 +451,7 @@ The `adjustStockExcessiveNegative` request is what the e2e test in task-10 maps 
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-04-inventory-stock-level-and-location/08-inventory-http-file.md`. Target ~120 lines. Sections:
+Write `docs/implementation/04-inventory-stock-level-and-location/08-inventory-http-file.md`. Target ~120 lines. Sections:
 
 1. **Endpoint surface recap.** The four endpoints + their auth model (one `@Public()`, two `inventory:adjust`-gated, one `inventory:read`-gated). The HTTP method, path, body, and response type for each.
 2. **The seeded `default-warehouse` rule.** Why omitting `stockLocationId` in a write body targets the default (the use case's static `DEFAULT_STOCK_LOCATION_ID` constant). When a future contributor adds a second location, they explicitly pass the id.

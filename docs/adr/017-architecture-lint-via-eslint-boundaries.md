@@ -7,9 +7,9 @@
 
 ## Context
 
-By task-11 the codebase had reached its target shape: every service follows the per-module hexagonal layout (`domain` / `application/ports` / `application/use-cases` / `infrastructure` / `presentation`), the shared libs (`@retail-inventory-system/{contracts,ddd,common,database,messaging,cache,observability,auth,config}`) have stable surfaces, and cross-service traffic is RabbitMQ-only.
+By the time of the cache-generalization work the codebase had reached its target shape: every service follows the per-module hexagonal layout (`domain` / `application/ports` / `application/use-cases` / `infrastructure` / `presentation`), the shared libs (`@retail-inventory-system/{contracts,ddd,common,database,messaging,cache,observability,auth,config}`) have stable surfaces, and cross-service traffic is RabbitMQ-only.
 
-Until now those rules were enforced **by code review**. `eslint-plugin-boundaries` was installed back in task-02 ([ADR-004](004-adopt-hexagonal-architecture-per-service.md)) but intentionally left off so the migration could proceed without thrashing the lint feedback loop on every checkpoint.
+Until now those rules were enforced **by code review**. `eslint-plugin-boundaries` was installed back when hexagonal architecture was adopted ([ADR-004](004-adopt-hexagonal-architecture-per-service.md)) but intentionally left off so the migration could proceed without thrashing the lint feedback loop on every checkpoint.
 
 With the layout stable, two risks dominate:
 
@@ -29,7 +29,7 @@ Adopt `eslint-plugin-boundaries` (v6.0.2, already in `devDependencies`). Rationa
 - `dependency.module` selectors cover the per-layer external denylists from the recommendation table (domain forbids `@nestjs/*`, ports forbid `typeorm`, presentation forbids `@keyv/redis`, etc.) — unified with the internal element-to-element rules under a single `boundaries/dependencies` rule.
 - The plugin reuses ESLint's standard `import/resolver` setting, so TypeScript path aliases (`@retail-inventory-system/*`) work without extra wiring.
 
-Task-12 uses the v6 API end-to-end: the unified `boundaries/dependencies` rule (with `default: 'disallow'` and `checkAllOrigins: true`), object-based `BaseElementSelectorData` selectors (`{ type: 'X', captured: {...} }`), `{{from.captured.x}}` template syntax, and per-source `dependency: { module: [...] }` policy entries. Index 0 of `dependencyRules` is a single catch-all `allow: { to: { origin: ['external', 'core'] } }` that exempts npm packages and node-core modules from the `default: 'disallow'` polarity; per-source disallow rules later in the array layer specific denylists on top (last match wins).
+This work uses the v6 API end-to-end: the unified `boundaries/dependencies` rule (with `default: 'disallow'` and `checkAllOrigins: true`), object-based `BaseElementSelectorData` selectors (`{ type: 'X', captured: {...} }`), `{{from.captured.x}}` template syntax, and per-source `dependency: { module: [...] }` policy entries. Index 0 of `dependencyRules` is a single catch-all `allow: { to: { origin: ['external', 'core'] } }` that exempts npm packages and node-core modules from the `default: 'disallow'` polarity; per-source disallow rules later in the array layer specific denylists on top (last match wins).
 
 ### 2. Element-type taxonomy
 
@@ -64,7 +64,7 @@ The shim entry must come before the broad `libs/common/**` entry — the plugin 
 - **`app-shared`** → own-app `app-shared`, plus `lib-contracts` and `lib-common`.
 - **`lib-ddd`** → `lib-ddd` only.
 - **`lib-contracts`** → `lib-contracts` only.
-- Other libs allow a narrow neighbourhood (`lib-common` may reach `lib-contracts`/`lib-cache`/`lib-config`/`lib-observability`; etc.). The shim element forwards to anything its re-exports need, since shims will disappear in task-14.
+- Other libs allow a narrow neighbourhood (`lib-common` may reach `lib-contracts`/`lib-cache`/`lib-config`/`lib-observability`; etc.). The shim element forwards to anything its re-exports need, since shims will disappear in a later cleanup pass.
 
 Cross-service and cross-module isolation are encoded by the `{{from.captured.app}}` / `{{from.captured.module}}` template-matched `captured` selectors on each `sameModule(...)` / `sameApp(...)` helper output: a `presentation` file in `apps/inventory-microservice/src/modules/stock/` cannot reach a `domain` file in `apps/retail-microservice/src/modules/orders/` because their `app` captures differ.
 
@@ -77,12 +77,12 @@ Only layers with documented denylists carry external rules. Each entry pins to a
 - **`application-port`** denies all of `@nestjs/{common,core,microservices,typeorm,cache-manager}`, `typeorm`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `axios`, `nestjs-pino`.
 - **`application-dto`** denies `@nestjs/*`, `typeorm`, `@keyv/redis`, `cacheable`, `redis`, `amqplib`, `axios`.
 - **`presentation`** denies `typeorm`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `@nestjs/typeorm`, `amqplib`, `amqp-connection-manager`. Nest controller/swagger/microservices imports stay allowed — that's the entire job of this layer.
-- **`lib-contracts`** denies `@nestjs/{common,core,microservices,typeorm,jwt,passport,cache-manager}`, `typeorm`, `@keyv/redis`, `cacheable`, `redis`, `amqplib`. `class-validator`, `class-transformer`, and `@nestjs/swagger` are the documented exceptions: contracts double as the wire-format DTOs that cross HTTP/RPC boundaries, and `@ApiProperty` metadata drives the Scalar OpenAPI viewer wired up in the gateway. The recommendation table read "plain TypeScript only" — task-12 widens that to allow the three decorator packages because the alternative (two parallel DTO trees, one for transport, one for Swagger) buys nothing and doubles the surface to keep in sync.
+- **`lib-contracts`** denies `@nestjs/{common,core,microservices,typeorm,jwt,passport,cache-manager}`, `typeorm`, `@keyv/redis`, `cacheable`, `redis`, `amqplib`. `class-validator`, `class-transformer`, and `@nestjs/swagger` are the documented exceptions: contracts double as the wire-format DTOs that cross HTTP/RPC boundaries, and `@ApiProperty` metadata drives the Scalar OpenAPI viewer wired up in the gateway. The recommendation table read "plain TypeScript only" — this work widens that to allow the three decorator packages because the alternative (two parallel DTO trees, one for transport, one for Swagger) buys nothing and doubles the surface to keep in sync.
 - **`lib-ddd`** denies `@nestjs/*`, `typeorm`, `@nestjs/typeorm`, `@nestjs/microservices`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`.
 
 ### 5. CI strategy
 
-The existing `lint` job in `.github/workflows/ci-cd.yml` already runs `yarn lint` as a gating step (`yarn lint --max-warnings 0`). With the boundaries rules wired into `eslint.config.mjs` they execute inside that same step — the option-(a) path the task brief mentioned. No separate `yarn lint:architecture` script and no second workflow file. Rationale: the CI surface stays one job, PR failures still cite the offending rule ID (the boundaries plugin's error messages are precise), and there is no duplicated install/checkout cost.
+The existing `lint` job in `.github/workflows/ci-cd.yml` already runs `yarn lint` as a gating step (`yarn lint --max-warnings 0`). With the boundaries rules wired into `eslint.config.mjs` they execute inside that same step — the single-job option considered for this decision. No separate `yarn lint:architecture` script and no second workflow file. Rationale: the CI surface stays one job, PR failures still cite the offending rule ID (the boundaries plugin's error messages are precise), and there is no duplicated install/checkout cost.
 
 If clearer per-rule failure messages become valuable later, a sibling script `yarn lint:architecture` that runs ESLint with `--rule '{ "boundaries/*": "error" }'` only is a five-line addition.
 
@@ -126,8 +126,8 @@ The spec is added to `apps/**/*.ts` + `libs/**/*.ts` lint scope via the `spec/**
 
 ### Open
 
-- An `import-order` rule that enforces `@retail-inventory-system/observability/tracer` as the first import in every `apps/*/src/main.ts` is not part of the boundaries plugin's surface. Today the rule is enforced by code review; a future task can add it via `eslint-plugin-import`'s `import/order` or a small custom rule.
-- The shim element type will retire alongside the shim libs in task-14.
+- An `import-order` rule that enforces `@retail-inventory-system/observability/tracer` as the first import in every `apps/*/src/main.ts` is not part of the boundaries plugin's surface. Today the rule is enforced by code review; future work can add it via `eslint-plugin-import`'s `import/order` or a small custom rule.
+- The shim element type will retire alongside the shim libs in a later cleanup pass.
 
 ## Alternatives considered
 

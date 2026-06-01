@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 2
 title: Add stock_location + auto-provision the default-warehouse row
 depends_on: [01]
-doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/02-default-stocklocation-auto-provision.md
+doc_deliverable: docs/implementation/04-inventory-stock-level-and-location/02-default-stocklocation-auto-provision.md
 ---
 
 # Task 02 — Add `stock_location` + auto-provision the default warehouse
@@ -259,7 +259,7 @@ providers: [
 - `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/stock-location.mapper.ts`
 - `apps/inventory-microservice/src/modules/stock/application/ports/stock-location.repository.port.ts`
 - `migrations/<timestamp>-CreateStockLocationTableAndSeedDefault.ts`
-- `docs/implementation/epic-04-inventory-stock-level-and-location/02-default-stocklocation-auto-provision.md`
+- `docs/implementation/04-inventory-stock-level-and-location/02-default-stocklocation-auto-provision.md`
 
 ## Files to modify
 
@@ -283,7 +283,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-04-inventory-stock-level-and-location/02-default-stocklocation-auto-provision.md`. Target ~140 lines. Sections:
+Write `docs/implementation/04-inventory-stock-level-and-location/02-default-stocklocation-auto-provision.md`. Target ~140 lines. Sections:
 
 1. **Open Question Q8 restated.** Why exactly one default location is auto-provisioned at install. The epic's rationale: making the default optional creates a migration hazard the moment a second warehouse appears (cite Vendure's pattern).
 2. **The seeded row.** Concrete values (`id`, `code`, `type`, `address`, `gln`, `active`). Why the `id` is a deterministic string (`default-warehouse`) rather than a UUID — so test fixtures, the API gateway's "omit `stockLocationId` ⇒ default" rule, and the human-debuggable JSON payloads all share one stable identifier.

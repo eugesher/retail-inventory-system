@@ -5,7 +5,7 @@ source_stages: [production-core]
 depends_on: [epic-05, epic-07]
 microservices: [api-gateway, retail-microservice, inventory-microservice]
 task_subfolder: tmp/tasks/epic-08-fulfillment-and-ship-flow/
-docs_subfolder: docs/implementation/epic-08-fulfillment-and-ship-flow/
+docs_subfolder: docs/implementation/08-fulfillment-and-ship-flow/
 ---
 
 # Epic 08 — Fulfillment + Ship flow — Fulfillment, FulfillmentLine, Cancel, Commit Sale, ship-triggered capture
@@ -122,7 +122,7 @@ Drive the order chain from `pending`/`authorized` all the way to `delivered`. Ad
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-08-fulfillment-and-ship-flow/`:
+**Per-task markdown files** under `docs/implementation/08-fulfillment-and-ship-flow/`:
 
 - `01-fulfillment-aggregate-and-three-statuses.md` — restate Q4; how Order's three statuses interact with Fulfillment's own status.
 - `02-create-and-ship-fulfillment.md` — preconditions; partial vs full ship; tracking-number policy.
@@ -185,7 +185,7 @@ Drive the order chain from `pending`/`authorized` all the way to `delivered`. Ad
 - [ ] `inventory.stock_movement` has a `sale`-type row per shipped line; `stock_level.quantityOnHand` is decremented accordingly.
 - [ ] Cancel Order pre-fulfillment voids the Payment; Cancel Order after Capture sets `flagged_for_refund=true` (consumed in `epic-09`).
 - [ ] Every request in `http/fulfillment.http` and `http/order-cancel.http` executes end-to-end.
-- [ ] Per-task docs present under `docs/implementation/epic-08-fulfillment-and-ship-flow/`.
+- [ ] Per-task docs present under `docs/implementation/08-fulfillment-and-ship-flow/`.
 - [ ] `README.md` System diagram + API updated; `CLAUDE.md` retail + messaging notes updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

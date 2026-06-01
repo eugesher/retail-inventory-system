@@ -5,7 +5,7 @@ source_stages: [walking-skeleton]
 depends_on: [epic-01, epic-02, epic-03, epic-04]
 microservices: [api-gateway, retail-microservice]
 task_subfolder: tmp/tasks/epic-05-cart-order-payment-walking-skeleton/
-docs_subfolder: docs/implementation/epic-05-cart-order-payment-walking-skeleton/
+docs_subfolder: docs/implementation/05-cart-order-payment-walking-skeleton/
 ---
 
 # Epic 05 — Walking-skeleton order chain — Cart, Order (3-status), OrderLine snapshots, Payment, Address
@@ -161,7 +161,7 @@ Close the Stage-1 chain end-to-end. Rebuild the retail-microservice from scratch
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-05-cart-order-payment-walking-skeleton/`:
+**Per-task markdown files** under `docs/implementation/05-cart-order-payment-walking-skeleton/`:
 
 - `01-retail-rebuild-and-old-tables-dropped.md` — what was deleted, why a full rewrite is cheaper than incremental refactor.
 - `02-cart-aggregate-and-q1-q3-decisions.md` — restate Q1 (persistent for auth, ephemeral-promoted for guests) and Q3 (distinct aggregates).
@@ -232,7 +232,7 @@ Close the Stage-1 chain end-to-end. Rebuild the retail-microservice from scratch
 - [ ] After Place Order, RabbitMQ shows `retail.order.placed` and `retail.payment.authorized` published; the notification microservice logs an order-placed line (proves the consumer re-pointing worked).
 - [ ] After Capture Payment, `retail.payment.captured` is published; Payment row in `captured` status; Order's `paymentStatus = captured`.
 - [ ] `OrderLine.sku`, `OrderLine.nameSnapshot`, `OrderLine.unitPriceMinor` are populated and match the catalog state at place-time.
-- [ ] Per-task docs present under `docs/implementation/epic-05-cart-order-payment-walking-skeleton/`.
+- [ ] Per-task docs present under `docs/implementation/05-cart-order-payment-walking-skeleton/`.
 - [ ] `README.md` System diagram + API sections rewritten; `CLAUDE.md` retail section rewritten.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

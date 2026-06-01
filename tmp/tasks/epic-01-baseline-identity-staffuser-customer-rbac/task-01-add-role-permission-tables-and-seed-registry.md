@@ -3,7 +3,7 @@ epic: epic-01
 task_number: 1
 title: Add the relational Role + Permission tables and seed the permission code registry
 depends_on: []
-doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md
+doc_deliverable: docs/implementation/01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md
 adr_deliverable: docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md
 ---
 
@@ -110,7 +110,7 @@ These four `name` values become the typed registry that `libs/contracts/auth/rol
   - `role_permissions(role_id CHAR(36) NOT NULL, permission_id CHAR(36) NOT NULL, PRIMARY KEY (role_id, permission_id), FOREIGN KEY (role_id) REFERENCES role(id) ON DELETE CASCADE, FOREIGN KEY (permission_id) REFERENCES permission(id) ON DELETE CASCADE)`.
   - Charset `utf8mb4_unicode_ci`.
   - Generate via `yarn migration:create migrations/CreateRoleAndPermissionTables` and then fill the `up`/`down` bodies.
-- `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md` — see "Doc deliverable" below.
+- `docs/implementation/01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md` — see "Doc deliverable" below.
 - `docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md` — see "ADR deliverable" below. Allocate the next free 3-digit number at first commit (ADR-003); do not reserve in advance.
 
 ## Files to modify
@@ -136,7 +136,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md` with these sections (target length: ~150 lines):
+Write `docs/implementation/01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md` with these sections (target length: ~150 lines):
 
 1. **Why a relational model.** The simple-array column couples role definitions to TypeScript releases (changing the role set requires a redeploy). A relational table makes the role set a runtime fact, addressable from admin tooling (task-06).
 2. **Schema rationale.** Why `role.name` is `VARCHAR(64)` (kebab-case slug, fits 4 canonical names + future additions), why `permission.code` is `VARCHAR(64)` (matches the regex), why `ON DELETE CASCADE` on the join (a deleted Role/Permission should not leave dangling bindings; refusal-to-delete is enforced at the use-case level in task-06).

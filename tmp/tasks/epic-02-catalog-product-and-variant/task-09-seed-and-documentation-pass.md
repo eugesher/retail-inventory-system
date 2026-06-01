@@ -152,6 +152,6 @@ None new. The task's documentation work is README + CLAUDE.md + the polish on th
 - [ ] `yarn seed` is idempotent — running it twice produces no errors, no duplicate rows, and the same set of seeded Products + Variants.
 - [ ] `docker compose up -d && yarn migration:run && yarn seed && yarn start:dev` boots all five services; `curl http://localhost:3000/api/catalog/products` returns the two seeded Products with their Variants.
 - [ ] Every endpoint in `http/catalog.http` (including the previously-disabled permission-failure blocks) executes end-to-end against the seeded data.
-- [ ] All seven per-task docs under `docs/implementation/epic-02-catalog-product-and-variant/` exist and contain no stray `<!-- task-… -->` HTML-comment anchors.
+- [ ] All seven per-task docs under `docs/implementation/02-catalog-product-and-variant/` exist and contain no stray `<!-- task-… -->` HTML-comment anchors.
 - [ ] `README.md` Services table + System diagram + API section reflect the catalog microservice; `CLAUDE.md` includes the new Catalog microservice section.
 - [ ] No file outside `tmp/` references `tmp/`.

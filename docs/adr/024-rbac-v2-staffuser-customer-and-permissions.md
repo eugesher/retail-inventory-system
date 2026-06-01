@@ -21,8 +21,8 @@ RBAC at the gateway with a deliberately minimal authorization model:
   warranted today" — meaning no `permission` table, no role/permission
   separation.
 
-That model was right for the audit baseline. It does not survive epic-01,
-which has four hard requirements ADR-010 did not anticipate:
+That model was right for the audit baseline. It does not survive the
+baseline identity work, which has four hard requirements ADR-010 did not anticipate:
 
 1. **Different lifecycles for staff and customers.** A warehouse worker is
    onboarded by an admin, may have no purchase history, and is
@@ -39,19 +39,19 @@ which has four hard requirements ADR-010 did not anticipate:
    every endpoint; introducing a fifth role means editing every guard
    call site that should also accept it. The mapping must live in the
    data layer, not in the controllers.
-3. **Runtime mutability.** Task-06 ships an IAM admin controller that
+3. **Runtime mutability.** An IAM admin controller
    lets an operator with `iam:role-edit` add or remove a permission from
    a role at runtime. ADR-010's `simple-array` column makes this
    impossible without a redeploy.
-4. **Customer-side public register.** Epic-01 ships `POST /auth/customer/register`
-   as `@Public()`. ADR-010 §7's deferral is the right default; epic-01
+4. **Customer-side public register.** This work ships `POST /auth/customer/register`
+   as `@Public()`. ADR-010 §7's deferral is the right default; this work
    needs to record the *decision* to relax it (and which of the three
    safeguards — rate-limiting, email verification, CAPTCHA — actually
-   land in-epic vs. become "known gap" follow-ups).
+   land in this baseline vs. become "known gap" follow-ups).
 
 This ADR records the cumulative architectural decision that supersedes
-ADR-010's RBAC model. The first concrete step (the relational schema and
-permission code registry) lands in epic-01 task-01; subsequent tasks
+ADR-010's RBAC model. The first concrete step is the relational schema and
+permission code registry; subsequent steps
 implement the aggregates, JWT inflation, guards, and admin controller.
 
 ## Decision
@@ -74,10 +74,10 @@ admin may have no `customer` row, and a customer who churns may need to
 keep an order tombstone") but committed to a single `User` for the audit
 baseline. This ADR commits the implementation.
 
-The split lands in **task-02** (rename `user` → `staff_user`, add
-`staff_user_roles`, drop the `simple-array` `roles` column) and
-**task-05** (`Customer` aggregate, public registration, nullable
-`order.customer_id`).
+The split lands in two parts: the **StaffUser rename** (rename `user` →
+`staff_user`, add `staff_user_roles`, drop the `simple-array` `roles`
+column) and the **Customer-side work** (`Customer` aggregate, public
+registration, nullable `order.customer_id`).
 
 ### 2. Relational role + permission model
 
@@ -88,13 +88,13 @@ Three new tables replace ADR-010's `user.roles: simple-array`:
 - `role_permissions(role_id, permission_id)` with composite PK and
   `ON DELETE CASCADE` on both FKs.
 
-A fourth join, `staff_user_roles(staff_user_id, role_id)`, lands in
-task-02 alongside the `staff_user` rename.
+A fourth join, `staff_user_roles(staff_user_id, role_id)`, lands with
+the `staff_user` rename.
 
 The four canonical role names are `admin`, `catalog-manager`,
 `warehouse-staff`, and `order-support`. The 12-code permission registry
 (see
-[`02-role-and-permission-relational-model.md`](../implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md)
+[`02-role-and-permission-relational-model.md`](../implementation/01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md)
 §3 for the canonical list) lives in `libs/contracts/auth/permission.enum.ts`
 as `PermissionCodeEnum`. The enum is the single source of truth —
 seeds, the future `@RequiresPermission` decorator, and the future
@@ -105,8 +105,8 @@ indirection is warranted today". The runtime-mutability requirement (§3
 of the Context) and the role/permission separation (§2 of the Context)
 both require the relational shape.
 
-The schema and the seeded rows land in **task-01**; the StaffUser-side
-join lands in **task-02**.
+The schema and the seeded rows land with the relational role/permission
+model; the StaffUser-side join lands with the `staff_user` rename.
 
 ### 3. Three-guard composition + `@RequiresPermission` decorator
 
@@ -132,20 +132,20 @@ about (e.g. "any admin" — coarse) rather than a specific capability
 (e.g. "may publish a catalog item" — fine). When in doubt, use the
 permission decorator.
 
-The inflation happens in `LoginUseCase` and `RefreshTokenUseCase`
-(task-03): the use case loads the `StaffUser`'s roles, unions their
+The inflation happens in `LoginUseCase` and `RefreshTokenUseCase`:
+the use case loads the `StaffUser`'s roles, unions their
 `permissions` sets via `IRoleRepositoryPort.findAllByNames(...)`, and
 emits the resulting `string[]` as the `permissions` claim on the access
 JWT. Guards then read the claim from `request.user` without a per-request
 DB hit; the JWT TTL is the staleness window for permission changes.
 
-The decorator and guard land in **task-04**.
+The decorator and guard land with the permissions-guard work.
 
 ### 4. Customer-side public registration (`POST /auth/customer/register`)
 
 ADR-010 §7 deferred public registration until three safeguards exist:
 rate-limiting, email verification, and CAPTCHA. This ADR records the
-decision to ship the endpoint in epic-01 without all three.
+decision to ship the endpoint in this baseline without all three.
 
 The endpoint:
 
@@ -155,10 +155,10 @@ The endpoint:
 - Creates a `Customer` aggregate, not a `StaffUser` — there is no path
   from public register to a staff role.
 
-**Safeguards that land in-epic:** to be confirmed by the task-05
-implementer. The strict floor is one of the three (rate-limiting being
+**Safeguards that land in this baseline:** to be confirmed by the
+customer-side implementer. The strict floor is one of the three (rate-limiting being
 the cheapest and most defensible). The other two become "known gap"
-follow-ups recorded against the task.
+follow-ups recorded as deferred safeguards.
 
 **Trade-off accepted.** Without all three safeguards in place, the
 endpoint is vulnerable to (a) credential-stuffing-style enumeration via
@@ -168,12 +168,12 @@ the duplicate-email error path, (b) bulk fake-account creation
 
 - The duplicate-email response is a generic `409 Conflict` with no body
   detail, narrowing (a).
-- The known-gap items are tracked against epic-01 as follow-up work, not
+- The known-gap items are tracked as follow-up work, not
   silently deferred to "someday" — naming a deferred safeguard as a
   known gap is itself an architectural decision and belongs here rather
-  than buried in a task body.
+  than buried in an implementation note.
 
-The endpoint and the known-gap register land in **task-05**.
+The endpoint and the known-gap register land with the customer-side work.
 
 ## Alternatives Considered
 
@@ -210,16 +210,17 @@ The endpoint and the known-gap register land in **task-05**.
 ### Public registration
 
 - **Hold the endpoint until all three safeguards land.** Rejected. The
-  whole point of epic-01 is to ship a working customer-side path; the
+  whole point of this work is to ship a working customer-side path; the
   known-gap-with-mitigation shape is the right trade-off given the
   project's portfolio-scope risk profile.
 
 ## Consequences
 
-- The `simple-array` `user.roles` column is dropped in task-02 and
-  never re-introduced. The `RoleVO` value object stays through task-01
-  for backwards-compat with the surviving `User` aggregate, then is
-  replaced by `RoleAggregate` in task-02.
+- The `simple-array` `user.roles` column is dropped with the `staff_user`
+  rename and never re-introduced. The `RoleVO` value object stays through
+  the relational role/permission model for backwards-compat with the
+  surviving `User` aggregate, then is replaced by `RoleAggregate` with the
+  `staff_user` rename.
 - `RoleEnum` in `libs/contracts/auth/role.enum.ts` is demoted from
   "authorization source of truth" to "typed registry of seeded role
   names". The runtime-of-record is the `role` table; the enum is the
@@ -230,7 +231,7 @@ The endpoint and the known-gap register land in **task-05**.
 - Permission changes (admin grants `iam:role-edit` to `catalog-manager`)
   take effect on the user's next refresh, not immediately. This is the
   standard JWT-inflation trade-off; the JWT TTL is the staleness window.
-- The IAM admin controller (task-06) becomes the single mutation path
+- The IAM admin controller becomes the single mutation path
   for `role_permissions`. Direct SQL surgery is no longer the expected
   workflow for an operator.
 - The four canonical role names are not enforced as an enum at the DB
@@ -246,13 +247,13 @@ The endpoint and the known-gap register land in **task-05**.
 
 - [ADR-003: Record architecture decisions](003-record-architecture-decisions.md) — supersession rules.
 - [ADR-010: JWT authentication and RBAC at the API gateway](010-jwt-rbac-at-the-gateway.md) — the model this ADR supersedes.
-- [Implementation doc 02: Role + Permission relational model](../implementation/epic-01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md) — task-01's concrete schema and seed rationale.
+- [Implementation doc 02: Role + Permission relational model](../implementation/01-baseline-identity-staffuser-customer-rbac/02-role-and-permission-relational-model.md) — the concrete schema and seed rationale.
 
-## Task chain that lands each decision
+## Implementation steps that land each decision
 
-- **task-01** → relational `role` / `permission` / `role_permissions` schema, `PermissionCodeEnum`, `RoleAggregate` / `PermissionAggregate`, seeded 12 codes + 4 roles (this PR).
-- **task-02** → `user` → `staff_user` rename, `staff_user_roles` join, drop of the `simple-array` `roles` column, `StaffUser` aggregate replacing `User`.
-- **task-03** → JWT `permissions: string[]` inflation in `LoginUseCase` / `RefreshTokenUseCase`.
-- **task-04** → `PermissionsGuard` + `@RequiresPermission(<code>)` decorator wired into the global guard chain.
-- **task-05** → `Customer` aggregate + `POST /auth/customer/register` (`@Public()`) + known-gap register for deferred safeguards.
-- **task-06** → IAM admin controller (`@RequiresPermission('iam:role-edit')`) for runtime `role_permissions` mutation.
+- **Relational role/permission model** → relational `role` / `permission` / `role_permissions` schema, `PermissionCodeEnum`, `RoleAggregate` / `PermissionAggregate`, seeded 12 codes + 4 roles.
+- **StaffUser rename** → `user` → `staff_user` rename, `staff_user_roles` join, drop of the `simple-array` `roles` column, `StaffUser` aggregate replacing `User`.
+- **JWT inflation** → JWT `permissions: string[]` inflation in `LoginUseCase` / `RefreshTokenUseCase`.
+- **Permissions guard** → `PermissionsGuard` + `@RequiresPermission(<code>)` decorator wired into the global guard chain.
+- **Customer-side work** → `Customer` aggregate + `POST /auth/customer/register` (`@Public()`) + known-gap register for deferred safeguards.
+- **IAM admin endpoints** → IAM admin controller (`@RequiresPermission('iam:role-edit')`) for runtime `role_permissions` mutation.

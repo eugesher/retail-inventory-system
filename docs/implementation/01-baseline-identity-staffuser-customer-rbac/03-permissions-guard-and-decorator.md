@@ -1,8 +1,8 @@
 # 03 — Permissions Guard and `@RequiresPermission()` Decorator
 
 This document records the JWT-inflation half of the permission-gating
-work landed in epic-01 task-03; the guard + decorator half is appended
-in task-04 below the anchor at the bottom of this file. The
+work; the guard + decorator half follows below the anchor at the bottom
+of this file. The
 relational model that this builds on is documented in
 [`02-role-and-permission-relational-model.md`](./02-role-and-permission-relational-model.md);
 the access-control architecture lives in
@@ -10,14 +10,14 @@ the access-control architecture lives in
 
 ## 1. Why inflate the permissions claim at issue time
 
-The pre-epic gateway answered authorization questions by reading
+The pre-existing gateway answered authorization questions by reading
 `request.user.roles: RoleEnum[]` — a fixed-cardinality enum stamped onto
-the JWT at login. With task-01's relational `permission` table, the
+the JWT at login. With the relational `permission` table, the
 authorization vocabulary is no longer a TypeScript artifact: an operator
-edits `role_permissions` rows through task-06's admin endpoints and the
+edits `role_permissions` rows through the IAM admin endpoints and the
 change must propagate to every gateway pod without a redeploy.
 
-That leaves two ways for `PermissionsGuard` (task-04) to learn which
+That leaves two ways for `PermissionsGuard` to learn which
 codes the current request carries:
 
 1. **Look them up per request.** On every authenticated call, load the
@@ -30,19 +30,20 @@ codes the current request carries:
    claim on the access JWT. The guard reads `request.user.permissions`
    directly — no DB lookup on the hot path.
 
-The epic mandates option 2: the test strategy line on
+This baseline mandates option 2: the test strategy line on
 `libs/auth/spec/permissions.guard.spec.ts` reads *"the JWT must already
 carry resolved permission codes (the JWT-issue path inflates roles →
 permissions on login)"*. The trade-off is intentional: RBAC reads
 dominate writes by orders of magnitude in a retail backend, so
 inflating once amortises the DB cost across the JWT's full lifetime.
 
-The cost of that choice is that a role-edit (task-06) does **not** take
+The cost of that choice is that a role-edit does **not** take
 effect for tokens already in circulation. The next refresh (≤15m later
 by default — `JWT_ACCESS_EXPIRES_IN`) picks up the new permission set;
 between the edit and that refresh, the guard sees the stale claim. This
-matches the epic's "last-writer-wins" stance on permission propagation
-and is documented as expected behavior for operators in the task-06 doc.
+matches the "last-writer-wins" stance on permission propagation
+and is documented as expected behavior for operators in the IAM admin
+endpoints documentation.
 
 ## 2. The merge algorithm
 
@@ -77,8 +78,8 @@ Three properties of this expression are load-bearing:
 Both use cases compute the array independently — `RefreshTokenUseCase`
 deliberately does *not* trust the claim on the inbound refresh token.
 It re-loads the live `StaffUser` row, then re-inflates from the live
-`role_permissions` bindings. This is the only path that picks up a
-task-06 role-edit for an already-signed-in actor.
+`role_permissions` bindings. This is the only path that picks up an
+IAM role-edit for an already-signed-in actor.
 
 ## 3. The validator's contract
 
@@ -121,7 +122,7 @@ Two things to notice:
 
 ## 4. The customer JWT
 
-Task-05 introduces customer authentication (`/api/auth/customer/login`)
+The customer-side work introduces customer authentication (`/api/auth/customer/login`)
 on the same `IJwtAccessPayload` shape. The customer JWT reuses the type
 exactly — including `permissions: string[]` — but the array is always
 empty: customers are not RBAC actors. They get a JWT only so the
@@ -131,12 +132,12 @@ customer JWT ever carries a non-empty permission set.
 
 Reusing one payload shape (and one strategy / validator pair) means the
 guard does not need to branch on actor type. The customer aggregate
-lives in a separate table (task-05), but it shares the gateway's JWT
+lives in a separate table, but it shares the gateway's JWT
 surface — and so it shares the type.
 
-## 5. What this enables for task-04
+## 5. What this enables for the guard
 
-After this task, on every authenticated request:
+After this work, on every authenticated request:
 
 - `request.user.permissions: string[]` is populated.
 - The array is sorted, deduplicated, and built from the live
@@ -145,8 +146,8 @@ After this task, on every authenticated request:
   future service that verifies the gateway's tokens off-host see the
   same authorization view.
 
-Task-04 will read `request.user.permissions` inside a `PermissionsGuard`
-and intersect it with `@RequiresPermission('iam:role-edit')` metadata
+The `PermissionsGuard` reads `request.user.permissions` and intersects
+it with `@RequiresPermission('iam:role-edit')` metadata
 on a controller method. The guard never re-loads from the DB.
 
 ## 6. Guard ergonomics
@@ -211,7 +212,7 @@ side on the same controller. They answer different questions:
 authorization predicate is genuinely "any staff role" rather than a
 specific capability. The existing `@Roles()` annotations on retail and
 inventory routes (gating `RoleEnum.ADMIN, RoleEnum.CUSTOMER`) remain
-correct under that lens and are not retargeted in this task.
+correct under that lens and are not retargeted in this work.
 
 ## 8. Guard ordering
 
@@ -274,9 +275,9 @@ overrides the class-level one rather than merging them — so stacking
 the method does *not* produce `A AND B`. It produces `B`. A true
 within-handler AND would require either a `RequiresAllPermissions(A, B)`
 variant (read by `getAllAndMerge` instead of `getAllAndOverride`) or a
-second decorator that the guard ANDs against the first. Neither lands
-in epic-01 — no current route needs AND-semantics. If a future epic
-does, the cleanest extension is the dedicated `RequiresAllPermissions`
+second decorator that the guard ANDs against the first. Neither is
+implemented today — no current route needs AND-semantics. If a future
+requirement does, the cleanest extension is the dedicated `RequiresAllPermissions`
 variant; the guard would read both metadata keys and require *all* the
 ALL-codes plus *any one* of the OR-codes.
 
@@ -289,7 +290,7 @@ off the handler / class via `Reflector` and intersects it with
 network call. The cost is one array `.some()` per gated request.
 
 This is the payoff of §1's inflate-at-issue choice. The corollary is
-the staleness window §1 also called out: a role-edit through task-06's
+the staleness window §1 also called out: a role-edit through the
 IAM admin endpoints does not retroactively change tokens already in
 circulation. The next refresh (≤ `JWT_ACCESS_EXPIRES_IN` later — 15
 minutes by default) re-inflates the claim from the live
@@ -297,7 +298,7 @@ minutes by default) re-inflates the claim from the live
 guard sees the stale claim.
 
 This is the intentional trade for never paying a DB hit on the guard's
-hot path, and it is the line operators of the IAM admin endpoints (task-06)
+hot path, and it is the line operators of the IAM admin endpoints
 need to know about. Token revocation under the same model rides on
 `StaffUser.isActive`: a suspended user is rejected by
 `ValidateStaffUserUseCase` regardless of permission staleness, so the

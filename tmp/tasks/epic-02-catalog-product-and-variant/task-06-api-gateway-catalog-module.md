@@ -3,7 +3,7 @@ epic: epic-02
 task_number: 6
 title: Add the api-gateway modules/catalog/ module — port, RMQ adapter, use cases, controller, DTOs, pipes
 depends_on: [task-01, task-02, task-03, task-04, task-05]
-doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/06-api-gateway-catalog-module.md
+doc_deliverable: docs/implementation/02-catalog-product-and-variant/06-api-gateway-catalog-module.md
 ---
 
 # Task 06 — `apps/api-gateway/src/modules/catalog/` module
@@ -195,7 +195,7 @@ Response DTOs are plain interfaces (or class-with-no-decorators) that mirror the
 - `libs/contracts/catalog/paged-products-response.dto.ts`.
 - `libs/contracts/catalog/index.ts` (barrel) + extend `libs/contracts/index.ts`.
 - `test/catalog.e2e-spec.ts`.
-- `docs/implementation/epic-02-catalog-product-and-variant/06-api-gateway-catalog-module.md`.
+- `docs/implementation/02-catalog-product-and-variant/06-api-gateway-catalog-module.md`.
 
 ## Files to modify
 
@@ -233,7 +233,7 @@ The e2e file relies on the seeded `catalog-manager` role + a non-catalog StaffUs
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-02-catalog-product-and-variant/06-api-gateway-catalog-module.md`. Target ~150 lines. Sections:
+Write `docs/implementation/02-catalog-product-and-variant/06-api-gateway-catalog-module.md`. Target ~150 lines. Sections:
 
 1. **Why the api-gateway has its own `modules/catalog/`.** ADR-009: the gateway is a port-and-adapter façade — its own use cases, ports, and adapters wrap the downstream microservice. This is symmetrical with `retail/` (orders) and `inventory/` (product-stock).
 2. **The seven endpoints and their permission gates.** Table from the epic, with one-line rationale per gate: registration + variant addition are catalog admin work (`catalog:write`); publication is a higher-privilege gate (`catalog:publish`) because mistakes go to buyers; reads are `@Public()` because Query Catalog is a buyer-facing browse path.

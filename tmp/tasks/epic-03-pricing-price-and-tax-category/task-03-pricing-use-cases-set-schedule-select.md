@@ -3,7 +3,7 @@ epic: epic-03
 task_number: 3
 title: Implement Set Price + Schedule Price + Select Applicable Price use cases, event publisher emission, and RPC message patterns
 depends_on: [task-02]
-doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/05-select-applicable-price.md
+doc_deliverable: docs/implementation/03-pricing-price-and-tax-category/05-select-applicable-price.md
 ---
 
 # Task 03 — Implement Set Price + Schedule Price + Select Applicable Price use cases
@@ -286,7 +286,7 @@ The concurrency test for the `validTo IS NULL` invariant lives in the e2e file (
 - `apps/catalog-microservice/src/modules/pricing/infrastructure/messaging/pricing.event-publisher.ts`.
 - `apps/catalog-microservice/src/modules/pricing/presentation/pricing.controller.ts` (or split write/read per existing convention).
 - `apps/catalog-microservice/src/modules/pricing/domain/concurrency.error.ts` (or extend an existing error hierarchy under `libs/ddd/` if one exists).
-- `docs/implementation/epic-03-pricing-price-and-tax-category/05-select-applicable-price.md`.
+- `docs/implementation/03-pricing-price-and-tax-category/05-select-applicable-price.md`.
 
 ## Files to modify
 
@@ -302,7 +302,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-03-pricing-price-and-tax-category/05-select-applicable-price.md`. Target ~180 lines. Sections:
+Write `docs/implementation/03-pricing-price-and-tax-category/05-select-applicable-price.md`. Target ~180 lines. Sections:
 
 1. **What "applicable" means.** The closed/open interval rule. The two ordering axes — `priority` (explicit operator intent), then `valid_from` (newer wins). The final tiebreak on `id`. Why the resolution is monotonic — a later `Set Price` cannot make an earlier `asOf` answer change (the closed predecessor row is still there in the table). Property: historic `asOf` queries are stable across future writes.
 2. **The SQL, with the index.** The exact query, the matching index, why the optimizer picks it. Why the priority sort is acceptable on a small candidate set (per `(variantId, currency)` scope, the number of rows whose `valid_from <= asOf < valid_to` is bounded by the lifetime of the variant; for the walking-skeleton seed it is exactly one).

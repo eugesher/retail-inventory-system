@@ -26,7 +26,7 @@ Tasks depend on each other through the `Carryover Between Tasks` table in the ep
 
 ## Document-deliverable map
 
-The epic lists eight topic-numbered docs under `docs/implementation/epic-04-inventory-stock-level-and-location/`. The same doc can be touched by more than one task; tasks 8 and 10 carry append-only sections rather than owning their own files.
+The epic lists eight topic-numbered docs under `docs/implementation/04-inventory-stock-level-and-location/`. The same doc can be touched by more than one task; tasks 8 and 10 carry append-only sections rather than owning their own files.
 
 - **`01-old-tables-dropped-and-new-schema.md`** — task-01 writes the dropped-tables half (what was removed and why ledger-as-source is gone). Task-10 appends the cumulative "after" schema diagram snapshot (the four-table → two-table delta in one place) and links to docs 02 + 03.
 - **`02-default-stocklocation-auto-provision.md`** — task-02 writes the entire file (Open Question Q8 decision, idempotent INSERT pattern, how a second location is added later, the soft-delete-via-`active=false` rule).
@@ -63,6 +63,6 @@ Mirrors the epic's `Exit Criteria` section. Each task carries its own per-task e
 - [ ] After `yarn test:seed`, `GET /api/inventory/variants/:variantId/stock` returns 100 units at `default-warehouse` for each seeded variant.
 - [ ] Redis: cache keys observed via `--scan` match the new `ris:inventory:stock:v2:<variantId>:<facet>` pattern; no `v1`-prefixed keys are written on the new code path.
 - [ ] Creating a new Variant via the catalog flow results in a new `StockLevel = 0` row at `default-warehouse` within seconds (verified by polling the inventory GET).
-- [ ] Per-task docs present under `docs/implementation/epic-04-inventory-stock-level-and-location/` (eight `*.md` files).
+- [ ] Per-task docs present under `docs/implementation/04-inventory-stock-level-and-location/` (eight `*.md` files).
 - [ ] `README.md` System diagram + API + Caching sections updated; `CLAUDE.md` stock-module + message-patterns + cache notes updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.

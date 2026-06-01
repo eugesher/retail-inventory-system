@@ -6,7 +6,7 @@ import { IAuditLogEvent, IAuditLogPublisher } from '@retail-inventory-system/con
 // Default `AUDIT_LOG_PUBLISHER` binding. Not a stub — semantics are "this
 // deployment has no audit log yet, so route the event to logs". The Pino
 // context is fixed to 'AuditLog' so `grep AuditLog` over dev output isolates
-// audit events cleanly even before the real publisher (epic-11) exists.
+// audit events cleanly even before the real publisher exists.
 @Injectable()
 export class NoOpAuditLogPublisher implements IAuditLogPublisher {
   constructor(@InjectPinoLogger('AuditLog') private readonly logger: PinoLogger) {}

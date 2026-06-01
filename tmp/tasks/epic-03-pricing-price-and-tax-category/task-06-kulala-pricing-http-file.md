@@ -3,7 +3,7 @@ epic: epic-03
 task_number: 6
 title: Author http/pricing.http (Kulala) covering Set Price, Schedule Price, list/select Price, TaxCategory CRUD, attach TaxCategory to Variant
 depends_on: [task-05]
-doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md
+doc_deliverable: docs/implementation/03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md
 ---
 
 # Task 06 — Author `http/pricing.http`
@@ -66,7 +66,7 @@ Task-05 complete. Specifically:
   - `# Pricing endpoints (apps/api-gateway/src/modules/catalog/presentation/...)` with a brief description.
   - `# Prereqs:` listing required seed state (admin user, seeded products with variants A and B) and the env vars expected.
   - `# Tip:` a one-line reminder about how to refresh the admin token if it expires (point at `http/auth.http` if epic-01 task-08 added one).
-- Append a "Kulala flow" section to `docs/implementation/epic-03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md` describing what `http/pricing.http` covers and in what order.
+- Append a "Kulala flow" section to `docs/implementation/03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md` describing what `http/pricing.http` covers and in what order.
 
 **Out:**
 
@@ -132,7 +132,7 @@ Before writing, run `cat http/product.http http/order.http` and copy:
 
 ## Files to modify
 
-- `docs/implementation/epic-03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md` — append the "Kulala flow" section described under §"Doc deliverable" below.
+- `docs/implementation/03-pricing-price-and-tax-category/06-pricing-api-and-kulala.md` — append the "Kulala flow" section described under §"Doc deliverable" below.
 - `http/http-client.env.json` — only if a new env variable is needed. Likely no change; `ENV_BASE_URL` already suffices.
 
 ## Files to delete

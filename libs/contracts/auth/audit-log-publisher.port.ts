@@ -1,6 +1,6 @@
-// Forward-compatibility port for the audit-log work that lands in epic-11.
-// epic-01 ships the interface + a no-op default adapter (Pino debug line) so
-// every audit-relevant use case calls `publisher.publish(...)` today; epic-11
+// Forward-compatibility port for future audit-log delivery work.
+// This baseline ships the interface + a no-op default adapter (Pino debug line) so
+// every audit-relevant use case calls `publisher.publish(...)` today; that future work
 // swaps the adapter binding to an RMQ publisher without re-touching call sites.
 
 export const AUDIT_LOG_PUBLISHER = Symbol('AUDIT_LOG_PUBLISHER');
@@ -18,7 +18,7 @@ export interface IAuditLogEvent {
   actorId: string | null;
 
   // The kind of subject acting. Audit consumers need this because actor ids
-  // are not globally unique across the two id spaces in this epic.
+  // are not globally unique across the two id spaces in this baseline.
   actorKind: AuditActorKind;
 
   // The target resource the event mutates (e.g., the StaffUser id whose

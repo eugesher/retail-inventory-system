@@ -330,10 +330,10 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
-  // The epic-01 modules (auth, iam) follow the same per-layer rules as
+  // The gateway auth + iam modules follow the same per-layer rules as
   // the inventory/stock module; these fixtures repeat the bumper there
   // so a future regression on the gateway side is caught.
-  describe('boundaries/dependencies — gateway auth + iam modules (epic-01)', () => {
+  describe('boundaries/dependencies — gateway auth + iam modules', () => {
     it('auth domain (RoleAggregate, PermissionAggregate, StaffUser, Customer) may not import @retail-inventory-system/messaging', () => {
       // Domain must stay framework- and transport-free. With default-disallow
       // + checkAllOrigins, lib-messaging is not in the domain allow list, so

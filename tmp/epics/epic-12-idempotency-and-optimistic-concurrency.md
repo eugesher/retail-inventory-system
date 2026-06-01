@@ -5,7 +5,7 @@ source_stages: [hardening]
 depends_on: [epic-05, epic-07]
 microservices: [api-gateway, retail-microservice, inventory-microservice]
 task_subfolder: tmp/tasks/epic-12-idempotency-and-optimistic-concurrency/
-docs_subfolder: docs/implementation/epic-12-idempotency-and-optimistic-concurrency/
+docs_subfolder: docs/implementation/12-idempotency-and-optimistic-concurrency/
 ---
 
 # Epic 12 — Hardening — idempotency keys on mutating ops + optimistic concurrency on StockLevel / Cart / Order
@@ -117,7 +117,7 @@ Convert the "header accepted, not enforced" idempotency story from `epic-05` (Pl
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-12-idempotency-and-optimistic-concurrency/`:
+**Per-task markdown files** under `docs/implementation/12-idempotency-and-optimistic-concurrency/`:
 
 - `01-idempotency-q10-restated.md` — restate Q10 + the per-service local store decision; body-fingerprinting strategy (canonical-JSON + SHA-256).
 - `02-idempotency-key-store-and-ttl.md` — table shape; TTL sweep; replay vs reuse-different-body semantics.
@@ -184,7 +184,7 @@ Convert the "header accepted, not enforced" idempotency story from `epic-05` (Pl
 - [ ] `idempotency_key` table is purged of expired rows automatically (verified by leaving a row, advancing simulated time, observing deletion).
 - [ ] 50 concurrent Receive Stock +1 calls produce a final `quantityOnHand` of seed + 50 (no lost updates).
 - [ ] 10 concurrent Place Order calls against a 5-supply variant produce exactly 5 successful orders.
-- [ ] Per-task docs present under `docs/implementation/epic-12-idempotency-and-optimistic-concurrency/`.
+- [ ] Per-task docs present under `docs/implementation/12-idempotency-and-optimistic-concurrency/`.
 - [ ] `README.md` Idempotency + Concurrency sections added; `CLAUDE.md` updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

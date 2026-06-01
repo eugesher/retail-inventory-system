@@ -5,7 +5,7 @@ source_stages: [production-core]
 depends_on: [epic-05]
 microservices: [api-gateway, notification-microservice]
 task_subfolder: tmp/tasks/epic-10-notification-templates-and-deliveries/
-docs_subfolder: docs/implementation/epic-10-notification-templates-and-deliveries/
+docs_subfolder: docs/implementation/10-notification-templates-and-deliveries/
 ---
 
 # Epic 10 — Notifications — NotificationTemplate registry + NotificationDelivery persistence + render-and-dispatch
@@ -117,7 +117,7 @@ Promote the notification microservice from "fire log lines from inline strings" 
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-10-notification-templates-and-deliveries/`:
+**Per-task markdown files** under `docs/implementation/10-notification-templates-and-deliveries/`:
 
 - `01-notification-template-versioning.md` — why `version` is part of the unique key; how rollback works.
 - `02-notification-delivery-as-audit-trail.md` — the delivery row is the source of truth for "did we send this?"; retention semantics.
@@ -184,7 +184,7 @@ Promote the notification microservice from "fire log lines from inline strings" 
 - [ ] Editing a template creates a new `version` row; the next event uses the new version's body.
 - [ ] Forcing a NOTIFIER failure increments `attempt_count`; retry succeeds on second attempt.
 - [ ] Every request in `http/notifications.http` executes end-to-end.
-- [ ] Per-task docs present under `docs/implementation/epic-10-notification-templates-and-deliveries/`.
+- [ ] Per-task docs present under `docs/implementation/10-notification-templates-and-deliveries/`.
 - [ ] `README.md` System diagram + API section updated; `CLAUDE.md` notification section updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

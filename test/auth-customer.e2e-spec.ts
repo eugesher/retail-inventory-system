@@ -21,7 +21,7 @@ interface ITokenResponse {
 
 // Each run creates a fresh customer to avoid colliding with prior runs that
 // may have left rows in the table. The seed script does not produce customer
-// rows in this epic — task-09 will.
+// rows yet — a later seed-extension step will.
 const customerEmail = (): string =>
   `buyer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
 const CUSTOMER_PASSWORD = 'customer1234';

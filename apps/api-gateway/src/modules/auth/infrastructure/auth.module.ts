@@ -36,7 +36,7 @@ import { StaffUserTypeormRepository } from './persistence/staff-user-typeorm.rep
 
 // AUTH_USER_VALIDATOR + STAFF_USER_REPOSITORY + CUSTOMER_REPOSITORY are bound
 // inside libs/auth's `forRootAsync` so its JwtStrategy can resolve them; the
-// validator now spans both subject kinds (task-05). Capturing the
+// validator now spans both subject kinds (staff and customer). Capturing the
 // DynamicModule reference (rather than inlining the call) lets AuthModule
 // *re-export* the whole dynamic module so its exports — STAFF_USER_REPOSITORY
 // in particular — propagate to AuthModule's downstream consumers (today: IAM).

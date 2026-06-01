@@ -35,8 +35,8 @@ describe('Retail Inventory System API', () => {
   // `admin@example.com` is established by `yarn test:seed`; one login,
   // reused across every assertion below as a bearer-token source. Customer-side
   // flows (register/login) live in `test/auth-customer.e2e-spec.ts`; the order
-  // endpoints here carry no customer association — epic-05 re-links orders to
-  // the gateway customer aggregate.
+  // endpoints here carry no customer association — future checkout work re-links
+  // orders to the gateway customer aggregate.
   const httpClient = () => {
     const agent = supertest.agent(apiGatewayApp.getHttpServer());
     agent.set('Authorization', `Bearer ${staffAccessToken}`);

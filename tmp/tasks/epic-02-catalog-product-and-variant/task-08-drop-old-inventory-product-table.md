@@ -43,7 +43,7 @@ Tasks 1–7 carryover present:
 - A code-level marker — a one-line comment in `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/stock-typeorm.repository.ts` (and any sibling) at the location where `ProductEntity` is imported/joined:
   - `// TODO(epic-04): replaced by Variant reference; the inventory product table is dropped by epic-02 task-08.`
   - **Do not** remove the import or change the join — the inventory app would fail to compile if we yanked the entity. The TODO is the entire deliverable on the inventory side; `epic-04` does the actual rewiring.
-- A `docs/implementation/epic-04-…/01-…md` forward-reference is **not** authored here (that doc lives in `epic-04`'s task tree). This task is migration-only; no docs are written.
+- A `docs/implementation/04-…/01-…md` forward-reference is **not** authored here (that doc lives in `epic-04`'s task tree). This task is migration-only; no docs are written.
 
 **Out:**
 

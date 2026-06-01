@@ -3,7 +3,7 @@ epic: epic-03
 task_number: 1
 title: Scaffold the pricing sibling module inside catalog-microservice (per-module hexagonal skeleton, boundaries lint update, new routing keys, cache-key builder)
 depends_on: []
-doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/01-pricing-module-scaffold.md
+doc_deliverable: docs/implementation/03-pricing-price-and-tax-category/01-pricing-module-scaffold.md
 ---
 
 # Task 01 — Scaffold the `pricing/` sibling module inside `catalog-microservice`
@@ -47,7 +47,7 @@ Epic-02 is complete on disk. Specifically:
 - Update `apps/catalog-microservice/src/app/app.module.ts` to import the new `PricingModule` placeholder.
 - Verify `eslint.config.mjs` automatically governs the new `pricing/` tree (the pattern `apps/*/src/modules/*/...` should already match). If a defensive allowlist exists, extend it.
 - Extend `spec/architecture-lint.spec.ts` with a new fixture block `describe('catalog-microservice pricing module boundaries', ...)` mirroring the existing `catalog/` fixture block. The fixtures must run at least one positive test (allowed import) and one negative test (forbidden import) per element type.
-- Doc deliverable `01-pricing-module-scaffold.md` under `docs/implementation/epic-03-pricing-price-and-tax-category/`.
+- Doc deliverable `01-pricing-module-scaffold.md` under `docs/implementation/03-pricing-price-and-tax-category/`.
 
 **Out:**
 
@@ -205,7 +205,7 @@ Mirror the existing `catalog/` fixture block; copy its synthetic-path setup help
 - `apps/catalog-microservice/src/modules/pricing/infrastructure/index.ts`.
 - `apps/catalog-microservice/src/modules/pricing/presentation/.gitkeep`.
 - `apps/catalog-microservice/src/modules/pricing/presentation/index.ts`.
-- `docs/implementation/epic-03-pricing-price-and-tax-category/01-pricing-module-scaffold.md`.
+- `docs/implementation/03-pricing-price-and-tax-category/01-pricing-module-scaffold.md`.
 
 ## Files to modify
 
@@ -227,7 +227,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-03-pricing-price-and-tax-category/01-pricing-module-scaffold.md`. Target ~150 lines. Sections:
+Write `docs/implementation/03-pricing-price-and-tax-category/01-pricing-module-scaffold.md`. Target ~150 lines. Sections:
 
 1. **Why a sibling module, not a new microservice.** Cite the epic charter — pricing colocates with catalog because (a) `Price.variantId` is an inward FK to `product_variant.id` and the two aggregates share a transaction boundary for `Set Price` (the predecessor row's `valid_to` close must be atomic with the new row's insert), (b) every consumer of pricing is also a consumer of catalog reads, (c) splitting the bounded contexts later is a Day-2 question. ADR-004/009/012/013 (per-module hexagonal) explicitly permits multiple sibling modules under one app.
 2. **The per-module shape, recapped.** Reference the canonical layout used by `modules/catalog/`. Note that the new `pricing/` tree mirrors it line-for-line. Call out the four element types (`domain`, `application`, `infrastructure`, `presentation`) and how `eslint-plugin-boundaries` captures them via the `apps/*/src/modules/*/` glob.

@@ -3,7 +3,7 @@ epic: epic-02
 task_number: 5
 title: Implement the Query Catalog read path — RPC handlers, list/get use cases, read projections
 depends_on: [task-01, task-02, task-03, task-04]
-doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/04-catalog-use-cases.md
+doc_deliverable: docs/implementation/02-catalog-product-and-variant/04-catalog-use-cases.md
 ---
 
 # Task 05 — `Query Catalog` read path (RPC handlers + read use cases)
@@ -138,7 +138,7 @@ async execute(input: { variantId: number }): Promise<VariantReadDto> {
 - `apps/catalog-microservice/src/modules/catalog/application/use-cases/index.ts` — barrel re-export.
 - `libs/messaging/routing-keys.constants.ts` — add the three RPC keys.
 - `libs/cache/cache-keys.ts` — add the `productByVariantId(variantId, facet?)` builder + `CATALOG_PRODUCT_KEY_VERSION` constant.
-- `docs/implementation/epic-02-catalog-product-and-variant/04-catalog-use-cases.md` — replace the `<!-- task-05-read-path-anchor -->` with the read-path subsection. The doc is complete after this task.
+- `docs/implementation/02-catalog-product-and-variant/04-catalog-use-cases.md` — replace the `<!-- task-05-read-path-anchor -->` with the read-path subsection. The doc is complete after this task.
 
 ## Files to delete
 

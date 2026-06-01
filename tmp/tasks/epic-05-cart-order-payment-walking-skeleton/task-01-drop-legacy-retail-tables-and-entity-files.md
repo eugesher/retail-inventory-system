@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 1
 title: Drop legacy retail tables + entity files; park `OrderTypeormRepository` in a throwing-stub state
 depends_on: []
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md
 ---
 
 # Task 01 — Drop legacy retail tables + entity files
@@ -85,7 +85,7 @@ Epic-04 is complete on disk. Specifically:
 - Update `libs/messaging/routing-keys.constants.ts`: remove `RETAIL_ORDER_CREATE`, `RETAIL_ORDER_CONFIRM`, `RETAIL_ORDER_GET`. Keep the three event constants (`RETAIL_ORDER_CREATED`, `RETAIL_ORDER_CONFIRMED`, `RETAIL_ORDER_CANCELLED`) — they are retired in task-06 once the new constants land.
 - Update the `routing-keys.constants.spec.ts` (which asserts the legacy `MicroserviceMessagePatternEnum` agrees value-for-value) to drop the three removed entries from both sides (the enum is in `libs/contracts/microservices/` — remove the matching entries there too).
 - Update `apps/api-gateway/src/modules/retail/` so the gateway still compiles. **This task does not reshape the gateway** — task-09 owns that. But the deletion of the three RPC routing keys forces a temporary measure: the gateway's `RetailRabbitmqAdapter` references the constants by name (`ROUTING_KEYS.RETAIL_ORDER_CREATE` etc.). The minimum-change path is to mark the controllers' usages with a temporary `@deprecated` JSDoc + replace the constant references with inline string literals `'retail.order.create'` etc., with a `// TODO(epic-05 task-09): remove with the controller rewrite`. The deprecation note in the JSDoc cites the task number. The HTTP endpoints will return RMQ errors at runtime — that is the expected observable behavior in this transition window, identical in spirit to the inventory-side throwing-stub from epic-04 task-01.
-- Doc deliverable `01-retail-rebuild-and-old-tables-dropped.md` under `docs/implementation/epic-05-cart-order-payment-walking-skeleton/` — the introductory half. Task-12 appends the cumulative "after" snapshot once the new schema is fully in place.
+- Doc deliverable `01-retail-rebuild-and-old-tables-dropped.md` under `docs/implementation/05-cart-order-payment-walking-skeleton/` — the introductory half. Task-12 appends the cumulative "after" snapshot once the new schema is fully in place.
 
 **Out:**
 
@@ -160,7 +160,7 @@ This file (or its equivalent in the existing layout — verify against the curre
 ## Files to add
 
 - `migrations/<timestamp>-DropLegacyRetailTables.ts` — the migration described above. Use `Date.now()` for the timestamp prefix per project convention; the `migrations/` folder ordering will surface the right name when `yarn migration:create -- DropLegacyRetailTables` is run.
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md` — introductory half; task-12 appends the post-state snapshot.
+- `docs/implementation/05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md` — introductory half; task-12 appends the post-state snapshot.
 
 ## Files to modify
 
@@ -211,7 +211,7 @@ This file (or its equivalent in the existing layout — verify against the curre
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md` (introductory half — target ~130 lines now; task-12 appends ~40 more lines for the after-snapshot). Sections this task writes:
+Write `docs/implementation/05-cart-order-payment-walking-skeleton/01-retail-rebuild-and-old-tables-dropped.md` (introductory half — target ~130 lines now; task-12 appends ~40 more lines for the after-snapshot). Sections this task writes:
 
 1. **Why a full rewrite is cheaper than incremental refactor.** Restate the epic's "Goal": the legacy `Order` aggregate carried two tables for status (`order_status` + `order_product_status`) — a normalized state-machine table that proved redundant once Q4's three-status-fields-on-the-row decision landed. The polymorphic `Address` snapshot is incompatible with the legacy `customer` table's address columns (the old table embedded a single address; the new model snapshots two addresses per order). The cart/order split (Q3) had no equivalent at all in the legacy schema. Across these three changes, an aggregate-by-aggregate refactor would have left two breaking intermediate snapshots — easier to detonate and rebuild.
 2. **What got dropped.** Bullet list with the five tables + the entity files + the mappers + the legacy events + the legacy use cases + the legacy publisher + the legacy `InventoryConfirmRabbitmqAdapter`. Cite each file by path and explain the role it played pre-deletion (e.g. `customer.entity.ts` was the retail-side mirror of identity from the early-days monolith; `epic-01`'s default-b decision moved identity authoritatively to the api-gateway auth module).

@@ -5,7 +5,7 @@ source_stages: [hardening]
 depends_on: [epic-07, epic-11]
 microservices: [api-gateway, inventory-microservice, event-store-microservice]
 task_subfolder: tmp/tasks/epic-14-reservation-sweeper-and-audit-queries/
-docs_subfolder: docs/implementation/epic-14-reservation-sweeper-and-audit-queries/
+docs_subfolder: docs/implementation/14-reservation-sweeper-and-audit-queries/
 ---
 
 # Epic 14 — Hardening — Reservation TTL sweeper + AuditLog and DomainEvent query endpoints
@@ -115,7 +115,7 @@ If any of the above indexes turn out missing in epic-11's actual implementation,
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-14-reservation-sweeper-and-audit-queries/`:
+**Per-task markdown files** under `docs/implementation/14-reservation-sweeper-and-audit-queries/`:
 
 - `01-reservation-sweeper-design.md` — cadence, batch sizing, transaction sizing rationale (short locks); OCC interaction with the cart-write path.
 - `02-sweeper-cron-and-coalesced-emit.md` — how `@nestjs/schedule` registers the cron; the per-group emit decision; consumer obligation to handle per-row.
@@ -173,7 +173,7 @@ If any of the above indexes turn out missing in epic-11's actual implementation,
 - [ ] Letting an Add-to-Cart sit untouched for ~`RESERVATION_TTL_MINUTES` results in the sweeper reaping it automatically; `quantityReserved` drops; stock-released event observed in the event-store.
 - [ ] `GET /api/audit/events?correlationId=<id>` returns the full chain for a placed order including events from every producing service.
 - [ ] `GET /api/audit/entries?action=iam:assign` returns the historical role-assignment rows.
-- [ ] Per-task docs present under `docs/implementation/epic-14-reservation-sweeper-and-audit-queries/`.
+- [ ] Per-task docs present under `docs/implementation/14-reservation-sweeper-and-audit-queries/`.
 - [ ] `README.md` Background-jobs + Audit-queries sections added; `CLAUDE.md` cron + query sections added.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

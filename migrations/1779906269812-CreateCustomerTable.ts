@@ -1,16 +1,16 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-// task-05 of epic-01 introduces the gateway-side customer aggregate. The
+// This migration introduces the gateway-side customer aggregate. The
 // pre-existing `customer` table (created by InitStarterEntities, BIGINT id)
 // and the dangling `order.customer_id` FK / column it served are dropped
-// entirely — no legacy artifacts remain. Epic-05 re-establishes the link
-// from `order` to the new CHAR(36) gateway customer at that point.
+// entirely — no legacy artifacts remain. Future checkout work re-establishes
+// the link from `order` to the new CHAR(36) gateway customer at that point.
 //
 // Every PII column on the new `customer` table is nullable so the row can
 // later be tombstoned in place (Q6) while preserving the customer id;
 // `password_hash` is nullable so future guest / social rows (Q7) can exist
 // without breaking the schema. The `status` enum already includes `guest`
-// and `deleted` even though no flow produces those rows in this epic — the
+// and `deleted` even though no flow produces those rows in this baseline — the
 // column shape must accept them on day one.
 export class CreateCustomerTable1779906269812 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
