@@ -10,12 +10,12 @@ import { DatabaseModule } from '@retail-inventory-system/database';
 import { CorrelationMiddleware, LoggerModuleConfig } from '@retail-inventory-system/observability';
 
 import {
-  AuthModule,
   CustomerEntity,
   PermissionEntity,
   RoleEntity,
   StaffUserEntity,
-} from '../modules/auth';
+} from '../modules/auth/infrastructure/persistence';
+import { AuthModule } from '../modules/auth';
 import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
 import { RetailModule } from '../modules/retail';
