@@ -1,1 +1,1 @@
-export * from './infrastructure/retail.module';
+export * from './retail.module';
