@@ -10,7 +10,7 @@ import {
   ROLE_REPOSITORY,
   RoleAggregate,
 } from '../../../auth';
-import { ICreateRoleCommand } from '../dto/create-role.command';
+import { ICreateRoleCommand } from '../dto';
 import { assertPermissionsExist } from './assert-permissions-exist';
 
 @Injectable()

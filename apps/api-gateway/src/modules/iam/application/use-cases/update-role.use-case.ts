@@ -9,7 +9,7 @@ import {
   ROLE_REPOSITORY,
   RoleAggregate,
 } from '../../../auth';
-import { IUpdateRoleCommand } from '../dto/update-role.command';
+import { IUpdateRoleCommand } from '../dto';
 import { assertPermissionsExist } from './assert-permissions-exist';
 
 @Injectable()

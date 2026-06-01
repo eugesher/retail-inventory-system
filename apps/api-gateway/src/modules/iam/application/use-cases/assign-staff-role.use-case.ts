@@ -9,7 +9,7 @@ import {
   STAFF_USER_REPOSITORY,
   StaffUser,
 } from '../../../auth';
-import { IAssignStaffRoleCommand } from '../dto/assign-staff-role.command';
+import { IAssignStaffRoleCommand } from '../dto';
 
 @Injectable()
 export class AssignStaffRoleUseCase {

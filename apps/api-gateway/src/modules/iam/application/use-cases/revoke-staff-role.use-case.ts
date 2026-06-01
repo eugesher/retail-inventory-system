@@ -3,7 +3,7 @@ import { ConflictException, Inject, Injectable, NotFoundException } from '@nestj
 import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
 
 import { IStaffUserRepositoryPort, STAFF_USER_REPOSITORY, StaffUser } from '../../../auth';
-import { IRevokeStaffRoleCommand } from '../dto/revoke-staff-role.command';
+import { IRevokeStaffRoleCommand } from '../dto';
 
 @Injectable()
 export class RevokeStaffRoleUseCase {
