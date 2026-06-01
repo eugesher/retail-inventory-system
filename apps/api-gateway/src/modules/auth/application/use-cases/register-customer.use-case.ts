@@ -4,9 +4,13 @@ import { randomUUID } from 'crypto';
 import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
 
 import { Customer } from '../../domain/customer.model';
-import { CUSTOMER_REPOSITORY, ICustomerRepositoryPort } from '../ports/customer.repository.port';
-import { IPasswordPort, PASSWORD_HASHER } from '../ports/password.port';
-import { IRegisterCustomerCommand } from '../dto/register-customer.command';
+import { IRegisterCustomerCommand } from '../dto';
+import {
+  CUSTOMER_REPOSITORY,
+  ICustomerRepositoryPort,
+  IPasswordPort,
+  PASSWORD_HASHER,
+} from '../ports';
 
 @Injectable()
 export class RegisterCustomerUseCase {

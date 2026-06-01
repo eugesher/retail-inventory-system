@@ -8,10 +8,16 @@ import {
   ICurrentUser,
 } from '@retail-inventory-system/contracts';
 
-import { ILoginCustomerCommand } from '../dto/login-customer.command';
-import { CUSTOMER_REPOSITORY, ICustomerRepositoryPort } from '../ports/customer.repository.port';
-import { IPasswordPort, PASSWORD_HASHER } from '../ports/password.port';
-import { IIssuedTokens, ITokenPort, TOKEN_SERVICE } from '../ports/token.port';
+import { ILoginCustomerCommand } from '../dto';
+import {
+  CUSTOMER_REPOSITORY,
+  ICustomerRepositoryPort,
+  IIssuedTokens,
+  IPasswordPort,
+  ITokenPort,
+  PASSWORD_HASHER,
+  TOKEN_SERVICE,
+} from '../ports';
 
 export interface ILoginCustomerResult extends IIssuedTokens {
   user: ICurrentUser;

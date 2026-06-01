@@ -9,13 +9,16 @@ import {
   RoleEnum,
 } from '@retail-inventory-system/contracts';
 
-import { ILoginCommand } from '../dto/login.command';
-import { PASSWORD_HASHER, IPasswordPort } from '../ports/password.port';
+import { ILoginCommand } from '../dto';
 import {
+  IIssuedTokens,
+  IPasswordPort,
   IStaffUserRepositoryPort,
+  ITokenPort,
+  PASSWORD_HASHER,
   STAFF_USER_REPOSITORY,
-} from '../ports/staff-user.repository.port';
-import { IIssuedTokens, ITokenPort, TOKEN_SERVICE } from '../ports/token.port';
+  TOKEN_SERVICE,
+} from '../ports';
 
 export interface ILoginResult extends IIssuedTokens {
   user: ICurrentUser;
