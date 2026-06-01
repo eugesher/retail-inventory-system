@@ -26,7 +26,6 @@ declare const module: {
         urls: [configService.get<string>('RABBITMQ_URL')!],
         queue: MicroserviceQueueEnum.CATALOG_QUEUE,
         queueOptions: { durable: true },
-        noAck: false,
       },
     });
 

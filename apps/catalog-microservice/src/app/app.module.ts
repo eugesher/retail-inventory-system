@@ -5,7 +5,6 @@ import { LoggerModule } from 'nestjs-pino';
 import { configModuleConfig } from '@retail-inventory-system/config';
 import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
-import { MessagingModule } from '@retail-inventory-system/messaging';
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
 import { CatalogModule } from '../modules/catalog';
@@ -18,7 +17,6 @@ import { CatalogModule } from '../modules/catalog';
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.CATALOG_MICROSERVICE)),
     DatabaseModule.forRoot([]),
-    MessagingModule,
     CatalogModule,
   ],
 })
