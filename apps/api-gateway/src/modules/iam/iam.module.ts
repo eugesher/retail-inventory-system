@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth';
-import { AssignStaffRoleUseCase } from './application/use-cases/assign-staff-role.use-case';
-import { CreateRoleUseCase } from './application/use-cases/create-role.use-case';
-import { ListRolesUseCase } from './application/use-cases/list-roles.use-case';
-import { RevokeStaffRoleUseCase } from './application/use-cases/revoke-staff-role.use-case';
-import { UpdateRoleUseCase } from './application/use-cases/update-role.use-case';
+import {
+  AssignStaffRoleUseCase,
+  CreateRoleUseCase,
+  ListRolesUseCase,
+  RevokeStaffRoleUseCase,
+  UpdateRoleUseCase,
+} from './application/use-cases';
 import { IamController } from './presentation/iam.controller';
 
 // IAM is a presentation-and-orchestration shell over the auth module's

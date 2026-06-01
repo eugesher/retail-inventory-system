@@ -26,11 +26,13 @@ import { ICurrentUser, PermissionCodeEnum } from '@retail-inventory-system/contr
 import { CorrelationId } from '@retail-inventory-system/observability';
 
 import { RoleAggregate } from '../../auth';
-import { AssignStaffRoleUseCase } from '../application/use-cases/assign-staff-role.use-case';
-import { CreateRoleUseCase } from '../application/use-cases/create-role.use-case';
-import { ListRolesUseCase } from '../application/use-cases/list-roles.use-case';
-import { RevokeStaffRoleUseCase } from '../application/use-cases/revoke-staff-role.use-case';
-import { UpdateRoleUseCase } from '../application/use-cases/update-role.use-case';
+import {
+  AssignStaffRoleUseCase,
+  CreateRoleUseCase,
+  ListRolesUseCase,
+  RevokeStaffRoleUseCase,
+  UpdateRoleUseCase,
+} from '../application/use-cases';
 import { AssignStaffRoleRequestDto } from './dto/assign-staff-role.request.dto';
 import { CreateRoleRequestDto } from './dto/create-role.request.dto';
 import { RoleResponseDto } from './dto/role.response.dto';
