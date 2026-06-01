@@ -1,17 +1,19 @@
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 import { AggregateRoot } from '@retail-inventory-system/ddd';
 
-import { StaffUserLoggedInEvent } from './events/staff-user-logged-in.event';
-import { StaffUserRegisteredEvent } from './events/staff-user-registered.event';
-import { StaffUserRoleRevokedEvent } from './events/staff-user-role-revoked.event';
-import { StaffUserRolesAssignedEvent } from './events/staff-user-roles-assigned.event';
+import {
+  StaffUserLoggedInEvent,
+  StaffUserRegisteredEvent,
+  StaffUserRoleRevokedEvent,
+  StaffUserRolesAssignedEvent,
+} from './events';
 import { RoleAggregate } from './role.aggregate';
 
 export interface IPasswordHasher {
   verify(hash: string, candidate: string): Promise<boolean>;
 }
 
-export type StaffUserStatus = 'active' | 'suspended';
+type StaffUserStatus = 'active' | 'suspended';
 
 interface IStaffUserProps {
   email: string;
@@ -28,12 +30,12 @@ interface IStaffUserProps {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class StaffUser extends AggregateRoot<string> {
-  private _email: string;
-  private _passwordHash: string;
   private _roles: RoleAggregate[];
   private _status: StaffUserStatus;
   private _lastLoginAt: Date | null;
   private _refreshTokenHash: string | null;
+  private readonly _email: string;
+  private readonly _passwordHash: string;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
   public readonly deletedAt: Date | null;

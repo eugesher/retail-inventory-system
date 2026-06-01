@@ -1,6 +1,6 @@
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { RoleAggregate } from '../../domain/role.aggregate';
+import { RoleAggregate } from '../../domain';
 
 export const ROLE_REPOSITORY = Symbol('ROLE_REPOSITORY');
 

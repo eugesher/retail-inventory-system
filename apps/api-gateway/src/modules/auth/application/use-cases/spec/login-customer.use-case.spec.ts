@@ -3,7 +3,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { Customer } from '../../../domain/customer.model';
+import { Customer } from '../../../domain';
 import { LoginCustomerUseCase } from '../login-customer.use-case';
 import {
   FakeAuditLogPublisher,

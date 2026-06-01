@@ -1,6 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 
-import { Customer } from '../../domain/customer.model';
+import { Customer } from '../../domain';
 import { CUSTOMER_REPOSITORY, ICustomerRepositoryPort } from '../ports';
 
 @Injectable()

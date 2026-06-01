@@ -2,7 +2,7 @@ import { DeepPartial } from 'typeorm';
 
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { RoleAggregate } from '../../domain/role.aggregate';
+import { RoleAggregate } from '../../domain';
 import { PermissionEntity } from './permission.entity';
 import { RoleEntity } from './role.entity';
 

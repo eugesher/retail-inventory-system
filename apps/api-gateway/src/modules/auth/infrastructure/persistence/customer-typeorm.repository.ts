@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { ICustomerRepositoryPort } from '../../application/ports';
-import { Customer } from '../../domain/customer.model';
+import { Customer } from '../../domain';
 import { CustomerEntity } from './customer.entity';
 import { CustomerMapper } from './customer.mapper';
 

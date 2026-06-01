@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 
 import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
 
-import { Customer } from '../../domain/customer.model';
+import { Customer } from '../../domain';
 import { IRegisterCustomerCommand } from '../dto';
 import {
   CUSTOMER_REPOSITORY,

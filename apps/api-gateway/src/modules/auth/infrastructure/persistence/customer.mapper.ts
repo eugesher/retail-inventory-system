@@ -1,6 +1,6 @@
 import { DeepPartial } from 'typeorm';
 
-import { Customer } from '../../domain/customer.model';
+import { Customer } from '../../domain';
 import { CustomerEntity } from './customer.entity';
 
 export class CustomerMapper {

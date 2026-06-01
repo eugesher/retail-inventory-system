@@ -1,4 +1,4 @@
-import { StaffUser } from '../../domain/staff-user.model';
+import { StaffUser } from '../../domain';
 
 export const STAFF_USER_REPOSITORY = Symbol('STAFF_USER_REPOSITORY');
 

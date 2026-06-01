@@ -5,8 +5,7 @@ import {
   IJwtRefreshPayload,
 } from '@retail-inventory-system/contracts';
 
-import { Customer } from '../../../domain/customer.model';
-import { StaffUser } from '../../../domain/staff-user.model';
+import { Customer, StaffUser } from '../../../domain';
 import {
   ICustomerRepositoryPort,
   IIssuedTokens,

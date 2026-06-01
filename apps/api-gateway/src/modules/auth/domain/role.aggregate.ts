@@ -14,8 +14,8 @@ const ROLE_NAME_REGEX = /^[a-z][a-z0-9-]*$/;
 // caller having to dedupe first. `RoleEntity` flattens this to a join
 // table at the persistence boundary; see `role.mapper.ts`.
 export class RoleAggregate extends AggregateRoot<string> {
-  private _name: string;
   private _description: string | null;
+  private readonly _name: string;
   private readonly _permissions: Set<PermissionCodeEnum>;
 
   private constructor(id: string, props: IRoleProps) {

@@ -1,6 +1,6 @@
 import { DeepPartial } from 'typeorm';
 
-import { StaffUser } from '../../domain/staff-user.model';
+import { StaffUser } from '../../domain';
 import { RoleEntity } from './role.entity';
 import { RoleMapper } from './role.mapper';
 import { StaffUserEntity } from './staff-user.entity';

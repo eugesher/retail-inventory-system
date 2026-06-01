@@ -1,6 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 
-import { Customer } from '../../../domain/customer.model';
+import { Customer } from '../../../domain';
 import { GetCurrentCustomerUseCase } from '../get-current-customer.use-case';
 import { InMemoryCustomerRepository } from './test-doubles';
 

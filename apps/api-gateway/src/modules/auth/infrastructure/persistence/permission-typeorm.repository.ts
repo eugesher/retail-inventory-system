@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
 import { IPermissionRepositoryPort } from '../../application/ports';
-import { PermissionAggregate } from '../../domain/permission.aggregate';
+import { PermissionAggregate } from '../../domain';
 import { PermissionEntity } from './permission.entity';
 import { PermissionMapper } from './permission.mapper';
 

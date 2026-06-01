@@ -1,10 +1,9 @@
 import { AggregateRoot } from '@retail-inventory-system/ddd';
 
-import { CustomerLoggedInEvent } from './events/customer-logged-in.event';
-import { CustomerRegisteredEvent } from './events/customer-registered.event';
+import { CustomerLoggedInEvent, CustomerRegisteredEvent } from './events';
 import { IPasswordHasher } from './staff-user.model';
 
-export type CustomerStatus = 'active' | 'suspended' | 'guest' | 'deleted';
+type CustomerStatus = 'active' | 'suspended' | 'guest' | 'deleted';
 
 const ALLOWED_STATUSES: ReadonlySet<CustomerStatus> = new Set([
   'active',
@@ -29,14 +28,14 @@ interface ICustomerProps {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class Customer extends AggregateRoot<string> {
-  private _email: string;
-  private _passwordHash: string | null;
   private _status: CustomerStatus;
-  private _phone: string | null;
-  private _firstName: string | null;
-  private _lastName: string | null;
   private _emailVerifiedAt: Date | null;
   private _refreshTokenHash: string | null;
+  private readonly _email: string;
+  private readonly _passwordHash: string | null;
+  private readonly _phone: string | null;
+  private readonly _firstName: string | null;
+  private readonly _lastName: string | null;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
 

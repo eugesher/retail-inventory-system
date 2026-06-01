@@ -2,9 +2,7 @@ import { UnauthorizedException } from '@nestjs/common';
 
 import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts';
 
-import { Customer } from '../../../domain/customer.model';
-import { RoleAggregate } from '../../../domain/role.aggregate';
-import { StaffUser } from '../../../domain/staff-user.model';
+import { Customer, RoleAggregate, StaffUser } from '../../../domain';
 import { ValidateJwtSubjectUseCase } from '../validate-jwt-subject.use-case';
 import {
   FakeHasher,

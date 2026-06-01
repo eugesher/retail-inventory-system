@@ -2,8 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { RoleAggregate, StaffUser } from '../../../../auth';
-import { StaffUserRolesAssignedEvent } from '../../../../auth/domain/events/staff-user-roles-assigned.event';
+import { RoleAggregate, StaffUser, StaffUserRolesAssignedEvent } from '../../../../auth';
 import { AssignStaffRoleUseCase } from '../assign-staff-role.use-case';
 import {
   FakeAuditLogPublisher,

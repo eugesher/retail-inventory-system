@@ -1,4 +1,4 @@
-import { PermissionAggregate } from '../../domain/permission.aggregate';
+import { PermissionAggregate } from '../../domain';
 
 export const PERMISSION_REPOSITORY = Symbol('PERMISSION_REPOSITORY');
 

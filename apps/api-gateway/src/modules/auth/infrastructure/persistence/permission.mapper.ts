@@ -1,4 +1,4 @@
-import { PermissionAggregate } from '../../domain/permission.aggregate';
+import { PermissionAggregate } from '../../domain';
 import { PermissionEntity } from './permission.entity';
 
 export class PermissionMapper {

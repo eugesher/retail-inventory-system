@@ -4,8 +4,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { RoleEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { RoleAggregate } from '../../../domain/role.aggregate';
-import { StaffUser } from '../../../domain/staff-user.model';
+import { RoleAggregate, StaffUser } from '../../../domain';
 import { LogoutUseCase } from '../logout.use-case';
 import { FakeAuditLogPublisher, FakeHasher, InMemoryStaffUserRepository } from './test-doubles';
 

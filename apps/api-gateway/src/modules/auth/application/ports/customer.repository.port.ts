@@ -1,4 +1,4 @@
-import { Customer } from '../../domain/customer.model';
+import { Customer } from '../../domain';
 
 export const CUSTOMER_REPOSITORY = Symbol('CUSTOMER_REPOSITORY');
 

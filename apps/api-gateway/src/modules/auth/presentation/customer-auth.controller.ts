@@ -17,7 +17,7 @@ import {
   LoginCustomerUseCase,
   RegisterCustomerUseCase,
 } from '../application/use-cases';
-import { Customer } from '../domain/customer.model';
+import { Customer } from '../domain';
 import {
   CurrentCustomerResponseDto,
   LoginCustomerRequestDto,

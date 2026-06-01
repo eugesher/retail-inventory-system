@@ -3,8 +3,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { RoleAggregate } from '../../../domain/role.aggregate';
-import { StaffUser } from '../../../domain/staff-user.model';
+import { RoleAggregate, StaffUser } from '../../../domain';
 import { LoginUseCase } from '../login.use-case';
 import {
   FakeAuditLogPublisher,

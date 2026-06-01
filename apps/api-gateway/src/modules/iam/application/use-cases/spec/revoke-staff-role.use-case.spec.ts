@@ -2,8 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { RoleAggregate, StaffUser } from '../../../../auth';
-import { StaffUserRoleRevokedEvent } from '../../../../auth/domain/events/staff-user-role-revoked.event';
+import { RoleAggregate, StaffUser, StaffUserRoleRevokedEvent } from '../../../../auth';
 import { RevokeStaffRoleUseCase } from '../revoke-staff-role.use-case';
 import { FakeAuditLogPublisher, InMemoryStaffUserRepository } from './test-doubles';
 
