@@ -57,6 +57,7 @@ describe('Retail Inventory System API', () => {
     retailMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
       RetailMicroserviceAppModule,
       {
+        logger: false,
         transport: Transport.RMQ,
         options: {
           urls: [rmqUrl],
@@ -69,6 +70,7 @@ describe('Retail Inventory System API', () => {
     inventoryMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
       InventoryMicroserviceAppModule,
       {
+        logger: false,
         transport: Transport.RMQ,
         options: {
           urls: [rmqUrl],
@@ -80,7 +82,7 @@ describe('Retail Inventory System API', () => {
 
     await Promise.all([retailMicroservice.listen(), inventoryMicroservice.listen()]);
 
-    apiGatewayApp = await NestFactory.create(ApiGatewayAppModule);
+    apiGatewayApp = await NestFactory.create(ApiGatewayAppModule, { logger: false });
     apiGatewayApp.setGlobalPrefix('api');
     apiGatewayApp.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
