@@ -11,7 +11,7 @@ import {
   ROLE_REPOSITORY,
   STAFF_USER_REPOSITORY,
   TOKEN_SERVICE,
-} from '../application/ports';
+} from './application/ports';
 import {
   GetCurrentCustomerUseCase,
   LoginCustomerUseCase,
@@ -21,22 +21,22 @@ import {
   RegisterCustomerUseCase,
   RegisterStaffUserUseCase,
   ValidateJwtSubjectUseCase,
-} from '../application/use-cases';
-import { AuthAdminController } from '../presentation/auth-admin.controller';
-import { AuthController } from '../presentation/auth.controller';
-import { CustomerAuthController } from '../presentation/customer-auth.controller';
-import { StaffLoginController } from '../presentation/staff-login.controller';
-import { Argon2PasswordAdapter } from './argon2/argon2-password.adapter';
-import { NoOpAuditLogPublisher } from './audit/no-op-audit-log.publisher';
-import { JwtTokenAdapter } from './jwt/jwt-token.adapter';
-import { CustomerEntity } from './persistence/customer.entity';
-import { CustomerTypeormRepository } from './persistence/customer-typeorm.repository';
-import { PermissionEntity } from './persistence/permission.entity';
-import { PermissionTypeormRepository } from './persistence/permission-typeorm.repository';
-import { RoleEntity } from './persistence/role.entity';
-import { RoleTypeormRepository } from './persistence/role-typeorm.repository';
-import { StaffUserEntity } from './persistence/staff-user.entity';
-import { StaffUserTypeormRepository } from './persistence/staff-user-typeorm.repository';
+} from './application/use-cases';
+import { AuthAdminController } from './presentation/auth-admin.controller';
+import { AuthController } from './presentation/auth.controller';
+import { CustomerAuthController } from './presentation/customer-auth.controller';
+import { StaffLoginController } from './presentation/staff-login.controller';
+import { Argon2PasswordAdapter } from './infrastructure/argon2/argon2-password.adapter';
+import { NoOpAuditLogPublisher } from './infrastructure/audit/no-op-audit-log.publisher';
+import { JwtTokenAdapter } from './infrastructure/jwt/jwt-token.adapter';
+import { CustomerEntity } from './infrastructure/persistence/customer.entity';
+import { CustomerTypeormRepository } from './infrastructure/persistence/customer-typeorm.repository';
+import { PermissionEntity } from './infrastructure/persistence/permission.entity';
+import { PermissionTypeormRepository } from './infrastructure/persistence/permission-typeorm.repository';
+import { RoleEntity } from './infrastructure/persistence/role.entity';
+import { RoleTypeormRepository } from './infrastructure/persistence/role-typeorm.repository';
+import { StaffUserEntity } from './infrastructure/persistence/staff-user.entity';
+import { StaffUserTypeormRepository } from './infrastructure/persistence/staff-user-typeorm.repository';
 
 // AUTH_USER_VALIDATOR + STAFF_USER_REPOSITORY + CUSTOMER_REPOSITORY are bound
 // inside libs/auth's `forRootAsync` so its JwtStrategy can resolve them; the

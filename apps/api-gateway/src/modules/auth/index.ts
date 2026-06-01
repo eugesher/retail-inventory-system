@@ -2,7 +2,7 @@ export * from './infrastructure/persistence/customer.entity';
 export * from './infrastructure/persistence/permission.entity';
 export * from './infrastructure/persistence/role.entity';
 export * from './infrastructure/persistence/staff-user.entity';
-export * from './infrastructure/auth.module';
+export * from './auth.module';
 
 // Aggregates — IAM consumes these to construct (`RoleAggregate.create`) and
 // rehydrate Role/Permission/StaffUser instances when calling cross-module
