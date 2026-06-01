@@ -33,11 +33,13 @@ import {
   RevokeStaffRoleUseCase,
   UpdateRoleUseCase,
 } from '../application/use-cases';
-import { AssignStaffRoleRequestDto } from './dto/assign-staff-role.request.dto';
-import { CreateRoleRequestDto } from './dto/create-role.request.dto';
-import { RoleResponseDto } from './dto/role.response.dto';
-import { StaffRolesResponseDto } from './dto/staff-roles.response.dto';
-import { UpdateRoleRequestDto } from './dto/update-role.request.dto';
+import {
+  AssignStaffRoleRequestDto,
+  CreateRoleRequestDto,
+  RoleResponseDto,
+  StaffRolesResponseDto,
+  UpdateRoleRequestDto,
+} from './dto';
 
 @ApiTags('IAM')
 @ApiBearerAuth()

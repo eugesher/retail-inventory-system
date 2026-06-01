@@ -8,7 +8,7 @@ import {
   RevokeStaffRoleUseCase,
   UpdateRoleUseCase,
 } from './application/use-cases';
-import { IamController } from './presentation/iam.controller';
+import { IamController } from './presentation';
 
 // IAM is a presentation-and-orchestration shell over the auth module's
 // Role / Permission / StaffUser aggregates (no own `domain/` folder, see
