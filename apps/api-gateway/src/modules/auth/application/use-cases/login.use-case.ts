@@ -20,7 +20,7 @@ import {
   TOKEN_SERVICE,
 } from '../ports';
 
-export interface ILoginResult extends IIssuedTokens {
+interface ILoginResult extends IIssuedTokens {
   user: ICurrentUser;
 }
 

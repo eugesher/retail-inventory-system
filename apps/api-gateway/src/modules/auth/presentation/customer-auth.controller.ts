@@ -12,14 +12,18 @@ import { CurrentUser, Public } from '@retail-inventory-system/auth';
 import { ICurrentUser } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
-import { GetCurrentCustomerUseCase } from '../application/use-cases/get-current-customer.use-case';
-import { LoginCustomerUseCase } from '../application/use-cases/login-customer.use-case';
-import { RegisterCustomerUseCase } from '../application/use-cases/register-customer.use-case';
+import {
+  GetCurrentCustomerUseCase,
+  LoginCustomerUseCase,
+  RegisterCustomerUseCase,
+} from '../application/use-cases';
 import { Customer } from '../domain/customer.model';
-import { CurrentCustomerResponseDto } from './dto/current-customer.response.dto';
-import { LoginCustomerRequestDto } from './dto/login-customer.request.dto';
-import { RegisterCustomerRequestDto } from './dto/register-customer.request.dto';
-import { TokenResponseDto } from './dto/token.response.dto';
+import {
+  CurrentCustomerResponseDto,
+  LoginCustomerRequestDto,
+  RegisterCustomerRequestDto,
+  TokenResponseDto,
+} from './dto';
 
 @ApiTags('Auth — Customer')
 @Controller('auth/customer')

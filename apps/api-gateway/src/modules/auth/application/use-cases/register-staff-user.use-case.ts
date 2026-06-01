@@ -13,7 +13,7 @@ import {
   STAFF_USER_REPOSITORY,
 } from '../ports';
 
-export interface IRegisterStaffUserCommand {
+interface IRegisterStaffUserCommand {
   email: string;
   password: string;
   roleNames: string[];

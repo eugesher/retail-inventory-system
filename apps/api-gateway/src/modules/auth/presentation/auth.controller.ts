@@ -11,11 +11,8 @@ import { CurrentUser, Public } from '@retail-inventory-system/auth';
 import { ICurrentUser } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
-import { LogoutUseCase } from '../application/use-cases/logout.use-case';
-import { RefreshTokenUseCase } from '../application/use-cases/refresh-token.use-case';
-import { CurrentUserResponseDto } from './dto/current-user.response.dto';
-import { RefreshRequestDto } from './dto/refresh.request.dto';
-import { TokenResponseDto } from './dto/token.response.dto';
+import { LogoutUseCase, RefreshTokenUseCase } from '../application/use-cases';
+import { CurrentUserResponseDto, RefreshRequestDto, TokenResponseDto } from './dto';
 
 @ApiTags('Auth')
 @Controller('auth')

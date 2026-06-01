@@ -4,13 +4,12 @@ import { ApiOkResponse, ApiOperation, ApiTags, ApiUnauthorizedResponse } from '@
 import { Public } from '@retail-inventory-system/auth';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
-import { LoginUseCase } from '../application/use-cases/login.use-case';
-import { LoginRequestDto } from './dto/login.request.dto';
-import { TokenResponseDto } from './dto/token.response.dto';
+import { LoginUseCase } from '../application/use-cases';
+import { LoginRequestDto, TokenResponseDto } from './dto';
 
 // Multi-prefix: `/auth/login` is the deprecated alias kept for one release
 // (the old route kept as a deprecated alias); `/auth/staff/login` is the
-// new canonical path. Both delegate to the same LoginUseCase, so behaviour is
+// new canonical path. Both delegate to the same LoginUseCase, so behavior is
 // identical — only the URL differs, which is what "deprecation" means here.
 @ApiTags('Auth — Staff')
 @Controller(['auth', 'auth/staff'])

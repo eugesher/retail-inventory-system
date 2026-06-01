@@ -5,7 +5,7 @@ import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-syste
 
 import { IStaffUserRepositoryPort, STAFF_USER_REPOSITORY } from '../ports';
 
-export interface ILogoutCommand {
+interface ILogoutCommand {
   userId: string;
   correlationId?: string | null;
 }
