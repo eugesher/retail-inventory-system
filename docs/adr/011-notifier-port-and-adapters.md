@@ -7,7 +7,7 @@
 
 ## Context
 
-Pre-task-07 the notification microservice (`apps/notification-microservice/`)
+Before the notification microservice was built out, it (`apps/notification-microservice/`)
 was a stub: `AppModule` registered `ConfigModule` and `LoggerModule`, `main.ts`
 connected to the `notification_events` RabbitMQ queue, and nothing else
 existed. No handlers, no business logic, no delivery channels.
@@ -15,7 +15,7 @@ existed. No handlers, no business logic, no delivery channels.
 ADR-004 established hexagonal-per-service as the target layout, ADR-008
 locked the RabbitMQ wire format, and ADR-009 produced the gateway-side
 realisation of the pattern. Inventory and retail are still on the legacy
-flat layout and migrate in tasks 08–09. Task-07 stands up the notification
+flat layout and migrate later. This work stands up the notification
 microservice **correctly the first time** so it can serve as the canonical
 per-module template that the bigger services copy from — a fresh build is
 cheaper to shape than a reshape, and the template is more useful before
@@ -42,7 +42,7 @@ modules/notifications/
   presentation/    # RMQ-only here (health); HTTP for services that need it
 ```
 
-Tasks 08 (inventory) and 09 (retail) copy this shape verbatim per bounded
+The inventory and retail hexagonal alignments copy this shape verbatim per bounded
 context. The split mirrors the gateway's `modules/auth/` and `modules/retail/`
 layouts so the project has one shape across services — not "hexagonal-style
 but slightly different per service."
@@ -134,7 +134,7 @@ an HTTP controller path, `assign()` is fine.**
 
 ### 8. Reuse the existing `notification_events` queue
 
-**Chosen.** The pre-task-07 stub already connected to the
+**Chosen.** The earlier stub already connected to the
 `notification_events` queue; the migrated service keeps the same queue
 name (`MicroserviceQueueEnum.NOTIFICATION_EVENTS`). The `EXCHANGES.NOTIFICATION`
 constant in `libs/messaging/exchanges.constants.ts` is reserved for a
@@ -146,7 +146,7 @@ the consumer.
 
 - The notification microservice now consumes `retail.order.created` and
   `inventory.stock.low`. **Neither producer exists yet** — they arrive in
-  tasks 08 (inventory) and 09 (retail). The smoke test
+  the inventory and retail hexagonal alignments. The smoke test
   `test/notification.e2e-spec.ts` exercises the full consumer → use-case
   → notifier path by publishing a synthetic event directly to the queue.
 - `libs/contracts` gains two new sub-areas: `retail/events/` and
@@ -160,7 +160,7 @@ the consumer.
   throw `not implemented` on `send()`. No new runtime dependencies
   (`nodemailer`, `axios`, etc.) were added — deferred until the adapter
   is actually wired post-migration.
-- Tasks 08–09 will copy the notification module's directory layout
+- The inventory and retail alignments will copy the notification module's directory layout
   verbatim. If they need to deviate, the deviation should land here as a
   follow-up ADR rather than silently in the code.
 

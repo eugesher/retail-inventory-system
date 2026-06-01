@@ -3,8 +3,8 @@ epic: epic-02
 task_number: 3
 title: Implement Register Product + Add Variant use cases + event-publisher port + RMQ adapter + routing keys
 depends_on: [task-01, task-02]
-doc_deliverable_primary: docs/implementation/epic-02-catalog-product-and-variant/04-catalog-use-cases.md
-doc_deliverable_secondary: docs/implementation/epic-02-catalog-product-and-variant/05-catalog-events.md
+doc_deliverable_primary: docs/implementation/02-catalog-product-and-variant/04-catalog-use-cases.md
+doc_deliverable_secondary: docs/implementation/02-catalog-product-and-variant/05-catalog-events.md
 ---
 
 # Task 03 — `Register Product` + `Add Variant` use cases + catalog event wiring
@@ -165,8 +165,8 @@ CATALOG_PRODUCT_ARCHIVED: 'catalog.product.archived',
 - `apps/catalog-microservice/src/modules/catalog/infrastructure/messaging/catalog-rabbitmq.publisher.ts` (adapter implementing the port).
 - `apps/catalog-microservice/src/modules/catalog/infrastructure/messaging/index.ts` (barrel).
 - `apps/catalog-microservice/src/modules/catalog/presentation/catalog.controller.ts` (initial `@MessagePattern` handlers for the two commands; task-05 adds the read RPC handlers).
-- `docs/implementation/epic-02-catalog-product-and-variant/04-catalog-use-cases.md` (write half).
-- `docs/implementation/epic-02-catalog-product-and-variant/05-catalog-events.md` (partial — `variant.created` only; task-04 finishes it).
+- `docs/implementation/02-catalog-product-and-variant/04-catalog-use-cases.md` (write half).
+- `docs/implementation/02-catalog-product-and-variant/05-catalog-events.md` (partial — `variant.created` only; task-04 finishes it).
 
 ## Files to modify
 

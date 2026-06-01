@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 5
 title: Implement Add to Cart / Remove from Cart / Change Quantity / Get Cart / Create Cart use cases + controllers
 depends_on: [01, 02, 03, 04]
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md (use-case half — completes the file)
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md (use-case half — completes the file)
 ---
 
 # Task 05 — Implement cart use cases + controller handlers
@@ -425,7 +425,7 @@ export class CartController {
 
 ## Doc deliverable
 
-Append to `docs/implementation/epic-05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md` the use-case-flow half. Target +80 lines. Sections:
+Append to `docs/implementation/05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md` the use-case-flow half. Target +80 lines. Sections:
 
 8. **The five use cases.** One paragraph each. Cite the input shape, the output shape, and the routing key. For `AddToCartUseCase`, explain the parallel catalog + pricing RPCs and why the same-currency check at the variant lookup is mandatory.
 9. **Q1 promotion path.** The `cart.assignCustomerId(...)` is called inside `AddToCartUseCase` (not at login time) because the customer's identity becomes available at the bearer token check, which happens at the api-gateway boundary on every request. Promoting at login would require touching the auth flow; promoting on first authenticated cart mutation is cleaner. The use case is idempotent — promoting twice is a no-op.

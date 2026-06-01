@@ -5,7 +5,7 @@ source_stages: [baseline, walking-skeleton]
 depends_on: []
 microservices: [api-gateway]
 task_subfolder: tmp/tasks/epic-01-baseline-identity-staffuser-customer-rbac/
-docs_subfolder: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/
+docs_subfolder: docs/implementation/01-baseline-identity-staffuser-customer-rbac/
 ---
 
 # Epic 01 — Baseline identity — split StaffUser from Customer, replace simple-array roles with relational RBAC
@@ -128,7 +128,7 @@ Establish the identity baseline that every other epic depends on. Split the conf
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/`:
+**Per-task markdown files** under `docs/implementation/01-baseline-identity-staffuser-customer-rbac/`:
 
 - `01-staffuser-customer-split.md` — what was renamed, what was added, why the split is necessary (Q7 + audit-log discipline).
 - `02-role-and-permission-relational-model.md` — schema rationale, seeded permission code list, the JWT inflation path (roles claim → permissions claim).
@@ -169,7 +169,7 @@ Establish the identity baseline that every other epic depends on. Split the conf
 
 | Task | Entry state assumed | Carryover artifacts produced (never under `tmp/`) |
 |---|---|---|
-| 1 | Pristine repo + this epic file. | New `role.entity.ts`, `permission.entity.ts`, `role_permissions.entity.ts` under `auth/infrastructure/persistence/`; new migration file under `migrations/`; new permission-code enum/registry under `libs/contracts/auth/`; seed extension; `docs/implementation/epic-01-…/01-…md`. |
+| 1 | Pristine repo + this epic file. | New `role.entity.ts`, `permission.entity.ts`, `role_permissions.entity.ts` under `auth/infrastructure/persistence/`; new migration file under `migrations/`; new permission-code enum/registry under `libs/contracts/auth/`; seed extension; `docs/implementation/01-…/01-…md`. |
 | 2 | Task 1 carryover present. | Renamed `staff_user.entity.ts`; new `staff_user_roles.entity.ts`; updated `StaffUserTypeormRepository`; new migration; `docs/implementation/.../02-…md`. |
 | 3 | Tasks 1–2 carryover present; auth use cases compile. | Updated `JwtTokenAdapter`/JWT payload contract in `libs/contracts/auth/jwt-payload.dto.ts`; updated login + refresh use cases; updated specs; `docs/implementation/.../03-…md`. |
 | 4 | Tasks 1–3 carryover present. | New `libs/auth/permissions.guard.ts`, `libs/auth/requires-permission.decorator.ts`; updated `libs/auth/index.ts` re-exports; updated `app.module.ts` `APP_GUARD` wiring; `docs/implementation/.../03-…md` (continued). |
@@ -189,7 +189,7 @@ Establish the identity baseline that every other epic depends on. Split the conf
 - [ ] All requests in `http/auth.http` and `http/iam.http` execute end-to-end against the seeded admin user.
 - [ ] `GET /api/auth/admin/ping` is gated behind `audit:read`; a StaffUser lacking the permission gets `403`, the seeded admin gets `200`.
 - [ ] The `user.roles` simple-array column is gone from the schema; `\d staff_user` (or the MySQL equivalent) shows no `roles` column.
-- [ ] Per-task docs present under `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/`.
+- [ ] Per-task docs present under `docs/implementation/01-baseline-identity-staffuser-customer-rbac/`.
 - [ ] `README.md` Authentication section reflects the relational RBAC model; `CLAUDE.md` modules/auth listing matches the new file set.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

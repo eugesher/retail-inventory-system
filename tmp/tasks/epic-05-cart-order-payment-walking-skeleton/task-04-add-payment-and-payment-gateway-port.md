@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 4
 title: Add `payment` table, domain, persistence; introduce `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter`
 depends_on: [01, 02, 03]
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/05-payment-gateway-port-and-fake-adapter.md
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/05-payment-gateway-port-and-fake-adapter.md
 ---
 
 # Task 04 — Add `payment` + introduce `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter`
@@ -281,7 +281,7 @@ Notes:
 - `libs/contracts/retail/payment/events/index.ts`
 - `libs/contracts/retail/payment/dto/payment-summary.dto.ts`
 - `libs/contracts/retail/payment/index.ts`
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/05-payment-gateway-port-and-fake-adapter.md`
+- `docs/implementation/05-cart-order-payment-walking-skeleton/05-payment-gateway-port-and-fake-adapter.md`
 
 ## Files to modify
 
@@ -301,7 +301,7 @@ Notes:
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-05-cart-order-payment-walking-skeleton/05-payment-gateway-port-and-fake-adapter.md` (target ~120 lines). Sections:
+Write `docs/implementation/05-cart-order-payment-walking-skeleton/05-payment-gateway-port-and-fake-adapter.md` (target ~120 lines). Sections:
 
 1. **Why a port-and-adapter for payments.** Restate the ADR-011 analogue: the `INotifierPort` shape that lets the notification microservice swap a log adapter for an email adapter without touching the use cases is the template. Payments are the same shape — the fake adapter lets the walking skeleton run end-to-end today; swapping in a real-gateway adapter behind the port is a Module-level binding change (one line in `orders.module.ts`).
 2. **The fake adapter's contract.** `authorize(...)` always returns `'authorized'`. `capture(...)` always returns `'captured'`. The `gatewayReference` is deterministic by `(orderNumber, op)` — important so e2e tests can assert on the value. A `FakeFailingPaymentGatewayAdapter` (always-fail variant) is not shipped today but is a small follow-up; name the file path it would land at: `apps/retail-microservice/.../infrastructure/payment-gateway/fake-failing-payment-gateway.adapter.ts`.

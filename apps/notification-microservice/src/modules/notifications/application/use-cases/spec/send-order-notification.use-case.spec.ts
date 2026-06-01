@@ -22,7 +22,6 @@ describe('SendOrderNotificationUseCase', () => {
   ): IRetailOrderCreatedEvent => ({
     correlationId: 'corr-1',
     orderId: 42,
-    customerId: 7,
     status: OrderStatusEnum.PENDING,
     products: [{ productId: 1, quantity: 2 }],
     occurredAt: '2026-05-13T12:34:56.000Z',
@@ -35,15 +34,13 @@ describe('SendOrderNotificationUseCase', () => {
     expect(notifier.sent).toHaveLength(1);
     const sent = notifier.sent[0];
 
-    expect(sent.recipient).toBe('customer:7');
+    expect(sent.recipient).toBe('order:42');
     expect(sent.channel).toBe(NotificationChannelEnum.LOG);
     expect(sent.subject).toBe('Order 42 received');
     expect(sent.body).toContain('Order 42');
-    expect(sent.body).toContain('customer 7');
     expect(sent.body).toContain('pending');
     expect(sent.metadata).toEqual({
       orderId: 42,
-      customerId: 7,
       status: OrderStatusEnum.PENDING,
       productCount: 1,
       occurredAt: '2026-05-13T12:34:56.000Z',

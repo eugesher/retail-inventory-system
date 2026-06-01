@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 5
 title: Rewrite the use case layer — Receive Stock, Adjust Stock, Query Availability
 depends_on: [01, 02, 03, 04]
-doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md and 07-availability-read-path.md
+doc_deliverable: docs/implementation/04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md and 07-availability-read-path.md
 ---
 
 # Task 05 — Rewrite the use case layer
@@ -291,8 +291,8 @@ The constructor injects the three new use cases. The old `getStockUseCase` / `re
 - `apps/inventory-microservice/src/modules/stock/domain/errors/stock-invariant-violation.error.ts`
 - `apps/inventory-microservice/src/modules/stock/domain/errors/index.ts`
 - `libs/contracts/inventory/stock-availability/stock-availability.projection.ts` (+ `index.ts`)
-- `docs/implementation/epic-04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md`
-- `docs/implementation/epic-04-inventory-stock-level-and-location/07-availability-read-path.md`
+- `docs/implementation/04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md`
+- `docs/implementation/04-inventory-stock-level-and-location/07-availability-read-path.md`
 
 ## Files to modify
 

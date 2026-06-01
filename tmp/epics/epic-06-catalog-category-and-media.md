@@ -5,7 +5,7 @@ source_stages: [production-core]
 depends_on: [epic-02]
 microservices: [api-gateway, catalog-microservice]
 task_subfolder: tmp/tasks/epic-06-catalog-category-and-media/
-docs_subfolder: docs/implementation/epic-06-catalog-category-and-media/
+docs_subfolder: docs/implementation/06-catalog-category-and-media/
 ---
 
 # Epic 06 — Catalog extensions — Category hierarchy and MediaAsset polymorphism
@@ -125,7 +125,7 @@ Extend the catalog-microservice with the two Stage-2 catalog entities the report
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-06-catalog-category-and-media/`:
+**Per-task markdown files** under `docs/implementation/06-catalog-category-and-media/`:
 
 - `01-category-hierarchy-and-materialized-path.md` — why a materialized `path` over closure-table; how reparent is implemented; cycle detection.
 - `02-product-categories-join.md` — N↔M relationship rationale; idempotent attach.
@@ -175,7 +175,7 @@ Extend the catalog-microservice with the two Stage-2 catalog entities the report
 - [ ] `docker compose up -d && yarn migration:run && yarn start:dev` boots clean; new tables present.
 - [ ] Every request in the new HTTP files executes; seeded categories are browseable; seeded media is returned in order.
 - [ ] Reparenting a category recomputes descendant paths in one transaction (verified by e2e + DB inspection).
-- [ ] Per-task docs present under `docs/implementation/epic-06-catalog-category-and-media/`.
+- [ ] Per-task docs present under `docs/implementation/06-catalog-category-and-media/`.
 - [ ] `README.md` and `CLAUDE.md` reflect the new endpoints + file shapes.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

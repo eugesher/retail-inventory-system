@@ -81,9 +81,9 @@ is not an ADR. Adding a dependency for ergonomic reasons is not an
 ADR. Adding a dependency that locks the project into a class of
 solutions (e.g., switching ORMs) **is** an ADR.
 
-**Index.** [`docs/adr/index.md`](.) is added by task-13 and lists
-every ADR with number, title, status, date, and a one-line summary.
-Until then, the directory listing serves as the index.
+**Index.** [`docs/adr/index.md`](.) was added as a follow-up step and
+lists every ADR with number, title, status, date, and a one-line
+summary. Until it existed, the directory listing served as the index.
 
 ---
 

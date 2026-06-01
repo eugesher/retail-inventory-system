@@ -3,7 +3,7 @@ epic: epic-02
 task_number: 7
 title: Author http/catalog.http (Kulala) covering every catalog endpoint
 depends_on: [task-01, task-02, task-03, task-04, task-05, task-06]
-doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/07-kulala-catalog-http-file.md
+doc_deliverable: docs/implementation/02-catalog-product-and-variant/07-kulala-catalog-http-file.md
 ---
 
 # Task 07 — Author `http/catalog.http`
@@ -77,7 +77,7 @@ If the relevant seed user doesn't exist yet (task-09 may not have shipped at the
 ## Files to add
 
 - `http/catalog.http` (structure above).
-- `docs/implementation/epic-02-catalog-product-and-variant/07-kulala-catalog-http-file.md`.
+- `docs/implementation/02-catalog-product-and-variant/07-kulala-catalog-http-file.md`.
 
 ## Files to modify
 
@@ -95,7 +95,7 @@ Manual against a freshly-seeded gateway (`docker compose up -d mysql redis rabbi
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-02-catalog-product-and-variant/07-kulala-catalog-http-file.md`. Target ~80 lines. Sections:
+Write `docs/implementation/02-catalog-product-and-variant/07-kulala-catalog-http-file.md`. Target ~80 lines. Sections:
 
 1. **What `http/catalog.http` covers.** One paragraph mapping each block to its endpoint, with a note that the file's request order doubles as the "happy-path admin demo" flow.
 2. **Conventions inherited from `http/order.http`.** `@baseUrl`, `# @name`, `{{X.response.body.$.path}}` chaining. Why each block has a leading `#` comment naming the route + gate.

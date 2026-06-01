@@ -330,6 +330,75 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
+  // The gateway auth + iam modules follow the same per-layer rules as
+  // the inventory/stock module; these fixtures repeat the bumper there
+  // so a future regression on the gateway side is caught.
+  describe('boundaries/dependencies — gateway auth + iam modules', () => {
+    it('auth domain (RoleAggregate, PermissionAggregate, StaffUser, Customer) may not import @retail-inventory-system/messaging', () => {
+      // Domain must stay framework- and transport-free. With default-disallow
+      // + checkAllOrigins, lib-messaging is not in the domain allow list, so
+      // this import fails the rule even before the external denylist runs.
+      const code = `import { ROUTING_KEYS } from '@retail-inventory-system/messaging';\nexport const y = ROUTING_KEYS;\n`;
+      const messages = lint(code, 'apps/api-gateway/src/modules/auth/domain/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('auth domain may not import typeorm', () => {
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(code, 'apps/api-gateway/src/modules/auth/domain/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('auth application use-case may not import typeorm', () => {
+      // Login/RefreshToken/RegisterStaffUser/RegisterCustomer reach the DB via
+      // repository ports — never via EntityManager.
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/auth/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('auth application use-case may not import @nestjs/typeorm', () => {
+      const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/auth/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('iam application use-case may not import typeorm', () => {
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/iam/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('iam application use-case may not import @nestjs/typeorm', () => {
+      const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/iam/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('iam presentation may not import auth infrastructure (cross-element + cross-module)', () => {
+      // The IAM module has no `infrastructure/` of its own — it reuses the
+      // auth module's repository adapters via the DI tokens AuthModule
+      // re-exports. A direct file-level import into auth's persistence
+      // tree from iam/presentation is the regression this fixture catches.
+      // 4 levels up: presentation → iam → modules → src → modules/auth/...
+      const code = `import { StaffUserEntity } from '../../auth/infrastructure/persistence/staff-user.entity';\nexport type Y = StaffUserEntity;\n`;
+      const messages = lint(code, 'apps/api-gateway/src/modules/iam/presentation/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+  });
+
   describe('positive cases — allowed edges do not flag', () => {
     it('domain importing lib-ddd is allowed', () => {
       const code = `import { AggregateRoot } from '@retail-inventory-system/ddd';\nexport const x = AggregateRoot;\n`;
@@ -346,6 +415,20 @@ describe('boundaries rules (ADR-017)', () => {
       const messages = lint(
         code,
         'apps/inventory-microservice/src/modules/stock/infrastructure/cache/__fixture__.ts',
+      );
+      const boundariesMessages = messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'));
+      expect(boundariesMessages).toEqual([]);
+    });
+
+    it('auth infrastructure/audit may import @retail-inventory-system/contracts (for the IAuditLogPublisher port)', () => {
+      // NoOpAuditLogPublisher implements the IAuditLogPublisher interface
+      // re-exported from contracts. The boundaries config treats audit as
+      // in-element-type `infrastructure`, which is already allowed to
+      // import lib-contracts.
+      const code = `import type { IAuditLogPublisher } from '@retail-inventory-system/contracts';\nexport type X = IAuditLogPublisher;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/auth/infrastructure/audit/__fixture__.ts',
       );
       const boundariesMessages = messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'));
       expect(boundariesMessages).toEqual([]);

@@ -25,7 +25,7 @@ Tasks depend on each other through the `Carryover Between Tasks` table in the ep
 
 ## Document-deliverable map
 
-The epic lists seven topic-numbered docs under `docs/implementation/epic-02-catalog-product-and-variant/`. The same doc can be touched by more than one task:
+The epic lists seven topic-numbered docs under `docs/implementation/02-catalog-product-and-variant/`. The same doc can be touched by more than one task:
 
 - **`01-new-catalog-microservice-scaffold.md`** — task-01 writes the entire file (Nest CLI generation, monorepo wiring, docker-compose, OTel, eslint boundaries, app-shell layout).
 - **`02-product-and-variant-domain.md`** — task-02 writes the entire file (aggregate boundaries, invariants, status state machine).
@@ -56,6 +56,6 @@ Mirrors the epic's `Exit Criteria` section. Each task carries its own per-task e
 - [ ] `docker compose up -d && yarn migration:run && yarn start:dev` boots all five services (the four existing + `catalog-microservice`); `catalog_queue` is bound on RabbitMQ.
 - [ ] Every request in `http/catalog.http` executes end-to-end against the seeded data.
 - [ ] `GET /api/catalog/products` returns the two seeded active products with their variants.
-- [ ] Per-task docs present under `docs/implementation/epic-02-catalog-product-and-variant/`.
+- [ ] Per-task docs present under `docs/implementation/02-catalog-product-and-variant/`.
 - [ ] `README.md` Services table + System diagram + API section reflect the catalog microservice; `CLAUDE.md` includes the new Catalog microservice section.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.

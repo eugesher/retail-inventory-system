@@ -1,22 +1,22 @@
 # ADR-010: JWT authentication and RBAC at the API gateway
 
 - **Date**: 2026-05-10
-- **Status**: Accepted
+- **Status**: Accepted (RBAC model superseded by [ADR-024](024-rbac-v2-staffuser-customer-and-permissions.md))
 
 ---
 
 ## Context
 
-Pre-task-06 the codebase had **no authentication and no authorization** at any
+Before authentication was added at the gateway, the codebase had **no authentication and no authorization** at any
 layer: `package.json` carried no `@nestjs/jwt` / `@nestjs/passport` /
 `passport*` / `argon2` / `bcrypt`, and no `auth/` folder existed under
 `apps/api-gateway/src/`. Every HTTP route was reachable by any client. This is
 acceptable for the audit baseline that the migration started from; it is not
 acceptable for the deliverable.
 
-Task-06 adds end-to-end authentication and role-based authorization. The
+This work adds end-to-end authentication and role-based authorization. The
 decisions in this ADR record the *shape* we picked rather than the
-incremental task notes.
+incremental implementation notes.
 
 ADR-009 already established the per-module hexagonal layout for the gateway;
 auth is the first gateway module with a real `domain/` aggregate, so the ADR
@@ -121,8 +121,8 @@ is no role hierarchy in the guard logic.
 microservice can validate the token offline. Today, downstream microservices
 trust the gateway: payloads carry `correlationId` but not yet the JWT.
 Threading the bearer or a stripped principal through RabbitMQ payloads is a
-**future task** — it costs a `libs/contracts` shape change, a publisher-port
-update, and `@MessagePattern`-side verification. Not in scope for task-06.
+**future change** — it costs a `libs/contracts` shape change, a publisher-port
+update, and `@MessagePattern`-side verification. Not in scope for this work.
 
 When that work lands, it slots into ADR-008's wire format without breaking
 existing call sites: a new optional `authContext` field on the payload, with
@@ -144,12 +144,12 @@ in scope. Deferred as a follow-up.
 
 `GET /auth/admin/ping` exists solely to give the role guard an admin-only
 target so the customer-vs-admin 403 path is exercised in E2E tests. It is
-not a production user-management surface; if a real admin API surfaces in a
-later task, this stub gets replaced.
+not a production user-management surface; if a real admin API surfaces
+later, this stub gets replaced.
 
 ## Consequences
 
-- The gateway acquires a TypeORM connection; until task-06, only microservices
+- The gateway acquires a TypeORM connection; until this work, only microservices
   did. Migration-wise this means the gateway's `app.module.ts` now calls
   `DatabaseModule.forRoot([UserEntity])`. The connection is shared with the
   retail/inventory microservices' MySQL database (same `DATABASE_URL`),
@@ -175,7 +175,7 @@ later task, this stub gets replaced.
 | Refresh policy | Rotation w/ reuse detection | Stateless refresh | Revocation; reuse signal. |
 | User home | Gateway | New microservice; retail microservice | Latency; concept fit. |
 | Default route policy | Protected | Opt-in protection | Fail-closed on new routes. |
-| Token verification downstream | Deferred | In scope today | Sequenced after publisher-port introduction (task-08/09). |
+| Token verification downstream | Deferred | In scope today | Sequenced after publisher-port introduction (the inventory and retail hexagonal alignments). |
 
 ## References
 

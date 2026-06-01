@@ -3,7 +3,7 @@ epic: epic-01
 task_number: 4
 title: Introduce `PermissionsGuard` + `@RequiresPermission()` in `libs/auth/`; wire globally; re-gate `/auth/admin/ping`
 depends_on: [task-01, task-02, task-03]
-doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md
+doc_deliverable: docs/implementation/01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md
 ---
 
 # Task 04 — `PermissionsGuard` + `@RequiresPermission()` + global wiring
@@ -38,7 +38,7 @@ Task-03 carryover present:
 - Register `PermissionsGuard` inside `libs/auth/auth.module.ts::forRootAsync` (so consumers don't have to wire it manually).
 - Append a third `{ provide: APP_GUARD, useClass: PermissionsGuard }` in `apps/api-gateway/src/app/app.module.ts` — order matters: must come **after** `RolesGuard`.
 - Re-gate `/api/auth/admin/ping` to use `@RequiresPermission(PermissionCodeEnum.AUDIT_READ)`. Keep `@ApiBearerAuth()` and the existing controller-level shape.
-- Append the **guard + decorator half** to `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md` (started in task-03; replace the `<!-- guard-and-decorator-half-anchor -->` marker).
+- Append the **guard + decorator half** to `docs/implementation/01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md` (started in task-03; replace the `<!-- guard-and-decorator-half-anchor -->` marker).
 - Guard spec: `libs/auth/spec/permissions.guard.spec.ts`.
 
 **Out:**
@@ -132,7 +132,7 @@ None.
 
 ## Doc deliverable
 
-Open `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md` (started in task-03). Replace the `<!-- guard-and-decorator-half-anchor -->` marker with the **guard + decorator half**. Target ~120 lines for this half. Sections:
+Open `docs/implementation/01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md` (started in task-03). Replace the `<!-- guard-and-decorator-half-anchor -->` marker with the **guard + decorator half**. Target ~120 lines for this half. Sections:
 
 1. **Guard ergonomics.** Show the decorator usage on `/api/auth/admin/ping`. Show what 403 looks like over HTTP.
 2. **Interaction with `@Roles()`.** Both decorators are still valid. `@Roles()` is the coarse gate (does this caller belong to a role bundle at all?); `@RequiresPermission()` is the precise gate (does this caller hold this specific atomic capability?). Decision rule: prefer `@RequiresPermission()` for any new endpoint; `@Roles()` is for very-broad gating where you genuinely don't care which permission inside the bundle triggers the access (rare).

@@ -3,7 +3,7 @@ epic: epic-02
 task_number: 4
 title: Implement Publish Product + Archive Product use cases and complete the events doc
 depends_on: [task-01, task-02, task-03]
-doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/05-catalog-events.md
+doc_deliverable: docs/implementation/02-catalog-product-and-variant/05-catalog-events.md
 ---
 
 # Task 04 — `Publish Product` + `Archive Product` use cases
@@ -27,8 +27,8 @@ Tasks 1–3 carryover present:
 - `ICatalogEventPublisherPort` defines three methods; the adapter implements `publishVariantCreated` and throws `not implemented` for the other two — this task replaces the two throws with real implementations.
 - Routing-key constants `CATALOG_PRODUCT_PUBLISHED` and `CATALOG_PRODUCT_ARCHIVED` are registered in `libs/messaging/routing-keys.constants.ts`.
 - `Product.publish()` and `Product.archive()` are model methods with the state-machine invariants already enforced; this task only adds the application orchestration around them.
-- `docs/implementation/epic-02-catalog-product-and-variant/04-catalog-use-cases.md` has a `<!-- task-04-publish-archive-anchor -->` HTML comment awaiting replacement.
-- `docs/implementation/epic-02-catalog-product-and-variant/05-catalog-events.md` has a `<!-- task-04-publish-archive-anchor -->` HTML comment awaiting replacement.
+- `docs/implementation/02-catalog-product-and-variant/04-catalog-use-cases.md` has a `<!-- task-04-publish-archive-anchor -->` HTML comment awaiting replacement.
+- `docs/implementation/02-catalog-product-and-variant/05-catalog-events.md` has a `<!-- task-04-publish-archive-anchor -->` HTML comment awaiting replacement.
 
 ## Scope
 
@@ -163,8 +163,8 @@ The `publishedAt` / `archivedAt` fields come from the persisted aggregate's `upd
 - `apps/catalog-microservice/src/modules/catalog/presentation/catalog.controller.ts` — add two `@MessagePattern` handlers (`catalog.product.publish`, `catalog.product.archive`).
 - `apps/catalog-microservice/src/modules/catalog/infrastructure/catalog.module.ts` — register `PublishProductUseCase` and `ArchiveProductUseCase` as providers.
 - `apps/catalog-microservice/src/modules/catalog/application/use-cases/index.ts` — barrel re-export.
-- `docs/implementation/epic-02-catalog-product-and-variant/04-catalog-use-cases.md` — replace `<!-- task-04-publish-archive-anchor -->` with the publish/archive subsection.
-- `docs/implementation/epic-02-catalog-product-and-variant/05-catalog-events.md` — replace `<!-- task-04-publish-archive-anchor -->` with the two new payload sections (full doc complete after this task).
+- `docs/implementation/02-catalog-product-and-variant/04-catalog-use-cases.md` — replace `<!-- task-04-publish-archive-anchor -->` with the publish/archive subsection.
+- `docs/implementation/02-catalog-product-and-variant/05-catalog-events.md` — replace `<!-- task-04-publish-archive-anchor -->` with the two new payload sections (full doc complete after this task).
 
 ## Files to delete
 

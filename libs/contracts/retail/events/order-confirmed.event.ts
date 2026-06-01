@@ -11,7 +11,6 @@ export interface IOrderConfirmedEventProduct {
 // for future cross-service consumers; no subscriber today.
 export interface IRetailOrderConfirmedEvent extends ICorrelationPayload {
   orderId: number;
-  customerId: number;
   status: OrderStatusEnum;
   products: IOrderConfirmedEventProduct[];
   occurredAt: string;

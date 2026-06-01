@@ -3,8 +3,8 @@ epic: epic-01
 task_number: 5
 title: Add the `customer` table, the `Customer` aggregate, and customer-side register/login/me endpoints
 depends_on: [task-01, task-02, task-03, task-04]
-doc_deliverable_primary: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/04-customer-register-and-login.md
-doc_deliverable_secondary: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/01-staffuser-customer-split.md
+doc_deliverable_primary: docs/implementation/01-baseline-identity-staffuser-customer-rbac/04-customer-register-and-login.md
+doc_deliverable_secondary: docs/implementation/01-baseline-identity-staffuser-customer-rbac/01-staffuser-customer-split.md
 ---
 
 # Task 05 — `customer` table + `Customer` aggregate + customer-side register/login/me endpoints

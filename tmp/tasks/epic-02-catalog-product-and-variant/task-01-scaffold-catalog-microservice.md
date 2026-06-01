@@ -3,7 +3,7 @@ epic: epic-02
 task_number: 1
 title: Scaffold the new catalog-microservice (monorepo wiring, MessagingModule + DatabaseModule + LoggerModule + tracer-first-import, eslint boundaries)
 depends_on: []
-doc_deliverable: docs/implementation/epic-02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md
+doc_deliverable: docs/implementation/02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md
 ---
 
 # Task 01 — Scaffold the new `catalog-microservice`
@@ -199,7 +199,7 @@ Add a new `describe('catalog-microservice boundaries', ...)` block that runs at 
 - `apps/catalog-microservice/src/modules/catalog/application/.gitkeep`.
 - `apps/catalog-microservice/src/modules/catalog/presentation/.gitkeep`.
 - `libs/messaging/microservice-client-catalog.module.ts`.
-- `docs/implementation/epic-02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md`.
+- `docs/implementation/02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md`.
 
 ## Files to modify
 
@@ -225,7 +225,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md`. Target ~150 lines. Sections:
+Write `docs/implementation/02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md`. Target ~150 lines. Sections:
 
 1. **Why a fifth microservice (and not a fifth module inside an existing one).** Cite the report's bounded-context boundary: catalog is the source of truth for `Product`/`ProductVariant` and every downstream cluster keys on `variantId`. Splitting it out keeps catalog reads/writes off the inventory-microservice's hot path and lets the inventory store reduce to its own concerns (stock + movements + reservations).
 2. **The per-module shape, recapped.** Reference ADR-004/009/012/013 and the canonical `apps/notification-microservice/src/modules/notifications/` template. The new tree mirrors it line-for-line.

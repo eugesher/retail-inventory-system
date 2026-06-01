@@ -5,7 +5,7 @@ source_stages: [walking-skeleton]
 depends_on: [epic-02]
 microservices: [api-gateway, inventory-microservice]
 task_subfolder: tmp/tasks/epic-04-inventory-stock-level-and-location/
-docs_subfolder: docs/implementation/epic-04-inventory-stock-level-and-location/
+docs_subfolder: docs/implementation/04-inventory-stock-level-and-location/
 ---
 
 # Epic 04 — Inventory foundation — StockLocation (one default) + StockLevel running totals
@@ -137,7 +137,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-04-inventory-stock-level-and-location/`:
+**Per-task markdown files** under `docs/implementation/04-inventory-stock-level-and-location/`:
 
 - `01-old-tables-dropped-and-new-schema.md` — what was deleted (product_stock, product_stock_action, storage, product), what was added (stock_location, stock_level), with the rationale (running totals over ledger-as-source).
 - `02-default-stocklocation-auto-provision.md` — Q8 decision restated; idempotent migration insert; how to add a second location later.
@@ -182,7 +182,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 
 | Task | Entry state assumed | Carryover artifacts produced (never under `tmp/`) |
 |---|---|---|
-| 1 | `epic-02` + `epic-03` complete; catalog publishes events. | Migration dropping 4 tables; 4 entity files deleted; `StockTypeormRepository` stub state; `docs/implementation/epic-04-…/01-…md`. |
+| 1 | `epic-02` + `epic-03` complete; catalog publishes events. | Migration dropping 4 tables; 4 entity files deleted; `StockTypeormRepository` stub state; `docs/implementation/04-…/01-…md`. |
 | 2 | Task 1 carryover present. | `stock-location.entity.ts`, mapper, repository methods, migration with default-warehouse INSERT; `02-…md`. |
 | 3 | Tasks 1–2 carryover present. | `stock-level.entity.ts`, mapper, repository methods, migration creating the table with `version`; `03-…md`. |
 | 4 | Tasks 1–3 carryover present. | Rewritten `stock-level.model.ts` aggregate (replacing `stock-item.model.ts` — the file is renamed); event files updated; domain spec rewritten. |
@@ -203,7 +203,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 - [ ] After `yarn test:seed`, `GET /api/inventory/variants/:variantId/stock` returns 100 units at `default-warehouse` for each seeded variant.
 - [ ] Redis: cache keys observed via `--scan` match the new `ris:inventory:stock:v2:<variantId>:<facet>` pattern; no `v1`-prefixed keys are written on the new code path.
 - [ ] Creating a new Variant via the catalog flow results in a new `StockLevel = 0` row at `default-warehouse` within seconds (verified by polling the inventory GET).
-- [ ] Per-task docs present under `docs/implementation/epic-04-inventory-stock-level-and-location/`.
+- [ ] Per-task docs present under `docs/implementation/04-inventory-stock-level-and-location/`.
 - [ ] `README.md` System diagram + API + Caching sections updated; `CLAUDE.md` stock-module + message-patterns + cache notes updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

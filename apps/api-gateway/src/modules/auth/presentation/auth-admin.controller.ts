@@ -1,19 +1,21 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 
-import { RoleEnum, Roles } from '@retail-inventory-system/auth';
+import { RequiresPermission } from '@retail-inventory-system/auth';
+import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-// Exists to cover the RolesGuard 403 path — the retail/inventory routes
-// only require CUSTOMER-or-ADMIN, leaving the admin-vs-customer rejection
-// otherwise unexercised. See ADR-010.
+// Smoke endpoint for the global guard chain: JwtAuthGuard (auth),
+// RolesGuard (any authenticated user passes — no `@Roles()` here),
+// and the new PermissionsGuard which gates on the `audit:read` code
+// bundled into the seeded admin role. See ADR-024.
 @ApiTags('Auth (admin)')
 @Controller('auth/admin')
 export class AuthAdminController {
   @Get('ping')
-  @Roles(RoleEnum.ADMIN)
+  @RequiresPermission(PermissionCodeEnum.AUDIT_READ)
   @ApiBearerAuth()
   @ApiOkResponse({ schema: { example: { ok: true } } })
-  @ApiForbiddenResponse({ description: 'Admin role required' })
+  @ApiForbiddenResponse({ description: 'audit:read permission required' })
   public ping(): { ok: true } {
     return { ok: true };
   }

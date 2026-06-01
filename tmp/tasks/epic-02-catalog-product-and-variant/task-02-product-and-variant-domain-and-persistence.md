@@ -3,8 +3,8 @@ epic: epic-02
 task_number: 2
 title: Add Product + ProductVariant domain, persistence, repository port/adapter, and the creation migration
 depends_on: [task-01]
-doc_deliverable_primary: docs/implementation/epic-02-catalog-product-and-variant/02-product-and-variant-domain.md
-doc_deliverable_secondary: docs/implementation/epic-02-catalog-product-and-variant/03-product-and-variant-persistence.md
+doc_deliverable_primary: docs/implementation/02-catalog-product-and-variant/02-product-and-variant-domain.md
+doc_deliverable_secondary: docs/implementation/02-catalog-product-and-variant/03-product-and-variant-persistence.md
 ---
 
 # Task 02 — `Product` + `ProductVariant` domain + persistence + repository port/adapter
@@ -193,8 +193,8 @@ The repository is registered under DI token `PRODUCT_REPOSITORY` in the same `Ca
 - `apps/catalog-microservice/src/modules/catalog/infrastructure/persistence/product-typeorm.repository.ts`.
 - `apps/catalog-microservice/src/modules/catalog/infrastructure/persistence/index.ts` (barrel).
 - `migrations/<ts>-CreateProductAndProductVariantTables.ts`.
-- `docs/implementation/epic-02-catalog-product-and-variant/02-product-and-variant-domain.md`.
-- `docs/implementation/epic-02-catalog-product-and-variant/03-product-and-variant-persistence.md`.
+- `docs/implementation/02-catalog-product-and-variant/02-product-and-variant-domain.md`.
+- `docs/implementation/02-catalog-product-and-variant/03-product-and-variant-persistence.md`.
 
 ## Files to modify
 

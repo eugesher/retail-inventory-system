@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 1
 title: Drop the old inventory tables + entity files; park the repository in a throwing-stub state
 depends_on: []
-doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md
+doc_deliverable: docs/implementation/04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md
 ---
 
 # Task 01 — Drop the old inventory tables + entity files
@@ -42,7 +42,7 @@ Epic-02 is complete on disk. Specifically:
 - Update `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/index.ts` to remove the now-deleted exports.
 - Update `apps/inventory-microservice/src/modules/stock/domain/index.ts` to remove the now-deleted `Storage` export. The `StockItem` export stays — it is renamed in task-04, not here.
 - Update `apps/inventory-microservice/src/modules/stock/application/use-cases/spec/test-doubles.ts` if it constructs `Storage` instances directly; rename those to `unknown` casts with a TODO referencing task-02. (Inspect the file; if it does not reference `Storage`, no change is required.)
-- Doc deliverable `01-old-tables-dropped-and-new-schema.md` under `docs/implementation/epic-04-inventory-stock-level-and-location/` — the introductory half. Task-10 appends the cumulative "after" snapshot once the new schema is fully in place.
+- Doc deliverable `01-old-tables-dropped-and-new-schema.md` under `docs/implementation/04-inventory-stock-level-and-location/` — the introductory half. Task-10 appends the cumulative "after" snapshot once the new schema is fully in place.
 
 **Out:**
 
@@ -158,7 +158,7 @@ This spec covers the `ITransactionPort` adapter, which is **not affected** by th
 ## Files to add
 
 - `migrations/<timestamp>-DropOldInventoryTables.ts` — the migration described above.
-- `docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` — introductory half; task-10 appends the post-state snapshot.
+- `docs/implementation/04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` — introductory half; task-10 appends the post-state snapshot.
 
 ## Files to modify
 
@@ -188,7 +188,7 @@ This spec covers the `ITransactionPort` adapter, which is **not affected** by th
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` (introductory half — target ~120 lines now; task-10 appends ~30 more lines for the after-snapshot). Sections this task writes:
+Write `docs/implementation/04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` (introductory half — target ~120 lines now; task-10 appends ~30 more lines for the after-snapshot). Sections this task writes:
 
 1. **Why the ledger-as-source goes away.** Restate the epic's "Goal" rationale: the old `product_stock` table was a typed-delta ledger (`actionId` + signed `quantity` rows, aggregated by `SUM` at read time). The walking-skeleton report concluded that running-totals on `StockLevel` + a separate `StockMovement` ledger (deferred to epic-07) is the universal-core shape — not a ledger as the read source. Two-table > one-table because (a) reads do not pay the aggregate cost, (b) the no-oversell invariant has a natural home on `StockLevel.quantityOnHand - quantityAllocated - quantityReserved`, (c) optimistic concurrency has a `version` column to attach to.
 2. **What got dropped.** Bullet list with the four tables + the four entity files + the orphaned mapper. Cite each row by file path and explain why the file goes away (e.g. `product.entity.ts` is the inventory-side stub of the catalog `Product` from before the split; epic-02 owns the real `Product`).

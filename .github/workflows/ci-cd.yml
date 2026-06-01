@@ -9,11 +9,11 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    # Today this job runs `yarn lint` only. Task-12 of the architecture
+    # Today this job runs `yarn lint` only. A later step in the architecture
     # migration adds a sibling `yarn lint:architecture` step that enforces
     # the hexagonal layer rules (domain → application → infrastructure /
     # presentation) via `eslint-plugin-boundaries`. The plugin is already
-    # installed (see task-02 / ADR-004) but intentionally not wired into
+    # installed (see ADR-004) but intentionally not wired into
     # eslint.config.mjs until services have reached the target shape.
     steps:
       - uses: actions/checkout@v4

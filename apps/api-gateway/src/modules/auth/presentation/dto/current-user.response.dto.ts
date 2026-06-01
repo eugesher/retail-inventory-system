@@ -11,4 +11,7 @@ export class CurrentUserResponseDto {
 
   @ApiProperty({ enum: RoleEnum, isArray: true })
   public roles: RoleEnum[];
+
+  @ApiProperty({ type: String, isArray: true })
+  public permissions: string[];
 }

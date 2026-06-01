@@ -1,13 +1,10 @@
 import { OrderProductStatusEnum, OrderStatusEnum } from '@retail-inventory-system/contracts';
 
-import { CustomerRef, Order } from '..';
-
-const customer = new CustomerRef({ id: 1 });
+import { Order } from '..';
 
 describe('Order.create', () => {
   it('expands per-quantity into one line per unit (matches the legacy invariant)', () => {
     const order = Order.create({
-      customer,
       lines: [
         { productId: 1, quantity: 2 },
         { productId: 2, quantity: 1 },
@@ -23,17 +20,17 @@ describe('Order.create', () => {
   });
 
   it('rejects an empty lines array', () => {
-    expect(() => Order.create({ customer, lines: [] })).toThrow(/no line items/);
+    expect(() => Order.create({ lines: [] })).toThrow(/no line items/);
   });
 
   it('rejects non-positive quantities', () => {
-    expect(() => Order.create({ customer, lines: [{ productId: 1, quantity: 0 }] })).toThrow(
+    expect(() => Order.create({ lines: [{ productId: 1, quantity: 0 }] })).toThrow(
       /positive integer/,
     );
   });
 
   it('does not record an OrderCreated event from the factory (use case publishes post-save)', () => {
-    const order = Order.create({ customer, lines: [{ productId: 1, quantity: 1 }] });
+    const order = Order.create({ lines: [{ productId: 1, quantity: 1 }] });
 
     expect(order.pullDomainEvents()).toHaveLength(0);
   });

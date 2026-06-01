@@ -1,18 +1,25 @@
-import { IJwtAccessPayload, IJwtRefreshPayload } from '@retail-inventory-system/contracts';
+import {
+  IAuditLogEvent,
+  IAuditLogPublisher,
+  IJwtAccessPayload,
+  IJwtRefreshPayload,
+} from '@retail-inventory-system/contracts';
 
-import { User } from '../../../domain/user.model';
+import { Customer } from '../../../domain/customer.model';
+import { StaffUser } from '../../../domain/staff-user.model';
+import { ICustomerRepositoryPort } from '../../ports/customer.repository.port';
 import { IPasswordPort } from '../../ports/password.port';
+import { IStaffUserRepositoryPort } from '../../ports/staff-user.repository.port';
 import { IIssuedTokens, ITokenPort } from '../../ports/token.port';
-import { IUserRepositoryPort } from '../../ports/user.repository.port';
 
-export class InMemoryUserRepository implements IUserRepositoryPort {
-  private byId = new Map<string, User>();
+export class InMemoryStaffUserRepository implements IStaffUserRepositoryPort {
+  private byId = new Map<string, StaffUser>();
 
-  public seed(user: User): void {
+  public seed(user: StaffUser): void {
     this.byId.set(user.id, user);
   }
 
-  public findByEmail(email: string): Promise<User | null> {
+  public findByEmail(email: string): Promise<StaffUser | null> {
     const target = email.toLowerCase();
     for (const user of this.byId.values()) {
       if (user.email === target && user.isActive) return Promise.resolve(user);
@@ -20,12 +27,16 @@ export class InMemoryUserRepository implements IUserRepositoryPort {
     return Promise.resolve(null);
   }
 
-  public findById(id: string): Promise<User | null> {
+  public findById(id: string): Promise<StaffUser | null> {
     const user = this.byId.get(id);
     return Promise.resolve(user?.isActive ? user : null);
   }
 
-  public save(user: User): Promise<User> {
+  public existsActiveById(id: string): Promise<boolean> {
+    return Promise.resolve(this.byId.get(id)?.isActive ?? false);
+  }
+
+  public save(user: StaffUser): Promise<StaffUser> {
     this.byId.set(user.id, user);
     return Promise.resolve(user);
   }
@@ -33,6 +44,35 @@ export class InMemoryUserRepository implements IUserRepositoryPort {
   public softDelete(id: string): Promise<void> {
     this.byId.delete(id);
     return Promise.resolve();
+  }
+}
+
+export class InMemoryCustomerRepository implements ICustomerRepositoryPort {
+  private byId = new Map<string, Customer>();
+
+  public seed(customer: Customer): void {
+    this.byId.set(customer.id, customer);
+  }
+
+  public findByEmail(email: string): Promise<Customer | null> {
+    const target = email.toLowerCase();
+    for (const customer of this.byId.values()) {
+      if (customer.email === target) return Promise.resolve(customer);
+    }
+    return Promise.resolve(null);
+  }
+
+  public findById(id: string): Promise<Customer | null> {
+    return Promise.resolve(this.byId.get(id) ?? null);
+  }
+
+  public existsActiveById(id: string): Promise<boolean> {
+    return Promise.resolve(this.byId.get(id)?.isActive ?? false);
+  }
+
+  public save(customer: Customer): Promise<Customer> {
+    this.byId.set(customer.id, customer);
+    return Promise.resolve(customer);
   }
 }
 
@@ -80,5 +120,16 @@ export class FakeTokenAdapter implements ITokenPort {
       refreshTokenJti: refresh.jti,
       expiresIn: this.accessTokenExpiresInSeconds(),
     };
+  }
+}
+
+// Recording fake for IAuditLogPublisher — collects the published events so
+// specs can assert event-name + payload shape per audit point.
+export class FakeAuditLogPublisher implements IAuditLogPublisher {
+  public readonly published: IAuditLogEvent[] = [];
+
+  public publish(event: IAuditLogEvent): Promise<void> {
+    this.published.push(event);
+    return Promise.resolve();
   }
 }

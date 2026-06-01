@@ -7,7 +7,7 @@
 
 ## Context
 
-At task-03 entry the repository had four libraries under `libs/`:
+At the start of the foundation-libs split the repository had four libraries under `libs/`:
 `common`, `config`, `inventory`, `retail`. Of these, `libs/common`
 had grown into a grab-bag — it carried microservice-routing enums
 (`MicroserviceMessagePatternEnum`, `MicroserviceQueueEnum`,
@@ -30,7 +30,7 @@ target in three concrete ways:
   `new TypeormModuleConfig(entities)` directly. There was no place
   to put a shared base entity, a shared mapper-aware repository, or
   a single source of truth for `SnakeNamingStrategy`.
-- The `architecture-lint` enforcement queued for task-12 (per ADR-004)
+- The `architecture-lint` enforcement queued as a later step (per ADR-004)
   needs distinct lib element-types to write boundary rules against.
   A single `lib-common` element collapses the rule space; splitting
   into purpose-named libs (`contracts`, `database`, `messaging`,
@@ -41,17 +41,17 @@ libs into purpose-named bounded libraries, and the structural choices
 we made within that split (folder layout, ID strategy on `BaseEntity`,
 shim policy for the migration window).
 
-The split is sequenced: task-03 (this task) lands the **foundation**
+The split is sequenced: this work lands the **foundation**
 libs that the rest of the migration depends on (`contracts`,
-`database`, slimmed `common`). Task-04 lands the **integration**
-libs (`messaging`, `cache`, `observability`, `ddd`). Task-06 builds
+`database`, slimmed `common`). The integration-libs split lands the **integration**
+libs (`messaging`, `cache`, `observability`, `ddd`). The authentication work builds
 `auth` from scratch.
 
 ---
 
 ## Decision
 
-### New libraries (this task)
+### New libraries (this work)
 
 - **`@retail-inventory-system/contracts`** — cross-service message
   and DTO contracts. Plain TypeScript only (`class-validator` and
@@ -88,9 +88,9 @@ Reduced to framework-free utility scaffolds:
 For one release the lib also still hosts `cache/`, `correlation/`,
 and `modules/` (the `MicroserviceClient*Module` modules). These move
 to `libs/cache`, `libs/observability`, and `libs/messaging` in
-task-04 respectively. The old `libs/common/index.ts` re-exports the
+the integration-libs split respectively. The old `libs/common/index.ts` re-exports the
 moved-to-contracts symbols so existing import paths keep compiling
-during the migration window; those re-exports are removed in task-14.
+during the migration window; those re-exports are removed in a later cleanup pass.
 
 ### `BaseEntity` ID strategy
 
@@ -106,7 +106,7 @@ during the migration window; those re-exports are removed in task-14.
   cardinality, are predictable for adversaries, and are awkward to
   generate client-side before insert. None of these are
   load-bearing today: there is no public ID surface (the gateway
-  hasn't been authenticated yet — task-06), no sharding, and no
+  hasn't been authenticated yet), no sharding, and no
   pre-insert ID flow.
 - Switching to UUID v7 (time-ordered) is the future-friendly choice
   if the project takes on a multi-tenant or sharded shape. That is
@@ -115,12 +115,12 @@ during the migration window; those re-exports are removed in task-14.
 `BaseEntity` also includes `createdAt`, `updatedAt`, and a nullable
 `deletedAt` to support TypeORM's soft-delete (`@DeleteDateColumn`).
 Existing entities are not retrofitted to extend `BaseEntity` in this
-task; that conversion is part of task-08 (inventory align) and
-task-09 (retail align).
+work; that conversion is part of the inventory and retail hexagonal
+alignments.
 
 ### Shim policy for the migration window
 
-Three classes of shim are introduced and all are removed in task-14:
+Three classes of shim are introduced and all are removed in a later cleanup pass:
 
 1. **`libs/common/index.ts`** re-exports the moved-to-contracts
    symbols (`AppNameEnum`, `MicroserviceClientTokenEnum`,
@@ -131,14 +131,14 @@ Three classes of shim are introduced and all are removed in task-14:
    line. The TS-path aliases for these libs remain in `tsconfig.json`
    for one release.
 3. **`libs/config/typeorm-module.config.ts`** keeps the
-   `TypeormModuleConfig` class unchanged (option B in task-03 step 7
+   `TypeormModuleConfig` class unchanged (option B in this work's step 7
    — "kept as a shim"). The factory logic is now owned by
    `DatabaseModule.forRoot()`; the class is functionally equivalent
-   and stays only to avoid forcing a one-task migration of every
+   and stays only to avoid forcing a single-step migration of every
    downstream consumer at the same moment as the structural move.
 
-Apps' import sites are repointed to the new paths in this task; the
-shims are defence-in-depth for any consumer (or future task) that
+Apps' import sites are repointed to the new paths in this work; the
+shims are defence-in-depth for any consumer (or future change) that
 hasn't been repointed yet.
 
 ### Layout choice
@@ -163,16 +163,16 @@ of the contract pull in transport-aware framework code. The whole
 point of `libs/contracts` is that a domain-layer file in
 `apps/<service>/src/modules/<module>/domain/` can import a contract
 without taking on a Nest dependency. ADR-004's hexagonal target
-forbids that coupling at lint time (task-12), so the split has to
+forbids that coupling at lint time, so the split has to
 land before the lint rules go on.
 
 **Promote each lib to a real Yarn workspace** (with its own
 `package.json`). Rejected. The four existing libs are TS-path aliases
 only — no `package.json`, no entry in `yarn workspaces list`. Adding
 real workspaces for the new libs would introduce a hybrid state
-(some libs are workspaces, some aren't), which task-12 would have to
+(some libs are workspaces, some aren't), which the architecture-lint work would have to
 work around. Promoting all six libs to workspaces is plausible but
-out of scope for this task; left for a future ADR if the build graph
+out of scope for this work; left for a future ADR if the build graph
 demands it.
 
 **Keep `TypeormModuleConfig` as the supported API and skip
@@ -182,18 +182,18 @@ repository, or the `forFeature` split that future per-module
 hexagonal layouts will use (each module will register its own
 entities via `DatabaseModule.forFeature` rather than aggregating in
 `app.module.ts`). Once that capability is needed, a `DatabaseModule`
-emerges anyway; building it in this task gives task-08 and task-09
-something to consume.
+emerges anyway; building it in this work gives the inventory and retail
+alignments something to consume.
 
 **Move `correlation/`, `cache/`, and the `MicroserviceClient*Module`
-modules to their final homes in this task.** Rejected as scope
+modules to their final homes in this work.** Rejected as scope
 creep. These three concerns are non-trivial — `correlation/` will
-gain trace-id enrichment for OTel (task-10), `cache/` will gain a
+gain trace-id enrichment for OTel, `cache/` will gain a
 port/adapter shape and the schema-version segment from the
 `AUDIT-2026-05-08` items, and the messaging modules will gain dotted
-routing-key constants. Doing all of that in task-03 would entangle
-the foundation move with the integration move. Task-04 owns those
-moves; this task only stages them.
+routing-key constants. Doing all of that in the foundation-libs split would entangle
+the foundation move with the integration move. The integration-libs split owns those
+moves; this work only stages them.
 
 ---
 
@@ -204,11 +204,11 @@ moves; this task only stages them.
 - The hexagonal target (ADR-004) gains a clean shared-contracts seam:
   domain layers in any module can import a contract without taking
   on Nest framework dependencies.
-- Architecture-lint (task-12) gets distinct lib element-types
+- Architecture-lint gets distinct lib element-types
   (`lib-contracts`, `lib-database`, `lib-common`, `lib-config`) to
   write boundary rules against, without a fat-`common` collapse.
 - `BaseEntity` and `BaseTypeormRepository` give the per-service
-  align tasks (task-08 inventory, task-09 retail) a single place to
+  align work (inventory and retail) a single place to
   attach soft-delete, mapper hooks, and (later) audit columns.
 - `DatabaseModule.forRoot()` removes the `TypeormModuleConfig`
   construction from each `app.module.ts`, simplifying app wiring and
@@ -219,7 +219,7 @@ moves; this task only stages them.
 - A migration window with shims in three places (`libs/common`,
   `libs/inventory`, `libs/retail`, plus the `TypeormModuleConfig`
   shim in `libs/config`) is in-flight code that has to be kept until
-  task-14. The shim re-exports are clearly comment-marked so a future
+  a later cleanup pass. The shim re-exports are clearly comment-marked so a future
   reader can tell at a glance what is migration scaffolding versus
   production API.
 - Choosing auto-increment IDs for `BaseEntity` rather than UUID v7
@@ -230,9 +230,9 @@ moves; this task only stages them.
 - The flat lib layout (no `src/`, no `tsconfig.lib.json`) means the
   new libs are not registered in `nest-cli.json` `projects`. They
   resolve fine via `tsconfig.json` paths, but Nest schematics aware
-  of `nest-cli.json` will not see them. If a future task standardizes
+  of `nest-cli.json` will not see them. If future work standardizes
   on the proper Nest-library shape, the migration is a single
-  task that touches all six libs at once.
+  change that touches all six libs at once.
 
 ---
 

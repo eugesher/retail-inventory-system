@@ -5,7 +5,7 @@ source_stages: [walking-skeleton]
 depends_on: [epic-01]
 microservices: [api-gateway, catalog-microservice]
 task_subfolder: tmp/tasks/epic-02-catalog-product-and-variant/
-docs_subfolder: docs/implementation/epic-02-catalog-product-and-variant/
+docs_subfolder: docs/implementation/02-catalog-product-and-variant/
 ---
 
 # Epic 02 — Catalog foundation — Product + ProductVariant in a new catalog microservice
@@ -126,7 +126,7 @@ Stand up a brand-new `catalog-microservice` whose single `catalog` bounded conte
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-02-catalog-product-and-variant/`:
+**Per-task markdown files** under `docs/implementation/02-catalog-product-and-variant/`:
 
 - `01-new-catalog-microservice-scaffold.md` — Nest CLI generation, `nest-cli.json` / `package.json` / `docker-compose.yml` / OTel-collector wiring, `eslint.config.mjs` boundaries update, MessagingModule + DatabaseModule + LoggerModule + tracer first-import.
 - `02-product-and-variant-domain.md` — aggregate boundaries (Product is the aggregate root; ProductVariant is a child entity inside Product on writes but a top-level read entity), invariants, status state machine.
@@ -168,7 +168,7 @@ Stand up a brand-new `catalog-microservice` whose single `catalog` bounded conte
 
 | Task | Entry state assumed | Carryover artifacts produced (never under `tmp/`) |
 |---|---|---|
-| 1 | `epic-01` complete (StaffUser + Permissions present and gated). | New `apps/catalog-microservice/src/{main,app/app.module}.ts`, updated `nest-cli.json`, `package.json`, `docker-compose.yml`, `infrastructure/otel-collector-config.yaml`, `eslint.config.mjs`, `spec/architecture-lint.spec.ts`; `docs/implementation/epic-02-…/01-…md`. |
+| 1 | `epic-01` complete (StaffUser + Permissions present and gated). | New `apps/catalog-microservice/src/{main,app/app.module}.ts`, updated `nest-cli.json`, `package.json`, `docker-compose.yml`, `infrastructure/otel-collector-config.yaml`, `eslint.config.mjs`, `spec/architecture-lint.spec.ts`; `docs/implementation/02-…/01-…md`. |
 | 2 | Task 1 carryover present; the new app boots empty. | `product.model.ts`, `product-variant.model.ts`, value-objects, entities, mappers, `CatalogTypeormRepository`; new migration creating `product` + `product_variant`; specs; `02-…md`, `03-…md`. |
 | 3 | Tasks 1–2 carryover present. | `register-product.use-case.ts`, `add-variant.use-case.ts`, specs, ports + adapters; routing-key constants + queue + `MicroserviceClientCatalogModule`; `04-…md`, `05-…md` (partial). |
 | 4 | Tasks 1–3 carryover present. | `publish-product.use-case.ts`, `archive-product.use-case.ts`, specs, additional event emission; `05-…md` complete. |
@@ -176,7 +176,7 @@ Stand up a brand-new `catalog-microservice` whose single `catalog` bounded conte
 | 6 | Tasks 1–5 carryover present. | `apps/api-gateway/src/modules/catalog/` full per-module hexagonal layout + controller + DTOs + pipes; `06-…md`. |
 | 7 | Task 6 carryover present. | New `http/catalog.http`; `07-…md`. |
 | 8 | Tasks 1–7 carryover present. | A migration that drops the obsolete inventory-microservice `product` table; no other change. (Inventory's `stock-typeorm.repository.ts` foreign-key import to that table is left dangling until `epic-04` reshapes it — flagged in `01-…md` of `epic-04`.) |
-| 9 | All prior tasks complete. | Updated `scripts/test-db-seed.ts`, `README.md`, `CLAUDE.md`, `spec/architecture-lint.spec.ts` fixtures; `docs/implementation/epic-02-…/` complete. |
+| 9 | All prior tasks complete. | Updated `scripts/test-db-seed.ts`, `README.md`, `CLAUDE.md`, `spec/architecture-lint.spec.ts` fixtures; `docs/implementation/02-…/` complete. |
 
 ## Exit Criteria
 
@@ -186,7 +186,7 @@ Stand up a brand-new `catalog-microservice` whose single `catalog` bounded conte
 - [ ] `docker compose up -d && yarn migration:run && yarn start:dev` boots all five services (the four existing + `catalog-microservice`); `catalog_queue` is bound on RabbitMQ.
 - [ ] Every request in `http/catalog.http` executes end-to-end against the seeded data.
 - [ ] `GET /api/catalog/products` returns the two seeded active products with their variants.
-- [ ] Per-task docs present under `docs/implementation/epic-02-catalog-product-and-variant/`.
+- [ ] Per-task docs present under `docs/implementation/02-catalog-product-and-variant/`.
 - [ ] `README.md` Services table + System diagram + API section reflect the catalog microservice; `CLAUDE.md` includes the new Catalog microservice section.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

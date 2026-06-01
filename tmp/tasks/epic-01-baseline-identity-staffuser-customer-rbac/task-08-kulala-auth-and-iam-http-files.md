@@ -3,7 +3,7 @@ epic: epic-01
 task_number: 8
 title: Author `http/auth.http` and `http/iam.http` (Kulala) covering existing and new endpoints
 depends_on: [task-01, task-02, task-03, task-04, task-05, task-06, task-07]
-doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/07-kulala-auth-and-iam-files.md
+doc_deliverable: docs/implementation/01-baseline-identity-staffuser-customer-rbac/07-kulala-auth-and-iam-files.md
 ---
 
 # Task 08 — Author `http/auth.http` and `http/iam.http` (Kulala)
@@ -52,12 +52,12 @@ Top comment block describing the file (cite all four controllers: `auth.controll
 
 Then one block per endpoint, in this order:
 
-1. **`# @name staffLogin` — `POST {{baseUrl}}/auth/staff/login`** with body `{ "email": "admin@example.com", "password": "admin1234" }`. Comment: "Canonical staff login. Returns access + refresh tokens. The access JWT carries `permissions: string[]` (task-03 inflation)."
-2. **`# @name staffLoginDeprecated` — `POST {{baseUrl}}/auth/login`** with the same body. Comment: "Deprecated alias for back-compat (one release). Same response shape; remove after epic-02 lands."
+1. **`# @name staffLogin` — `POST {{baseUrl}}/auth/staff/login`** with body `{ "email": "admin@example.com", "password": "admin1234" }`. Comment: "Canonical staff login. Returns access + refresh tokens. The access JWT carries `permissions: string[]`, inflated at login."
+2. **`# @name staffLoginDeprecated` — `POST {{baseUrl}}/auth/login`** with the same body. Comment: "Deprecated alias for back-compat (one release). Same response shape; remove in a future release."
 3. **`# @name refresh` — `POST {{baseUrl}}/auth/refresh`** with body `{ "refreshToken": "{{staffLogin.response.body.$.refreshToken}}" }`. Comment: "Rotates both access and refresh tokens; emits `RefreshTokenRotated`. Reusing an already-rotated refresh token triggers `RefreshFailed: rotation reuse detected` and clears the live hash (ADR-010)."
-4. **`# @name me` — `GET {{baseUrl}}/auth/me`** with header `Authorization: Bearer {{staffLogin.response.body.$.accessToken}}`. Comment: "Returns the authenticated subject (staff or customer — the validator routes by id). Response includes `permissions: string[]` (added in task-03)."
+4. **`# @name me` — `GET {{baseUrl}}/auth/me`** with header `Authorization: Bearer {{staffLogin.response.body.$.accessToken}}`. Comment: "Returns the authenticated subject (staff or customer — the validator routes by id). Response includes `permissions: string[]`, inflated at login."
 5. **`# @name logout` — `POST {{baseUrl}}/auth/logout`** with header `Authorization: Bearer {{staffLogin.response.body.$.accessToken}}`. Comment: "Clears the server-side refresh token hash. The access JWT remains technically valid until expiry; clients should drop it."
-6. **`# @name adminPing` — `GET {{baseUrl}}/auth/admin/ping`** with header `Authorization: Bearer {{staffLogin.response.body.$.accessToken}}`. Comment: "Gated behind `audit:read` (task-04). Admin succeeds (200 `{ ok: true }`); a StaffUser without `audit:read` gets 403."
+6. **`# @name adminPing` — `GET {{baseUrl}}/auth/admin/ping`** with header `Authorization: Bearer {{staffLogin.response.body.$.accessToken}}`. Comment: "Gated behind `audit:read`. Admin succeeds (200 `{ ok: true }`); a StaffUser without `audit:read` gets 403."
 7. **`# @name customerRegister` — `POST {{baseUrl}}/auth/customer/register`** with body `{ "email": "buyer@example.com", "password": "buyer1234", "firstName": "Buy", "lastName": "Er" }`. Comment: "Creates a Customer in `status='active'`, `email_verified_at: null`. Idempotent on duplicate email → 409."
 8. **`# @name customerLogin` — `POST {{baseUrl}}/auth/customer/login`** with body `{ "email": "buyer@example.com", "password": "buyer1234" }`. Comment: "Same JWT envelope as staff login but `roles: []` and `permissions: []` — customer is not an RBAC actor."
 9. **`# @name customerMe` — `GET {{baseUrl}}/auth/customer/me`** with `Authorization: Bearer {{customerLogin.response.body.$.accessToken}}`. Comment: "Returns the Customer's profile. The same JWT is rejected by `/auth/admin/ping` because the customer lacks `audit:read`."
@@ -81,7 +81,7 @@ Then:
 
 - `http/auth.http` (structure above).
 - `http/iam.http` (structure above).
-- `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/07-kulala-auth-and-iam-files.md`.
+- `docs/implementation/01-baseline-identity-staffuser-customer-rbac/07-kulala-auth-and-iam-files.md`.
 
 ## Files to modify
 
@@ -100,7 +100,7 @@ Manual against a freshly-seeded gateway (`docker compose up -d mysql redis rabbi
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/07-kulala-auth-and-iam-files.md`. Target ~80 lines. Sections:
+Write `docs/implementation/01-baseline-identity-staffuser-customer-rbac/07-kulala-auth-and-iam-files.md`. Target ~80 lines. Sections:
 
 1. **What Kulala is.** One sentence + a pointer to the plugin's docs. Why .http files: they are a checked-in, version-controlled alternative to Postman collections, browsable inside the editor.
 2. **File overview.** `http/auth.http` covers the auth controllers (staff + customer); `http/iam.http` covers the IAM admin controller. They are independent — neither imports the other; the redundancy of the `adminLogin` block is intentional.

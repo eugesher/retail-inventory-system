@@ -3,7 +3,6 @@ import * as fs from 'fs';
 export class TestDbSeedUtil {
   public static seedFiles: string[] = [
     'product.sql',
-    'customer.sql',
     'product-stock.sql',
     'order.sql',
     'order-product.sql',

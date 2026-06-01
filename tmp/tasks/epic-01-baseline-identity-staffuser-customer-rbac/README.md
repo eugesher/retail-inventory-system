@@ -54,7 +54,7 @@ Mirrors the epic's `Exit Criteria` section. Each task carries its own per-task e
 - [ ] All requests in `http/auth.http` and `http/iam.http` execute end-to-end against the seeded admin user.
 - [ ] `GET /api/auth/admin/ping` is gated behind `audit:read`; a StaffUser lacking the permission gets `403`, the seeded admin gets `200`.
 - [ ] The old `user.roles` simple-array column is gone (MySQL `DESCRIBE staff_user;` shows no `roles` column).
-- [ ] Per-task docs present under `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/`.
+- [ ] Per-task docs present under `docs/implementation/01-baseline-identity-staffuser-customer-rbac/`.
 - [ ] New ADR `docs/adr/NNN-rbac-v2-staffuser-customer-and-permissions.md` present (number allocated at task-01 first commit); `docs/adr/010-jwt-rbac-at-the-gateway.md` `**Status**` line carries the one-line forward-supersession pointer and nothing else has changed in the file; `docs/adr/index.md` lists the new ADR.
 - [ ] `README.md` Authentication section reflects the relational RBAC model; `CLAUDE.md` modules/auth listing matches the new file set.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.

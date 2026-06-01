@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 10
 title: Author `http/cart.http`; rewrite `http/order.http`
 depends_on: [09]
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/10-cart-and-order-http-files.md
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/10-cart-and-order-http-files.md
 ---
 
 # Task 10 — Author `http/cart.http`; rewrite `http/order.http`
@@ -76,7 +76,7 @@ The implementer should verify Kulala's exact syntax against the project's existi
 ## Files to add
 
 - `http/cart.http`
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/10-cart-and-order-http-files.md`
+- `docs/implementation/05-cart-order-payment-walking-skeleton/10-cart-and-order-http-files.md`
 
 ## Files to modify
 
@@ -93,7 +93,7 @@ The implementer should verify Kulala's exact syntax against the project's existi
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-05-cart-order-payment-walking-skeleton/10-cart-and-order-http-files.md` (target ~80 lines). Sections:
+Write `docs/implementation/05-cart-order-payment-walking-skeleton/10-cart-and-order-http-files.md` (target ~80 lines). Sections:
 
 1. **Why two files.** Cart and Order are separate Kulala flows because (a) the cart flow exercises mutations only inside the retail-microservice (no payment gateway, no order rows); (b) the order flow assumes a cart already exists and exercises the full chain through to capture. Splitting them lets a contributor exercise one without the other.
 2. **The seeded customer's credentials.** Cite the seed file location (`scripts/test-db-seed.ts` plus the SQL seeds under `scripts/seeds/`); the email + password are documented in `epic-01`'s doc folder. Both `.http` files use the same login.

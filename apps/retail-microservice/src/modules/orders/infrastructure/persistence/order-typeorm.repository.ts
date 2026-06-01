@@ -12,7 +12,6 @@ import {
 
 import { Order as OrderDomain } from '../../domain';
 import { IOrderRepositoryPort } from '../../application/ports';
-import { Customer as CustomerEntity } from './customer.entity';
 import { Order as OrderEntity } from './order.entity';
 import { OrderProduct as OrderProductEntity } from './order-product.entity';
 import { OrderMapper } from './order.mapper';
@@ -22,8 +21,6 @@ export class OrderTypeormRepository implements IOrderRepositoryPort {
   constructor(
     @InjectRepository(OrderEntity)
     private readonly orderRepository: Repository<OrderEntity>,
-    @InjectRepository(CustomerEntity)
-    private readonly customerRepository: Repository<CustomerEntity>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     @InjectPinoLogger(OrderTypeormRepository.name)
@@ -67,10 +64,6 @@ export class OrderTypeormRepository implements IOrderRepositoryPort {
     };
   }
 
-  public customerExists(customerId: number): Promise<boolean> {
-    return this.customerRepository.existsBy({ id: customerId });
-  }
-
   public async findExistingProductIds(productIds: number[]): Promise<number[]> {
     if (productIds.length === 0) return [];
     // The `product` table is owned by the inventory service; the order-create
@@ -107,7 +100,6 @@ export class OrderTypeormRepository implements IOrderRepositoryPort {
 
   public async save(order: OrderDomain): Promise<OrderDomain> {
     const partial: DeepPartial<OrderEntity> = {
-      customerId: order.customer.id,
       statusId: order.statusId,
       products: order.products.map((line) => ({
         productId: line.productId,

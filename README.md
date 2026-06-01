@@ -22,8 +22,27 @@ The system handles order lifecycle management and product stock tracking across 
 ┌─────────────────────────────▼─────────────────────────────┐
 │                  API Gateway port: 3000                   │
 │                                                           │
-│  POST  /api/auth/{login,refresh,logout}                   │
+│  Staff auth                                               │
+│  POST  /api/auth/staff/login                              │
+│  POST  /api/auth/login           (deprecated alias)       │
+│  POST  /api/auth/refresh                                  │
+│  POST  /api/auth/logout                                   │
 │  GET   /api/auth/me                                       │
+│  GET   /api/auth/admin/ping                               │
+│                                                           │
+│  Customer auth                                            │
+│  POST  /api/auth/customer/register                        │
+│  POST  /api/auth/customer/login                           │
+│  GET   /api/auth/customer/me                              │
+│                                                           │
+│  IAM admin                                                │
+│  GET   /api/iam/roles                                     │
+│  POST  /api/iam/roles                                     │
+│  PATCH /api/iam/roles/:id                                 │
+│  POST  /api/iam/staff/:id/roles                           │
+│  DELETE /api/iam/staff/:id/roles/:roleName                │
+│                                                           │
+│  Domain                                                   │
 │  POST  /api/order                                         │
 │  PUT   /api/order/:id/confirm                             │
 │  GET   /api/product/:productId/stock                      │
@@ -50,7 +69,9 @@ The system handles order lifecycle management and product stock tracking across 
                               │                               │
 ┌─────────────────────────────▼─────────────────────────────┐ │
 │                        Shared DB                          │ │
-│  user / order / order_product / product / product_stock   │ │
+│  staff_user / customer / role / permission                │ │
+│  role_permissions / staff_user_roles                      │ │
+│  order / order_product / product / product_stock          │ │
 │  storage / order_status / order_product_status            │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
@@ -71,7 +92,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 
 | Library | Purpose |
 | ------- | ------- |
-| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/`, `inventory/`, `auth/` (`RoleEnum`, `ICurrentUser`, JWT payload interfaces). |
+| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/`, `inventory/`, `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, JWT payload interfaces, `IAuditLogPublisher` port + `AUDIT_LOG_PUBLISHER` token). |
 | `database` | TypeORM base — `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. |
 | `messaging` | RabbitMQ wiring — `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory,Notification}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` and `EXCHANGES` constants. |
 | `cache` | Cache port + Redis adapter — `ICachePort` (`get` / `set` / `del` / `wrap` / `delByPrefix` / `singleFlight`), `CACHE_PORT` DI token, `RedisCacheAdapter` (OTel-spanned), `CacheModule` (global), `@Cacheable()` decorator, `CACHE_KEYS` registry. |
@@ -79,7 +100,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `ddd` | Framework-free domain building blocks — `Entity`, `AggregateRoot`, `ValueObject`, `DomainEvent`, `IRepositoryPort`. No `@nestjs/*` or TypeORM imports. |
 | `common` | Framework-free utilities (`Result`, `DomainException`, pagination types `IPage` / `IPageRequest`, `Maybe` / `Nullable`). |
 | `config` | `configModuleConfig` (Joi env schema). |
-| `auth` | Framework-glue for JWT + RBAC: `AuthModule.forRootAsync()`, `JwtStrategy`, `JwtAuthGuard`, `RolesGuard`, `@Public()`, `@Roles()`, `@CurrentUser()`. The `RoleEnum` (`admin`, `customer`) is re-exported from `@retail-inventory-system/contracts/auth` (the source of truth — framework-free). |
+| `auth` | Framework-glue for JWT + RBAC: `AuthModule.forRootAsync()`, `JwtStrategy`, `JwtAuthGuard`, `RolesGuard`, `PermissionsGuard`, `@Public()`, `@Roles()`, `@RequiresPermission()`, `@CurrentUser()`. The `RoleEnum` (`admin`, `catalog-manager`, `warehouse-staff`, `order-support`) and `PermissionCodeEnum` are re-exported from `@retail-inventory-system/contracts/auth` (the source of truth — framework-free). |
 
 ## Services
 
@@ -122,7 +143,7 @@ apps/api-gateway/src/
             └── dto/product-stock-get-query.dto.ts
 ```
 
-The gateway also hosts a `modules/auth/` module — the only gateway module with a real `domain/` (User aggregate, RoleVO) and the only one that owns DB state. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md).
+The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, and `PermissionAggregate` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
 
 ### Per-module hexagonal layout
 
@@ -323,51 +344,104 @@ GET /product/:productId/stock
 ### Auth
 
 ```
-POST /api/auth/login         # public
-POST /api/auth/refresh       # public
-POST /api/auth/logout        # bearer
-GET  /api/auth/me            # bearer
-GET  /api/auth/admin/ping    # bearer + admin role (smoke endpoint)
+# Staff
+POST /api/auth/staff/login              # public
+POST /api/auth/login                    # public — deprecated alias of /auth/staff/login
+POST /api/auth/refresh                  # public
+POST /api/auth/logout                   # bearer
+GET  /api/auth/me                       # bearer
+GET  /api/auth/admin/ping               # bearer + audit:read permission (smoke endpoint)
+
+# Customer
+POST /api/auth/customer/register        # public
+POST /api/auth/customer/login           # public
+GET  /api/auth/customer/me              # bearer
+
+# IAM admin
+GET   /api/iam/roles                    # bearer + iam:role-edit
+POST  /api/iam/roles                    # bearer + iam:role-edit
+PATCH /api/iam/roles/:id                # bearer + iam:role-edit
+POST  /api/iam/staff/:id/roles          # bearer + iam:assign
+DELETE /api/iam/staff/:id/roles/:roleName # bearer + iam:assign
 ```
 
 Interactive API reference is available at `http://localhost:3000/api/reference` when the gateway is running.
 
 ## Authentication
 
-Every gateway route is **protected by default** by a global `JwtAuthGuard`. Routes opt out with `@Public()` (currently only `/auth/login` and `/auth/refresh`). Role-based authorization is layered on top via `@Roles(RoleEnum.X, …)` on controllers or methods, evaluated by a global `RolesGuard`. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the rationale.
+Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
+
+Two subject kinds share the JWT pipeline:
+
+- **`StaffUser`** — operators with one or more `Role`s, each binding a set of `Permission` codes. The access token's `permissions: string[]` claim is the union of those codes, inflated at login/refresh.
+- **`Customer`** — buyer-side identity. No roles, no `permissions` claim — customer tokens never satisfy any `@RequiresPermission(...)` gate, by design.
 
 ### Login + refresh flow
 
 ```
-1. POST /api/auth/login { email, password }
+1. POST /api/auth/staff/login { email, password }       # or /auth/customer/login
    ↳ verify password (argon2id)
-   ↳ issue access JWT      (HS256, 15m by default, secret = JWT_ACCESS_SECRET)
+   ↳ load roles → flatten permission codes (staff only)
+   ↳ issue access JWT      (HS256, 15m by default, secret = JWT_ACCESS_SECRET,
+                            payload includes roles + permissions for staff)
    ↳ issue refresh JWT     (HS256, 7d  by default, secret = JWT_REFRESH_SECRET)
-   ↳ store argon2id hash of refresh JWT on the user row
+   ↳ store argon2id hash of refresh JWT on the subject row
    ↳ return { accessToken, refreshToken, expiresIn }
 
 2. POST /api/auth/refresh { refreshToken }
    ↳ verify signature + expiry
    ↳ argon2.verify(stored hash, presented token)
        ↳ mismatch ⇒ rotation reuse: clear the stored hash + 401
+   ↳ re-inflate the staff permissions claim (so role-edits via /iam propagate)
    ↳ issue new access + refresh JWTs
-   ↳ store new hash on the user row
+   ↳ store new hash on the subject row
    ↳ return { accessToken, refreshToken, expiresIn }
 
 3. POST /api/auth/logout (bearer)
-   ↳ clear the user's refresh-hash; subsequent /auth/refresh fails 401.
+   ↳ clear the subject's refresh-hash; subsequent /auth/refresh fails 401.
 ```
 
-Refresh tokens **rotate on every successful refresh** — the old token is invalidated by hash replacement, and reuse trips a circuit-breaker that clears the live hash entirely.
+Refresh tokens **rotate on every successful refresh** — the old token is invalidated by hash replacement, and reuse trips a circuit-breaker that clears the live hash entirely. Permission edits made via the IAM admin endpoints take effect on the next refresh (≤15m by default); access tokens already in circulation continue to carry the pre-edit `permissions` claim.
 
-### Roles
+### Roles and permissions
 
-Two seeded roles, defined as the `RoleEnum` in [`libs/contracts/auth/role.enum.ts`](libs/contracts/auth/role.enum.ts):
+Roles are stored relationally in the `role` table and bound to permission codes through the `role_permissions` join. Staff users acquire roles through `staff_user_roles`. Permission codes themselves are the source-of-truth `PermissionCodeEnum` in [`libs/contracts/auth/permission.enum.ts`](libs/contracts/auth/permission.enum.ts); the four seeded role bundles live in `scripts/test-db-seed.ts` and are recreated by `yarn test:seed`.
 
-| Role | Description |
-| ---- | ----------- |
-| `customer` | Default role. May `POST /api/order`, `PUT /api/order/:id/confirm`, `GET /product/:id/stock`. |
-| `admin` | Inherits customer access (admins seed with both roles). May additionally hit any route guarded by `@Roles(RoleEnum.ADMIN)` (today only the smoke endpoint `GET /api/auth/admin/ping`). |
+| Role | Permission codes |
+| --- | --- |
+| `admin` | every code |
+| `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish` |
+| `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer` |
+| `order-support` | `order:read`, `order:cancel`, `order:refund` |
+
+Guard a controller method on a precise code with `@RequiresPermission()` from `@retail-inventory-system/auth`:
+
+```ts
+@Get('roles')
+@RequiresPermission(PermissionCodeEnum.IAM_ROLE_EDIT)
+public list(): Promise<RoleResponseDto[]> { … }
+```
+
+`@RequiresPermission(code)` is the **precise** gate — it checks `request.user.permissions` (the JWT-inflated claim). `@Roles(RoleEnum.X, …)` remains valid for **coarse** role-bundle gating where the precise permission isn't meaningful (rare; defaults are to use `@RequiresPermission`). Customer tokens have no `permissions` claim and never satisfy `@RequiresPermission`, so any code-gated route is a staff-only path by construction. See [docs/implementation/01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md](docs/implementation/01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md) for the inflation algorithm and the staleness window.
+
+### Permissions
+
+Every seeded permission code and the role bundles it appears in. Codes are kebab-case `<resource>:<action>` strings; the enum is at `libs/contracts/auth/permission.enum.ts`.
+
+| Code | Roles |
+| --- | --- |
+| `catalog:read` | `admin`, `catalog-manager` |
+| `catalog:write` | `admin`, `catalog-manager` |
+| `catalog:publish` | `admin`, `catalog-manager` |
+| `inventory:read` | `admin`, `warehouse-staff` |
+| `inventory:adjust` | `admin`, `warehouse-staff` |
+| `inventory:transfer` | `admin`, `warehouse-staff` |
+| `order:read` | `admin`, `order-support` |
+| `order:cancel` | `admin`, `order-support` |
+| `order:refund` | `admin`, `order-support` |
+| `iam:assign` | `admin` |
+| `iam:role-edit` | `admin` |
+| `audit:read` | `admin` |
 
 ### Required environment variables
 
@@ -383,14 +457,17 @@ Two seeded roles, defined as the `RoleEnum` in [`libs/contracts/auth/role.enum.t
 
 ### Local development
 
-`yarn test:seed` (or `yarn test:infra:reload`) inserts two argon2id-hashed users:
+`yarn test:seed` (or `yarn test:infra:reload`) inserts argon2id-hashed users — four staff (one per canonical role) and one customer:
 
-| Email | Password | Roles |
-| ----- | -------- | ----- |
-| `admin@example.com` | `admin1234` | `admin`, `customer` |
-| `customer@example.com` | `customer1234` | `customer` |
+| Email | Password | Role | Type |
+| --- | --- | --- | --- |
+| `admin@example.com` | `admin1234` | `admin` | StaffUser |
+| `catalog@example.com` | `catalog1234` | `catalog-manager` | StaffUser |
+| `warehouse@example.com` | `warehouse1234` | `warehouse-staff` | StaffUser |
+| `support@example.com` | `support1234` | `order-support` | StaffUser |
+| `customer@example.com` | `customer1234` | — | Customer |
 
-Auth events (`UserLoggedIn`, `LoginFailed`, `RefreshTokenRotated`, `LogoutPerformed`) emit Pino log lines with `userId` and `correlationId`. They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.user-logged-in` routing key plus a publisher in `LoginUseCase` are missing.
+Auth events emit Pino log lines with `userId` and `correlationId`, and (when wired) flow through the `AUDIT_LOG_PUBLISHER` port; the default binding is the in-process `NoOpAuditLogPublisher` (logs the event at `debug` under the `AuditLog` context). They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.*` routing key plus a publisher binding are missing.
 
 ## Logging & Observability
 
