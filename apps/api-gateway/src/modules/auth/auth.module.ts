@@ -26,17 +26,19 @@ import { AuthAdminController } from './presentation/auth-admin.controller';
 import { AuthController } from './presentation/auth.controller';
 import { CustomerAuthController } from './presentation/customer-auth.controller';
 import { StaffLoginController } from './presentation/staff-login.controller';
-import { Argon2PasswordAdapter } from './infrastructure/argon2/argon2-password.adapter';
-import { NoOpAuditLogPublisher } from './infrastructure/audit/no-op-audit-log.publisher';
-import { JwtTokenAdapter } from './infrastructure/jwt/jwt-token.adapter';
-import { CustomerEntity } from './infrastructure/persistence/customer.entity';
-import { CustomerTypeormRepository } from './infrastructure/persistence/customer-typeorm.repository';
-import { PermissionEntity } from './infrastructure/persistence/permission.entity';
-import { PermissionTypeormRepository } from './infrastructure/persistence/permission-typeorm.repository';
-import { RoleEntity } from './infrastructure/persistence/role.entity';
-import { RoleTypeormRepository } from './infrastructure/persistence/role-typeorm.repository';
-import { StaffUserEntity } from './infrastructure/persistence/staff-user.entity';
-import { StaffUserTypeormRepository } from './infrastructure/persistence/staff-user-typeorm.repository';
+import { Argon2PasswordAdapter } from './infrastructure/argon2';
+import { NoOpAuditLogPublisher } from './infrastructure/audit';
+import { JwtTokenAdapter } from './infrastructure/jwt';
+import {
+  CustomerEntity,
+  CustomerTypeormRepository,
+  PermissionEntity,
+  PermissionTypeormRepository,
+  RoleEntity,
+  RoleTypeormRepository,
+  StaffUserEntity,
+  StaffUserTypeormRepository,
+} from './infrastructure/persistence';
 
 // AUTH_USER_VALIDATOR + STAFF_USER_REPOSITORY + CUSTOMER_REPOSITORY are bound
 // inside libs/auth's `forRootAsync` so its JwtStrategy can resolve them; the
