@@ -2,10 +2,10 @@ import { Module } from '@nestjs/common';
 
 import { MicroserviceClientInventoryModule } from '@retail-inventory-system/messaging';
 
-import { INVENTORY_GATEWAY_PORT } from '../application/ports';
-import { GetProductStockUseCase } from '../application/use-cases';
-import { ProductController } from '../presentation/product.controller';
-import { InventoryRabbitmqAdapter } from './messaging/inventory-rabbitmq.adapter';
+import { INVENTORY_GATEWAY_PORT } from './application/ports';
+import { GetProductStockUseCase } from './application/use-cases';
+import { InventoryRabbitmqAdapter } from './infrastructure/messaging';
+import { ProductController } from './presentation';
 
 @Module({
   imports: [MicroserviceClientInventoryModule],

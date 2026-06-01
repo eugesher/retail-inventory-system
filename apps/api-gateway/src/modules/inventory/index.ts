@@ -1,1 +1,1 @@
-export * from './infrastructure/inventory.module';
+export * from './inventory.module';

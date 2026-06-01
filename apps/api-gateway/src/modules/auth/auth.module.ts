@@ -22,10 +22,6 @@ import {
   RegisterStaffUserUseCase,
   ValidateJwtSubjectUseCase,
 } from './application/use-cases';
-import { AuthAdminController } from './presentation/auth-admin.controller';
-import { AuthController } from './presentation/auth.controller';
-import { CustomerAuthController } from './presentation/customer-auth.controller';
-import { StaffLoginController } from './presentation/staff-login.controller';
 import { Argon2PasswordAdapter } from './infrastructure/argon2';
 import { NoOpAuditLogPublisher } from './infrastructure/audit';
 import { JwtTokenAdapter } from './infrastructure/jwt';
@@ -39,6 +35,12 @@ import {
   StaffUserEntity,
   StaffUserTypeormRepository,
 } from './infrastructure/persistence';
+import {
+  AuthAdminController,
+  AuthController,
+  CustomerAuthController,
+  StaffLoginController,
+} from './presentation';
 
 // AUTH_USER_VALIDATOR + STAFF_USER_REPOSITORY + CUSTOMER_REPOSITORY are bound
 // inside libs/auth's `forRootAsync` so its JwtStrategy can resolve them; the
