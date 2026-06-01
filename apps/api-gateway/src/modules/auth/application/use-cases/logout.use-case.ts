@@ -3,10 +3,7 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
 
-import {
-  IStaffUserRepositoryPort,
-  STAFF_USER_REPOSITORY,
-} from '../ports/staff-user.repository.port';
+import { IStaffUserRepositoryPort, STAFF_USER_REPOSITORY } from '../ports';
 
 export interface ILogoutCommand {
   userId: string;

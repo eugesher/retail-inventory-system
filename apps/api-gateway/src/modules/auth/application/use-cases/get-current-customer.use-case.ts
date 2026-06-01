@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 
 import { Customer } from '../../domain/customer.model';
-import { CUSTOMER_REPOSITORY, ICustomerRepositoryPort } from '../ports/customer.repository.port';
+import { CUSTOMER_REPOSITORY, ICustomerRepositoryPort } from '../ports';
 
 @Injectable()
 export class GetCurrentCustomerUseCase {

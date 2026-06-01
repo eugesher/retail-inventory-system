@@ -3,11 +3,12 @@ import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { IAuthUserValidator } from '@retail-inventory-system/auth';
 import { ICurrentUser, IJwtAccessPayload } from '@retail-inventory-system/contracts';
 
-import { CUSTOMER_REPOSITORY, ICustomerRepositoryPort } from '../ports/customer.repository.port';
 import {
+  CUSTOMER_REPOSITORY,
+  ICustomerRepositoryPort,
   IStaffUserRepositoryPort,
   STAFF_USER_REPOSITORY,
-} from '../ports/staff-user.repository.port';
+} from '../ports';
 
 // Single validator for both subject kinds — staff first, customer on miss.
 // The JWT envelope carries the same claims for both kinds (customer JWTs simply

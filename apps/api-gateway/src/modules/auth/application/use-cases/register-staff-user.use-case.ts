@@ -4,12 +4,14 @@ import { randomUUID } from 'crypto';
 import { AUDIT_LOG_PUBLISHER, IAuditLogPublisher } from '@retail-inventory-system/contracts';
 
 import { StaffUser } from '../../domain/staff-user.model';
-import { PASSWORD_HASHER, IPasswordPort } from '../ports/password.port';
-import { IRoleRepositoryPort, ROLE_REPOSITORY } from '../ports/role.repository.port';
 import {
+  IPasswordPort,
+  IRoleRepositoryPort,
   IStaffUserRepositoryPort,
+  PASSWORD_HASHER,
+  ROLE_REPOSITORY,
   STAFF_USER_REPOSITORY,
-} from '../ports/staff-user.repository.port';
+} from '../ports';
 
 export interface IRegisterStaffUserCommand {
   email: string;

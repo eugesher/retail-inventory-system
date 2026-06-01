@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { IStaffUserRepositoryPort } from '../../application/ports/staff-user.repository.port';
+import { IStaffUserRepositoryPort } from '../../application/ports';
 import { StaffUser } from '../../domain/staff-user.model';
 import { StaffUserEntity } from './staff-user.entity';
 import { StaffUserMapper } from './staff-user.mapper';

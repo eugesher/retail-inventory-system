@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts';
 
 import { RoleAggregate } from '../../../domain/role.aggregate';
-import { IRoleRepositoryPort } from '../../ports/role.repository.port';
+import { IRoleRepositoryPort } from '../../ports';
 import { RegisterStaffUserUseCase } from '../register-staff-user.use-case';
 import { FakeAuditLogPublisher, FakeHasher, InMemoryStaffUserRepository } from './test-doubles';
 

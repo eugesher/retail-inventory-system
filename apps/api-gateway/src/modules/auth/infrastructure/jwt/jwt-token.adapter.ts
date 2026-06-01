@@ -4,7 +4,7 @@ import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 
 import { IJwtAccessPayload, IJwtRefreshPayload } from '@retail-inventory-system/contracts';
 
-import { ITokenPort } from '../../application/ports/token.port';
+import { ITokenPort } from '../../application/ports';
 
 const SECONDS_PER_UNIT: Record<string, number> = {
   s: 1,

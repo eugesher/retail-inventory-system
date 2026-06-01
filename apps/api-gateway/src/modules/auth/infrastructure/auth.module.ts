@@ -4,20 +4,24 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule as AuthLibModule, AUTH_USER_VALIDATOR } from '@retail-inventory-system/auth';
 import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
 
-import { CUSTOMER_REPOSITORY } from '../application/ports/customer.repository.port';
-import { PASSWORD_HASHER } from '../application/ports/password.port';
-import { PERMISSION_REPOSITORY } from '../application/ports/permission.repository.port';
-import { ROLE_REPOSITORY } from '../application/ports/role.repository.port';
-import { STAFF_USER_REPOSITORY } from '../application/ports/staff-user.repository.port';
-import { TOKEN_SERVICE } from '../application/ports/token.port';
-import { GetCurrentCustomerUseCase } from '../application/use-cases/get-current-customer.use-case';
-import { LoginCustomerUseCase } from '../application/use-cases/login-customer.use-case';
-import { LoginUseCase } from '../application/use-cases/login.use-case';
-import { LogoutUseCase } from '../application/use-cases/logout.use-case';
-import { RefreshTokenUseCase } from '../application/use-cases/refresh-token.use-case';
-import { RegisterCustomerUseCase } from '../application/use-cases/register-customer.use-case';
-import { RegisterStaffUserUseCase } from '../application/use-cases/register-staff-user.use-case';
-import { ValidateJwtSubjectUseCase } from '../application/use-cases/validate-jwt-subject.use-case';
+import {
+  CUSTOMER_REPOSITORY,
+  PASSWORD_HASHER,
+  PERMISSION_REPOSITORY,
+  ROLE_REPOSITORY,
+  STAFF_USER_REPOSITORY,
+  TOKEN_SERVICE,
+} from '../application/ports';
+import {
+  GetCurrentCustomerUseCase,
+  LoginCustomerUseCase,
+  LoginUseCase,
+  LogoutUseCase,
+  RefreshTokenUseCase,
+  RegisterCustomerUseCase,
+  RegisterStaffUserUseCase,
+  ValidateJwtSubjectUseCase,
+} from '../application/use-cases';
 import { AuthAdminController } from '../presentation/auth-admin.controller';
 import { AuthController } from '../presentation/auth.controller';
 import { CustomerAuthController } from '../presentation/customer-auth.controller';

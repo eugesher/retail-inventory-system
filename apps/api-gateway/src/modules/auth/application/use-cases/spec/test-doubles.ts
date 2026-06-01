@@ -7,10 +7,13 @@ import {
 
 import { Customer } from '../../../domain/customer.model';
 import { StaffUser } from '../../../domain/staff-user.model';
-import { ICustomerRepositoryPort } from '../../ports/customer.repository.port';
-import { IPasswordPort } from '../../ports/password.port';
-import { IStaffUserRepositoryPort } from '../../ports/staff-user.repository.port';
-import { IIssuedTokens, ITokenPort } from '../../ports/token.port';
+import {
+  ICustomerRepositoryPort,
+  IIssuedTokens,
+  IPasswordPort,
+  IStaffUserRepositoryPort,
+  ITokenPort,
+} from '../../ports';
 
 export class InMemoryStaffUserRepository implements IStaffUserRepositoryPort {
   private byId = new Map<string, StaffUser>();

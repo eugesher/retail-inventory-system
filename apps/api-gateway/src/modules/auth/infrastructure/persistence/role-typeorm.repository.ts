@@ -4,7 +4,7 @@ import { EntityManager, In, Repository } from 'typeorm';
 
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { IRoleRepositoryPort } from '../../application/ports/role.repository.port';
+import { IRoleRepositoryPort } from '../../application/ports';
 import { RoleAggregate } from '../../domain/role.aggregate';
 import { PermissionEntity } from './permission.entity';
 import { RoleEntity } from './role.entity';
@@ -87,12 +87,10 @@ export class RoleTypeormRepository implements IRoleRepositoryPort {
         throw new NotFoundException(`Role ${role.id} not found`);
       }
 
-      const permissions =
-        codes.length === 0 ? [] : await permRepo.find({ where: { code: In(codes) } });
-
       // Setting the inverse side + saving via the parent does the
       // delete-old + insert-new on the join table in one logical step.
-      existingRole.permissions = permissions;
+      existingRole.permissions =
+        codes.length === 0 ? [] : await permRepo.find({ where: { code: In(codes) } });
       await roleRepo.save(existingRole);
     });
 
