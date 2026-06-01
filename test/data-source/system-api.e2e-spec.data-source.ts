@@ -4,7 +4,7 @@ export class SystemApiE2ESpecDataSource extends DataSource {
   public async getOrderRowsByOrderId(orderId: number): Promise<any> {
     return await this.query(
       `
-        SELECT customer_id, status_id
+        SELECT status_id
         FROM \`order\`
         WHERE id = ?;
       `,

@@ -1,15 +1,6 @@
 import { OrderProductStatusEnum, OrderStatusEnum } from '@retail-inventory-system/contracts';
 
-import {
-  CustomerRef,
-  Order,
-  OrderConfirmedEvent,
-  OrderProduct,
-  OrderProductStatusVO,
-  OrderStatusVO,
-} from '..';
-
-const customer = new CustomerRef({ id: 1 });
+import { Order, OrderConfirmedEvent, OrderProduct, OrderProductStatusVO, OrderStatusVO } from '..';
 
 const makeProduct = (id: number, statusId = OrderProductStatusEnum.PENDING): OrderProduct =>
   new OrderProduct({
@@ -24,7 +15,6 @@ const makeProduct = (id: number, statusId = OrderProductStatusEnum.PENDING): Ord
 const makeOrder = (products: OrderProduct[], statusId = OrderStatusEnum.PENDING): Order =>
   Order.reconstitute({
     id: 1,
-    customer,
     products,
     status:
       statusId === OrderStatusEnum.CONFIRMED ? OrderStatusVO.CONFIRMED : OrderStatusVO.PENDING,

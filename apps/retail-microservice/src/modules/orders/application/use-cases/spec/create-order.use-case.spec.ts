@@ -24,7 +24,6 @@ describe('CreateOrderUseCase', () => {
   });
 
   const payload: IOrderCreatePayload = {
-    customerId: 1,
     products: [
       { productId: 1, quantity: 2 },
       { productId: 2, quantity: 1 },
@@ -48,7 +47,6 @@ describe('CreateOrderUseCase', () => {
     expect(publisher.created).toHaveLength(1);
     const [{ event, correlationId }] = publisher.created;
     expect(event.aggregateId).toBe(response.orderId);
-    expect(event.customerId).toBe(1);
     expect(event.lines).toEqual([
       { productId: 1, quantity: 2 },
       { productId: 2, quantity: 1 },

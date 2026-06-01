@@ -11,8 +11,9 @@
 OpenTelemetry as the distributed-trace layer and froze the *shape* of
 the bootstrap — a side-effect `libs/observability/tracer.ts` imported as
 the first line of every service's `main.ts`, plus a Pino `logMethod`
-hook that enriches log records with `traceId` / `spanId`. Task-04
-shipped the empty shell; task-10 fills in the body.
+hook that enriches log records with `traceId` / `spanId`. The
+observability-library work shipped the empty shell; the OTel SDK wiring
+fills in the body.
 
 That leaves four concrete questions:
 
@@ -117,7 +118,7 @@ how the four-service trace stays a single trace across RabbitMQ.
 `amqp-connection-manager` (in `package.json`) is a wrapper around
 `amqplib`; the underlying channels are real amqplib Channel objects,
 so the instrumentation patches them transparently. A manual smoke
-test for task-10 confirmed: a `PUT /api/order/:id/confirm` request
+test of the OTel SDK wiring confirmed: a `PUT /api/order/:id/confirm` request
 produces a trace with spans from all four services, including the
 `publish` / `process` pairs for `retail_queue`, `inventory_queue`,
 and `notification_events`.

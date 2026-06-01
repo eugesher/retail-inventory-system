@@ -65,7 +65,7 @@ Author the `docs/extensions/` folder: one short, focused markdown per excluded e
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-15-future-extensions-guide/`:
+**Per-task markdown files** under `docs/implementation/15-future-extensions-guide/`:
 
 - `01-extension-guide-structure-and-template.md` — the per-file template (Description → Business needs → Implementation sketch → Attachment points → Effort sketch); the front-matter convention; the index README structure.
 - `02-product-catalog-extension-guides.md` — covers the nine catalog files (one short summary per).
@@ -127,7 +127,7 @@ One short line. Rough magnitude: "1 epic" / "2-3 epics" / "subsystem-scale (5+ e
 10. **Author the one combined Physical Retail file.**
 11. **Fill in the index `docs/extensions/README.md`** with the final cluster-grouped table-of-contents.
 12. **Update `README.md` + `CLAUDE.md`** with cross-links.
-13. **Write the eleven per-task implementation docs** under `docs/implementation/epic-15-future-extensions-guide/`.
+13. **Write the eleven per-task implementation docs** under `docs/implementation/15-future-extensions-guide/`.
 
 ## Carryover Between Tasks
 
@@ -145,7 +145,7 @@ One short line. Rough magnitude: "1 epic" / "2-3 epics" / "subsystem-scale (5+ e
 | 10 | Task 1 complete. | One combined markdown file. |
 | 11 | Tasks 2–10 complete. | Finalized `docs/extensions/README.md` with grouped TOC. |
 | 12 | Task 11 complete. | Updated root `README.md` + `CLAUDE.md` cross-links. |
-| 13 | All prior tasks complete. | Eleven implementation docs under `docs/implementation/epic-15-future-extensions-guide/`. |
+| 13 | All prior tasks complete. | Eleven implementation docs under `docs/implementation/15-future-extensions-guide/`. |
 
 ## Exit Criteria
 
@@ -155,7 +155,7 @@ One short line. Rough magnitude: "1 epic" / "2-3 epics" / "subsystem-scale (5+ e
 - [ ] No file under `docs/extensions/` references anything under `tmp/` — extension guides describe forward-looking work in terms of the existing code state.
 - [ ] Root `README.md` has the **Extensions and future expansion** section linking to `docs/extensions/README.md`.
 - [ ] `CLAUDE.md` notes the extension-guides convention.
-- [ ] Per-task implementation docs present under `docs/implementation/epic-15-future-extensions-guide/`.
+- [ ] Per-task implementation docs present under `docs/implementation/15-future-extensions-guide/`.
 - [ ] No production code touched.
 
 ## Self-Containment Notice

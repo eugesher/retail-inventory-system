@@ -9,6 +9,10 @@ import { MicroserviceQueueEnum, AppNameEnum } from '@retail-inventory-system/con
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 import { AppModule } from './app';
 
+declare const module: {
+  hot?: { accept(): void; dispose(callback: () => void | Promise<void>): void };
+};
+
 ((): void => {
   const logger = new PinoLogger(new LoggerModuleConfig(AppNameEnum.INVENTORY_MICROSERVICE));
 
@@ -28,6 +32,11 @@ import { AppModule } from './app';
     app.useLogger(app.get(Logger));
 
     await app.listen();
+
+    if (module.hot) {
+      module.hot.accept();
+      module.hot.dispose(() => app.close());
+    }
 
     logger.info('Inventory Microservice is listening for messages');
   })().catch((e: Error) => {

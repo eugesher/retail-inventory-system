@@ -1,7 +1,6 @@
 import { OrderStatusEnum } from '@retail-inventory-system/contracts';
 import { AggregateRoot } from '@retail-inventory-system/ddd';
 
-import { CustomerRef } from './customer.model';
 import { OrderCancelledEvent, OrderConfirmedEvent } from './events';
 import { OrderProduct } from './order-product.model';
 import { OrderProductStatusVO } from './order-product-status.value-object';
@@ -9,7 +8,6 @@ import { OrderStatusVO } from './order-status.value-object';
 
 interface IOrderProps {
   id: number | null;
-  customer: CustomerRef;
   products: OrderProduct[];
   status: OrderStatusVO;
 }
@@ -22,23 +20,18 @@ export interface IOrderConfirmationResult {
 }
 
 export class Order extends AggregateRoot<number | null> {
-  private _customer: CustomerRef;
   private _products: OrderProduct[];
   private _status: OrderStatusVO;
 
   private constructor(props: IOrderProps) {
     super(props.id);
-    this._customer = props.customer;
     this._products = props.products;
     this._status = props.status;
   }
 
   // Expands per-quantity into one line per unit — `order_product` has no
   // `quantity` column, so each unit gets its own row.
-  public static create(props: {
-    customer: CustomerRef;
-    lines: { productId: number; quantity: number }[];
-  }): Order {
+  public static create(props: { lines: { productId: number; quantity: number }[] }): Order {
     if (!props.lines.length) {
       throw new Error('Order.create: cannot create an order with no line items');
     }
@@ -61,7 +54,6 @@ export class Order extends AggregateRoot<number | null> {
 
     return new Order({
       id: null,
-      customer: props.customer,
       products,
       status: OrderStatusVO.PENDING,
     });
@@ -69,10 +61,6 @@ export class Order extends AggregateRoot<number | null> {
 
   public static reconstitute(props: IOrderProps): Order {
     return new Order(props);
-  }
-
-  public get customer(): CustomerRef {
-    return this._customer;
   }
 
   public get products(): readonly OrderProduct[] {
@@ -114,7 +102,6 @@ export class Order extends AggregateRoot<number | null> {
       this.addDomainEvent(
         new OrderConfirmedEvent({
           orderId: this.id ?? 0,
-          customerId: this._customer.id,
           lines: this._products
             .filter((line): line is OrderProduct & { id: number } => line.id !== null)
             .map((line) => ({ orderProductId: line.id, productId: line.productId })),
@@ -134,7 +121,6 @@ export class Order extends AggregateRoot<number | null> {
     this.addDomainEvent(
       new OrderCancelledEvent({
         orderId: this.id ?? 0,
-        customerId: this._customer.id,
         reason,
       }),
     );

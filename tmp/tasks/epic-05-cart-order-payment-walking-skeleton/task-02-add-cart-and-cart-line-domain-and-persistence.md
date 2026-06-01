@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 2
 title: Add `cart` + `cart_line` tables, domain, persistence, mappers
 depends_on: [01]
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md (intro half — task-05 appends the use-case half)
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md (intro half — task-05 appends the use-case half)
 ---
 
 # Task 02 — Add `cart` + `cart_line` domain and persistence
@@ -411,7 +411,7 @@ Three notes for the implementer:
 - `libs/contracts/retail/cart/events/cart-line-quantity-changed.event.ts`
 - `libs/contracts/retail/cart/events/index.ts`
 - `libs/contracts/retail/cart/index.ts`
-- `docs/implementation/epic-05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md` (intro half)
+- `docs/implementation/05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md` (intro half)
 
 ## Files to modify
 
@@ -429,7 +429,7 @@ Three notes for the implementer:
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md` (intro half — target ~110 lines now; task-05 appends the use-case half). Sections this task writes:
+Write `docs/implementation/05-cart-order-payment-walking-skeleton/02-cart-aggregate-and-q1-q3-decisions.md` (intro half — target ~110 lines now; task-05 appends the use-case half). Sections this task writes:
 
 1. **Q1 — When is a Cart persistent?** Restate the epic's decision: persistent for authenticated customers; ephemeral session-id-keyed for guests, promoted on first login or on Place Order. The cart row has a nullable `customer_id`; pre-promotion the cart resolves by id only (the cookie carries the cart's UUID). Forward-link to task-05's `AddToCartUseCase` doc which wires the promotion path.
 2. **Q3 — Cart vs Order are distinct aggregates.** Restate: one-shot conversion at Place Order time. The conversion is `cart.markConverted()` + `Order.create(...)` in one transaction (task-06). No "Order edits the cart" path exists — once converted, the cart is read-only.

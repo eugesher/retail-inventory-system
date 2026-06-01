@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 10
 title: Seed + documentation pass — README, CLAUDE.md, arch-lint, test seed, e2e
 depends_on: [01, 02, 03, 04, 05, 06, 07, 08, 09]
-doc_deliverable: closing append to docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md
+doc_deliverable: closing append to docs/implementation/04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md
 ---
 
 # Task 10 — Seed + documentation pass
@@ -15,7 +15,7 @@ doc_deliverable: closing append to docs/implementation/epic-04-inventory-stock-l
 
 ## Goal
 
-Close out epic-04. Extend the test seed so each seeded variant from epic-02 has a `StockLevel = 100` row at `default-warehouse`. Add the two e2e specs the epic requires (`test/inventory-receive-and-adjust.e2e-spec.ts` and `test/inventory-cache.e2e-spec.ts`). Update `README.md` (System diagram + API → Stock section + Caching section + Database section). Update `CLAUDE.md` (stock-module file-listing + Message patterns + Shared Libraries → cache + Operational notes). Extend `spec/architecture-lint.spec.ts` to govern the new directory shape under `apps/inventory-microservice/src/modules/stock/`. Write the closing append to `docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` — the cumulative "after" schema diagram snapshot referenced from the introductory half written in task-01.
+Close out epic-04. Extend the test seed so each seeded variant from epic-02 has a `StockLevel = 100` row at `default-warehouse`. Add the two e2e specs the epic requires (`test/inventory-receive-and-adjust.e2e-spec.ts` and `test/inventory-cache.e2e-spec.ts`). Update `README.md` (System diagram + API → Stock section + Caching section + Database section). Update `CLAUDE.md` (stock-module file-listing + Message patterns + Shared Libraries → cache + Operational notes). Extend `spec/architecture-lint.spec.ts` to govern the new directory shape under `apps/inventory-microservice/src/modules/stock/`. Write the closing append to `docs/implementation/04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` — the cumulative "after" schema diagram snapshot referenced from the introductory half written in task-01.
 
 The closeout has no new code in `apps/`/`libs/` beyond the seed extension, the e2e tests, and the arch-lint fixtures. Every other surface of the codebase is in its final epic-04 state when this task starts.
 
@@ -25,7 +25,7 @@ Task-09 carryover present:
 
 - The four api-gateway endpoints work end-to-end against the inventory microservice; `http/inventory.http` is the kulala flow.
 - The inventory microservice has the new domain + use cases + cache + publisher + consumer wired.
-- Three new doc files exist under `docs/implementation/epic-04-inventory-stock-level-and-location/` from tasks 02 / 04 / 06 / 07 / 09 (each task wrote at least one doc; tasks 05 wrote two; tasks 01 + 03 wrote partial files that this task completes).
+- Three new doc files exist under `docs/implementation/04-inventory-stock-level-and-location/` from tasks 02 / 04 / 06 / 07 / 09 (each task wrote at least one doc; tasks 05 wrote two; tasks 01 + 03 wrote partial files that this task completes).
 - Two existing docs have appended sections from task-08.
 - No e2e test for the new endpoints exists yet.
 
@@ -76,7 +76,7 @@ Task-09 carryover present:
   - **Message patterns** list — remove `inventory.product-stock.get`; add `inventory.stock.receive`, `inventory.stock.adjust`, `inventory.stock.query-availability`, `inventory.stock-locations.list`, `inventory.stock.received`, `inventory.stock.adjusted`, `inventory.stock-level.initialized`; mark `inventory.order.confirm` as "deprecation handler; reshaped in epic-07 for the Reservation flow"; mark `catalog.variant.created` as "consumed by inventory's auto-init use case".
   - **Shared Libraries → cache** — `INVENTORY_STOCK_KEY_VERSION='v2'` (was `'v1'`); the legacy invalidate-only prefix entry (`inventoryStockV1LegacyPrefix`).
   - **Operational notes** — bullet on cache-aside read path is updated to reflect the new key shape; bullet on the auto-init lazy-recovery scenario; bullet on the `CACHE_DRAIN_LEGACY_ON_BOOT` env flag (with the "remove after two deploy epochs" note).
-- Append the closing snapshot to `docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md`. Target ~30 additional lines. Heading: `## Cumulative "after" snapshot`. Subsections:
+- Append the closing snapshot to `docs/implementation/04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md`. Target ~30 additional lines. Heading: `## Cumulative "after" snapshot`. Subsections:
   1. **Before vs after** in tabular form: list the four old tables + their column counts, then the two new tables + their column counts.
   2. **Mermaid (or ASCII) diagram** of the new schema: two boxes (`stock_location`, `stock_level`), one arrow from `stock_level.stock_location_id` to `stock_location.id`. The cross-service `variant_id` arrow points off-diagram with a `(see epic-02)` label.
   3. **Variant-id-keyed surfaces.** A single bullet list naming every surface that switched from `productId` to `variantId` keying: the DB column, the cache key, the HTTP path (`/api/inventory/variants/:variantId/stock`), the RMQ payload field for the four `inventory.stock.*` routing keys.
@@ -100,7 +100,7 @@ Task-09 carryover present:
 - `README.md` — System diagram + API → Stock + Caching → Cache key + Database sections.
 - `CLAUDE.md` — Stock module file-listing + Message patterns + Shared Libraries → cache + Operational notes.
 - `spec/architecture-lint.spec.ts` — inventory fixtures updated per above.
-- `docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` — closing append.
+- `docs/implementation/04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` — closing append.
 
 ## Files to delete
 
@@ -116,7 +116,7 @@ None. (The deletions were carried out by tasks 01 / 05 / 06 / 09.)
 
 ## Closing doc append
 
-`docs/implementation/epic-04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` gets the `## Cumulative "after" snapshot` section appended. The introductory half (written in task-01) ends with "task-10 appends the closing snapshot here"; this task fulfills that forward-reference.
+`docs/implementation/04-inventory-stock-level-and-location/01-old-tables-dropped-and-new-schema.md` gets the `## Cumulative "after" snapshot` section appended. The introductory half (written in task-01) ends with "task-10 appends the closing snapshot here"; this task fulfills that forward-reference.
 
 Concrete content of the snapshot section:
 
@@ -166,7 +166,7 @@ The epic's exit criteria (cumulative, from the epic frontmatter) all hold:
 - [ ] After `yarn test:seed`, `GET /api/inventory/variants/1/stock` returns `{ levels: [{ quantityOnHand: 100, … }] }`.
 - [ ] Redis: keys observed via `redis-cli --scan --pattern 'ris:inventory:stock:v2:*'` match the new shape; no `v1`-prefixed keys are written on the new code path.
 - [ ] Creating a new Variant via the catalog flow results in a `StockLevel = 0` row at `default-warehouse` within seconds (covered by the first e2e spec).
-- [ ] Per-task docs present under `docs/implementation/epic-04-inventory-stock-level-and-location/` — eight `*.md` files: `01-old-tables-dropped-and-new-schema.md`, `02-default-stocklocation-auto-provision.md`, `03-stocklevel-aggregate-and-version-column.md`, `04-cache-key-bump-v1-to-v2.md`, `05-auto-init-on-variant-created.md`, `06-receive-and-adjust-use-cases.md`, `07-availability-read-path.md`, `08-inventory-http-file.md`.
+- [ ] Per-task docs present under `docs/implementation/04-inventory-stock-level-and-location/` — eight `*.md` files: `01-old-tables-dropped-and-new-schema.md`, `02-default-stocklocation-auto-provision.md`, `03-stocklevel-aggregate-and-version-column.md`, `04-cache-key-bump-v1-to-v2.md`, `05-auto-init-on-variant-created.md`, `06-receive-and-adjust-use-cases.md`, `07-availability-read-path.md`, `08-inventory-http-file.md`.
 - [ ] `README.md` System diagram + API + Caching + Database sections updated.
 - [ ] `CLAUDE.md` Stock module + Message patterns + cache notes updated.
 - [ ] `grep -rn "tmp/" docs apps libs http README.md CLAUDE.md` returns zero hits.

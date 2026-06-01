@@ -68,7 +68,7 @@ that can be called *without* a transaction reference.
 
 ### 1. Why a wrapper, not an `afterCommit` registry on the repository
 
-Two designs were considered (the task brief named both):
+Two designs were considered (both were on the table):
 
 - **Option A — `withInvalidation` wrapper on the cache port** (chosen).
 - **Option B — `afterCommit(callback)` registry on

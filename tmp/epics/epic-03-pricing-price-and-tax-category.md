@@ -5,7 +5,7 @@ source_stages: [walking-skeleton]
 depends_on: [epic-02]
 microservices: [api-gateway, catalog-microservice]
 task_subfolder: tmp/tasks/epic-03-pricing-price-and-tax-category/
-docs_subfolder: docs/implementation/epic-03-pricing-price-and-tax-category/
+docs_subfolder: docs/implementation/03-pricing-price-and-tax-category/
 ---
 
 # Epic 03 — Pricing foundation — Price + TaxCategory, colocated with catalog
@@ -121,7 +121,7 @@ Add a money layer to the catalog. Implement `Price` (currency-scoped, time-bound
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-03-pricing-price-and-tax-category/`:
+**Per-task markdown files** under `docs/implementation/03-pricing-price-and-tax-category/`:
 
 - `01-pricing-module-scaffold.md` — sibling module inside catalog-microservice; boundaries lint rules; new routing keys.
 - `02-price-domain-and-append-only-history.md` — append-only-for-history rationale, `(variantId, currency)` scope, the closed/open interval ledger.
@@ -159,7 +159,7 @@ Add a money layer to the catalog. Implement `Price` (currency-scoped, time-bound
 
 | Task | Entry state assumed | Carryover artifacts produced (never under `tmp/`) |
 |---|---|---|
-| 1 | `epic-02` complete; catalog-microservice boots; products + variants exist in seed. | New `apps/catalog-microservice/src/modules/pricing/` skeleton; updated `eslint.config.mjs`; `spec/architecture-lint.spec.ts` extended; `docs/implementation/epic-03-…/01-…md`. |
+| 1 | `epic-02` complete; catalog-microservice boots; products + variants exist in seed. | New `apps/catalog-microservice/src/modules/pricing/` skeleton; updated `eslint.config.mjs`; `spec/architecture-lint.spec.ts` extended; `docs/implementation/03-…/01-…md`. |
 | 2 | Task 1 carryover present. | `price.model.ts`, `tax-category.model.ts`, entities, mappers, repositories; new migration; `02-…md`, `03-…md`. |
 | 3 | Tasks 1–2 carryover present. | Three use cases + specs; updated `MicroserviceClientCatalogModule` to expose RPC patterns; routing keys added; `05-…md`. |
 | 4 | Tasks 1–3 carryover present. | Updated `publish-product.use-case.ts` + its spec; `04-…md`. |
@@ -176,7 +176,7 @@ Add a money layer to the catalog. Implement `Price` (currency-scoped, time-bound
 - [ ] Every request in `http/pricing.http` executes end-to-end.
 - [ ] `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded Price.
 - [ ] At-most-one-`validTo IS NULL`-per-`(variantId, currency)` invariant verified by the concurrency test.
-- [ ] Per-task docs present under `docs/implementation/epic-03-pricing-price-and-tax-category/`.
+- [ ] Per-task docs present under `docs/implementation/03-pricing-price-and-tax-category/`.
 - [ ] `README.md` API / Environment sections updated; `CLAUDE.md` catalog section updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 4
 title: Rewrite the StockItem domain aggregate as the StockLevel aggregate
 depends_on: [01, 02, 03]
-doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md
+doc_deliverable: docs/implementation/04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md
 ---
 
 # Task 04 — Rewrite the `StockItem` aggregate as `StockLevel`
@@ -46,7 +46,7 @@ Task-03 carryover present:
 - Delete `apps/inventory-microservice/src/modules/stock/domain/stock-item.model.ts`.
 - Delete `apps/inventory-microservice/src/modules/stock/domain/spec/stock-item.model.spec.ts`.
 - Update `domain/index.ts` to drop the `StockItem` export and add the new events.
-- Append the **Domain Aggregate** half to `docs/implementation/epic-04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md`.
+- Append the **Domain Aggregate** half to `docs/implementation/04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md`.
 
 **Out:**
 
@@ -345,7 +345,7 @@ export {
 - `apps/inventory-microservice/src/modules/stock/domain/events/stock-released.event.ts` — same.
 - `apps/inventory-microservice/src/modules/stock/domain/events/index.ts` — re-export the new event classes.
 - `apps/inventory-microservice/src/modules/stock/domain/index.ts` — drop `StockItem`, add `StockLevel` + the new events.
-- `docs/implementation/epic-04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md` — append the domain half.
+- `docs/implementation/04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md` — append the domain half.
 
 ## Files to delete
 
@@ -362,7 +362,7 @@ export {
 
 ## Doc deliverable
 
-Append the **Domain Aggregate** half to `docs/implementation/epic-04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md`. Target ~120 additional lines. Sections appended:
+Append the **Domain Aggregate** half to `docs/implementation/04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md`. Target ~120 additional lines. Sections appended:
 
 1. **Aggregate shape.** The mutator surface (`receive(amount)` / `applySignedDelta(delta, reasonCode)`); the deferred mutators (`reserve(amount)` / `release(amount)`) are noted but not present, with a forward link to epic-07.
 2. **Per-mutation `version` bump — active but un-checked.** Why the bump lives in the aggregate even though no check fires today: it gives the `@VersionColumn()` column truthful contents from this commit, so epic-07's retrofit (which adds `WHERE version = ?` to the UPDATE) is purely additive. The doc explicitly warns: "do not remove the bump as 'dead code' before epic-07 lands".

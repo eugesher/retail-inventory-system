@@ -5,7 +5,7 @@ source_stages: [production-core]
 depends_on: [epic-04, epic-05]
 microservices: [api-gateway, inventory-microservice, retail-microservice]
 task_subfolder: tmp/tasks/epic-07-inventory-reservation-and-stock-movement/
-docs_subfolder: docs/implementation/epic-07-inventory-reservation-and-stock-movement/
+docs_subfolder: docs/implementation/07-inventory-reservation-and-stock-movement/
 ---
 
 # Epic 07 — Inventory production-shape — Reservation (TTL, cartId) + typed StockMovement ledger
@@ -132,7 +132,7 @@ Close the inventory model's production-shape gap and make the no-oversell invari
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-07-inventory-reservation-and-stock-movement/`:
+**Per-task markdown files** under `docs/implementation/07-inventory-reservation-and-stock-movement/`:
 
 - `01-reservation-aggregate-and-q2-q9.md` — restate Q2 (explicit Reservation) and Q9 (TTL ~15min, refresh on writes, immediate commit on place).
 - `02-stock-movement-typed-ledger.md` — types and their signs; polymorphic reference; append-only enforcement.
@@ -204,7 +204,7 @@ Close the inventory model's production-shape gap and make the no-oversell invari
 - [ ] Add-to-cart on a Variant with `quantityOnHand=0` returns `409 OUT_OF_STOCK`.
 - [ ] Place Order produces exactly one `allocation` StockMovement per OrderLine; querying `/api/inventory/variants/:id/movements` returns the expected timeline.
 - [ ] `redis-cli --scan --pattern 'ris:inventory:stock:v3:*'` shows v3 entries; v2 entries are not written on new code paths.
-- [ ] Per-task docs present under `docs/implementation/epic-07-inventory-reservation-and-stock-movement/`.
+- [ ] Per-task docs present under `docs/implementation/07-inventory-reservation-and-stock-movement/`.
 - [ ] `README.md` System diagram + API + Caching updated; `CLAUDE.md` stock module + message patterns + cache notes updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

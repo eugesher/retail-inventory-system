@@ -3,7 +3,10 @@ import * as path from 'path';
 
 import { installMemoryPinoLogger } from '@retail-inventory-system/observability/testing';
 
-dotenv.config({ path: path.resolve(__dirname, '..', '.env.local') });
+// `quiet: true` silences only dotenv's own "[dotenv] injecting env …" tip
+// line. Source-level `console.*` calls are left untouched — they're our local
+// debugging channel, so Jest's console is deliberately not globally silenced.
+dotenv.config({ path: path.resolve(__dirname, '..', '.env.local'), quiet: true });
 
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_LOGGING = 'false';

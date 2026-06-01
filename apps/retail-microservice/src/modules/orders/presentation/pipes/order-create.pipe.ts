@@ -19,24 +19,10 @@ export class OrderCreatePipe implements PipeTransform<
   ) {}
 
   public async transform(payload: IOrderCreatePayload): Promise<IOrderCreatePayload> {
-    const { customerId, correlationId } = payload;
+    const { correlationId } = payload;
     const productIds = [...new Set(payload.products.map((p) => p.productId))];
 
-    const [exists, foundProductIds] = await Promise.all([
-      this.orderRepository.customerExists(customerId),
-      this.orderRepository.findExistingProductIds(productIds),
-    ]);
-
-    if (!exists) {
-      this.logger.warn(
-        { correlationId, customerId },
-        'Customer not found, rejecting order creation',
-      );
-      throw new RpcException({
-        statusCode: HttpStatus.NOT_FOUND,
-        message: `Customer #${customerId} not found`,
-      });
-    }
+    const foundProductIds = await this.orderRepository.findExistingProductIds(productIds);
 
     if (foundProductIds.length !== productIds.length) {
       this.logger.warn(

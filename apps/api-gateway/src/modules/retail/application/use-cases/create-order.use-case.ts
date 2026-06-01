@@ -22,10 +22,7 @@ export class CreateOrderUseCase {
     this.logger.assign({ correlationId });
 
     try {
-      this.logger.info(
-        { customerId: dto.customerId, productCount: dto.products.length },
-        'Order creation in progress',
-      );
+      this.logger.info({ productCount: dto.products.length }, 'Order creation in progress');
 
       const order = await this.retailGateway.createOrder(dto, correlationId);
 

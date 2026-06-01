@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 3
 title: Add stock_level with the optimistic-concurrency version column
 depends_on: [01, 02]
-doc_deliverable: docs/implementation/epic-04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md
+doc_deliverable: docs/implementation/04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md
 ---
 
 # Task 03 — Add `stock_level` with the `@VersionColumn()` token
@@ -325,7 +325,7 @@ providers: [
 - `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/stock-level.mapper.ts`
 - `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/spec/stock-typeorm.repository.spec.ts` (new — old spec was deleted in task-01)
 - `migrations/<timestamp>-CreateStockLevelTable.ts`
-- `docs/implementation/epic-04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md` (persistence half — task-04 appends domain half)
+- `docs/implementation/04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md` (persistence half — task-04 appends domain half)
 
 ## Files to modify
 
@@ -359,7 +359,7 @@ None in this task. The legacy use case files are stubbed, not deleted; task-05 o
 
 ## Doc deliverable
 
-Write the **persistence half** of `docs/implementation/epic-04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md`. Target ~140 lines now; task-04 appends ~120 lines for the domain half. Sections this task writes:
+Write the **persistence half** of `docs/implementation/04-inventory-stock-level-and-location/03-stocklevel-aggregate-and-version-column.md`. Target ~140 lines now; task-04 appends ~120 lines for the domain half. Sections this task writes:
 
 1. **Why running totals, not a delta ledger.** Restate the epic's rationale: reads do not pay the `SUM` cost; the no-oversell invariant has a natural home on the row; OCC has a column to attach to. Cross-link doc 01 (which covered "why the ledger goes away" from the inverse angle).
 2. **The column shape.** Table with each column, its type, default, and one-line semantic note. The `variant_id` row notes "cross-service FK by convention — not declared with REFERENCES; see §FK strategy".

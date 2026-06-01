@@ -3,7 +3,7 @@ epic: epic-01
 task_number: 3
 title: Inflate the JWT permissions claim on login + refresh, surface permissions on `ICurrentUser`
 depends_on: [task-01, task-02]
-doc_deliverable: docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md
+doc_deliverable: docs/implementation/01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md
 ---
 
 # Task 03 — Inflate JWT permissions claim on login + refresh, surface on `ICurrentUser`
@@ -89,7 +89,7 @@ None.
 
 ## Doc deliverable
 
-Append the **JWT inflation half** to `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md`. Create the file in this task — leave a clear `<!-- guard-and-decorator-half-anchor -->` marker at the end for task-04. Sections to write now:
+Append the **JWT inflation half** to `docs/implementation/01-baseline-identity-staffuser-customer-rbac/03-permissions-guard-and-decorator.md`. Create the file in this task — leave a clear `<!-- guard-and-decorator-half-anchor -->` marker at the end for task-04. Sections to write now:
 
 1. **Why inflate at issue time.** Trade off: hot-path DB lookup per request vs. one-DB-lookup per login. RBAC reads dominate writes; inflation amortises the cost across the JWT's lifetime. Cite the epic's §Test Strategy line "the JWT must already carry resolved permission codes".
 2. **The merge algorithm.** Set-union across the StaffUser's bound roles, sort ASC. Why sorted: deterministic tests + better caching downstream (an HTTP edge cache or CDN can use the JWT body's hash as a cache key without spurious misses from claim reordering).

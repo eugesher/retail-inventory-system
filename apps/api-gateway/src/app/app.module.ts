@@ -3,13 +3,20 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 
-import { JwtAuthGuard, RolesGuard } from '@retail-inventory-system/auth';
+import { JwtAuthGuard, PermissionsGuard, RolesGuard } from '@retail-inventory-system/auth';
 import { configModuleConfig } from '@retail-inventory-system/config';
 import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import { CorrelationMiddleware, LoggerModuleConfig } from '@retail-inventory-system/observability';
 
-import { AuthModule, UserEntity } from '../modules/auth';
+import {
+  CustomerEntity,
+  PermissionEntity,
+  RoleEntity,
+  StaffUserEntity,
+} from '../modules/auth/infrastructure/persistence';
+import { AuthModule } from '../modules/auth';
+import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
 import { RetailModule } from '../modules/retail';
 
@@ -17,14 +24,16 @@ import { RetailModule } from '../modules/retail';
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.API_GATEWAY)),
-    DatabaseModule.forRoot([UserEntity]),
+    DatabaseModule.forRoot([StaffUserEntity, RoleEntity, PermissionEntity, CustomerEntity]),
     AuthModule,
+    IamModule,
     RetailModule,
     InventoryModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule implements NestModule {

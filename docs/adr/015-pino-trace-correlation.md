@@ -163,5 +163,5 @@ a smoke test rather than this unit suite.
   bootstrap that registers the auto-instrumentations bundle, which
   is the activation seam for `instrumentation-pino`.
 - [ADR-007](007-pino-and-opentelemetry.md) — the parent decision
-  committing to Pino + OTel; `epic-00/task-06` already amends its
+  committing to Pino + OTel; a subsequent revision already amends its
   example log shape from snake_case to camelCase.

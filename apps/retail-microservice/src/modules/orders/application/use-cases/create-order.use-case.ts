@@ -7,7 +7,7 @@ import {
   OrderStatusEnum,
 } from '@retail-inventory-system/contracts';
 
-import { CustomerRef, Order, OrderCreatedEvent } from '../../domain';
+import { Order, OrderCreatedEvent } from '../../domain';
 import {
   IOrderEventsPublisherPort,
   IOrderRepositoryPort,
@@ -27,15 +27,14 @@ export class CreateOrderUseCase {
   ) {}
 
   public async execute(payload: IOrderCreatePayload): Promise<OrderCreateResponseDto> {
-    const { customerId, products, correlationId } = payload;
+    const { products, correlationId } = payload;
 
     this.logger.info(
-      { correlationId, customerId, productCount: products.length },
+      { correlationId, productCount: products.length },
       'Received RPC: create order',
     );
 
     const order = Order.create({
-      customer: new CustomerRef({ id: customerId }),
       lines: products.map((p) => ({ productId: p.productId, quantity: p.quantity })),
     });
 
@@ -47,11 +46,10 @@ export class CreateOrderUseCase {
         throw new Error('CreateOrderUseCase: repository returned an unsaved aggregate');
       }
 
-      this.logger.info({ correlationId, orderId, customerId }, 'Order created');
+      this.logger.info({ correlationId, orderId }, 'Order created');
 
       const event = new OrderCreatedEvent({
         orderId,
-        customerId,
         lines: products.map((p) => ({ productId: p.productId, quantity: p.quantity })),
       });
       try {
@@ -70,7 +68,7 @@ export class CreateOrderUseCase {
         message: 'Order successfully created',
       };
     } catch (error) {
-      this.logger.error({ err: error as Error, correlationId, customerId }, 'Error creating order');
+      this.logger.error({ err: error as Error, correlationId }, 'Error creating order');
       throw error;
     }
   }

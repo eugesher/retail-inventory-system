@@ -3,7 +3,7 @@ epic: epic-03
 task_number: 4
 title: Update Publish Product to hard-fail when any variant lacks an active Price in DEFAULT_CURRENCY
 depends_on: [task-03]
-doc_deliverable: docs/implementation/epic-03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md
+doc_deliverable: docs/implementation/03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md
 ---
 
 # Task 04 — Update `Publish Product` to hard-fail on missing active Price
@@ -173,7 +173,7 @@ Updates to the existing spec (`publish-product.use-case.spec.ts`):
 
 - `apps/catalog-microservice/src/modules/catalog/domain/publish-precondition-failed.error.ts`.
 - `apps/catalog-microservice/src/modules/catalog/infrastructure/catalog-ports.module.ts` (only if the cycle resolution requires it — see above).
-- `docs/implementation/epic-03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md`.
+- `docs/implementation/03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md`.
 
 ## Files to modify
 
@@ -191,7 +191,7 @@ None.
 
 ## Doc deliverable
 
-Write `docs/implementation/epic-03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md`. Target ~150 lines. Sections:
+Write `docs/implementation/03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md`. Target ~150 lines. Sections:
 
 1. **What changed.** The warning is gone; the hard-fail is in. Diff-level pointer to the deleted TODO so a future contributor searching for it understands the history.
 2. **The `DEFAULT_CURRENCY` env.** Why an env, not a hard-coded constant. Why `USD` is the default. How to override per-deployment (cite where it lives in `docker-compose.yml` and `.env.example`). Note: this is the **only** currency the publish precondition checks against; multi-currency catalogs are still allowed (a variant can have prices in EUR + USD), but if `DEFAULT_CURRENCY=USD` then the USD price is what gates publish. Document the tradeoff: a market-first deployment (say, EUR-primary) would set `DEFAULT_CURRENCY=EUR` and the precondition flips. Forward-link: `epic-15` may introduce a per-market scope.

@@ -3,7 +3,7 @@ epic: epic-04
 task_number: 8
 title: Wire the new RabbitMQ publisher — three new routing keys + cleanup of legacy ones
 depends_on: [01, 02, 03, 04, 05, 06, 07]
-doc_deliverable: appended to docs/implementation/epic-04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md and 05-auto-init-on-variant-created.md
+doc_deliverable: appended to docs/implementation/04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md and 05-auto-init-on-variant-created.md
 ---
 
 # Task 08 — Wire the new RMQ publisher
@@ -333,8 +333,8 @@ This task does **not** modify `auto-init-stock-level.use-case.ts`. Task-07 alrea
 - (`spec/auto-init-stock-level.use-case.spec.ts` was already publisher-port-aware in task-07 — not modified here.)
 - `apps/inventory-microservice/src/modules/stock/presentation/stock.controller.ts` — three handler routing keys swap from inline literals to constants; deprecation handler for `INVENTORY_ORDER_CONFIRM` added.
 - `apps/notification-microservice/.../<stock-low consumer file>` — type imports realign with the reshaped `IInventoryStockLowEvent`.
-- `docs/implementation/epic-04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md` — append emitted-event section.
-- `docs/implementation/epic-04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md` — append the cross-event-consistency paragraph + deprecation-handler note.
+- `docs/implementation/04-inventory-stock-level-and-location/06-receive-and-adjust-use-cases.md` — append emitted-event section.
+- `docs/implementation/04-inventory-stock-level-and-location/05-auto-init-on-variant-created.md` — append the cross-event-consistency paragraph + deprecation-handler note.
 
 ## Files to delete
 

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
 
-import { IPasswordPort } from '../../application/ports/password.port';
+import { IPasswordPort } from '../../application/ports';
 
 @Injectable()
 export class Argon2PasswordAdapter implements IPasswordPort {

@@ -28,7 +28,7 @@ Tasks depend on each other through the `Carryover Between Tasks` table in the ep
 
 ## Document-deliverable map
 
-The epic lists ten topic-numbered docs under `docs/implementation/epic-05-cart-order-payment-walking-skeleton/`. The same doc can be touched by more than one task; tasks 05 + 07 + 11 + 12 carry append-only sections rather than owning their own files.
+The epic lists ten topic-numbered docs under `docs/implementation/05-cart-order-payment-walking-skeleton/`. The same doc can be touched by more than one task; tasks 05 + 07 + 11 + 12 carry append-only sections rather than owning their own files.
 
 - **`01-retail-rebuild-and-old-tables-dropped.md`** — task-01 writes the dropped-tables half (what was removed and why a full rewrite is cheaper than incremental refactor). Task-12 appends the cumulative "after" snapshot (the five-table → six-table delta in one place; the legacy `customer` table being deleted in favor of identity-only resolution per `epic-01`'s default-b decision).
 - **`02-cart-aggregate-and-q1-q3-decisions.md`** — task-02 writes the persistence-and-decisions intro (Open Question Q1 — persistent for authenticated, ephemeral-promoted for guests; Open Question Q3 — distinct aggregates one-shot-converted at Place Order). Task-05 appends the use-case-flow half (Add to Cart's price-snapshot via the catalog's Select Applicable Price RPC, the Q1 guest-promotion path). Task-12 final-passes for cross-link parity.
@@ -71,6 +71,6 @@ Mirrors the epic's `Exit Criteria` section. Each task carries its own per-task e
 - [ ] After Place Order, RabbitMQ shows `retail.order.placed` and `retail.payment.authorized` published; the notification microservice logs an order-placed line (proves the consumer re-pointing in task-11 worked).
 - [ ] After Capture Payment, `retail.payment.captured` is published; Payment row in `captured` status; Order's `paymentStatus = captured`.
 - [ ] `OrderLine.sku`, `OrderLine.nameSnapshot`, `OrderLine.unitPriceMinor` are populated and match the catalog state at place-time.
-- [ ] Per-task docs present under `docs/implementation/epic-05-cart-order-payment-walking-skeleton/` (ten `*.md` files).
+- [ ] Per-task docs present under `docs/implementation/05-cart-order-payment-walking-skeleton/` (ten `*.md` files).
 - [ ] `README.md` System diagram + API → Cart + API → Orders + Payment gateway + Authentication → Roles sections rewritten; `CLAUDE.md` retail-microservice + Message patterns + Forbidden imports sections rewritten.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.

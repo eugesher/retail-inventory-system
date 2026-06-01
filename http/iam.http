@@ -1,0 +1,124 @@
+# IAM admin endpoints (apps/api-gateway/src/modules/iam/presentation/iam.controller.ts)
+#
+# Five endpoints for managing the relational RBAC schema at runtime:
+#   1. GET    /api/iam/roles                       — list roles
+#   2. POST   /api/iam/roles                       — create role
+#   3. PATCH  /api/iam/roles/:id                   — patch description / replace permissions
+#   4. POST   /api/iam/staff/:id/roles             — assign roles to a staff user
+#   5. DELETE /api/iam/staff/:id/roles/:roleName   — revoke a role from a staff user
+#
+# All endpoints sit behind a bearer token and a `@RequiresPermission(...)`
+# gate (ADR-024):
+#   • iam:role-edit gates the role-management endpoints (#1, #2, #3)
+#   • iam:assign    gates the staff-role assignment endpoints (#4, #5)
+# The seeded admin (admin@example.com) carries every code in the registry, so
+# logging in as admin is sufficient for every block below.
+#
+# Prereqs: send `# @name adminLogin` first, then `# @name adminMe`. Every
+# later block substitutes {{adminLogin.response.body.$.accessToken}} for the
+# bearer header and {{adminMe.response.body.$.id}} for the staff-user path
+# segment. The duplicate adminLogin block (mirrored from http/auth.http) is
+# intentional — this file stands on its own.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name adminLogin
+# POST /api/auth/staff/login
+# Mirror of http/auth.http's staffLogin block. Returns access + refresh
+# tokens. The login response (TokenResponseDto) intentionally omits user
+# info, so the next block (`adminMe`) is what supplies the staff-user id for
+# the assign/revoke blocks downstream.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+
+# @name adminMe
+# GET /api/auth/me
+# Resolves "who is the caller" → { id, email, roles, permissions }. We chain
+# this block specifically to capture the admin's id so the staff-role
+# blocks below can target it via {{adminMe.response.body.$.id}}. Side
+# benefit: verifies the access token from adminLogin actually authenticates.
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{adminLogin.response.body.$.accessToken}}
+
+###
+
+# @name listRoles
+# GET /api/iam/roles
+# Returns Role[] sorted by name ASC; each entry includes its permission
+# codes. Requires `iam:role-edit`.
+GET {{baseUrl}}/iam/roles
+Authorization: Bearer {{adminLogin.response.body.$.accessToken}}
+
+###
+
+# @name createRole
+# POST /api/iam/roles
+# Body shape (CreateRoleRequestDto):
+#   name: ^[a-z][a-z0-9-]*$, 1..64 — unique in role.name (409 on duplicate)
+#   description?: string, ≤255
+#   permissionCodes: PermissionCodeEnum[] — every code must exist in the
+#                    registry (400 lists the unknown codes)
+# Returns 201 with the persisted Role projection. `id` is captured for the
+# patchRole block below.
+POST {{baseUrl}}/iam/roles
+Authorization: Bearer {{adminLogin.response.body.$.accessToken}}
+Content-Type: application/json
+
+{
+  "name": "ops-readonly",
+  "description": "Operations team read-only access",
+  "permissionCodes": ["catalog:read", "inventory:read", "order:read"]
+}
+
+###
+
+# @name patchRole
+# PATCH /api/iam/roles/:id
+# Body shape (UpdateRoleRequestDto): description? | permissionCodes? (at
+# least one — both omitted → 400 "No-op patch"). permissionCodes is a
+# REPLACE, not a merge — supply the full desired set. The adapter does the
+# swap in a single transaction.
+PATCH {{baseUrl}}/iam/roles/{{createRole.response.body.$.id}}
+Authorization: Bearer {{adminLogin.response.body.$.accessToken}}
+Content-Type: application/json
+
+{
+  "description": "Ops team (read + audit)",
+  "permissionCodes": ["catalog:read", "inventory:read", "order:read", "audit:read"]
+}
+
+###
+
+# @name assignStaffRole
+# POST /api/iam/staff/:id/roles
+# Idempotent — reassigning a role the user already holds is a no-op (200
+# either way). Unknown role name → 400; missing or suspended staff user →
+# 404. Returns 200 with the updated StaffUser projection
+# { id, email, roleNames }.
+POST {{baseUrl}}/iam/staff/{{adminMe.response.body.$.id}}/roles
+Authorization: Bearer {{adminLogin.response.body.$.accessToken}}
+Content-Type: application/json
+
+{
+  "roleNames": ["ops-readonly"]
+}
+
+###
+
+# @name revokeStaffRole
+# DELETE /api/iam/staff/:id/roles/:roleName
+# 204 on success. 404 if the role is not currently bound to the user. 409
+# "Cannot revoke the last remaining role" if it would leave the StaffUser
+# with no roles — the seeded admin holds the `admin` role independently of
+# `ops-readonly`, so this revoke succeeds.
+DELETE {{baseUrl}}/iam/staff/{{adminMe.response.body.$.id}}/roles/ops-readonly
+Authorization: Bearer {{adminLogin.response.body.$.accessToken}}

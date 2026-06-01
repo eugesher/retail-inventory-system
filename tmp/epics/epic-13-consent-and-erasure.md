@@ -5,7 +5,7 @@ source_stages: [hardening]
 depends_on: [epic-01, epic-05]
 microservices: [api-gateway]
 task_subfolder: tmp/tasks/epic-13-consent-and-erasure/
-docs_subfolder: docs/implementation/epic-13-consent-and-erasure/
+docs_subfolder: docs/implementation/13-consent-and-erasure/
 ---
 
 # Epic 13 — Hardening — ConsentRecord + tombstone-erase Customer (Q6) + session revoke on erase
@@ -115,7 +115,7 @@ Add the report's Stage-3 Customer-side hardening: `ConsentRecord` (transactional
 
 ## Documentation Deliverables
 
-**Per-task markdown files** under `docs/implementation/epic-13-consent-and-erasure/`:
+**Per-task markdown files** under `docs/implementation/13-consent-and-erasure/`:
 
 - `01-consent-record-aggregate.md` — the four fields; default-true transactional; the bypass rule for transactional channels.
 - `02-erase-customer-q6.md` — restate Q6; the per-column nulling list; what is NOT erased (Order snapshots); session revocation.
@@ -170,7 +170,7 @@ Add the report's Stage-3 Customer-side hardening: `ConsentRecord` (transactional
 - [ ] Transactional email to a customer with `transactionalEmail=true` succeeds regardless of marketing consent.
 - [ ] `customer.erased` event payload contains NO PII (only the customerId + actor + timestamp); the audit log row matches.
 - [ ] Every request in `http/consent.http` + `http/customer-admin.http` executes end-to-end.
-- [ ] Per-task docs present under `docs/implementation/epic-13-consent-and-erasure/`.
+- [ ] Per-task docs present under `docs/implementation/13-consent-and-erasure/`.
 - [ ] `README.md` + `CLAUDE.md` updated.
 - [ ] No file under `docs/`, `apps/`, `libs/`, `http/`, `README.md`, or `CLAUDE.md` references any path under `tmp/`.
 

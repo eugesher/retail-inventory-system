@@ -151,10 +151,9 @@ as an *import surface* is permitted across the wider `infrastructure/`
 tree (the lint rules in `eslint.config.mjs` reflect this).
 
 No code changes are required by this amendment; the `auth.module.ts`
-precedent and the eight follow-on tasks under `tmp/tasks/**` that
-instruct `TypeOrmModule.forFeature(...)` at the infrastructure-module
-layer become compliant by the clarification. Filed under
-`tmp/tasks/epic-00/task-17-adr-019-reconcile-typeorm-vs-database-module-for-feature.md`.
+precedent and any follow-on work that uses `TypeOrmModule.forFeature(...)`
+at the infrastructure-module layer becomes compliant by the
+clarification.
 
 ---
 

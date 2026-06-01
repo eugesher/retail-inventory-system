@@ -1,5 +1,5 @@
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import KeyvRedis from '@keyv/redis';
 import { trace } from '@opentelemetry/api';
 
@@ -19,7 +19,7 @@ interface IRedisScanClient {
 }
 
 @Injectable()
-export class RedisCacheAdapter implements ICachePort {
+export class RedisCacheAdapter implements ICachePort, OnApplicationShutdown {
   // In-process map of in-flight loads for `singleFlight`. Single-replica
   // deployments get full dedupe; multi-replica deployments dedupe per
   // process — one replica's stampede no longer fans out to
@@ -32,6 +32,15 @@ export class RedisCacheAdapter implements ICachePort {
     @Inject(CACHE_MANAGER)
     private readonly cache: Cache,
   ) {}
+
+  // Close the underlying Redis connection on shutdown. `app.close()` fans the
+  // shutdown hooks out to every provider, so this fires in tests (which call
+  // `app.close()` in `afterAll`) and on SIGTERM in prod once shutdown hooks
+  // are enabled. Without it the @keyv/redis socket lingers as an open handle —
+  // the reason the e2e run needed `--forceExit` to terminate.
+  public async onApplicationShutdown(): Promise<void> {
+    await this.getRedisAdapter()?.disconnect();
+  }
 
   public async get<T>(key: string): Promise<T | undefined> {
     const tracer = trace.getTracer(TRACER_NAME);

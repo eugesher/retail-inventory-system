@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 11
 title: Re-point notification's `order-events.consumer.ts` to `retail.order.placed`
 depends_on: [06]
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/09-routing-keys-retired-and-added.md (consumer half — completes the file)
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/09-routing-keys-retired-and-added.md (consumer half — completes the file)
 ---
 
 # Task 11 — Re-point the notification order-events consumer
@@ -135,7 +135,7 @@ export class OrderEventsConsumer {
 
 ## Doc deliverable
 
-Append to `docs/implementation/epic-05-cart-order-payment-walking-skeleton/09-routing-keys-retired-and-added.md` the consumer-side section. Task-06 wrote sections 1–2 (retired + added tables); this task adds section 3.
+Append to `docs/implementation/05-cart-order-payment-walking-skeleton/09-routing-keys-retired-and-added.md` the consumer-side section. Task-06 wrote sections 1–2 (retired + added tables); this task adds section 3.
 
 3. **The notification consumer's re-point.** Describe the path:
    - Old subscription: `@EventPattern('retail.order.created')` in `order-events.consumer.ts`; payload `IOrderCreatedEvent`.

@@ -4,8 +4,8 @@ task_number: 2
 title: Add Price + TaxCategory domain models, persistence entities, repository ports/adapters, and migration; attach tax_category_id to product_variant
 depends_on: [task-01]
 doc_deliverable:
-  - docs/implementation/epic-03-pricing-price-and-tax-category/02-price-domain-and-append-only-history.md
-  - docs/implementation/epic-03-pricing-price-and-tax-category/03-tax-category-and-variant-attachment.md
+  - docs/implementation/03-pricing-price-and-tax-category/02-price-domain-and-append-only-history.md
+  - docs/implementation/03-pricing-price-and-tax-category/03-tax-category-and-variant-attachment.md
 ---
 
 # Task 02 — Add `Price` + `TaxCategory` domain + persistence + repositories
@@ -291,8 +291,8 @@ The use-case specs are deliberately deferred to task-03.
 - `apps/catalog-microservice/src/modules/pricing/infrastructure/persistence/spec/tax-category.mapper.spec.ts`.
 - `apps/catalog-microservice/src/modules/pricing/infrastructure/system-clock.adapter.ts` (if a shared one is not used).
 - `migrations/<timestamp>-CreatePriceAndTaxCategoryTables.ts`.
-- `docs/implementation/epic-03-pricing-price-and-tax-category/02-price-domain-and-append-only-history.md`.
-- `docs/implementation/epic-03-pricing-price-and-tax-category/03-tax-category-and-variant-attachment.md`.
+- `docs/implementation/03-pricing-price-and-tax-category/02-price-domain-and-append-only-history.md`.
+- `docs/implementation/03-pricing-price-and-tax-category/03-tax-category-and-variant-attachment.md`.
 
 ## Files to modify
 

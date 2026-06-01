@@ -21,8 +21,8 @@ migration), but the lack of a port/adapter inversion means that:
 - The `ClientProxy` to RabbitMQ is the same shape as the inventory
   service holds for retail, leaking transport concerns into business
   logic and making the inter-service contract non-obvious.
-- New cross-cutting concerns (OpenTelemetry — task-10, generalized
-  cache-aside — task-11, notification dispatch — task-07) have no
+- New cross-cutting concerns (OpenTelemetry, generalized
+  cache-aside, notification dispatch) have no
   obvious seam to attach to other than directly inside the service
   classes, which would compound the coupling.
 
@@ -50,9 +50,9 @@ its top-level structural divisions, mirroring the `apps/` folder:
 - **inventory** (`apps/inventory-microservice`) — products, product
   stock, storage.
 - **notification** (`apps/notification-microservice`) — outbound
-  notifications (built fresh in task-07; today a stub).
+  notifications (built fresh later; today a stub).
 - **gateway** (`apps/api-gateway`) — HTTP edge plus authentication
-  (built fresh in task-06).
+  (authentication built fresh later).
 
 The retail and inventory contexts are bounded contexts in the DDD
 sense; notification is an application service over an external
@@ -97,11 +97,11 @@ live under `infrastructure/<concern>/` and end in `*.adapter.ts` or
 `*.repository.ts`.
 
 **Migration sequence.** The structural moves are not part of this
-ADR's scope; they are sequenced through task-03 (foundation libs),
-task-04 (integration libs), task-05 (gateway align), task-06 (auth
-fresh build), task-07 (notification fresh build), task-08 (inventory
-align), task-09 (retail-orders align). Architecture-lint enforcement
-(`eslint-plugin-boundaries` rules) is queued for task-12 once every
+ADR's scope; they are sequenced through the foundation-libs split, the
+integration-libs split, the gateway alignment, the authentication fresh
+build, the notification fresh build, the inventory alignment, and the
+retail-orders alignment. Architecture-lint enforcement
+(`eslint-plugin-boundaries` rules) is queued as a later step once every
 service has reached the target shape; until then, the rules would
 generate noise faster than the migration can resolve it.
 
@@ -154,11 +154,11 @@ and the libs we already have (`common`, `config`, `inventory`,
   swapping (e.g., MySQL → Postgres, RabbitMQ → Kafka, KeyV/Redis →
   another store) is a contained change rather than a project-wide
   edit.
-- Cross-cutting concerns from later phases (cache-aside generalization
-  in task-11, OTel spans in task-10, notification dispatch in
-  task-07) attach at the application/infrastructure boundary rather
+- Cross-cutting concerns from later phases (cache-aside generalization,
+  OTel spans, notification dispatch) attach at the
+  application/infrastructure boundary rather
   than threading through service classes.
-- Architecture lint (task-12) gains a clear target: element types map
+- Architecture lint gains a clear target: element types map
   directly to `domain | application | infrastructure | presentation`
   globs.
 
@@ -170,13 +170,13 @@ and the libs we already have (`common`, `config`, `inventory`,
   controllers — the structure can feel ceremonial. Accepted as the
   cost of uniformity, since the architecture-lint rules require the
   same shape everywhere.
-- Migration is multi-PR (tasks 03–09) and inevitably reshapes the
+- Migration is multi-PR and inevitably reshapes the
   diff surface. Each PR is scoped to one structural move so that
   reviewers can verify the shape one boundary at a time.
-- Lint rules (task-12) will catch back-edges (e.g., `domain/`
+- Lint rules will catch back-edges (e.g., `domain/`
   importing TypeORM) only after the structural moves are complete;
-  intermediate task PRs may briefly violate the target shape. This is
-  acceptable because each task is reviewed and merged before the next
+  intermediate PRs may briefly violate the target shape. This is
+  acceptable because each step is reviewed and merged before the next
   begins.
 - Choosing not to adopt CQRS or event sourcing now means a future
   decision if the read/write asymmetry grows; left as a future ADR

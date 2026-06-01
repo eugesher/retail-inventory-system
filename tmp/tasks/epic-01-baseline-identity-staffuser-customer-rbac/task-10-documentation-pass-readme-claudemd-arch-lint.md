@@ -61,7 +61,7 @@ Find the **Authentication → Roles** subsection. Replace the existing narrative
    | `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer` |
    | `order-support` | `order:read`, `order:cancel`, `order:refund` |
 
-3. A `@RequiresPermission()` snippet showing the new gating pattern, with a one-sentence note on how it interacts with `@Roles()` (links to `docs/implementation/epic-01-…/03-permissions-guard-and-decorator.md`).
+3. A `@RequiresPermission()` snippet showing the new gating pattern, with a one-sentence note on how it interacts with `@Roles()` (links to `docs/implementation/01-…/03-permissions-guard-and-decorator.md`).
 
 Add a new **Permissions** subsection under **Authentication** listing every seeded permission code and the role bundles it appears in. Use the codes from `libs/contracts/auth/permission.enum.ts` as the authoritative list.
 
@@ -138,7 +138,7 @@ None (unless the `tmp/` grep above finds stale references in source files — de
 
 ## Doc deliverable
 
-None. The doc folder `docs/implementation/epic-01-baseline-identity-staffuser-customer-rbac/` is already complete by task-08; this task adjusts the project-level docs only.
+None. The doc folder `docs/implementation/01-baseline-identity-staffuser-customer-rbac/` is already complete by task-08; this task adjusts the project-level docs only.
 
 ## Carryover produced
 

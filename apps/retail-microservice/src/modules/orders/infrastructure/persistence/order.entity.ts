@@ -19,9 +19,6 @@ export class Order {
   @PrimaryGeneratedColumn()
   public id: number;
 
-  @Column()
-  public customerId: number;
-
   @Column({
     type: 'enum',
     enum: OrderStatusEnum,

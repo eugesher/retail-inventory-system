@@ -15,11 +15,6 @@ class OrderCreateProductDto {
 }
 
 export class OrderCreateDto {
-  @ApiProperty()
-  @IsInt()
-  @IsPositive()
-  public customerId: number;
-
   @ApiProperty({ type: [OrderCreateProductDto] })
   @IsArray()
   @ArrayMinSize(1)

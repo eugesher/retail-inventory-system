@@ -8,10 +8,10 @@
 ## Context
 
 ADR-004 commits the project to a per-module hexagonal layout for every
-service in `apps/`. Task-05 lands the structural change for the API
+service in `apps/`. This work lands the structural change for the API
 gateway (`apps/api-gateway/`).
 
-Pre-task-05 the gateway was flat:
+Before the gateway's port/adapter alignment it was flat:
 
 ```
 apps/api-gateway/src/app/api/
@@ -92,7 +92,7 @@ with the microservice it fronts (`retail-microservice` →
 
 The gateway holds no aggregate state of its own — it is presentation
 plus an outbound transport adapter. The `domain/` folder is therefore
-omitted from the retail and inventory modules. Task-06 introduces
+omitted from the retail and inventory modules. The authentication work introduces
 `modules/auth/` with a real `domain/` (User, Role) — that is the only
 module on the gateway that owns enforced state.
 
@@ -122,8 +122,8 @@ status read. Putting the pipe behind the port keeps the
 Adapters reference `ROUTING_KEYS.RETAIL_ORDER_CREATE` etc. from
 `@retail-inventory-system/messaging` rather than the
 `MicroserviceMessagePatternEnum` (kept for back-compat per ADR-008).
-This is a fresh-write rule — task-05 did not flip existing call sites
-in microservices, that's a focused cleanup pass at task-14.
+This is a fresh-write rule — this work did not flip existing call sites
+in microservices, that's a later focused cleanup pass.
 
 ### `main.ts` boots OpenTelemetry first
 
@@ -133,8 +133,8 @@ The first executable line of `apps/api-gateway/src/main.ts` is
 import '@retail-inventory-system/observability/tracer';
 ```
 
-The body of `tracer.ts` is empty today (filled in task-10). The
-import is wired now so the cutover in task-10 needs no change to
+The body of `tracer.ts` is empty today (filled in by the OTel SDK
+wiring). The import is wired now so that cutover needs no change to
 `main.ts`. OTel must initialize before `NestFactory.create*()` so
 auto-instrumentation can patch HTTP, MySQL (TypeORM), Redis, and
 AMQP modules in time — that requirement constrains the bootstrap
@@ -142,20 +142,20 @@ ordering even though the body is currently a no-op.
 
 ### `RETAIL_ORDER_GET` payload preserved as-is
 
-The pre-task-05 pipe sent only the numeric order id over
+The earlier pipe sent only the numeric order id over
 `RETAIL_ORDER_GET` (no `correlationId`). The new
 `getOrderStatus(id)` adapter method preserves that wire shape
 verbatim — flipping it to include a `correlationId` would have
 required a coordinated change on the retail microservice
 `@MessagePattern` handler, which is out of scope for the gateway
 alignment. The gap is acknowledged here; a fix lands together with
-the publisher-port introduction in a later task.
+the publisher-port introduction in later work.
 
 ## Consequences
 
 - **+** The gateway matches the hexagonal layout the rest of the
-  services adopt in tasks 06–09. The architecture-lint rules in
-  task-12 can treat all `apps/*` uniformly.
+  services adopt. The architecture-lint rules can treat all `apps/*`
+  uniformly.
 - **+** Replacing RabbitMQ with another transport at the gateway is
   now a single-file change (the adapter). Use-cases and the pipe
   stay untouched.
@@ -168,7 +168,7 @@ the publisher-port introduction in a later task.
 - **−** Two methods on `IRetailGatewayPort` carry `correlationId` as
   an explicit parameter; `getOrderStatus` does not. The asymmetry
   reflects the wire format and is documented at the port — a
-  follow-up task aligns it.
+  follow-up change aligns it.
 
 ## Alternatives considered
 
@@ -177,7 +177,7 @@ the publisher-port introduction in a later task.
   `application/` is empty, breaking the uniform shape ADR-004
   prescribes. The use-case is intentionally slim today; it carries
   the logging and error-translation concerns that previously lived
-  in the per-action service, and gives task-06 an obvious place to
+  in the per-action service, and gives the authentication work an obvious place to
   layer `auth`-aware logic.
 - **Keep the pipe injecting `ClientProxy`.** Rejected: the
   "no `ClientProxy` outside adapters" verification gate would fail,
@@ -188,13 +188,13 @@ the publisher-port introduction in a later task.
   the proxy talks to is `retail-microservice` / `inventory-microservice`.
   Naming after the downstream service makes the cross-app boundary
   visible at the directory level and matches the layout the
-  microservices themselves adopt in tasks 08–09.
+  microservices themselves adopt in their hexagonal alignments.
 - **Move `app.module.ts` out of `apps/api-gateway/src/app/` to the
   `src/` root** (matching the recommendation diagram exactly).
   Deferred: requires updating `tsconfig.json` and
   `jest.e2e.config.js` path aliases. Cosmetic; the load-bearing
   structure (per-module folders, port/adapter split) is in place.
-  Tracked for task-14 cleanup.
+  Tracked for a later cleanup pass.
 
 ---
 

@@ -1,7 +1,6 @@
 import { IOrderProductConfirm, OrderConfirmResponseDto } from '@retail-inventory-system/contracts';
 
 import {
-  CustomerRef,
   Order,
   OrderCancelledEvent,
   OrderConfirmedEvent,
@@ -24,7 +23,6 @@ let _nextOrderProductId = 9000;
 
 export const buildPersistedOrder = (props: {
   id?: number;
-  customerId?: number;
   lines: { id?: number; productId: number; statusId?: 'pending' | 'confirmed' }[];
   status?: 'pending' | 'confirmed';
 }): Order => {
@@ -41,7 +39,6 @@ export const buildPersistedOrder = (props: {
   );
   return Order.reconstitute({
     id: props.id ?? _nextOrderId++,
-    customer: new CustomerRef({ id: props.customerId ?? 1 }),
     products,
     status: props.status === 'confirmed' ? OrderStatusVO.CONFIRMED : OrderStatusVO.PENDING,
   });
@@ -91,11 +88,6 @@ export class InMemoryOrderRepository implements IOrderRepositoryPort {
     });
   }
 
-  public customerExists(customerId: number): Promise<boolean> {
-    void customerId;
-    return Promise.resolve(true);
-  }
-
   public findExistingProductIds(productIds: number[]): Promise<number[]> {
     return Promise.resolve([...productIds]);
   }
@@ -117,7 +109,6 @@ export class InMemoryOrderRepository implements IOrderRepositoryPort {
   public save(order: Order): Promise<Order> {
     const persisted = buildPersistedOrder({
       id: order.id ?? _nextOrderId++,
-      customerId: order.customer.id,
       lines: order.products.map((p) => ({
         id: p.id ?? _nextOrderProductId++,
         productId: p.productId,
@@ -153,7 +144,6 @@ export class InMemoryOrderRepository implements IOrderRepositoryPort {
     );
     const updated = Order.reconstitute({
       id: order.id,
-      customer: order.customer,
       products,
       status: payload.shouldFlipHeaderToConfirmed ? OrderStatusVO.CONFIRMED : order.status,
     });

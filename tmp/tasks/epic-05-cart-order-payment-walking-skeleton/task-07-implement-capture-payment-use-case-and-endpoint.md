@@ -3,7 +3,7 @@ epic: epic-05
 task_number: 7
 title: Implement Capture Payment use case + endpoint
 depends_on: [01, 02, 03, 04, 05, 06]
-doc_deliverable: docs/implementation/epic-05-cart-order-payment-walking-skeleton/07-authorize-on-place-capture-explicit-q5.md (capture half — completes the file) + 08-idempotency-key-header-q10.md (capture half)
+doc_deliverable: docs/implementation/05-cart-order-payment-walking-skeleton/07-authorize-on-place-capture-explicit-q5.md (capture half — completes the file) + 08-idempotency-key-header-q10.md (capture half)
 ---
 
 # Task 07 — Implement Capture Payment use case + endpoint

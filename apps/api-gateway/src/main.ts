@@ -12,6 +12,10 @@ import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
 import { AppModule } from './app';
 
+declare const module: {
+  hot?: { accept(): void; dispose(callback: () => void | Promise<void>): void };
+};
+
 ((): void => {
   const logger = new PinoLogger(new LoggerModuleConfig(AppNameEnum.API_GATEWAY));
 
@@ -40,6 +44,11 @@ import { AppModule } from './app';
     }
 
     await app.listen(port);
+
+    if (module.hot) {
+      module.hot.accept();
+      module.hot.dispose(() => app.close());
+    }
 
     logger.info(`API Gateway is running on port: ${port}`);
   })().catch((e: Error) => {

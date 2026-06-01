@@ -17,7 +17,7 @@ import { ProductStockGetQueryDto } from './dto';
 
 @ApiTags('Product')
 @ApiBearerAuth()
-@Roles(RoleEnum.CUSTOMER, RoleEnum.ADMIN)
+@Roles(RoleEnum.ADMIN)
 @Controller('product')
 export class ProductController {
   constructor(private readonly getProductStockUseCase: GetProductStockUseCase) {}
