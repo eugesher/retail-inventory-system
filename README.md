@@ -46,6 +46,15 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/order                                         │
 │  PUT   /api/order/:id/confirm                             │
 │  GET   /api/product/:productId/stock                      │
+│                                                           │
+│  Catalog (write: bearer + permission, read: public)       │
+│  POST  /api/catalog/products                              │
+│  POST  /api/catalog/products/:id/variants                 │
+│  POST  /api/catalog/products/:id/publish                  │
+│  POST  /api/catalog/products/:id/archive                  │
+│  GET   /api/catalog/products                              │
+│  GET   /api/catalog/products/:slug                        │
+│  GET   /api/catalog/variants/:id                          │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -141,16 +150,26 @@ apps/api-gateway/src/
     │   └── presentation/
     │       ├── order.controller.ts            # POST/PUT /api/order…
     │       └── pipes/order-confirm.pipe.ts
-    └── inventory/                             # talks to inventory-microservice
+    ├── inventory/                             # talks to inventory-microservice
+    │   ├── application/
+    │   │   ├── ports/inventory-gateway.port.ts
+    │   │   └── use-cases/get-product-stock.use-case.ts
+    │   ├── infrastructure/
+    │   │   ├── messaging/inventory-rabbitmq.adapter.ts
+    │   │   └── inventory.module.ts
+    │   └── presentation/
+    │       ├── product.controller.ts          # GET /api/product/:id/stock
+    │       └── dto/product-stock-get-query.dto.ts
+    └── catalog/                               # talks to catalog-microservice
         ├── application/
-        │   ├── ports/inventory-gateway.port.ts
-        │   └── use-cases/get-product-stock.use-case.ts
+        │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
+        │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
         ├── infrastructure/
-        │   ├── messaging/inventory-rabbitmq.adapter.ts
-        │   └── inventory.module.ts
-        └── presentation/
-            ├── product.controller.ts          # GET /api/product/:id/stock
-            └── dto/product-stock-get-query.dto.ts
+        │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder
+        ├── presentation/
+        │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id
+        │   └── dto/                           # Register/CreateVariant request + ListProducts query DTOs
+        └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
 ```
 
 The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, and `PermissionAggregate` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
@@ -352,6 +371,18 @@ PUT  /api/order/:id/confirm
 GET /product/:productId/stock
 ```
 
+### Catalog
+
+```
+POST /api/catalog/products                      # bearer + catalog:write
+POST /api/catalog/products/:productId/variants  # bearer + catalog:write
+POST /api/catalog/products/:productId/publish   # bearer + catalog:publish
+POST /api/catalog/products/:productId/archive   # bearer + catalog:write
+GET  /api/catalog/products                       # public  — paged active-catalogue browse
+GET  /api/catalog/products/:slug                 # public  — product + active variants
+GET  /api/catalog/variants/:variantId            # public  — variant + parent product
+```
+
 ### Auth
 
 ```
@@ -380,7 +411,7 @@ Interactive API reference is available at `http://localhost:3000/api/reference` 
 
 ## Authentication
 
-Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
+Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, and the three `GET /api/catalog/...` browse/resolve routes). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
 
 Two subject kinds share the JWT pipeline:
 
