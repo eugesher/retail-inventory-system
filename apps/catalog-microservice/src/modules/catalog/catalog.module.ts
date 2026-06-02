@@ -1,26 +1,40 @@
 import { Module } from '@nestjs/common';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
+import { MicroserviceClientCatalogModule } from '@retail-inventory-system/messaging';
 
-import { CATALOG_REPOSITORY } from './application/ports';
+import { CATALOG_EVENTS_PUBLISHER, CATALOG_REPOSITORY } from './application/ports';
+import { AddVariantUseCase, RegisterProductUseCase } from './application/use-cases';
+import { CatalogRabbitmqPublisher } from './infrastructure/messaging';
 import {
   CatalogTypeormRepository,
   ProductEntity,
   ProductVariantEntity,
 } from './infrastructure/persistence';
+import { CatalogController } from './presentation';
 
 // `useExisting` shares the single adapter instance with code that injects the
-// concrete class directly, while consumers depend on the `CATALOG_REPOSITORY`
-// port symbol (mirrors `stock.module.ts`). The `forFeature` array is the entity
-// classes literal (not the `catalogEntities` const, whose loose
-// `TypeOrmModuleOptions['entities']` type does not satisfy `forFeature`). Use
-// cases / controllers arrive in later work; today the module only stands up the
-// persistence seam.
+// concrete class directly, while consumers depend on the port symbols
+// (`CATALOG_REPOSITORY`, `CATALOG_EVENTS_PUBLISHER`) — mirrors `stock.module.ts`
+// / `orders.module.ts`. `MicroserviceClientCatalogModule` provides the
+// `catalog_queue` `ClientProxy` the publisher injects; the `forFeature` array is
+// the entity-classes literal (the loose `catalogEntities` const type does not
+// satisfy `forFeature`).
 @Module({
-  imports: [DatabaseModule.forFeature([ProductEntity, ProductVariantEntity])],
+  imports: [
+    DatabaseModule.forFeature([ProductEntity, ProductVariantEntity]),
+    MicroserviceClientCatalogModule,
+  ],
+  controllers: [CatalogController],
   providers: [
     CatalogTypeormRepository,
     { provide: CATALOG_REPOSITORY, useExisting: CatalogTypeormRepository },
+
+    CatalogRabbitmqPublisher,
+    { provide: CATALOG_EVENTS_PUBLISHER, useExisting: CatalogRabbitmqPublisher },
+
+    RegisterProductUseCase,
+    AddVariantUseCase,
   ],
 })
 export class CatalogModule {}
