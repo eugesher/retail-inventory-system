@@ -43,7 +43,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 - **ADR-022** (cache-key schema version): `INVENTORY_STOCK_KEY_VERSION` constant bumps `v1` → `v2`. Pre-bump entries become unreachable on the next deploy — acceptable since no production data exists.
 - **ADR-023** (post-commit cache invalidation by type): the existing `IStockCachePort.withInvalidation(work, resolveItems, opts)` contract is preserved; Receive Stock / Adjust Stock route writes through it. The `resolveItems` function returns `[{ variantId, stockLocationId }]` (was `[{ productId, storageId }]` — DTO shape change, hence the version bump).
 - **ADR-017** (boundaries lint): unchanged; the existing stock-module layout absorbs the new entities under the same `domain/application/infrastructure/presentation` split.
-- **ADR-019** (TypeORM + MySQL): the existing `product_stock` table is **dropped** along with `product_stock_action` and `storage` (replaced by `stock_location`); `product` (the inventory-side stub) is dropped (already done by `epic-02`'s task 8 if it ran first; otherwise this epic does it).
+- **ADR-019** (TypeORM + MySQL): the existing `product_stock` table is **dropped** along with `product_stock_action` and `storage` (replaced by `stock_location`). The inventory-side `product` stub was already removed by `epic-02`'s conflict-resolution cleanup (its task 2), so this epic does not touch it.
 - **ADR-010** (RBAC at the gateway): `inventory:adjust` gates Receive/Adjust; `inventory:read` gates Query Availability admin endpoints; the customer-facing Query Availability is public.
 
 ## Persistence Changes
@@ -58,8 +58,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 - `product_stock` table (the old delta ledger).
 - `product_stock_action` lookup table.
 - `storage` table (replaced by `stock_location`).
-- The inventory-microservice's old `product` table (if not already dropped by `epic-02` task 8).
-- `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/product.entity.ts` — deleted.
+- The inventory-microservice's old `product` table and its `product.entity.ts` were already removed by `epic-02`'s conflict-resolution cleanup; this epic does not re-drop them. The `product_stock.product_id` integer column that `epic-02` left in place is removed here when `product_stock` is dropped.
 - `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/product-stock.entity.ts` — deleted (and replaced by `stock-level.entity.ts`).
 - `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/product-stock-action.entity.ts` — deleted.
 - `apps/inventory-microservice/src/modules/stock/infrastructure/persistence/storage.entity.ts` — renamed/replaced by `stock-location.entity.ts`.
@@ -84,7 +83,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
   - `inventory.stock-level.initialized` — emitted on the auto-init path (new StockLevel row at 0); payload: `{ variantId, stockLocationId, eventVersion: 'v1', correlationId }`.
 - **New consumer:** inventory-microservice subscribes to `catalog.variant.created` (from `epic-02`); on receipt, creates a `StockLevel = 0` row for the new variant at the auto-provisioned default location. Idempotent — repeat events do not duplicate rows.
 - **Preserved:** the existing `inventory.stock.low` event (defined in `libs/contracts/inventory/events/stock-low.event.ts`) and the existing notification consumer of it. The threshold semantics are unchanged. The publisher path adapts to the new `StockLevel.quantityOnHand` source instead of the old aggregate.
-- **Retired:** the legacy `inventory.product-stock.get` RPC and `inventory.order.confirm` RPC (the latter is repurposed in `epic-07` into the Reservation/Allocation flow; for now its handler returns a deprecation error if called).
+- **Retired:** the legacy `inventory.product-stock.get` RPC and `inventory.order.confirm` RPC. For now `inventory.order.confirm` becomes a deprecation-error stub; `epic-07` then **removes** the whole confirm seam (its task 1) and ships the Reservation/Allocation flow under new `inventory.reservation.*` routing keys.
 
 ## API Surface
 
@@ -139,7 +138,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 
 **Per-task markdown files** under `docs/implementation/04-inventory-stock-level-and-location/`:
 
-- `01-old-tables-dropped-and-new-schema.md` — what was deleted (product_stock, product_stock_action, storage, product), what was added (stock_location, stock_level), with the rationale (running totals over ledger-as-source).
+- `01-old-tables-dropped-and-new-schema.md` — what was deleted (product_stock, product_stock_action, storage; the `product` stub was already removed in `epic-02`), what was added (stock_location, stock_level), with the rationale (running totals over ledger-as-source).
 - `02-default-stocklocation-auto-provision.md` — Q8 decision restated; idempotent migration insert; how to add a second location later.
 - `03-stocklevel-aggregate-and-version-column.md` — the optimistic-concurrency token; why it ships now even though enforcement lands in epic-07/12.
 - `04-cache-key-bump-v1-to-v2.md` — the ADR-022-style bump; what legacy prefixes are kept; what unreachable entries on Redis will look like.
@@ -150,7 +149,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 
 **`README.md` updates required:**
 
-- **System diagram** updated to show `stock_location` + `stock_level` (instead of `product_stock` / `storage`) and to drop the legacy `product` box from inventory.
+- **System diagram** updated to show `stock_location` + `stock_level` (instead of `product_stock` / `storage`); the legacy `product` box was already removed from inventory in `epic-02`.
 - **API → Stock** section replaced with the new endpoint list.
 - **Caching → Cache key** section updated to show the new key shape (`ris:inventory:stock:v2:<variantId>:<facet>`) and to note the version bump from `v1` to `v2`.
 - **Caching → Inspecting the cache** snippet updated to use `variantId` and the new prefix.
@@ -167,7 +166,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 
 ## Tasks (decomposition hint)
 
-1. **Drop the old inventory tables + entity files.** Migration removes `product_stock`, `product_stock_action`, `storage`, `product` (if not already removed by epic-02). Delete the four entity .ts files. Update `StockTypeormRepository` to a stub that does nothing (compiles but throws on every method) — short-lived intermediate state.
+1. **Drop the old inventory tables + entity files.** Migration removes `product_stock`, `product_stock_action`, `storage` (the `product` stub was already removed by `epic-02`'s cleanup). Delete the three remaining entity .ts files (`product-stock.entity.ts`, `product-stock-action.entity.ts`, `storage.entity.ts`). Update `StockTypeormRepository` to a stub that does nothing (compiles but throws on every method) — short-lived intermediate state.
 2. **Add `stock_location` + auto-provision the default.** New entity + mapper + migration with idempotent INSERT.
 3. **Add `stock_level` with version column.** New entity + mapper + repository.
 4. **Rewrite `StockItem` domain aggregate as `StockLevel` aggregate.** Update domain spec; events file kept but moved/renamed where needed (`StockReservedEvent`/`StockReleasedEvent`/`StockLowEvent` keep their files; new placeholder events for `StockReceivedEvent`/`StockAdjustedEvent`/`StockLevelInitializedEvent`).
@@ -182,7 +181,7 @@ Rebuild the inventory microservice's core model. Replace the existing `product_s
 
 | Task | Entry state assumed | Carryover artifacts produced (never under `tmp/`) |
 |---|---|---|
-| 1 | `epic-02` + `epic-03` complete; catalog publishes events. | Migration dropping 4 tables; 4 entity files deleted; `StockTypeormRepository` stub state; `docs/implementation/04-…/01-…md`. |
+| 1 | `epic-02` + `epic-03` complete; catalog publishes events (the inventory `product` stub already removed by `epic-02`). | Migration dropping 3 tables (`product_stock`, `product_stock_action`, `storage`); 3 entity files deleted; `StockTypeormRepository` stub state; `docs/implementation/04-…/01-…md`. |
 | 2 | Task 1 carryover present. | `stock-location.entity.ts`, mapper, repository methods, migration with default-warehouse INSERT; `02-…md`. |
 | 3 | Tasks 1–2 carryover present. | `stock-level.entity.ts`, mapper, repository methods, migration creating the table with `version`; `03-…md`. |
 | 4 | Tasks 1–3 carryover present. | Rewritten `stock-level.model.ts` aggregate (replacing `stock-item.model.ts` — the file is renamed); event files updated; domain spec rewritten. |

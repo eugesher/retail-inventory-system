@@ -79,10 +79,10 @@ Close the inventory model's production-shape gap and make the no-oversell invari
   - `inventory.reservation.release` — request `{ cartId, variantId? }` → response `{ released: [...] }`.
   - `inventory.reservation.allocate` — request `{ cartId, orderId }` → response `{ allocated: [...] }` or error.
 - **Cart-side consumer wiring (retail-microservice):**
-  - `Add to Cart` calls `inventory.reservation.reserve` via a new `INVENTORY_RESERVATION_GATEWAY` port (mirroring the existing `INVENTORY_CONFIRM_GATEWAY` pattern from epic-13's existing ADR).
+  - `Add to Cart` calls `inventory.reservation.reserve` via a new `INVENTORY_RESERVATION_GATEWAY` port (following the port-adapter pattern ADR-013 established for the now-removed `INVENTORY_CONFIRM_GATEWAY`).
   - `Remove from Cart` / `Change Quantity` calls `inventory.reservation.release` (or reserve with the new quantity).
   - `Place Order` calls `inventory.reservation.allocate`.
-- **Retired:** the legacy `inventory.order.confirm` RPC handler (deprecated stub from `epic-04`) is removed.
+- **Retired (task 1, before the new seam is built):** the entire legacy `inventory.order.confirm` confirm seam is removed — the inventory `@MessagePattern` handler/stub left by `epic-04`, any remaining retail `INVENTORY_CONFIRM_GATEWAY` port + adapter + call sites, the `IProductStockOrderConfirmPayload` contract, and the `inventory.order.confirm` routing-key constant. It is **replaced (not repurposed)** by the `inventory.reservation.{reserve,release,allocate}` RPCs above. Complete removal — no rename to `legacy`/`old`.
 
 ## API Surface
 
@@ -134,16 +134,17 @@ Close the inventory model's production-shape gap and make the no-oversell invari
 
 **Per-task markdown files** under `docs/implementation/07-inventory-reservation-and-stock-movement/`:
 
-- `01-reservation-aggregate-and-q2-q9.md` — restate Q2 (explicit Reservation) and Q9 (TTL ~15min, refresh on writes, immediate commit on place).
-- `02-stock-movement-typed-ledger.md` — types and their signs; polymorphic reference; append-only enforcement.
-- `03-no-oversell-invariant-and-occ.md` — the cross-cutting §1 restated; OCC + retry policy; cache invalidation post-commit (ADR-023) preserved.
-- `04-add-to-cart-cross-service-reserve.md` — the new RPC seam between retail Cart and inventory Reservation; the `INVENTORY_RESERVATION_GATEWAY` port.
-- `05-allocate-on-place.md` — Place Order → Allocate flow; Reservation→committed semantics.
-- `06-cache-key-bump-v2-to-v3.md` — version bump rationale (semantic change without field-set change).
-- `07-receive-adjust-now-write-movements.md` — closes the epic-04 deferral.
-- `08-transfer-stock-two-movements.md`.
-- `09-movements-audit-endpoint-and-http-file.md`.
-- `10-concurrent-oversell-e2e.md` — how to run and read the canonical concurrency test.
+- `01-legacy-confirm-seam-removed.md` — why the deprecated `inventory.order.confirm` confirm seam is removed up front (it is dead/deprecated after `epic-04`/`epic-05` and is replaced — not repurposed — by the `inventory.reservation.*` RPCs); what was deleted across inventory, retail, and `libs/contracts`/`libs/messaging`; why removing it first keeps the new seam clean.
+- `02-reservation-aggregate-and-q2-q9.md` — restate Q2 (explicit Reservation) and Q9 (TTL ~15min, refresh on writes, immediate commit on place).
+- `03-stock-movement-typed-ledger.md` — types and their signs; polymorphic reference; append-only enforcement.
+- `04-no-oversell-invariant-and-occ.md` — the cross-cutting §1 restated; OCC + retry policy; cache invalidation post-commit (ADR-023) preserved.
+- `05-add-to-cart-cross-service-reserve.md` — the new RPC seam between retail Cart and inventory Reservation; the `INVENTORY_RESERVATION_GATEWAY` port.
+- `06-allocate-on-place.md` — Place Order → Allocate flow; Reservation→committed semantics.
+- `07-cache-key-bump-v2-to-v3.md` — version bump rationale (semantic change without field-set change).
+- `08-receive-adjust-now-write-movements.md` — closes the epic-04 deferral.
+- `09-transfer-stock-two-movements.md`.
+- `10-movements-audit-endpoint-and-http-file.md`.
+- `11-concurrent-oversell-e2e.md` — how to run and read the canonical concurrency test.
 
 **`README.md` updates required:**
 
@@ -163,37 +164,39 @@ Close the inventory model's production-shape gap and make the no-oversell invari
 
 ## Tasks (decomposition hint)
 
-1. **Add `reservation` table + domain + repository.** Migration; spec asserts no oversell at the aggregate level.
-2. **Add `stock_movement` table + domain + repository.** Append-only enforced.
-3. **Implement Reserve Stock + Release Reservation use cases** with OCC retry + cache invalidation.
-4. **Implement Allocate Stock use case** (Reservation→committed; fallback to direct allocate; rejects expired Reservation).
-5. **Implement Cancel Allocation use case** (called via RPC from `epic-08`'s Cancel Order; stub the RPC handler).
-6. **Extend Receive Stock + Adjust Stock** to also write StockMovement rows (close epic-04 gap).
-7. **Implement Transfer Stock use case + endpoint** (two-movement transaction).
-8. **Wire the cart-side RPCs:** new `INVENTORY_RESERVATION_GATEWAY` port + adapter in retail-microservice; update Add/Remove/Change/Place use cases to call it.
-9. **Add the `GET /api/inventory/variants/:id/movements` audit endpoint** + the `POST /api/inventory/reservations/:id/release` ops endpoint.
-10. **Bump cache key version v2→v3.** Update spec.
-11. **Author concurrent-oversell e2e + reserve/release/allocate e2e tests.**
-12. **Extend `http/inventory.http`** with the new endpoints.
-13. **Seed + docs pass.**
+1. **Resolve legacy conflicts — remove the deprecated `inventory.order.confirm` confirm seam.** Completely delete every remaining trace of the old cross-service confirm flow before the new reservation seam is built: the inventory `inventory.order.confirm` `@MessagePattern` handler/stub (left by `epic-04`); if still present after `epic-05`, the retail `INVENTORY_CONFIRM_GATEWAY` port + `InventoryConfirmRabbitmqAdapter` + their call sites; the `IProductStockOrderConfirmPayload` contract in `libs/contracts`; and the `inventory.order.confirm` routing-key constant in `libs/messaging`. Complete removal — no rename to `legacy`/`old`. Retail must still compile (its place path simply stops calling inventory until task 9 wires the reservation seam).
+2. **Add `reservation` table + domain + repository.** Migration; spec asserts no oversell at the aggregate level.
+3. **Add `stock_movement` table + domain + repository.** Append-only enforced.
+4. **Implement Reserve Stock + Release Reservation use cases** with OCC retry + cache invalidation.
+5. **Implement Allocate Stock use case** (Reservation→committed; fallback to direct allocate; rejects expired Reservation).
+6. **Implement Cancel Allocation use case** (called via RPC from `epic-08`'s Cancel Order; stub the RPC handler).
+7. **Extend Receive Stock + Adjust Stock** to also write StockMovement rows (close epic-04 gap).
+8. **Implement Transfer Stock use case + endpoint** (two-movement transaction).
+9. **Wire the cart-side RPCs:** new `INVENTORY_RESERVATION_GATEWAY` port + adapter in retail-microservice; update Add/Remove/Change/Place use cases to call it.
+10. **Add the `GET /api/inventory/variants/:id/movements` audit endpoint** + the `POST /api/inventory/reservations/:id/release` ops endpoint.
+11. **Bump cache key version v2→v3.** Update spec.
+12. **Author concurrent-oversell e2e + reserve/release/allocate e2e tests.**
+13. **Extend `http/inventory.http`** with the new endpoints.
+14. **Seed + docs pass.**
 
 ## Carryover Between Tasks
 
 | Task | Entry state assumed | Carryover artifacts produced (never under `tmp/`) |
 |---|---|---|
-| 1 | `epic-04` + `epic-05` complete; the cart/order chain exists but is reservation-free. | `reservation.entity.ts`, mapper, repository, domain spec, migration; `01-…md`. |
-| 2 | Task 1 complete. | `stock-movement.entity.ts`, mapper, repository, domain spec, migration; `02-…md`. |
-| 3 | Tasks 1–2 complete. | Two use cases + specs; updated `IStockEventsPublisherPort`; updated RMQ publisher; cache-invalidation routing through ADR-023; `03-…md`. |
-| 4 | Tasks 1–3 complete. | Allocate use case + spec; `05-…md`. |
-| 5 | Tasks 1–4 complete. | Cancel allocation use case + spec + RPC handler stub. |
-| 6 | Tasks 1–5 complete. | Updated `receive-stock` + `adjust-stock` use cases + specs; `07-…md`. |
-| 7 | Tasks 1–6 complete. | Transfer use case + spec + endpoint; `08-…md`. |
-| 8 | Tasks 1–7 complete; retail-microservice cart/place use cases compile against new contracts. | New `INVENTORY_RESERVATION_GATEWAY` port + RMQ adapter in retail-microservice; updated cart use cases; updated specs; `04-…md`. |
-| 9 | Tasks 1–8 complete. | Audit endpoint controller + use case; ops release endpoint; `09-…md`. |
-| 10 | Tasks 1–9 complete. | `INVENTORY_STOCK_KEY_VERSION='v3'`; legacy prefix entry added; cache spec updated; `06-…md`. |
-| 11 | Tasks 1–10 complete. | `test/cart-reserve-release.e2e-spec.ts`, `test/place-order-allocates.e2e-spec.ts`, `test/concurrent-oversell.e2e-spec.ts`, `test/inventory-movements-audit.e2e-spec.ts`; `10-…md`. |
-| 12 | Tasks 1–11 complete. | Extended `http/inventory.http`. |
-| 13 | All prior tasks complete. | Extended `.env.example`/`.env.local`; updated README + CLAUDE.md; extended architecture-lint fixtures. |
+| 1 | `epic-04` + `epic-05` complete; the cart/order chain exists but is reservation-free; the deprecated `inventory.order.confirm` seam may still be present. | Removed: the `inventory.order.confirm` handler/stub; any remaining retail `INVENTORY_CONFIRM_GATEWAY` port + adapter + call sites; `IProductStockOrderConfirmPayload`; the `inventory.order.confirm` routing-key constant. Retail compiles with no inventory call on the place path; `01-…md`. |
+| 2 | Task 1 complete. | `reservation.entity.ts`, mapper, repository, domain spec, migration; `02-…md`. |
+| 3 | Tasks 1–2 complete. | `stock-movement.entity.ts`, mapper, repository, domain spec, migration; `03-…md`. |
+| 4 | Tasks 1–3 complete. | Two use cases + specs; updated `IStockEventsPublisherPort`; updated RMQ publisher; cache-invalidation routing through ADR-023; `04-…md`. |
+| 5 | Tasks 1–4 complete. | Allocate use case + spec; `06-…md`. |
+| 6 | Tasks 1–5 complete. | Cancel allocation use case + spec + RPC handler stub. |
+| 7 | Tasks 1–6 complete. | Updated `receive-stock` + `adjust-stock` use cases + specs; `08-…md`. |
+| 8 | Tasks 1–7 complete. | Transfer use case + spec + endpoint; `09-…md`. |
+| 9 | Tasks 1–8 complete; retail-microservice cart/place use cases compile against new contracts. | New `INVENTORY_RESERVATION_GATEWAY` port + RMQ adapter in retail-microservice; updated cart use cases; updated specs; `05-…md`. |
+| 10 | Tasks 1–9 complete. | Audit endpoint controller + use case; ops release endpoint; `10-…md`. |
+| 11 | Tasks 1–10 complete. | `INVENTORY_STOCK_KEY_VERSION='v3'`; legacy prefix entry added; cache spec updated; `07-…md`. |
+| 12 | Tasks 1–11 complete. | `test/cart-reserve-release.e2e-spec.ts`, `test/place-order-allocates.e2e-spec.ts`, `test/concurrent-oversell.e2e-spec.ts`, `test/inventory-movements-audit.e2e-spec.ts`; `11-…md`. |
+| 13 | Tasks 1–12 complete. | Extended `http/inventory.http`. |
+| 14 | All prior tasks complete. | Extended `.env.example`/`.env.local`; updated README + CLAUDE.md; extended architecture-lint fixtures. |
 
 ## Exit Criteria
 
@@ -201,6 +204,7 @@ Close the inventory model's production-shape gap and make the no-oversell invari
 - [ ] `yarn test:unit` passes; ≥9 new specs green.
 - [ ] `yarn test:e2e` passes; `test/concurrent-oversell.e2e-spec.ts` is **green and stable across 5 consecutive runs** (the report's Stage 2 acceptance criterion).
 - [ ] `docker compose up -d && yarn migration:run && yarn start:dev` boots clean; `reservation` and `stock_movement` tables present.
+- [ ] No trace of the legacy confirm seam remains — `grep -rnE 'inventory\.order\.confirm|INVENTORY_CONFIRM_GATEWAY|IProductStockOrderConfirmPayload' apps/ libs/` returns nothing.
 - [ ] Add-to-cart on a Variant with `quantityOnHand=0` returns `409 OUT_OF_STOCK`.
 - [ ] Place Order produces exactly one `allocation` StockMovement per OrderLine; querying `/api/inventory/variants/:id/movements` returns the expected timeline.
 - [ ] `redis-cli --scan --pattern 'ris:inventory:stock:v3:*'` shows v3 entries; v2 entries are not written on new code paths.
