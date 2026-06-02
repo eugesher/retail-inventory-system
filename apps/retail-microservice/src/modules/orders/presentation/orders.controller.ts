@@ -11,7 +11,7 @@ import {
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import { ConfirmOrderUseCase, CreateOrderUseCase, GetOrderUseCase } from '../application/use-cases';
-import { OrderConfirmPipe, OrderCreatePipe } from './pipes';
+import { OrderConfirmPipe } from './pipes';
 
 @Controller()
 export class OrderController {
@@ -22,9 +22,7 @@ export class OrderController {
   ) {}
 
   @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_CREATE)
-  public async create(
-    @Payload(OrderCreatePipe) payload: IOrderCreatePayload,
-  ): Promise<OrderCreateResponseDto> {
+  public async create(@Payload() payload: IOrderCreatePayload): Promise<OrderCreateResponseDto> {
     return this.createOrderUseCase.execute(payload);
   }
 

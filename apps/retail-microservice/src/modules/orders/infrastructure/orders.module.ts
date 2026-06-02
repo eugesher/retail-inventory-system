@@ -13,7 +13,7 @@ import {
 } from '../application/ports';
 import { ConfirmOrderUseCase, CreateOrderUseCase, GetOrderUseCase } from '../application/use-cases';
 import { OrderController } from '../presentation/orders.controller';
-import { OrderConfirmPipe, OrderCreatePipe } from '../presentation/pipes';
+import { OrderConfirmPipe } from '../presentation/pipes';
 import { InventoryConfirmRabbitmqAdapter, OrderRabbitmqPublisher } from './messaging';
 import {
   Order,
@@ -47,7 +47,6 @@ import {
     GetOrderUseCase,
 
     OrderConfirmPipe,
-    OrderCreatePipe,
   ],
 })
 export class OrdersModule {}

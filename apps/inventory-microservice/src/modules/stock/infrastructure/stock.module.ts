@@ -18,7 +18,6 @@ import { StockController } from '../presentation/stock.controller';
 import { StockCache } from './cache';
 import { StockRabbitmqPublisher } from './messaging';
 import {
-  Product,
   ProductStock,
   ProductStockAction,
   Storage,
@@ -31,7 +30,7 @@ import {
 // adapter state).
 @Module({
   imports: [
-    DatabaseModule.forFeature([Product, ProductStock, ProductStockAction, Storage]),
+    DatabaseModule.forFeature([ProductStock, ProductStockAction, Storage]),
     MicroserviceClientNotificationModule,
   ],
   controllers: [StockController],
