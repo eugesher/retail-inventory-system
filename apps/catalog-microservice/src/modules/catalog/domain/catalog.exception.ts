@@ -21,6 +21,10 @@ export enum CatalogErrorCodeEnum {
   PRODUCT_NOT_FOUND = 'CATALOG_PRODUCT_NOT_FOUND',
   PRODUCT_SLUG_TAKEN = 'CATALOG_PRODUCT_SLUG_TAKEN',
   VARIANT_SKU_TAKEN = 'CATALOG_VARIANT_SKU_TAKEN',
+  // Read-path not-found: `catalog.variant.get` for an unknown variant id. A
+  // distinct code from `PRODUCT_NOT_FOUND` so the presentation layer can map the
+  // variant lookup to its own 404 without conflating it with a product miss.
+  VARIANT_NOT_FOUND = 'CATALOG_VARIANT_NOT_FOUND',
 }
 
 // The catalog bounded context is the first concrete consumer of the

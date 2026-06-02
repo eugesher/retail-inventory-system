@@ -32,6 +32,11 @@
 // path keeps wiping the pre-bump shape for one transition window.
 const INVENTORY_STOCK_KEY_VERSION = 'v1';
 const RETAIL_ORDER_KEY_VERSION = 'v1';
+// Reserved for a future cached catalog read path. The catalog product cache is
+// keyed on `variantId` (not `productId`) because the variant is the downstream
+// backbone — inventory stock, pricing, and order lines all key on the variant
+// (ADR-025). The `catalogProduct*` builders below are not consumed yet.
+const CATALOG_PRODUCT_KEY_VERSION = 'v1';
 
 // Sentinel for the "every facet for this id" key. Non-glob so the literal
 // cannot be confused with a Redis MATCH pattern (CACHE-011 fix from ADR-016).
@@ -68,6 +73,18 @@ export const CACHE_KEYS = {
 
   retailOrder: (orderId: number, opts?: ITenantOptions): string =>
     `${CACHE_KEYS.retailOrderPrefix(orderId, opts)}${ALL_FACETS_SENTINEL}`,
+
+  // Reserved catalog read-path builder (ADR-016 / ADR-022). Keyed on
+  // `variantId` — the variant is the unit with a stock/price/order-line, so a
+  // future cached catalog read path keys on it rather than the product
+  // (ADR-025). **Not consumed yet**: the catalog service does not import
+  // `CacheModule`; this builder + `CATALOG_PRODUCT_KEY_VERSION` exist so the
+  // future cached read path can adopt the v1 key shape without re-keying.
+  catalogProductPrefix: (variantId: number, opts?: ITenantOptions): string =>
+    `${rootPrefix(opts)}catalog:product:${CATALOG_PRODUCT_KEY_VERSION}:${variantId}:`,
+
+  catalogProduct: (variantId: number, opts?: ITenantOptions): string =>
+    `${CACHE_KEYS.catalogProductPrefix(variantId, opts)}${ALL_FACETS_SENTINEL}`,
 
   // -- Pre-v1 (post-ADR-016) shape — invalidate-only ------------------------
   // Returns the pre-v1 stock prefix `ris:inventory:stock:<productId>:`.

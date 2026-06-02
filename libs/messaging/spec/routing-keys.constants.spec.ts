@@ -54,6 +54,15 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.CATALOG_PRODUCT_ARCHIVED).toBe(
       MicroserviceMessagePatternEnum.CATALOG_PRODUCT_ARCHIVED,
     );
+    expect(ROUTING_KEYS.CATALOG_PRODUCT_LIST).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_LIST,
+    );
+    expect(ROUTING_KEYS.CATALOG_PRODUCT_GET).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_GET,
+    );
+    expect(ROUTING_KEYS.CATALOG_VARIANT_GET).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_VARIANT_GET,
+    );
     expect(ROUTING_KEYS.NOTIFICATION_HEALTH_PING).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATION_HEALTH_PING,
     );

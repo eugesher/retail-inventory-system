@@ -115,6 +115,31 @@ describe('CACHE_KEYS', () => {
     });
   });
 
+  describe('catalogProduct (reserved read-path builder — not consumed yet)', () => {
+    // Locks the reserved catalog read-path key shape (ADR-016 / ADR-022). The
+    // builder is keyed on `variantId` (the downstream backbone — ADR-025), not
+    // productId. It is **not consumed** by any code path today: the catalog
+    // service does not import `CacheModule`. This assertion exists so a future
+    // cached catalog read path adopts the locked v1 shape without re-keying.
+    it('embeds the v1 schema-version segment in the single-tenant prefix', () => {
+      expect(CACHE_KEYS.catalogProductPrefix(5001)).toBe('ris:catalog:product:v1:5001:');
+      expect(CACHE_KEYS.catalogProduct(5001)).toBe('ris:catalog:product:v1:5001:__all__');
+    });
+
+    it('keys on variantId and uses the non-glob __all__ sentinel', () => {
+      expect(CACHE_KEYS.catalogProduct(5001)).not.toMatch(/\*/);
+    });
+
+    it('prepends `t:<tenantId>:` immediately after the `ris:` root when tenantId is supplied', () => {
+      expect(CACHE_KEYS.catalogProductPrefix(5001, { tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:catalog:product:v1:5001:',
+      );
+      expect(CACHE_KEYS.catalogProduct(5001, { tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:catalog:product:v1:5001:__all__',
+      );
+    });
+  });
+
   describe('productStock (pre-ADR-016 legacy — kept for original transition window)', () => {
     it('uses the bare stock prefix', () => {
       expect(CACHE_KEYS.productStockPrefix(42)).toBe('stock:42:');

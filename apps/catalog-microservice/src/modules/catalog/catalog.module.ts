@@ -7,6 +7,9 @@ import { CATALOG_EVENTS_PUBLISHER, CATALOG_REPOSITORY } from './application/port
 import {
   AddVariantUseCase,
   ArchiveProductUseCase,
+  GetProductBySlugUseCase,
+  GetVariantUseCase,
+  ListProductsUseCase,
   PublishProductUseCase,
   RegisterProductUseCase,
 } from './application/use-cases';
@@ -42,6 +45,9 @@ import { CatalogController } from './presentation';
     AddVariantUseCase,
     PublishProductUseCase,
     ArchiveProductUseCase,
+    ListProductsUseCase,
+    GetProductBySlugUseCase,
+    GetVariantUseCase,
   ],
 })
 export class CatalogModule {}
