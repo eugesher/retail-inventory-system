@@ -318,18 +318,6 @@ describe('Retail Inventory System API', () => {
         assertData({ body, orderRows, orderProductRows });
       });
 
-      it('returns 400 when productId does not exist', async () => {
-        const { status, body, headers } = await httpClient()
-          .post(apiHref)
-          .send({ products: [{ productId: 9999, quantity: 1 }] });
-
-        expect(headers[CORRELATION_ID_HEADER]).toBeDefined();
-        expect(status).toBe(HttpStatus.BAD_REQUEST);
-        expect(body.statusCode).toBe(HttpStatus.BAD_REQUEST);
-        expect(body.error).toBe('Bad Request');
-        expect(body).toMatchSnapshot();
-      });
-
       it('returns 400 when products array is empty', async () => {
         const { status, body, headers } = await httpClient().post(apiHref).send({ products: [] });
 

@@ -71,7 +71,7 @@ The system handles order lifecycle management and product stock tracking across 
 │                        Shared DB                          │ │
 │  staff_user / customer / role / permission                │ │
 │  role_permissions / staff_user_roles                      │ │
-│  order / order_product / product / product_stock          │ │
+│  order / order_product / product_stock                    │ │
 │  storage / order_status / order_product_status            │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
@@ -245,7 +245,7 @@ apps/retail-microservice/src/
     │   └── orders.module.ts                   # binds all three port symbols → adapters
     └── presentation/
         ├── orders.controller.ts               # @MessagePattern handlers for RETAIL_ORDER_CREATE / CONFIRM / GET
-        └── pipes/                              # OrderCreatePipe + OrderConfirmPipe (pre-RPC validation/load)
+        └── pipes/                              # OrderConfirmPipe (pre-RPC order line-item load)
 ```
 
 `ClientProxy` is confined to the two adapters under `infrastructure/messaging/`; the use cases inject `INVENTORY_CONFIRM_GATEWAY` (for the cross-service reserve call) and `ORDER_EVENTS_PUBLISHER` (for `retail.order.created` / `retail.order.confirmed`). See [ADR-013](docs/adr/013-order-aggregate-and-cross-service-confirm.md) for the aggregate boundaries and the cross-service confirm flow.

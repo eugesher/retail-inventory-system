@@ -88,10 +88,6 @@ export class InMemoryOrderRepository implements IOrderRepositoryPort {
     });
   }
 
-  public findExistingProductIds(productIds: number[]): Promise<number[]> {
-    return Promise.resolve([...productIds]);
-  }
-
   public findOrderResponse(id: number): Promise<OrderConfirmResponseDto | null> {
     const order = this.stored.get(id);
     if (!order) return Promise.resolve(null);

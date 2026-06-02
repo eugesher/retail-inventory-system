@@ -62,14 +62,6 @@ exports[`Retail Inventory System API Order POST /api/order creates an order with
 ]
 `;
 
-exports[`Retail Inventory System API Order POST /api/order returns 400 when productId does not exist 1`] = `
-{
-  "error": "Bad Request",
-  "message": "One or more product IDs are invalid",
-  "statusCode": 400,
-}
-`;
-
 exports[`Retail Inventory System API Order POST /api/order returns 400 when products array is empty 1`] = `
 {
   "error": "Bad Request",
