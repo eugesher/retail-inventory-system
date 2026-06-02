@@ -33,6 +33,15 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_STOCK_LOW).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LOW,
     );
+    expect(ROUTING_KEYS.CATALOG_PRODUCT_REGISTER).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_REGISTER,
+    );
+    expect(ROUTING_KEYS.CATALOG_VARIANT_CREATE).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_VARIANT_CREATE,
+    );
+    expect(ROUTING_KEYS.CATALOG_VARIANT_CREATED).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_VARIANT_CREATED,
+    );
     expect(ROUTING_KEYS.NOTIFICATION_HEALTH_PING).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATION_HEALTH_PING,
     );

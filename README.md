@@ -85,7 +85,8 @@ The system handles order lifecycle management and product stock tracking across 
 ┌───────────────────────────────────────────────────────────────┐
 │                  Catalog Microservice (RMQ)                   │
 │  Binds: catalog_queue (product / variant context)             │
-│  No message handlers registered yet                           │
+│  Handles: product.register, variant.create                    │
+│  Emits: catalog.variant.created (no consumer yet)             │
 └───────────────────────────────────────────────────────────────┘
 
 OpenTelemetry: every service exports OTLP/HTTP spans through the
@@ -117,7 +118,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
-| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context (no message handlers registered yet) |
+| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` and emits `catalog.variant.created` |
 
 ### API Gateway layout
 

@@ -12,6 +12,15 @@ export enum CatalogErrorCodeEnum {
   VARIANT_OPTION_VALUES_REQUIRED = 'CATALOG_VARIANT_OPTION_VALUES_REQUIRED',
   VARIANT_WEIGHT_INVALID = 'CATALOG_VARIANT_WEIGHT_INVALID',
   VARIANT_DIMENSIONS_INVALID = 'CATALOG_VARIANT_DIMENSIONS_INVALID',
+  // Repository-level rejections surfaced by the write use cases. The aggregate
+  // cannot see other aggregates, so global slug/sku uniqueness and parent
+  // existence are pre-checked through the repository port and raised with these
+  // codes (the UNIQUE constraints remain the hard guard). Same typed-code
+  // channel as the invariant codes above — the presentation layer maps the code
+  // to an HTTP status (ADR-025).
+  PRODUCT_NOT_FOUND = 'CATALOG_PRODUCT_NOT_FOUND',
+  PRODUCT_SLUG_TAKEN = 'CATALOG_PRODUCT_SLUG_TAKEN',
+  VARIANT_SKU_TAKEN = 'CATALOG_VARIANT_SKU_TAKEN',
 }
 
 // The catalog bounded context is the first concrete consumer of the
