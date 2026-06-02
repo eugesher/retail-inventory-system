@@ -1,161 +1,183 @@
-# 01 — Scaffold the new `catalog-microservice`
+# 01 — The catalog microservice scaffold
 
-> Epic-02 · Task-01 · Foundation-only. This task stands up an empty, boot-ready
-> fifth Nest application. No catalog domain code exists yet — `Product` /
-> `ProductVariant` arrive in task-02.
+This document records the standing-up of `catalog-microservice`, a new
+deployable that will own the **catalog** bounded context (products and their
+variants). At this stage the service is intentionally inert: it boots, connects
+to RabbitMQ on a dedicated `catalog_queue`, logs that it is listening, and
+registers **no** message handlers. Its domain, persistence, use cases, events,
+and controllers arrive in the sibling documents that follow this one.
 
-## 1. Why a fifth microservice (and not a fifth module inside an existing one)
+## 1. What this service is
 
-Catalog is its own bounded context: it is the **source of truth for `Product`
-and `ProductVariant`**, and every downstream cluster (inventory stock, retail
-orders, pricing) keys on `variantId`. Co-locating that aggregate inside the
-inventory-microservice would entangle two lifecycles that change for different
-reasons — catalog authoring (SKU creation, variant attributes, descriptions)
-versus stock movement (reservations, replenishment, low-stock alerts).
+The catalog bounded context — the authoritative list of sellable products and
+their variants — gets its own deployable rather than living as a module inside
+the inventory or retail services. Three reasons, all grounded in the existing
+architecture:
 
-Splitting catalog out:
+- **A bounded context maps to a deployable** ([ADR-018](../../adr/018-nestjs-monorepo-apps-and-libs.md)).
+  Catalog has a distinct lifecycle from stock and orders: products are authored
+  and published by catalog managers, whereas stock levels move on every
+  reservation and orders move on every checkout. Folding catalog into inventory
+  would couple two contexts that change for different reasons and at different
+  rates.
+- **The inventory service already carries a `product` stub** that only exists as
+  a foreign-key anchor for `product_stock`. Catalog is where product identity
+  *belongs*; co-locating it with inventory would entrench that accident. (The
+  removal of the inventory-side stub and the migration of product ownership to
+  catalog are handled in the immediately following work.)
+- **Authorization is already catalog-aware.** The shared permission registry
+  (`libs/contracts/auth/permission.enum.ts`) defines `catalog:read`,
+  `catalog:write`, and `catalog:publish`, and the seed provisions a
+  `catalog-manager` role bundling them (see
+  [ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)). The
+  service those permissions gate now exists.
 
-- keeps catalog reads/writes **off the inventory hot path** — a burst of
-  product-authoring traffic never contends with stock reservation throughput;
-- lets the inventory store **reduce to its own concerns** (stock + movements +
-  reservations) — task-08 drops the old inventory-resident `product` table once
-  the catalog service owns the identity;
-- matches the per-service hexagonal model the repo already commits to
-  (ADR-004 / ADR-018): one deployable per bounded context, shared code in
-  `libs/`.
+The catalog service has **no HTTP surface**. Like the inventory and retail
+services, all of its reads and writes are proxied by the API gateway over
+RabbitMQ; the gateway remains the single HTTP entry point and the single place
+that authenticates and authorizes a caller. The gateway-side catalog module and
+its routes are added later.
 
-The cost is one more queue and one more container — both cheap, both wired the
-same way as the existing four.
+## 2. Boot shape
 
-## 2. The per-module shape, recapped
+`apps/catalog-microservice/src/main.ts` mirrors the inventory service's
+bootstrap exactly, with the catalog identifiers substituted:
 
-Every service in `apps/` uses the per-module hexagonal layout
-(ADR-004 / ADR-009 / ADR-012 / ADR-013). The cleanest existing reference is
-`apps/notification-microservice/src/modules/notifications/` (ADR-011 names it
-the canonical template). The new tree mirrors it:
+- **The first executable import is `@retail-inventory-system/observability/tracer`**
+  ([ADR-007](../../adr/007-pino-and-opentelemetry.md) /
+  [ADR-014](../../adr/014-otel-exporter-otlp-http-and-jaeger.md)). OpenTelemetry
+  auto-instrumentation patches `amqplib` (and, once persistence lands, `mysql2`)
+  at module-load time. Any transport client `require()`'d before the tracer side
+  effect runs would be invisible to tracing, so this line must stay first — no
+  import may be hoisted above it.
+- The app is created with `NestFactory.createMicroservice<MicroserviceOptions>`
+  using `Transport.RMQ`, the connection URL from `RABBITMQ_URL`, and
+  `queue: MicroserviceQueueEnum.CATALOG_QUEUE` with `queueOptions.durable = true`
+  — one durable queue per service, per
+  [ADR-020](../../adr/020-rabbitmq-as-inter-service-bus.md).
+- Logging is Pino via `nestjs-pino`
+  ([ADR-001](../../adr/001-structured-logging-with-pino.md) /
+  [ADR-015](../../adr/015-pino-trace-correlation.md)), configured with
+  `new LoggerModuleConfig(AppNameEnum.CATALOG_MICROSERVICE)` so every log line
+  carries `app: "catalog-microservice"`. The bootstrap logs
+  `Catalog Microservice is listening for messages` once `app.listen()` resolves.
+- The standard webpack-HMR `module.hot` accept/dispose block is present so
+  `yarn start:dev:catalog-microservice` hot-reloads in watch mode.
 
-```
-apps/catalog-microservice/
-├── tsconfig.app.json
-└── src/
-    ├── main.ts                       # tracer-first import, RMQ microservice bootstrap
-    ├── app/
-    │   ├── app.module.ts             # LoggerModule + DatabaseModule.forRoot([]) + MessagingModule + CatalogModule
-    │   └── index.ts                  # re-exports AppModule
-    └── modules/
-        └── catalog/
-            ├── index.ts              # barrel — re-exports CatalogModule (task-02 fills it)
-            ├── domain/.gitkeep       # empty — task-02
-            ├── application/.gitkeep   # empty — task-02
-            ├── infrastructure/
-            │   └── catalog.module.ts # empty Nest module — DatabaseModule.forFeature([]) placeholder
-            └── presentation/.gitkeep  # empty — task-02
-```
+`apps/catalog-microservice/src/app/app.module.ts` is the inventory app module
+**minus two imports**:
 
-The empty `domain/`, `application/`, `presentation/` directories are kept in Git
-via `.gitkeep` so the per-module tree physically exists — that is what lets the
-`eslint-plugin-boundaries` globs "see" the catalog module before any code lands.
+- **No `CacheModule`.** The catalog service does not cache. Product/variant
+  reads are low-volume and authored, not the high-fanout aggregate that
+  justified Redis cache-aside for stock
+  ([ADR-002](../../adr/002-redis-cache-aside-product-stock.md)).
+- **No `DatabaseModule.forRoot(...)` yet.** There are no catalog entities at this
+  stage, and `DatabaseModule.forRoot([])` with an empty entity list would be
+  noise. Persistence wiring (`DatabaseModule.forRoot(catalogEntities)`) is added
+  with the first entities in a following document.
 
-## 3. Monorepo wiring summary
+What remains is the minimum that every service needs to boot and be observable:
+`ConfigModule.forRoot(configModuleConfig)` (Joi-validated env, per
+[ADR-005](../../adr/005-split-shared-common-into-bounded-libs.md)),
+`LoggerModule.forRoot(...)`, and the (empty) `CatalogModule`.
 
-| File | Change |
+### Environment variables
+
+The `configModuleConfig` Joi schema in `libs/config` is shared by every service,
+so the catalog container must still satisfy its **required** keys even for keys
+catalog does not functionally use:
+
+| Variable | Why catalog sets it |
 | --- | --- |
-| `nest-cli.json` | Fifth `projects` entry (`catalog-microservice`). |
-| `package.json` | `build:` / `start:dev:` / `start:prod:` script trio, mirroring the four existing families. |
-| `scripts/bash/start-dev.sh` | Added `CAT` to the `concurrently` runner so `yarn start:dev` boots all five. |
-| `docker-compose.yml` | `catalog-microservice` service — identical shape to `inventory-microservice`, swapping the app name. Consumer-only: **no exposed port**. |
-| `infrastructure/otel-collector-config.yaml` | **No change** — see §5. |
-| `eslint.config.mjs` | **No change** — see §6. |
-| `libs/contracts/microservices/*.enum.ts` | `MicroserviceQueueEnum.CATALOG_QUEUE`, `MicroserviceClientTokenEnum.CATALOG_MICROSERVICE`, `AppNameEnum.CATALOG_MICROSERVICE`. |
-| `libs/messaging/` | New `MicroserviceClientCatalogModule` + barrel export. |
+| `RABBITMQ_URL` | The transport the service binds to — its reason for existing. |
+| `DATABASE_URL` | Required by the shared schema; consumed once persistence lands. |
+| `REDIS_URL` | Required by the shared schema (`.required()`), even though catalog does not cache — it is set to keep validation passing, not because a Redis client is opened. |
+| `OTEL_SERVICE_NAME` | Required; set to `catalog-microservice` so its spans are distinguishable in Jaeger. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Required; the collector endpoint, must end in `/v1/traces`. |
 
-**Why the same `DATABASE_URL` is reused.** There is a single MySQL instance and a
-single `retail_db` schema. The catalog tables (task-02) live alongside the rest
-by deliberate choice — `DatabaseModule.forRoot([])` points at the same
-connection string as every other service. A dedicated catalog schema (or a
-separate physical database) is a Day-2 question: it buys blast-radius isolation
-at the cost of cross-schema joins and a second migration pipeline, and nothing
-in epic-02 needs it yet. `synchronize` stays off (ADR-019); task-02 ships the
-catalog tables as a hand-authored migration.
+`CACHE_TTL_MS_DEFAULT` is deliberately **omitted** from the catalog container's
+environment. Unlike `REDIS_URL`, that key is optional in the shared schema
+(`.default(60000)`), and the catalog service has no cache to tune — carrying it
+would imply a caching concern the service does not have. This is the one place
+the catalog compose block diverges from the notification block it is otherwise
+modelled on.
 
-`AppNameEnum.CATALOG_MICROSERVICE` was added alongside the queue/token enums
-because `main.ts` and `app.module.ts` construct `new LoggerModuleConfig(AppNameEnum.CATALOG_MICROSERVICE)`
-— the logger's service tag is sourced from that enum, exactly as the other four
-apps do.
+## 3. Per-module hexagonal skeleton
 
-## 4. MessagingModule + the new `catalog_queue`
+The service follows the per-module hexagonal layout that every service in this
+repository uses ([ADR-004](../../adr/004-adopt-hexagonal-architecture-per-service.md)),
+modelled on the notification microservice, which is the canonical template. Its
+single bounded context is `catalog`:
 
-The new `MicroserviceClientCatalogModule` is a line-for-line mirror of
-`MicroserviceClientNotificationModule`: it registers a `ClientsModule` async
-client bound to `MicroserviceClientTokenEnum.CATALOG_MICROSERVICE` over
-`MicroserviceQueueEnum.CATALOG_QUEUE = 'catalog_queue'`, and is re-exported from
-`libs/messaging/index.ts`.
+```
+apps/catalog-microservice/src/
+  main.ts                         # tracer-first import, RMQ bootstrap, Pino logger
+  app/
+    app.module.ts                 # ConfigModule + LoggerModule + CatalogModule
+    index.ts                      # re-exports AppModule
+  modules/
+    catalog/
+      index.ts                    # re-exports CatalogModule (entity barrel added later)
+      catalog.module.ts           # empty @Module({}) — providers/controllers added later
+```
 
-`main.ts` boots the inbound side with
-`NestFactory.createMicroservice(AppModule, { transport: Transport.RMQ, options: { queue: CATALOG_QUEUE, queueOptions: { durable: true }, noAck: false } })`
-— the exact options block the inventory microservice uses. On boot, the Nest RMQ
-transport asserts the durable `catalog_queue`; verified live (`rabbitmqctl
-list_queues` shows `catalog_queue`).
+`CatalogModule` is an empty `@Module({})` today. As the context grows it gains
+the four canonical layers under `modules/catalog/`:
 
-**Routing keys are deferred to task-03.** No `catalog.product.*` dotted constants
-exist yet — the queue is provisioned, the patterns come with the write-side use
-cases.
+- `domain/` — the `Product` and `Variant` aggregates and their value objects,
+  framework-free (no `@nestjs/*`, no TypeORM, no `class-validator`).
+- `application/` — use cases plus the port interfaces they depend on
+  (`application/ports/`), injected by symbol; no direct dependency on adapters.
+- `infrastructure/` — TypeORM entities and repositories, and the RabbitMQ
+  publisher; the only layer allowed to import transport/ORM packages.
+- `presentation/` — `@MessagePattern` / `@EventPattern` handlers (the catalog
+  service is RMQ-only, so there are no HTTP controllers here).
 
-## 5. Tracer-first-import discipline
+Keeping the empty module on these exact paths means the boundaries lint (next
+section) classifies future files correctly the moment they are added.
 
-`import '@retail-inventory-system/observability/tracer';` is the **very first
-line** of `main.ts`, ahead of every other import. This is the binding rule from
-[ADR-007](../../adr/007-pino-and-opentelemetry.md) §"Side-effect import for OTel
-bootstrap": the OpenTelemetry SDK patches the Node module loader (HTTP, MySQL,
-Redis, amqplib auto-instrumentations) **at module load**. Any client `require()`d
-before the tracer side-effect runs is invisible to OTel, silently disabling
-trace correlation across the service boundary. ADR-014 / ADR-015 layer the OTLP
-exporter and Pino `traceId`/`spanId` injection on top of that decision but do not
-redefine the import-order invariant.
+## 4. Monorepo + ops wiring
 
-No app-local `otel.setup.ts` is created. Every microservice in the repo imports
-the shared `libs/observability` tracer; the catalog scaffold follows that
-convention. Runtime trace routing comes from `OTEL_SERVICE_NAME=catalog-microservice`
-set in the docker-compose env block, not from any app-local bootstrap file.
+A new deployable is, mechanically, a new `apps/<service>/` folder plus four
+registrations ([ADR-018](../../adr/018-nestjs-monorepo-apps-and-libs.md)):
 
-**Why the OTel collector config needs no change.** `infrastructure/otel-collector-config.yaml`
-is a generic `otlp → batch → jaeger` pipeline — it does **not** enumerate service
-names. The per-service identity travels as the OTel `service.name` resource
-attribute (sourced from `OTEL_SERVICE_NAME`), which the collector forwards to
-Jaeger untouched. Adding a fifth service is therefore free at the collector
-layer; `grep -n 'inventory-microservice' infrastructure/otel-collector-config.yaml`
-returns nothing, confirming there is no allowlist to extend.
+- **`nest-cli.json`** — a `catalog-microservice` entry under `projects` mirroring
+  the inventory block (`root: apps/catalog-microservice`, `entryFile: main`,
+  `sourceRoot: apps/catalog-microservice/src`,
+  `tsConfigPath: apps/catalog-microservice/tsconfig.app.json`). This is what lets
+  `nest build catalog-microservice` resolve the app.
+- **`apps/catalog-microservice/tsconfig.app.json`** — extends the root
+  `tsconfig.json` and sets `outDir` to `../../dist/apps/catalog-microservice`;
+  identical in shape to the other apps'.
+- **`package.json` scripts** — `build:catalog-microservice`,
+  `start:dev:catalog-microservice` (webpack-HMR watch), and
+  `start:prod:catalog-microservice` (`node dist/apps/catalog-microservice/main.js`),
+  each mirroring the inventory entries.
+- **`docker-compose.yml`** — a `catalog-microservice` service modelled on the
+  notification block: the three `depends_on` health conditions (rabbitmq, mysql,
+  redis), the source bind-mount volumes, `command: yarn start:dev:catalog-microservice`,
+  the `backend` network, and the environment described in §2 with
+  `OTEL_SERVICE_NAME: catalog-microservice` and `container_name: catalog-microservice`.
+- **`scripts/bash/start-dev.sh`** — the `concurrently` block gains a `CAT` name,
+  a colour, and `yarn start:dev:catalog-microservice`, so `yarn start:dev` boots
+  the catalog service alongside the others.
 
-## 6. Boundaries lint coverage
+No `MicroserviceClient*` module or `ROUTING_KEYS` entries are added at this stage:
+nothing publishes to or calls the catalog service yet. The client token and the
+outbound publisher wiring arrive with the first event producer, in later work.
 
-The `eslint-plugin-boundaries` taxonomy (ADR-017) captures app-layer elements
-with the glob `apps/*/src/modules/*/{domain,application,infrastructure,presentation}/**`
-— the `*` in the app position matches `catalog-microservice` automatically, with
-**no explicit app allowlist** to extend. `yarn lint --max-warnings 0` runs clean
-against the new tree, producing no `boundaries/element-types` "unknown element"
-warnings. Decision recorded: **no `eslint.config.mjs` change required**.
+## 5. Why the boundaries config needed no change
 
-To lock that guarantee under CI, `spec/architecture-lint.spec.ts` gains a
-`catalog-microservice scaffold (epic-02)` fixture block: one synthetic violation
-per element type (domain → `@nestjs/common`, application-use-case → `typeorm`,
-application-port → `typeorm`, presentation → `@keyv/redis`, infrastructure →
-cross-app reach), each asserting the `boundaries/dependencies` ruleId fires.
-Task-09 will revisit this if the catalog modules need additional fixtures.
+The architecture-lint rules in `eslint.config.mjs`
+([ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md)) are
+expressed **generically**. Element types are matched by glob patterns such as
+`apps/*/src/modules/*/domain/**` with `capture: ['app', 'module']`, not by
+hard-coded per-service paths. A brand-new microservice placed at the canonical
+paths is therefore classified automatically — its `domain/`, `application/`,
+`infrastructure/`, and `presentation/` folders inherit the same per-layer import
+denylists as every other service, with no new rule and no new entry.
 
-## 7. What this task did NOT do
-
-- **Domain + persistence + migration** — `Product` / `ProductVariant` aggregates,
-  TypeORM entities, mappers, and the catalog tables migration land in **task-02**.
-- **Write-side use cases + events + routing keys** — `catalog.product.*` patterns
-  and the create/update flows land in **task-03**.
-- **Dropping the old inventory `product` table** — the inventory-resident product
-  identity is retired in **task-08**, once the catalog service owns it.
-
-## Carryover produced (consumed by task-02 onward)
-
-- The application boots empty: an empty `CatalogModule` placeholder, no entities
-  registered with `DatabaseModule`, no presentation handlers, no use cases.
-- `MicroserviceQueueEnum.CATALOG_QUEUE` + `MicroserviceClientTokenEnum.CATALOG_MICROSERVICE`
-  are available to task-06 (gateway adapter) and any future consumer.
-- `MicroserviceClientCatalogModule` is exported from `libs/messaging/`.
-- `yarn start:dev:catalog-microservice` exists; CI in any later task can rely on it.
+The corollary is a discipline: there is nothing to add, and adding a
+catalog-specific rule would be wrong. The lint config is unchanged by this work.
+(The regression fixtures that assert the rules fire for catalog-shaped paths are
+added with the lint-coverage follow-up.)

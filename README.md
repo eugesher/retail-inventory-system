@@ -81,6 +81,12 @@ The system handles order lifecycle management and product stock tracking across 
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
+┌───────────────────────────────────────────────────────────────┐
+│                  Catalog Microservice (RMQ)                   │
+│  Binds: catalog_queue (product / variant context)             │
+│  No message handlers registered yet                           │
+└───────────────────────────────────────────────────────────────┘
+
 OpenTelemetry: every service exports OTLP/HTTP spans through the
 otel-collector → Jaeger UI at http://localhost:16686 (see the
 "Distributed tracing" section below).
@@ -110,6 +116,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
+| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context (no message handlers registered yet) |
 
 ### API Gateway layout
 
@@ -259,19 +266,20 @@ yarn start:dev
 
 | Script | Description |
 | ------ | ----------- |
-| `yarn start:dev` | Start all four services concurrently with watch reload (uses `scripts/bash/start-dev.sh`). |
+| `yarn start:dev` | Start all five services concurrently with watch reload (uses `scripts/bash/start-dev.sh`). |
 | `yarn start:dev:api-gateway` | Start the API gateway with watch reload. |
 | `yarn start:dev:inventory-microservice` | Start the inventory microservice with watch reload. |
 | `yarn start:dev:retail-microservice` | Start the retail microservice with watch reload. |
 | `yarn start:dev:notification-microservice` | Start the notification microservice with watch reload. |
-| `yarn start:prod:<service>` | Run a built service from `dist/` (`api-gateway`, `inventory-microservice`, `retail-microservice`, `notification-microservice`). |
+| `yarn start:dev:catalog-microservice` | Start the catalog microservice with watch reload. |
+| `yarn start:prod:<service>` | Run a built service from `dist/` (`api-gateway`, `inventory-microservice`, `retail-microservice`, `notification-microservice`, `catalog-microservice`). |
 
 ### Build
 
 | Script | Description |
 | ------ | ----------- |
-| `yarn build` | Build all four apps via `nest build --all`. |
-| `yarn build:<service>` | Build a single app — same four service names as above. |
+| `yarn build` | Build all five apps via `nest build --all`. |
+| `yarn build:<service>` | Build a single app — same five service names as above. |
 
 ### Lint / format
 

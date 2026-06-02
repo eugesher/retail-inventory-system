@@ -113,7 +113,7 @@ Status: Accepted (2026-05-10). [ADR-009](../docs/adr/009-port-adapter-at-the-gat
 
 ## ADR-010 — JWT authentication and RBAC at the API gateway
 
-Status: Accepted (2026-05-10). [ADR-010](../docs/adr/010-jwt-rbac-at-the-gateway.md)
+Status: Accepted (2026-05-10; §4 aggregate boundary, §5 authorization model, §7 registration deferral, and the closing `RoleEnum` Consequences discussion superseded by ADR-024 — see References). [ADR-010](../docs/adr/010-jwt-rbac-at-the-gateway.md)
 
 - **Decision:** HS256 JWTs (access + refresh, distinct secrets); argon2id for password hashes (OWASP 2024 cost defaults: `memoryCost: 19_456`, `timeCost: 2`, `parallelism: 1`); refresh-token rotation with reuse detection (mismatch clears the live hash); all gateway routes protected by default via global `APP_GUARD`; the `User` aggregate lives in the gateway.
 - **Binding rules for implementers:**
@@ -270,3 +270,17 @@ Status: Accepted (2026-05-20). [ADR-023](../docs/adr/023-cache-invalidate-post-c
   - Never resurrect a public `invalidate(...)` on `IStockCachePort` — the type-system contract is the point.
   - The same shape applies when adding new aggregate caches: declare `withInvalidation` on the new port, keep the prefix fan-out private.
   - The `withInvalidation` helper is transaction-API-agnostic (`work: () => Promise<T>`) — it composes with both `entityManager.transaction(...)` and `transactionPort.runInTransaction(...)`.
+
+## ADR-024 — RBAC v2 — StaffUser/Customer split and a relational permission model
+
+Status: Accepted (2026-05-27; supersedes ADR-010 §4, §5, §7, and its closing `RoleEnum` discussion). [ADR-024](../docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md)
+
+- **Decision:** Replace ADR-010's single `User` aggregate + `simple-array` `user.roles` with **two aggregates** (`StaffUser`, `Customer`) and a **relational role/permission model** (`role`, `permission`, `role_permissions`, `staff_user_roles`). Authorization moves from coarse roles to a 12-code `PermissionCodeEnum` registry (`libs/contracts/auth/permission.enum.ts`) inflated into the access JWT as a `permissions: string[]` claim. Guard chain extends to three: `JwtAuthGuard → RolesGuard → PermissionsGuard`, with `@RequiresPermission(<code>)` as the default route gate. Customer-side public registration ships at `POST /auth/customer/register` (`@Public()`).
+- **Binding rules for implementers:**
+  - Two aggregates, never one `User` with a `kind` discriminator. `StaffUser` has a non-nullable `status` (active/suspended/disabled) and is admin-onboarded — **no public registration path**. `Customer` self-registers and is the FK target of `order.customer_id`, which is **nullable** so deleting a customer leaves an order tombstone.
+  - `PermissionCodeEnum` is the single source of truth for permission codes — seeds, `@RequiresPermission`, and the IAM validator all read it. Don't hard-code permission strings at call sites.
+  - **`@RequiresPermission(<PermissionCodeEnum>)` is the default for new endpoints.** `@Roles(<RoleEnum>)` survives only for coarse role-bundle gates ("any admin") where the *role itself* is the abstraction — when in doubt, use the permission decorator.
+  - Permissions are inflated in `LoginUseCase` / `RefreshTokenUseCase` (union of the staff user's roles' permission sets via `IRoleRepositoryPort.findAllByNames(...)`); guards read `request.user.permissions` with **no per-request DB hit**. Permission changes take effect on the user's **next refresh**, not immediately — JWT TTL is the staleness window. The **refresh** JWT does not carry the claim; only access tokens do.
+  - `RoleEnum` (`libs/contracts/auth/role.enum.ts`) is demoted from "authorization source of truth" to a typed registry of the four seeded role names (`admin`, `catalog-manager`, `warehouse-staff`, `order-support`). The runtime-of-record is the `role` table; the four seeded roles are the **floor, not the ceiling** — IAM tooling may add a fifth at runtime. Don't enforce the four as a DB-layer enum.
+  - The IAM admin controller (`@RequiresPermission('iam:role-edit')`) is the **single mutation path** for `role_permissions` — direct SQL surgery is no longer the expected operator workflow.
+  - `POST /auth/customer/register` is `@Public()`, creates a `Customer` (never a `StaffUser`), and returns a customer-tier access+refresh pair. The duplicate-email path returns a generic **`409 Conflict` with no body detail**. Shipping without all three ADR-010 §7 safeguards (rate-limiting, email verification, CAPTCHA) is an accepted trade-off; deferred safeguards are tracked as named "known gaps", not silently dropped.
