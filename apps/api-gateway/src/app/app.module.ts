@@ -16,6 +16,7 @@ import {
   StaffUserEntity,
 } from '../modules/auth/infrastructure/persistence';
 import { AuthModule } from '../modules/auth';
+import { CatalogModule } from '../modules/catalog';
 import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
 import { RetailModule } from '../modules/retail';
@@ -29,6 +30,7 @@ import { RetailModule } from '../modules/retail';
     IamModule,
     RetailModule,
     InventoryModule,
+    CatalogModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
