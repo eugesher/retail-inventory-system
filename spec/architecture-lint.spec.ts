@@ -399,6 +399,61 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
+  // The catalog-microservice scaffold (epic-02 task-01) adds a fifth app whose
+  // per-module tree falls under the same `apps/*/src/modules/*/...` globs as the
+  // other four. No domain code exists yet (task-02), so these fixtures inject
+  // import strings into virtual files at catalog paths and assert the same
+  // per-layer ruleIds fire — proving the boundaries config already governs the
+  // new tree before any business logic lands.
+  describe('boundaries/dependencies — catalog-microservice scaffold (epic-02)', () => {
+    it('catalog domain may not import @nestjs/common', () => {
+      const code = `import { Injectable } from '@nestjs/common';\nexport const x = Injectable;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog application use-case may not import typeorm', () => {
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog application port may not import typeorm', () => {
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/application/ports/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog presentation may not import @keyv/redis', () => {
+      const code = `import KeyvRedis from '@keyv/redis';\nexport const x = KeyvRedis;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/presentation/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog infrastructure may not reach another app', () => {
+      // 5 levels up: infrastructure → catalog → modules → src →
+      // catalog-microservice → apps, then into inventory-microservice.
+      const code = `import { StockCache } from '../../../../../inventory-microservice/src/modules/stock/infrastructure/cache/stock.cache';\nexport const y = StockCache;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/infrastructure/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+  });
+
   describe('positive cases — allowed edges do not flag', () => {
     it('domain importing lib-ddd is allowed', () => {
       const code = `import { AggregateRoot } from '@retail-inventory-system/ddd';\nexport const x = AggregateRoot;\n`;

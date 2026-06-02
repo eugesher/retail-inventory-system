@@ -18,6 +18,9 @@
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "@retail-inventory-system/apps/api-gateway": ["apps/api-gateway/src/app/app.module"],
+      "@retail-inventory-system/apps/catalog-microservice": [
+        "apps/catalog-microservice/src/app/app.module"
+      ],
       "@retail-inventory-system/apps/inventory-microservice": [
         "apps/inventory-microservice/src/app/app.module"
       ],
