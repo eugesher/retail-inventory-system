@@ -18,5 +18,8 @@ export enum MicroserviceMessagePatternEnum {
   CATALOG_VARIANT_CREATED = 'catalog.variant.created',
   CATALOG_PRODUCT_PUBLISHED = 'catalog.product.published',
   CATALOG_PRODUCT_ARCHIVED = 'catalog.product.archived',
+  CATALOG_PRODUCT_LIST = 'catalog.product.list',
+  CATALOG_PRODUCT_GET = 'catalog.product.get',
+  CATALOG_VARIANT_GET = 'catalog.variant.get',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
 }

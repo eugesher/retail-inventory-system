@@ -100,8 +100,24 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
   }
 
   public listActive(query: ICatalogListActiveQuery): Promise<IProductPage> {
-    const items = [...this.store.values()].filter((product) => product.isActive());
-    return Promise.resolve({ items, total: items.length, page: query.page, size: query.size });
+    const { page, size, search } = query;
+
+    let matched = [...this.store.values()].filter((product) => product.isActive());
+    if (search) {
+      const needle = search.toLowerCase();
+      matched = matched.filter(
+        (product) =>
+          product.name.toLowerCase().includes(needle) ||
+          product.slug.toLowerCase().includes(needle),
+      );
+    }
+    // Newest first — mirror the real adapter's `ORDER BY Product.id DESC`.
+    matched.sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+
+    const total = matched.length;
+    const start = (page - 1) * size;
+    const items = matched.slice(start, start + size);
+    return Promise.resolve({ items, total, page, size });
   }
 }
 
