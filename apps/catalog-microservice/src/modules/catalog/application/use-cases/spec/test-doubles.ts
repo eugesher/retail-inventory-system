@@ -1,4 +1,8 @@
-import { ICatalogVariantCreatedEvent } from '@retail-inventory-system/contracts';
+import {
+  ICatalogProductArchivedEvent,
+  ICatalogProductPublishedEvent,
+  ICatalogVariantCreatedEvent,
+} from '@retail-inventory-system/contracts';
 
 import { Product, ProductVariant } from '../../../domain';
 import {
@@ -103,12 +107,36 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
 
 export class InMemoryCatalogEventsPublisher implements ICatalogEventsPublisherPort {
   public readonly published: { event: ICatalogVariantCreatedEvent; correlationId?: string }[] = [];
+  public readonly productPublished: {
+    event: ICatalogProductPublishedEvent;
+    correlationId?: string;
+  }[] = [];
+  public readonly productArchived: {
+    event: ICatalogProductArchivedEvent;
+    correlationId?: string;
+  }[] = [];
 
   public publishVariantCreated(
     event: ICatalogVariantCreatedEvent,
     correlationId?: string,
   ): Promise<void> {
     this.published.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishProductPublished(
+    event: ICatalogProductPublishedEvent,
+    correlationId?: string,
+  ): Promise<void> {
+    this.productPublished.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishProductArchived(
+    event: ICatalogProductArchivedEvent,
+    correlationId?: string,
+  ): Promise<void> {
+    this.productArchived.push({ event, correlationId });
     return Promise.resolve();
   }
 }
