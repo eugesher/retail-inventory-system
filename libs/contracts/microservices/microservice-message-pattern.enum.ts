@@ -12,7 +12,11 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_ORDER_CONFIRMED = 'retail.order.confirmed',
   RETAIL_ORDER_CANCELLED = 'retail.order.cancelled',
   CATALOG_PRODUCT_REGISTER = 'catalog.product.register',
+  CATALOG_PRODUCT_PUBLISH = 'catalog.product.publish',
+  CATALOG_PRODUCT_ARCHIVE = 'catalog.product.archive',
   CATALOG_VARIANT_CREATE = 'catalog.variant.create',
   CATALOG_VARIANT_CREATED = 'catalog.variant.created',
+  CATALOG_PRODUCT_PUBLISHED = 'catalog.product.published',
+  CATALOG_PRODUCT_ARCHIVED = 'catalog.product.archived',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
 }

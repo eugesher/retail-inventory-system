@@ -4,7 +4,12 @@ import { DatabaseModule } from '@retail-inventory-system/database';
 import { MicroserviceClientCatalogModule } from '@retail-inventory-system/messaging';
 
 import { CATALOG_EVENTS_PUBLISHER, CATALOG_REPOSITORY } from './application/ports';
-import { AddVariantUseCase, RegisterProductUseCase } from './application/use-cases';
+import {
+  AddVariantUseCase,
+  ArchiveProductUseCase,
+  PublishProductUseCase,
+  RegisterProductUseCase,
+} from './application/use-cases';
 import { CatalogRabbitmqPublisher } from './infrastructure/messaging';
 import {
   CatalogTypeormRepository,
@@ -35,6 +40,8 @@ import { CatalogController } from './presentation';
 
     RegisterProductUseCase,
     AddVariantUseCase,
+    PublishProductUseCase,
+    ArchiveProductUseCase,
   ],
 })
 export class CatalogModule {}

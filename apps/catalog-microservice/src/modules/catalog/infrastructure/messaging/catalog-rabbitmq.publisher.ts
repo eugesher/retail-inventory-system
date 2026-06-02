@@ -2,7 +2,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
-import { ICatalogVariantCreatedEvent } from '@retail-inventory-system/contracts';
+import {
+  ICatalogProductArchivedEvent,
+  ICatalogProductPublishedEvent,
+  ICatalogVariantCreatedEvent,
+} from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import { ICatalogEventsPublisherPort } from '../../application/ports';
@@ -25,6 +29,24 @@ export class CatalogRabbitmqPublisher implements ICatalogEventsPublisherPort {
     await firstValueFrom(
       this.catalogClient.emit<void, ICatalogVariantCreatedEvent>(
         ROUTING_KEYS.CATALOG_VARIANT_CREATED,
+        event,
+      ),
+    );
+  }
+
+  public async publishProductPublished(event: ICatalogProductPublishedEvent): Promise<void> {
+    await firstValueFrom(
+      this.catalogClient.emit<void, ICatalogProductPublishedEvent>(
+        ROUTING_KEYS.CATALOG_PRODUCT_PUBLISHED,
+        event,
+      ),
+    );
+  }
+
+  public async publishProductArchived(event: ICatalogProductArchivedEvent): Promise<void> {
+    await firstValueFrom(
+      this.catalogClient.emit<void, ICatalogProductArchivedEvent>(
+        ROUTING_KEYS.CATALOG_PRODUCT_ARCHIVED,
         event,
       ),
     );
