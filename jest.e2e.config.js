@@ -8,8 +8,6 @@ module.exports = {
   },
   moduleNameMapper: {
     '^@retail-inventory-system/apps/api-gateway$': '<rootDir>/apps/api-gateway/src/app/app.module',
-    '^@retail-inventory-system/apps/catalog-microservice$':
-      '<rootDir>/apps/catalog-microservice/src/app/app.module',
     '^@retail-inventory-system/apps/inventory-microservice$':
       '<rootDir>/apps/inventory-microservice/src/app/app.module',
     '^@retail-inventory-system/apps/notification-microservice$':

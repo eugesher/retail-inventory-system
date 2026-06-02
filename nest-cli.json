@@ -50,15 +50,6 @@
       "compilerOptions": {
         "tsConfigPath": "apps/notification-microservice/tsconfig.app.json"
       }
-    },
-    "catalog-microservice": {
-      "type": "application",
-      "root": "apps/catalog-microservice",
-      "entryFile": "main",
-      "sourceRoot": "apps/catalog-microservice/src",
-      "compilerOptions": {
-        "tsConfigPath": "apps/catalog-microservice/tsconfig.app.json"
-      }
     }
   }
 }
