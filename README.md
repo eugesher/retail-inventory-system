@@ -73,6 +73,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  role_permissions / staff_user_roles                      │ │
 │  order / order_product / product_stock                    │ │
 │  storage / order_status / order_product_status            │ │
+│  product / product_variant                                │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
