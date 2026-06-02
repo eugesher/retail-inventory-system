@@ -3,4 +3,5 @@ export enum AppNameEnum {
   INVENTORY_MICROSERVICE = 'inventory-microservice',
   NOTIFICATION_MICROSERVICE = 'notification-microservice',
   RETAIL_MICROSERVICE = 'retail-microservice',
+  CATALOG_MICROSERVICE = 'catalog-microservice',
 }
