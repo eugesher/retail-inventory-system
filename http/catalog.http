@@ -1,0 +1,191 @@
+# Catalog endpoints
+# (apps/api-gateway/src/modules/catalog/presentation/catalog.controller.ts)
+#
+# The API gateway fronts the catalog microservice's seven RPCs over HTTP at
+# /api/catalog: four protected write commands (register a draft product, append
+# a variant, publish draft -> active, archive active -> archived) and three
+# public read queries (browse active products, resolve a product by slug,
+# resolve a variant by id). Write routes are permission-gated (catalog:write for
+# register/add-variant/archive, catalog:publish for publish); read routes are
+# @Public(), so an unauthenticated shopper can browse the catalogue.
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures the seeded admin's bearer token
+#      into @accessToken, which every write request below substitutes into its
+#      Authorization header. The three GETs send no token (proving the public
+#      routes work unauthenticated).
+#   3. The product slug and variant SKUs below are fixed values, and uniqueness
+#      is enforced (a duplicate slug/SKU is rejected). A second top-to-bottom
+#      run therefore wants a fresh database — re-seed between runs with
+#      `yarn test:infra:reload`.
+#
+# Send the blocks in order: the write requests chain. `registerProduct` captures
+# @productId / @productSlug, `addVariantBlack` captures @variantId, and
+# publish / archive / get-by-slug / get-variant target those captured values, so
+# the file runs straight through without manual edits.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name login
+# POST /api/auth/staff/login
+# Seeded admin login (admin@example.com / admin1234). The admin holds every
+# permission code, including catalog:write and catalog:publish, so this single
+# token unlocks all four write routes below. Response is TokenResponseDto
+# { accessToken, refreshToken, expiresIn }.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name registerProduct
+# POST /api/catalog/products  (Bearer — catalog:write)
+# Registers a new product in status 'draft'. Body shape
+# (RegisterProductRequestDto):
+#   name:         1..255
+#   slug:         globally-unique kebab-case (^[a-z0-9]+(?:-[a-z0-9]+)*$)
+#   description?: <= 2000
+# Response is ProductView { id, name, slug, description, status: 'draft' }.
+POST {{baseUrl}}/catalog/products
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Aeron Chair",
+  "slug": "aeron-chair",
+  "description": "Ergonomic office chair"
+}
+
+###
+@productId = {{registerProduct.response.body.$.id}}
+@productSlug = {{registerProduct.response.body.$.slug}}
+
+###
+
+# @name addVariantBlack
+# POST /api/catalog/products/:productId/variants  (Bearer — catalog:write)
+# Appends a variant to the just-registered product. The owning product comes
+# from the path param (captured @productId), not the body. Body shape
+# (CreateVariantRequestDto):
+#   sku:           1..255 (unique)
+#   gtin?:         <= 64
+#   optionValues:  free-form option map { color, size, ... }
+#   weightG?:      >= 0 int
+#   dimensionsMm?: { l, w, h } non-negative ints
+# Response is ProductVariantView { id, productId, sku, ..., status: 'active' }.
+POST {{baseUrl}}/catalog/products/{{productId}}/variants
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "sku": "AERON-CHAIR-BLK-M",
+  "gtin": "0123456789012",
+  "optionValues": { "color": "black", "size": "M" },
+  "weightG": 14500,
+  "dimensionsMm": { "l": 680, "w": 680, "h": 1145 }
+}
+
+###
+@variantId = {{addVariantBlack.response.body.$.id}}
+
+###
+
+# @name addVariantGraphite
+# POST /api/catalog/products/:productId/variants  (Bearer — catalog:write)
+# A second variant on the same product. Publish (below) requires the product to
+# carry at least one variant; appending two also shows the read views returning
+# a multi-entry variant collection.
+POST {{baseUrl}}/catalog/products/{{productId}}/variants
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "sku": "AERON-CHAIR-GRPH-L",
+  "gtin": "0123456789029",
+  "optionValues": { "color": "graphite", "size": "L" },
+  "weightG": 15000,
+  "dimensionsMm": { "l": 680, "w": 680, "h": 1180 }
+}
+
+###
+
+# @name publishProduct
+# POST /api/catalog/products/:productId/publish  (Bearer — catalog:publish)
+# Transitions the product draft -> active (the domain enforces >= 1 variant).
+# Returns 200 (a state transition, not a creation) with ProductView
+# { ..., status: 'active', publishedAt }. catalog:publish is a higher-trust code
+# than catalog:write — a role may hold write without publish.
+POST {{baseUrl}}/catalog/products/{{productId}}/publish
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name listProducts
+# GET /api/catalog/products?status=active&page=1&pageSize=20  (public)
+# Browses the active catalogue, paginated. No Authorization header — the
+# @Public() route serves an unauthenticated shopper. Query
+# (ListProductsQueryDto):
+#   status?:   active | draft | archived (defaults to active)
+#   page?:     1-based, >= 1
+#   pageSize?: >= 1 (capped at 100 downstream)
+#   search?:   free-text name/slug filter
+# Response is the paginated envelope { items, total, page, size }; each item is a
+# ProductWithVariantsView carrying its ACTIVE variants only. The product
+# published above appears here.
+GET {{baseUrl}}/catalog/products?status=active&page=1&pageSize=20
+
+###
+
+# @name getProductBySlug
+# GET /api/catalog/products/:slug  (public)
+# Resolves one product by its slug (captured @productSlug) with its active
+# variants. Resolvable regardless of status, so historical references stay
+# valid. Response is ProductWithVariantsView.
+GET {{baseUrl}}/catalog/products/{{productSlug}}
+
+###
+
+# @name getVariant
+# GET /api/catalog/variants/:variantId  (public)
+# Resolves one variant by id (captured @variantId) plus its parent product
+# header. An archived variant/product stays resolvable here so order/stock
+# references keyed on variantId never dangle. Response is VariantWithProductView
+# { ...variant, product }.
+GET {{baseUrl}}/catalog/variants/{{variantId}}
+
+###
+
+# @name archiveProduct
+# POST /api/catalog/products/:productId/archive  (Bearer — catalog:write)
+# Transitions the product active -> archived (terminal soft-delete). Returns 200
+# with ProductView { ..., status: 'archived', archivedAt }. Archived products
+# are hidden from browse but stay resolvable by slug/id (see the follow-up list).
+POST {{baseUrl}}/catalog/products/{{productId}}/archive
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name listProductsAfterArchive
+# GET /api/catalog/products?status=active&search=aeron  (public)
+# Re-browses with a name/slug filter narrowed to the product just archived. It
+# is absent from the active listing now — browse hides non-active products —
+# even though getProductBySlug / getVariant above still resolve it.
+GET {{baseUrl}}/catalog/products?status=active&page=1&pageSize=20&search=aeron
