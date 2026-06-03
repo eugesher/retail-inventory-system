@@ -32,14 +32,17 @@ export class UpdateRoleUseCase {
 
     if (command.description !== undefined) {
       role.setDescription(command.description ?? null);
-      await this.roles.save(role);
     }
-
-    let result = role;
     if (command.permissionCodes !== undefined) {
       await assertPermissionsExist(this.permissions, command.permissionCodes);
-      result = await this.roles.replacePermissions(role, command.permissionCodes);
     }
+
+    // Persist description + permissions in one atomic call so a both-fields
+    // patch cannot leave the description committed while the permission
+    // replacement fails (and so a description-only patch skips the join
+    // rewrite). `command.permissionCodes` is forwarded verbatim — `undefined`
+    // means "leave the permission set untouched".
+    const result = await this.roles.update(role, command.permissionCodes);
 
     await this.audit.publish({
       name: 'RolePermissionsReplaced',

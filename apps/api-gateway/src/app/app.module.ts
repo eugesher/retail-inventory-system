@@ -1,6 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 
 import { JwtAuthGuard, PermissionsGuard, RolesGuard } from '@retail-inventory-system/auth';
@@ -20,6 +20,7 @@ import { CatalogModule } from '../modules/catalog';
 import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
 import { RetailModule } from '../modules/retail';
+import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.filter';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { RetailModule } from '../modules/retail';
     CatalogModule,
   ],
   providers: [
+    { provide: APP_FILTER, useClass: DuplicateKeyExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

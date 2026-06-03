@@ -4,21 +4,28 @@ import { PinoLogger } from 'nestjs-pino';
 import { RoleEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { RoleAggregate, StaffUser } from '../../../domain';
+import { Customer, RoleAggregate, StaffUser } from '../../../domain';
 import { LogoutUseCase } from '../logout.use-case';
-import { FakeAuditLogPublisher, FakeHasher, InMemoryStaffUserRepository } from './test-doubles';
+import {
+  FakeAuditLogPublisher,
+  FakeHasher,
+  InMemoryCustomerRepository,
+  InMemoryStaffUserRepository,
+} from './test-doubles';
 
 describe('LogoutUseCase', () => {
   let users: InMemoryStaffUserRepository;
+  let customers: InMemoryCustomerRepository;
   let audit: FakeAuditLogPublisher;
   let logger: PinoLoggerMock;
   let useCase: LogoutUseCase;
 
   beforeEach(() => {
     users = new InMemoryStaffUserRepository();
+    customers = new InMemoryCustomerRepository();
     audit = new FakeAuditLogPublisher();
     logger = makePinoLoggerMock();
-    useCase = new LogoutUseCase(users, audit, logger as unknown as PinoLogger);
+    useCase = new LogoutUseCase(users, customers, audit, logger as unknown as PinoLogger);
   });
 
   const seedActiveUser = async (): Promise<StaffUser> => {
@@ -49,6 +56,21 @@ describe('LogoutUseCase', () => {
     await expect(useCase.execute({ userId: 'missing-id' })).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('clears the refresh-token hash for a customer subject (shared /auth/logout route)', async () => {
+    const customer = Customer.register('customer-1', {
+      email: 'customer-1@example.com',
+      passwordHash: await new FakeHasher().hash('password123'),
+      status: 'active',
+      refreshTokenHash: 'hash:customer-token',
+    });
+    customers.seed(customer);
+
+    await useCase.execute({ userId: customer.id });
+
+    const reloaded = await customers.findById(customer.id);
+    expect(reloaded?.refreshTokenHash).toBeNull();
   });
 
   describe('audit-log publishing', () => {

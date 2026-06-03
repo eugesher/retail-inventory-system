@@ -6,11 +6,12 @@ import {
   AUDIT_LOG_PUBLISHER,
   IAuditLogPublisher,
   IJwtRefreshPayload,
-  RoleEnum,
 } from '@retail-inventory-system/contracts';
 
 import { IRefreshCommand } from '../dto';
 import {
+  CUSTOMER_REPOSITORY,
+  ICustomerRepositoryPort,
   IIssuedTokens,
   IPasswordPort,
   IStaffUserRepositoryPort,
@@ -19,11 +20,13 @@ import {
   STAFF_USER_REPOSITORY,
   TOKEN_SERVICE,
 } from '../ports';
+import { resolveAuthSubject } from './resolve-auth-subject';
 
 @Injectable()
 export class RefreshTokenUseCase {
   constructor(
-    @Inject(STAFF_USER_REPOSITORY) private readonly users: IStaffUserRepositoryPort,
+    @Inject(STAFF_USER_REPOSITORY) private readonly staff: IStaffUserRepositoryPort,
+    @Inject(CUSTOMER_REPOSITORY) private readonly customers: ICustomerRepositoryPort,
     @Inject(PASSWORD_HASHER) private readonly hasher: IPasswordPort,
     @Inject(TOKEN_SERVICE) private readonly tokens: ITokenPort,
     @Inject(AUDIT_LOG_PUBLISHER) private readonly audit: IAuditLogPublisher,
@@ -50,34 +53,37 @@ export class RefreshTokenUseCase {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const user = await this.users.findById(payload.sub);
-    if (!user || !user.isActive || !user.refreshTokenHash) {
+    // Resolve across both identity spaces — staff and customers share the
+    // `/auth/refresh` route and both are issued refresh tokens at login.
+    const resolved = await resolveAuthSubject(this.staff, this.customers, payload.sub);
+    const subject = resolved?.subject;
+    if (!resolved || !subject || !subject.isActive || !subject.refreshTokenHash) {
       this.logger.warn({ sub: payload.sub }, 'RefreshFailed: user missing or inactive');
       await this.audit.publish({
         name: 'RefreshFailed',
         actorId: null,
         actorKind: 'anonymous',
         targetId: payload.sub,
-        targetKind: 'staff-user',
+        targetKind: resolved?.targetKind ?? null,
         payload: { reason: 'user-missing-or-inactive' },
         correlationId,
       });
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const matches = await this.hasher.verify(user.refreshTokenHash, command.refreshToken);
+    const matches = await this.hasher.verify(subject.refreshTokenHash, command.refreshToken);
     if (!matches) {
       // Rotation reuse — clear the live hash so a leaked stale refresh token
       // can't roll forward (ADR-010).
-      user.rotateRefreshTokenHash(null);
-      await this.users.save(user);
-      this.logger.warn({ userId: user.id }, 'RefreshFailed: rotation reuse detected');
+      subject.rotateRefreshTokenHash(null);
+      await resolved.persist();
+      this.logger.warn({ userId: subject.id }, 'RefreshFailed: rotation reuse detected');
       await this.audit.publish({
         name: 'RefreshReuseDetected',
-        actorId: user.id,
-        actorKind: 'staff',
-        targetId: user.id,
-        targetKind: 'staff-user',
+        actorId: subject.id,
+        actorKind: resolved.actorKind,
+        targetId: subject.id,
+        targetKind: resolved.targetKind,
         payload: { reason: 'rotation-reuse' },
         correlationId,
       });
@@ -86,31 +92,29 @@ export class RefreshTokenUseCase {
 
     const accessJti = randomUUID();
     const refreshJti = randomUUID();
-    const roles = user.roleNames as RoleEnum[];
-    const permissions = user.permissionCodes;
 
     const accessToken = await this.tokens.issueAccessToken({
-      sub: user.id,
-      email: user.email,
-      roles,
-      permissions,
+      sub: subject.id,
+      email: subject.email,
+      roles: resolved.roles,
+      permissions: resolved.permissions,
       jti: accessJti,
     });
     const refreshToken = await this.tokens.issueRefreshToken({
-      sub: user.id,
+      sub: subject.id,
       jti: refreshJti,
     });
 
-    user.rotateRefreshTokenHash(await this.hasher.hash(refreshToken));
-    await this.users.save(user);
+    subject.rotateRefreshTokenHash(await this.hasher.hash(refreshToken));
+    await resolved.persist();
 
-    this.logger.info({ userId: user.id }, 'RefreshTokenRotated');
+    this.logger.info({ userId: subject.id }, 'RefreshTokenRotated');
     await this.audit.publish({
       name: 'RefreshTokenRotated',
-      actorId: user.id,
-      actorKind: 'staff',
-      targetId: user.id,
-      targetKind: 'staff-user',
+      actorId: subject.id,
+      actorKind: resolved.actorKind,
+      targetId: subject.id,
+      targetKind: resolved.targetKind,
       payload: { refreshJti },
       correlationId,
     });

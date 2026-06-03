@@ -62,16 +62,16 @@ export class InMemoryRoleRepository implements IRoleRepositoryPort {
     return Promise.resolve(role);
   }
 
-  public replacePermissions(
-    role: RoleAggregate,
-    codes: PermissionCodeEnum[],
-  ): Promise<RoleAggregate> {
+  public update(role: RoleAggregate, codes?: PermissionCodeEnum[]): Promise<RoleAggregate> {
     const stored = this.byId.get(role.id) ?? role;
-    for (const code of [...stored.permissions]) {
-      stored.removePermission(code);
-    }
-    for (const code of codes) {
-      stored.addPermission(code);
+    stored.setDescription(role.description);
+    if (codes !== undefined) {
+      for (const code of [...stored.permissions]) {
+        stored.removePermission(code);
+      }
+      for (const code of codes) {
+        stored.addPermission(code);
+      }
     }
     this.byId.set(stored.id, stored);
     return Promise.resolve(stored);

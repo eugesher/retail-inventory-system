@@ -4,18 +4,20 @@ import { PinoLogger } from 'nestjs-pino';
 import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { RoleAggregate, StaffUser } from '../../../domain';
+import { Customer, RoleAggregate, StaffUser } from '../../../domain';
 import { LoginUseCase } from '../login.use-case';
 import { RefreshTokenUseCase } from '../refresh-token.use-case';
 import {
   FakeAuditLogPublisher,
   FakeHasher,
   FakeTokenAdapter,
+  InMemoryCustomerRepository,
   InMemoryStaffUserRepository,
 } from './test-doubles';
 
 describe('RefreshTokenUseCase', () => {
   let users: InMemoryStaffUserRepository;
+  let customers: InMemoryCustomerRepository;
   let hasher: FakeHasher;
   let tokens: FakeTokenAdapter;
   let loginAudit: FakeAuditLogPublisher;
@@ -43,6 +45,7 @@ describe('RefreshTokenUseCase', () => {
 
   beforeEach(() => {
     users = new InMemoryStaffUserRepository();
+    customers = new InMemoryCustomerRepository();
     hasher = new FakeHasher();
     tokens = new FakeTokenAdapter();
     loginAudit = new FakeAuditLogPublisher();
@@ -58,6 +61,7 @@ describe('RefreshTokenUseCase', () => {
     );
     refresh = new RefreshTokenUseCase(
       users,
+      customers,
       hasher,
       tokens,
       refreshAudit,
@@ -126,6 +130,26 @@ describe('RefreshTokenUseCase', () => {
     await expect(refresh.execute({ refreshToken: first.refreshToken })).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
+  });
+
+  it('rotates tokens for a customer subject on the shared /auth/refresh route', async () => {
+    const customer = Customer.register('customer-1', {
+      email: 'customer-1@example.com',
+      passwordHash: await hasher.hash('password123'),
+      status: 'active',
+    });
+    const seededRefresh = await tokens.issueRefreshToken({ sub: customer.id, jti: 'seed-jti' });
+    customer.rotateRefreshTokenHash(await hasher.hash(seededRefresh));
+    customers.seed(customer);
+
+    const issuedBefore = tokens.issuedAccess.length;
+    const rotated = await refresh.execute({ refreshToken: seededRefresh });
+
+    expect(rotated.refreshToken).not.toBe(seededRefresh);
+    const reloaded = await customers.findById(customer.id);
+    expect(reloaded?.refreshTokenHash).toBe(`hash:${rotated.refreshToken}`);
+    // Customer access tokens carry no roles/permissions.
+    expect(tokens.issuedAccess[issuedBefore]).toMatchObject({ roles: [], permissions: [] });
   });
 
   describe('audit-log publishing', () => {
