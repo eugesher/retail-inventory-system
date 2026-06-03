@@ -122,36 +122,32 @@ transition timestamp.
 
 1. **Load.** `repository.findById(productId)` — a missing product is rejected
    (see §6).
-2. **Pricing precondition seam (warn, don't block).** See below.
-3. **Transition.** `product.publish()` — the domain enforces the two write-side
+2. **Transition.** `product.publish()` — the domain enforces the two write-side
    preconditions it can see: the product is in `draft` and has **at least one
    variant**. A non-draft product raises `PRODUCT_INVALID_STATE_TRANSITION`; a
    variant-less product raises `PRODUCT_PUBLISH_REQUIRES_VARIANT`. On success the
    aggregate flips to `active` and records a `ProductPublishedEvent` carrying the
    slug and the concrete `variantIds`.
-4. **Persist** via `repository.save(product)`.
-5. **Emit after commit.** Drain `product.pullDomainEvents()`, map the
+3. **Persist** via `repository.save(product)`.
+4. **Emit after commit.** Drain `product.pullDomainEvents()`, map the
    `ProductPublishedEvent` to `ICatalogProductPublishedEvent`, and publish it
    through the events port (best-effort — see §7).
-6. **Return** the `ProductView` with `status: 'active'` and `publishedAt`.
+5. **Return** the `ProductView` with `status: 'active'` and `publishedAt`.
 
-### The deferred active-price precondition
+### The active-Price publish precondition is owned by pricing
 
-A second precondition — "the product has **≥1 active Price**" — is *not* enforced
-yet. Price is owned by a **future pricing capability** that does not exist in the
-system today (there is no `Price` entity, table, or column). Until that capability
-lands, `PublishProductUseCase` does **not** block a price-less product: where the
-real check will live, it logs a `warn`
-(`active price precondition not yet enforced — pricing capability pending`) and
-proceeds.
+`PublishProductUseCase` enforces exactly one publish precondition of its own: the
+variant count, delegated to `Product.publish()` (the domain rejects a `draft`
+product with zero variants). It performs **no price awareness**.
 
-This is a deliberate, named **seam**. The warn sits at the point in the flow where
-the future hard check belongs (right before the `publish()` transition), so the
-pricing capability replaces the warn with a real assertion — and, if it fails it,
-a typed rejection — **without reshaping the use case**. The domain is left out of
-this entirely: `Product.publish()` guards only the variant count (ADR-025);
-"≥1 active Price" is a cross-aggregate fact the `Product` cannot see, so it lives
-in the use case, never in the model.
+A second precondition — "the product has **≥1 active Price**" — is a real business
+rule, but it is **owned by the pricing capability**, not by this use case. Price is
+a cross-aggregate fact the catalog `Product` cannot see, so it never belongs in the
+`Product` model; and the catalog publish use case does not reach across into
+pricing state. The capability that owns `Price` owns that precondition and enforces
+it where pricing is wired into the publish path. This use case therefore stays
+free of any price check — there is no placeholder, no warn, and no deferred seam
+here.
 
 ## 5. Archive Product
 
@@ -369,9 +365,8 @@ the catalog service still does not import `CacheModule`.
     rejections, and the best-effort publish (the variant is still returned when
     the publisher rejects).
   - **Publish** — happy path (`draft` + ≥1 variant → `active`, emits
-    `catalog.product.published` with the right `variantIds`), the deferred-price
-    warn-and-proceed, the no-variants rejection, the not-found rejection, and the
-    best-effort publish.
+    `catalog.product.published` with the right `variantIds`), the no-variants
+    rejection, the not-found rejection, and the best-effort publish.
   - **Archive** — happy path (`active → archived`, emits
     `catalog.product.archived`), the non-active rejection, the not-found
     rejection, and the best-effort publish.
@@ -389,9 +384,10 @@ the catalog service still does not import `CacheModule`.
 
 ## What this does not do
 
-The "≥1 active Price" publish precondition is a deferred warn-not-block seam (§4) —
-the pricing capability that turns it into a hard check is future work. The read
-path is **not cached** (§9.4 reserves the key builder but the service does not
-import `CacheModule`). The API gateway catalog module — the HTTP surface that
+The "≥1 active Price" publish precondition is **not** part of this use case (§4):
+`PublishProductUseCase` enforces only the ≥1-variant rule, and the active-Price
+check is owned by the pricing capability and enforced where pricing joins the
+publish path. The read path is **not cached** (§9.4 reserves the key builder but
+the service does not import `CacheModule`). The API gateway catalog module — the HTTP surface that
 exposes these RPCs and maps `CatalogErrorCodeEnum` → HTTP status — is later work,
 described in its own document as it lands.

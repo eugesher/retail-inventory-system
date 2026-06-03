@@ -43,18 +43,10 @@ export class PublishProductUseCase {
       );
     }
 
-    // Pricing precondition seam. A future pricing capability will assert the
-    // product has at least one active Price before it can be published; Price is
-    // owned by that capability and does not exist yet. Until it lands this warns
-    // and proceeds rather than blocking, so the publish path keeps its shape and
-    // the real check slots in here without reshaping the use case.
-    this.logger.warn(
-      { correlationId, productId },
-      'active price precondition not yet enforced — pricing capability pending',
-    );
-
     // Domain transition: rejects a non-draft product or a product with no
-    // variants, and records a `ProductPublishedEvent` on success.
+    // variants, and records a `ProductPublishedEvent` on success. The
+    // active-Price publish precondition is owned by the pricing capability and
+    // enforced there, not in this use case.
     product.publish();
 
     const saved = await this.repository.save(product);

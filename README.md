@@ -454,7 +454,7 @@ Roles are stored relationally in the `role` table and bound to permission codes 
 | Role | Permission codes |
 | --- | --- |
 | `admin` | every code |
-| `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish` |
+| `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish`, `pricing:write` |
 | `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer` |
 | `order-support` | `order:read`, `order:cancel`, `order:refund` |
 
@@ -486,6 +486,7 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `iam:assign` | `admin` |
 | `iam:role-edit` | `admin` |
 | `audit:read` | `admin` |
+| `pricing:write` | `admin`, `catalog-manager` |
 
 ### Required environment variables
 
