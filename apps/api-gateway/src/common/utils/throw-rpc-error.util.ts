@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpStatus,
   InternalServerErrorException,
   NotFoundException,
@@ -13,6 +14,7 @@ export function throwRpcError(error: unknown): never {
 
     if (code === HttpStatus.NOT_FOUND) throw new NotFoundException(msg);
     if (code === HttpStatus.BAD_REQUEST) throw new BadRequestException(msg);
+    if (code === HttpStatus.CONFLICT) throw new ConflictException(msg);
   }
 
   throw new InternalServerErrorException();

@@ -46,6 +46,15 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/order                                         │
 │  PUT   /api/order/:id/confirm                             │
 │  GET   /api/product/:productId/stock                      │
+│                                                           │
+│  Catalog (write: bearer + permission, read: public)       │
+│  POST  /api/catalog/products                              │
+│  POST  /api/catalog/products/:id/variants                 │
+│  POST  /api/catalog/products/:id/publish                  │
+│  POST  /api/catalog/products/:id/archive                  │
+│  GET   /api/catalog/products                              │
+│  GET   /api/catalog/products/:slug                        │
+│  GET   /api/catalog/variants/:id                          │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -71,8 +80,9 @@ The system handles order lifecycle management and product stock tracking across 
 │                        Shared DB                          │ │
 │  staff_user / customer / role / permission                │ │
 │  role_permissions / staff_user_roles                      │ │
-│  order / order_product / product / product_stock          │ │
+│  order / order_product / product_stock                    │ │
 │  storage / order_status / order_product_status            │ │
+│  product / product_variant                                │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
@@ -81,10 +91,20 @@ The system handles order lifecycle management and product stock tracking across 
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
+┌───────────────────────────────────────────────────────────────┐
+│                  Catalog Microservice (RMQ)                   │
+│  Binds: catalog_queue (product / variant context)             │
+│  Handles: product register/publish/archive, variant.create    │
+│  Emits: variant.created, product.published/archived           │
+│  Reads: product.list, product.get, variant.get                │
+└───────────────────────────────────────────────────────────────┘
+
 OpenTelemetry: every service exports OTLP/HTTP spans through the
 otel-collector → Jaeger UI at http://localhost:16686 (see the
 "Distributed tracing" section below).
 ```
+
+The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. The `product_stock.product_id` / `order_product.product_id` columns survive today as plain integers with **no foreign key** (the standalone inventory `product` table was dropped); a later inventory/retail capability reshapes them onto a catalog `variantId`.
 
 ## Shared libraries
 
@@ -110,6 +130,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
+| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, and emits `catalog.variant.created` / `catalog.product.published` / `catalog.product.archived` |
 
 ### API Gateway layout
 
@@ -131,16 +152,26 @@ apps/api-gateway/src/
     │   └── presentation/
     │       ├── order.controller.ts            # POST/PUT /api/order…
     │       └── pipes/order-confirm.pipe.ts
-    └── inventory/                             # talks to inventory-microservice
+    ├── inventory/                             # talks to inventory-microservice
+    │   ├── application/
+    │   │   ├── ports/inventory-gateway.port.ts
+    │   │   └── use-cases/get-product-stock.use-case.ts
+    │   ├── infrastructure/
+    │   │   ├── messaging/inventory-rabbitmq.adapter.ts
+    │   │   └── inventory.module.ts
+    │   └── presentation/
+    │       ├── product.controller.ts          # GET /api/product/:id/stock
+    │       └── dto/product-stock-get-query.dto.ts
+    └── catalog/                               # talks to catalog-microservice
         ├── application/
-        │   ├── ports/inventory-gateway.port.ts
-        │   └── use-cases/get-product-stock.use-case.ts
+        │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
+        │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
         ├── infrastructure/
-        │   ├── messaging/inventory-rabbitmq.adapter.ts
-        │   └── inventory.module.ts
-        └── presentation/
-            ├── product.controller.ts          # GET /api/product/:id/stock
-            └── dto/product-stock-get-query.dto.ts
+        │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder
+        ├── presentation/
+        │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id
+        │   └── dto/                           # Register/CreateVariant request + ListProducts query DTOs
+        └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
 ```
 
 The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, and `PermissionAggregate` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
@@ -238,7 +269,7 @@ apps/retail-microservice/src/
     │   └── orders.module.ts                   # binds all three port symbols → adapters
     └── presentation/
         ├── orders.controller.ts               # @MessagePattern handlers for RETAIL_ORDER_CREATE / CONFIRM / GET
-        └── pipes/                              # OrderCreatePipe + OrderConfirmPipe (pre-RPC validation/load)
+        └── pipes/                              # OrderConfirmPipe (pre-RPC order line-item load)
 ```
 
 `ClientProxy` is confined to the two adapters under `infrastructure/messaging/`; the use cases inject `INVENTORY_CONFIRM_GATEWAY` (for the cross-service reserve call) and `ORDER_EVENTS_PUBLISHER` (for `retail.order.created` / `retail.order.confirmed`). See [ADR-013](docs/adr/013-order-aggregate-and-cross-service-confirm.md) for the aggregate boundaries and the cross-service confirm flow.
@@ -259,19 +290,20 @@ yarn start:dev
 
 | Script | Description |
 | ------ | ----------- |
-| `yarn start:dev` | Start all four services concurrently with watch reload (uses `scripts/bash/start-dev.sh`). |
+| `yarn start:dev` | Start all five services concurrently with watch reload (uses `scripts/bash/start-dev.sh`). |
 | `yarn start:dev:api-gateway` | Start the API gateway with watch reload. |
 | `yarn start:dev:inventory-microservice` | Start the inventory microservice with watch reload. |
 | `yarn start:dev:retail-microservice` | Start the retail microservice with watch reload. |
 | `yarn start:dev:notification-microservice` | Start the notification microservice with watch reload. |
-| `yarn start:prod:<service>` | Run a built service from `dist/` (`api-gateway`, `inventory-microservice`, `retail-microservice`, `notification-microservice`). |
+| `yarn start:dev:catalog-microservice` | Start the catalog microservice with watch reload. |
+| `yarn start:prod:<service>` | Run a built service from `dist/` (`api-gateway`, `inventory-microservice`, `retail-microservice`, `notification-microservice`, `catalog-microservice`). |
 
 ### Build
 
 | Script | Description |
 | ------ | ----------- |
-| `yarn build` | Build all four apps via `nest build --all`. |
-| `yarn build:<service>` | Build a single app — same four service names as above. |
+| `yarn build` | Build all five apps via `nest build --all`. |
+| `yarn build:<service>` | Build a single app — same five service names as above. |
 
 ### Lint / format
 
@@ -324,7 +356,7 @@ What the boundaries rules cover today:
 - `libs/ddd/` is framework-free (no `@nestjs/*`, no TypeORM, no I/O packages).
 - Cross-service (`apps/X` → `apps/Y`) and cross-module imports are rejected by `boundaries/dependencies` via the `{{from.captured.app}}` / `{{from.captured.module}}` template-matched selectors.
 
-The rules are regression-tested in `tests/lint/architecture-lint.spec.ts` — every rule has a fixture that intentionally violates it and asserts the expected `boundaries/*` ruleId fires, so silent weakening of a rule fails the unit suite.
+The rules are regression-tested in `spec/architecture-lint.spec.ts` — every rule has a fixture that intentionally violates it and asserts the expected `boundaries/*` ruleId fires, so silent weakening of a rule fails the unit suite. The suite covers the inventory `stock` module, the gateway `auth`/`iam` modules, and the catalog microservice's `catalog` module.
 
 ## API
 
@@ -339,6 +371,18 @@ PUT  /api/order/:id/confirm
 
 ```
 GET /product/:productId/stock
+```
+
+### Catalog
+
+```
+POST /api/catalog/products                      # bearer + catalog:write
+POST /api/catalog/products/:productId/variants  # bearer + catalog:write
+POST /api/catalog/products/:productId/publish   # bearer + catalog:publish
+POST /api/catalog/products/:productId/archive   # bearer + catalog:write
+GET  /api/catalog/products                       # public  — paged active-catalogue browse
+GET  /api/catalog/products/:slug                 # public  — product + active variants
+GET  /api/catalog/variants/:variantId            # public  — variant + parent product
 ```
 
 ### Auth
@@ -369,7 +413,7 @@ Interactive API reference is available at `http://localhost:3000/api/reference` 
 
 ## Authentication
 
-Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
+Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, and the three `GET /api/catalog/...` browse/resolve routes). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
 
 Two subject kinds share the JWT pipeline:
 

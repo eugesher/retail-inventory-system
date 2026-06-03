@@ -55,9 +55,9 @@ Stand up a brand-new `catalog-microservice` whose single `catalog` bounded conte
 - `product` table: `id` (INT PK), `name`, `slug` (unique), `description`, `status` (enum), timestamps.
 - `product_variant` table: `id` (INT PK), `product_id` (FK), `sku` (unique), `gtin` (nullable), `option_values` (JSON), `weight_g` (INT nullable), `dimensions_mm` (JSON nullable), `status` (enum), timestamps.
 
-**Removed:**
+**Removed (in the conflict-resolution cleanup — task 2, before any catalog table is created):**
 
-- The inventory-microservice's existing `product` table (3 columns: `id`, `name`, timestamps) is **dropped**. All references in the inventory bounded context shift to `variantId` and are owned by `epic-04`.
+- The inventory-microservice's existing `product` table (3 columns: `id`, `name`, timestamps) is **dropped**, together with its entity (`apps/inventory-microservice/src/modules/stock/infrastructure/persistence/product.entity.ts`), the barrel re-export in that folder's `index.ts`, its TypeORM entity registration, and any FK constraint referencing it. **This must happen before task 3 creates the catalog `product` table** — both live in the single shared `retail_db` schema, so a catalog `CREATE TABLE product` would collide with the inventory stub otherwise. The inventory `product_stock.product_id` column is kept as a plain integer (no FK) until `epic-04` reshapes the inventory model onto `variantId`; nothing is left dangling against a dropped table.
 - The retail-microservice does NOT own a `product` table today; no removal there.
 
 **Indexes & constraints:**
@@ -129,17 +129,19 @@ Stand up a brand-new `catalog-microservice` whose single `catalog` bounded conte
 **Per-task markdown files** under `docs/implementation/02-catalog-product-and-variant/`:
 
 - `01-new-catalog-microservice-scaffold.md` — Nest CLI generation, `nest-cli.json` / `package.json` / `docker-compose.yml` / OTel-collector wiring, `eslint.config.mjs` boundaries update, MessagingModule + DatabaseModule + LoggerModule + tracer first-import.
-- `02-product-and-variant-domain.md` — aggregate boundaries (Product is the aggregate root; ProductVariant is a child entity inside Product on writes but a top-level read entity), invariants, status state machine.
-- `03-product-and-variant-persistence.md` — entity + mapper + repository shape; FK rationale.
-- `04-catalog-use-cases.md` — Register / Add Variant / Publish / Archive use cases, ports and adapters used.
-- `05-catalog-events.md` — routing keys added, payload shapes, version `v1` rationale.
-- `06-api-gateway-catalog-module.md` — gateway module mirrors retail/inventory shape; permission gating decisions.
-- `07-kulala-catalog-http-file.md` — the `http/catalog.http` shape and how to run it locally.
+- `02-inventory-product-stub-removed.md` — why the inventory-side `product` stub is removed up front (single shared `retail_db` schema → the catalog `product` table cannot be created while the stub exists); what was dropped (table, entity, barrel re-export, entity registration, FK); why `product_stock.product_id` is left as a plain integer until `epic-04`.
+- `03-product-and-variant-domain.md` — aggregate boundaries (Product is the aggregate root; ProductVariant is a child entity inside Product on writes but a top-level read entity), invariants, status state machine.
+- `04-product-and-variant-persistence.md` — entity + mapper + repository shape; FK rationale.
+- `05-catalog-use-cases.md` — Register / Add Variant / Publish / Archive use cases, ports and adapters used.
+- `06-catalog-events.md` — routing keys added, payload shapes, version `v1` rationale.
+- `07-api-gateway-catalog-module.md` — gateway module mirrors retail/inventory shape; permission gating decisions.
+- `08-kulala-catalog-http-file.md` — the `http/catalog.http` shape and how to run it locally.
 
 **`README.md` updates required:**
 
 - Add a `catalog-microservice` row to the **Services** table.
 - Update the **System diagram** to include the catalog box and its `catalog_queue`; show the new routing keys.
+- Remove the inventory-microservice's `product` box/table from the **System diagram** and any prose describing it — it is dropped in task 2.
 - Add **API → Catalog** section with the endpoint list.
 - Add a new diagram caption noting "every downstream cluster keys on `variantId` (not `productId`)".
 
@@ -155,27 +157,27 @@ Stand up a brand-new `catalog-microservice` whose single `catalog` bounded conte
 ## Tasks (decomposition hint)
 
 1. **Scaffold the new catalog-microservice.** Nest generate, wire `nest-cli.json`, `package.json` scripts, `docker-compose.yml`, OTel collector, tracer-first-import, LoggerModule, MessagingModule, DatabaseModule, eslint boundaries config + fixture suite extension.
-2. **Add Product + ProductVariant domain + persistence + repository port/adapter.** Specs alongside.
-3. **Implement Register Product + Add Variant use cases.** Specs + event publisher port + RMQ publisher adapter (RoutingKeys + queue + events).
-4. **Implement Publish Product + Archive Product use cases.** Specs + event emission.
-5. **Implement Query Catalog read path** (RPC handlers + presentation `@MessagePattern` handlers).
-6. **Add the api-gateway `modules/catalog/` module.** Port + RMQ adapter + use cases + controller + DTOs + pipes.
-7. **Author `http/catalog.http`.**
-8. **Drop the inventory-microservice's old `product` table** via a migration. (Inventory's references shift in `epic-04`; this task only removes the obsolete table that won't be re-read.)
-9. **Seed and documentation pass:** extend `scripts/test-db-seed.ts`; write the seven per-task `docs/implementation/.../*.md` files; update `README.md` + `CLAUDE.md`; extend `spec/architecture-lint.spec.ts`.
+2. **Resolve naming conflicts — remove the inventory-microservice's `product` stub.** Drop the inventory `product` table via a migration; delete `product.entity.ts`; remove its barrel re-export and TypeORM entity registration; drop any FK constraint referencing it (keep `product_stock.product_id` as a plain integer until `epic-04`). Runs **before** task 3 so the catalog `product` table can be created in the shared `retail_db` schema without a name collision. Complete removal — no rename to a `legacy`/`old` table.
+3. **Add Product + ProductVariant domain + persistence + repository port/adapter.** Specs alongside. Creates the catalog `product` + `product_variant` tables.
+4. **Implement Register Product + Add Variant use cases.** Specs + event publisher port + RMQ publisher adapter (RoutingKeys + queue + events).
+5. **Implement Publish Product + Archive Product use cases.** Specs + event emission.
+6. **Implement Query Catalog read path** (RPC handlers + presentation `@MessagePattern` handlers).
+7. **Add the api-gateway `modules/catalog/` module.** Port + RMQ adapter + use cases + controller + DTOs + pipes.
+8. **Author `http/catalog.http`.**
+9. **Seed and documentation pass:** extend `scripts/test-db-seed.ts`; write the per-task `docs/implementation/.../*.md` files; update `README.md` + `CLAUDE.md`; extend `spec/architecture-lint.spec.ts`.
 
 ## Carryover Between Tasks
 
 | Task | Entry state assumed | Carryover artifacts produced (never under `tmp/`) |
 |---|---|---|
 | 1 | `epic-01` complete (StaffUser + Permissions present and gated). | New `apps/catalog-microservice/src/{main,app/app.module}.ts`, updated `nest-cli.json`, `package.json`, `docker-compose.yml`, `infrastructure/otel-collector-config.yaml`, `eslint.config.mjs`, `spec/architecture-lint.spec.ts`; `docs/implementation/02-…/01-…md`. |
-| 2 | Task 1 carryover present; the new app boots empty. | `product.model.ts`, `product-variant.model.ts`, value-objects, entities, mappers, `CatalogTypeormRepository`; new migration creating `product` + `product_variant`; specs; `02-…md`, `03-…md`. |
-| 3 | Tasks 1–2 carryover present. | `register-product.use-case.ts`, `add-variant.use-case.ts`, specs, ports + adapters; routing-key constants + queue + `MicroserviceClientCatalogModule`; `04-…md`, `05-…md` (partial). |
-| 4 | Tasks 1–3 carryover present. | `publish-product.use-case.ts`, `archive-product.use-case.ts`, specs, additional event emission; `05-…md` complete. |
-| 5 | Tasks 1–4 carryover present. | RPC routing keys (`catalog.product.get`, `catalog.variant.get`); presentation `catalog.controller.ts` `@MessagePattern` handlers; `04-…md` updated. |
-| 6 | Tasks 1–5 carryover present. | `apps/api-gateway/src/modules/catalog/` full per-module hexagonal layout + controller + DTOs + pipes; `06-…md`. |
-| 7 | Task 6 carryover present. | New `http/catalog.http`; `07-…md`. |
-| 8 | Tasks 1–7 carryover present. | A migration that drops the obsolete inventory-microservice `product` table; no other change. (Inventory's `stock-typeorm.repository.ts` foreign-key import to that table is left dangling until `epic-04` reshapes it — flagged in `01-…md` of `epic-04`.) |
+| 2 | Task 1 carryover present; the new app boots empty. | A migration dropping the inventory-microservice `product` table (and any FK referencing it); deleted `product.entity.ts` + its barrel re-export + entity registration; `product_stock.product_id` retained as a plain integer column; `docs/implementation/02-…/02-…md`. After this task the shared `retail_db` schema has no `product` table, so task 3 can create the catalog one. |
+| 3 | Tasks 1–2 carryover present. | `product.model.ts`, `product-variant.model.ts`, value-objects, entities, mappers, `CatalogTypeormRepository`; new migration creating `product` + `product_variant`; specs; `03-…md`, `04-…md`. |
+| 4 | Tasks 1–3 carryover present. | `register-product.use-case.ts`, `add-variant.use-case.ts`, specs, ports + adapters; routing-key constants + queue + `MicroserviceClientCatalogModule`; `05-…md`, `06-…md` (partial). |
+| 5 | Tasks 1–4 carryover present. | `publish-product.use-case.ts`, `archive-product.use-case.ts`, specs, additional event emission; `06-…md` complete. |
+| 6 | Tasks 1–5 carryover present. | RPC routing keys (`catalog.product.get`, `catalog.variant.get`); presentation `catalog.controller.ts` `@MessagePattern` handlers; `05-…md` updated. |
+| 7 | Tasks 1–6 carryover present. | `apps/api-gateway/src/modules/catalog/` full per-module hexagonal layout + controller + DTOs + pipes; `07-…md`. |
+| 8 | Task 7 carryover present. | New `http/catalog.http`; `08-…md`. |
 | 9 | All prior tasks complete. | Updated `scripts/test-db-seed.ts`, `README.md`, `CLAUDE.md`, `spec/architecture-lint.spec.ts` fixtures; `docs/implementation/02-…/` complete. |
 
 ## Exit Criteria
@@ -184,6 +186,7 @@ Stand up a brand-new `catalog-microservice` whose single `catalog` bounded conte
 - [ ] `yarn test:unit` passes; ≥6 new domain/use-case spec files green.
 - [ ] `yarn test:e2e` passes; `test/catalog.e2e-spec.ts` green.
 - [ ] `docker compose up -d && yarn migration:run && yarn start:dev` boots all five services (the four existing + `catalog-microservice`); `catalog_queue` is bound on RabbitMQ.
+- [ ] The inventory-microservice's `product` table and `product.entity.ts` are gone before the catalog `product` table is created; `yarn migration:run` applies cleanly end-to-end with no table-name collision in the shared `retail_db` schema.
 - [ ] Every request in `http/catalog.http` executes end-to-end against the seeded data.
 - [ ] `GET /api/catalog/products` returns the two seeded active products with their variants.
 - [ ] Per-task docs present under `docs/implementation/02-catalog-product-and-variant/`.

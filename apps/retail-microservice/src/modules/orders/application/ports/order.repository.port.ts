@@ -16,7 +16,6 @@ export interface IOrderRepositoryPort {
   findHeaderById(id: number): Promise<{ statusId: Order['statusId'] } | null>;
   findOrderResponse(id: number): Promise<OrderConfirmResponseDto | null>;
   findConfirmableOrder(id: number): Promise<Omit<IOrderConfirm, 'correlationId'> | null>;
-  findExistingProductIds(productIds: number[]): Promise<number[]>;
   save(order: Order): Promise<Order>;
   confirmLines(payload: {
     orderId: number;

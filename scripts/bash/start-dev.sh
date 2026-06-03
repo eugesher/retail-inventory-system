@@ -20,10 +20,11 @@ if [[ "$reload" == true ]]; then
 fi
 
 concurrently \
-  --names "API,INV,RET,NOT" \
+  --names "API,INV,RET,NOT,CAT" \
   --prefix "[{name}]" \
-  --prefix-colors "magenta,blue,cyan,yellow" \
+  --prefix-colors "magenta,blue,cyan,yellow,green" \
   "yarn start:dev:api-gateway" \
   "yarn start:dev:inventory-microservice" \
   "yarn start:dev:retail-microservice" \
-  "yarn start:dev:notification-microservice"
+  "yarn start:dev:notification-microservice" \
+  "yarn start:dev:catalog-microservice"

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DataSource, DeepPartial, In, Repository } from 'typeorm';
+import { DeepPartial, In, Repository } from 'typeorm';
 
 import {
   IOrderConfirm,
@@ -21,8 +21,6 @@ export class OrderTypeormRepository implements IOrderRepositoryPort {
   constructor(
     @InjectRepository(OrderEntity)
     private readonly orderRepository: Repository<OrderEntity>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
     @InjectPinoLogger(OrderTypeormRepository.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -62,18 +60,6 @@ export class OrderTypeormRepository implements IOrderRepositoryPort {
         statusId: line.statusId,
       })),
     };
-  }
-
-  public async findExistingProductIds(productIds: number[]): Promise<number[]> {
-    if (productIds.length === 0) return [];
-    // The `product` table is owned by the inventory service; the order-create
-    // existence check reads it here so the boundary rule (no `Repository<...>`
-    // outside `infrastructure/`) stays intact (ADR-013).
-    const rows = await this.dataSource.query<{ id: number }[]>(
-      `SELECT id FROM product WHERE id IN (${productIds.map(() => '?').join(',')})`,
-      productIds,
-    );
-    return rows.map((r) => r.id);
   }
 
   public async findOrderResponse(id: number): Promise<OrderConfirmResponseDto | null> {

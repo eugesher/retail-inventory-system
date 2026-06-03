@@ -1,254 +1,215 @@
 ---
 epic: epic-02
 task_number: 1
-title: Scaffold the new catalog-microservice (monorepo wiring, MessagingModule + DatabaseModule + LoggerModule + tracer-first-import, eslint boundaries)
+title: Scaffold the catalog microservice
 depends_on: []
 doc_deliverable: docs/implementation/02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md
+adr_deliverable: none
 ---
 
-# Task 01 — Scaffold the new `catalog-microservice`
+# Task 01 — Scaffold the catalog microservice
 
 ## Required reading
 
-- **Mandatory:** Read `tmp/adr-summary.md` before starting — the index of architectural decisions of record.
-- **Recommended:** For any decision relevant to this task, open the linked original ADR under `docs/adr/` before implementing.
+- Review and follow the guidelines in the file `tmp/tasks/execution-requirements.md`.
+- Review and follow the carryover documents (`carryover-*.md` in this task's folder) produced by the preceding tasks.
+- Review the document `tmp/adr-summary.md`, then select, review, and follow the `docs/adr/` documents related to this task.
+
+Most relevant ADRs: **ADR-018** (NestJS monorepo apps + libs), **ADR-004**
+(per-module hexagonal), **ADR-007 / ADR-014** (tracer-first import + OTel env),
+**ADR-001 / ADR-015** (Pino logger), **ADR-020** (RabbitMQ transport + queue per
+service), **ADR-008** (messaging wiring).
 
 ## Goal
 
-Stand up an empty, boot-ready fifth Nest application — `apps/catalog-microservice/` — that mirrors the canonical per-module shape of `apps/notification-microservice/` (the cleanest existing reference per ADR-004/009/012/013). After this task the app starts under `yarn start:dev:catalog-microservice`, registers an empty Nest microservice on a new `catalog_queue` RabbitMQ queue, owns its DB connection, emits OTel traces under the service name `catalog-microservice`, and is recognised by ESLint's `eslint-plugin-boundaries` configuration. **No catalog domain code exists yet** — that arrives in task-02.
-
-This task is foundation-only. There are no entity files, no use cases, no controllers, no migrations. Every later task assumes the skeleton put in place here.
+Stand up a new deployable `catalog-microservice` that boots as an RMQ server on
+a new `catalog_queue`, with an empty `catalog` bounded-context module shaped on
+the canonical per-module hexagonal template. After this task the service starts,
+connects to RabbitMQ, logs "listening", and registers **no** message handlers
+yet. No domain, persistence, use cases, or events exist — those arrive in later
+tasks.
 
 ## Entry state assumed
 
-Pristine repo at the commit `afdaf02 RIS-43 Batch-01` (or any later commit that has not begun epic-02). Specifically:
-
-- `apps/` contains exactly four applications: `api-gateway`, `inventory-microservice`, `retail-microservice`, `notification-microservice`.
-- `libs/contracts/microservices/microservice-queue.enum.ts` defines `INVENTORY_QUEUE`, `RETAIL_QUEUE`, `NOTIFICATION_EVENTS`.
-- `libs/contracts/microservices/microservice-client-token.enum.ts` defines `INVENTORY_MICROSERVICE`, `RETAIL_MICROSERVICE`, `NOTIFICATION_MICROSERVICE`.
-- `libs/messaging/` contains `microservice-client-{inventory,retail,notification}.module.ts` but **no** catalog module.
-- `nest-cli.json` has four entries under `projects`.
-- `package.json` defines `start:dev:` and `build:` scripts for the four existing apps.
-- `docker-compose.yml` defines services for the four apps + `mysql`, `redis`, `rabbitmq`.
-- `infrastructure/otel-collector-config.yaml` lists the four existing OTel `service.name`s for trace routing.
-- `eslint.config.mjs` has a boundaries config that captures `apps/*/src/modules/*/{domain,application,infrastructure,presentation}/**`.
-- `spec/architecture-lint.spec.ts` exercises that boundary set with fixtures.
+- The four existing services (`api-gateway`, `inventory-microservice`,
+  `retail-microservice`, `notification-microservice`) are present and green.
+- There is **no** `apps/catalog-microservice/` directory.
+- `libs/contracts/auth/permission.enum.ts` already defines `CATALOG_READ`,
+  `CATALOG_WRITE`, `CATALOG_PUBLISH`; `role.enum.ts` already defines
+  `CATALOG_MANAGER`; the baseline seed already seeds these. Do **not** re-add them.
+- First task — read no carryover.
 
 ## Scope
 
-**In:**
+**In**
 
-- A new `apps/catalog-microservice/` tree (Nest CLI–generated layout) with the bare bones to boot: `src/main.ts`, `src/app/app.module.ts`, `src/app/index.ts`, `tsconfig.app.json`, `webpack.config.js` (if the other apps have one; otherwise rely on the root webpack.config.js), and a single empty `src/modules/catalog/` placeholder so the module dir exists for task-02 to extend.
-- A new `MicroserviceClientCatalogModule` in `libs/messaging/` mirroring `MicroserviceClientNotificationModule`.
-- New enum values: `MicroserviceQueueEnum.CATALOG_QUEUE = 'catalog_queue'`, `MicroserviceClientTokenEnum.CATALOG_MICROSERVICE = 'CATALOG_MICROSERVICE'`.
-- `nest-cli.json`: add the fifth `projects` entry.
-- `package.json`: add `start:dev:catalog-microservice` and `build:catalog-microservice` scripts mirroring the existing four.
-- `docker-compose.yml`: add the `catalog-microservice` service (identical shape to `inventory-microservice` — same env vars, same network, same `depends_on`).
-- `infrastructure/otel-collector-config.yaml`: add `catalog-microservice` to the routing list.
-- `eslint.config.mjs`: register `catalog-microservice` in the `app:` capture set if the rules use an explicit allowlist (they don't appear to today, but verify); otherwise the new tree falls under `apps/*/...` automatically — no change needed. **Crosscheck** by running `yarn lint` against the new tree and confirming no `boundaries/element-types` "unknown element" warnings.
-- `spec/architecture-lint.spec.ts`: extend the fixture set so the spec asserts that the new app's tree is governed by the same rules. Concrete extension: a new `describe('catalog-microservice fixtures', ...)` block that mirrors one or two existing fixture blocks for a different app, swapping the path prefix.
-- Doc deliverable `01-new-catalog-microservice-scaffold.md`.
+- The `apps/catalog-microservice/` app skeleton that boots empty.
+- The contract enum additions needed for a bootable RMQ service.
+- Monorepo wiring: `nest-cli.json`, per-app `tsconfig.app.json`, `package.json`
+  scripts, `docker-compose.yml`, `scripts/bash/start-dev.sh`.
 
-**Out:**
+**Out**
 
-- Any domain code (Product/ProductVariant) — task-02.
-- Any migration — task-02.
-- Routing key constants for `catalog.product.*` — task-03.
-- Tracer instrumentation specifics (the shared-library tracer first-import via `@retail-inventory-system/observability/tracer` is part of task-01 because it must run before any Nest import — see ADR-007 §"Side-effect import for OTel bootstrap"; subsequent OTel decisions belong to ADR-014/015, not here).
+- Domain, persistence, use cases, events, controllers (later tasks).
+- Any `eslint.config.mjs` change for boundaries (see "Architecture-lint note").
+- `MicroserviceClientCatalogModule` and any `ROUTING_KEYS` (task-05+).
+- `CacheModule` — the catalog service does not cache in this work.
 
-## Layout to create
+## Contract enum additions
 
-Use `apps/notification-microservice/` as the source-of-truth shape (it is the cleanest existing reference). End state after this task:
+Add exactly these (additive; keep existing members):
+
+- `libs/contracts/microservices/microservice-queue.enum.ts` →
+  `CATALOG_QUEUE = 'catalog_queue'` in `MicroserviceQueueEnum`.
+- `libs/contracts/microservices/app-name.enum.ts` →
+  `CATALOG_MICROSERVICE = 'catalog-microservice'` in `AppNameEnum`.
+
+Do **not** add a `MicroserviceClientTokenEnum.CATALOG_MICROSERVICE` here — no
+code injects a catalog client yet; that token arrives in task-05 with the
+publisher.
+
+## App skeleton (model on the notification + inventory microservices)
 
 ```
 apps/catalog-microservice/
-├── tsconfig.app.json
-├── src/
-│   ├── main.ts
-│   ├── app/
-│   │   ├── app.module.ts      # imports MessagingModule, DatabaseModule.forRoot([]), LoggerModule, the empty CatalogModule placeholder
-│   │   └── index.ts           # re-exports AppModule
-│   └── modules/
-│       └── catalog/
-│           ├── index.ts        # empty barrel for task-02 to fill
-│           ├── domain/         # empty dir + .gitkeep
-│           ├── application/    # empty dir + .gitkeep
-│           ├── infrastructure/
-│           │   └── catalog.module.ts   # empty NestJS module — TypeOrmModule.forFeature([]) placeholder
-│           └── presentation/   # empty dir + .gitkeep
+  tsconfig.app.json                 # extends ../../tsconfig.json; outDir ../../dist/apps/catalog-microservice
+  src/
+    main.ts                         # FIRST import: '@retail-inventory-system/observability/tracer'
+    app/
+      app.module.ts
+      index.ts                      # re-exports AppModule
+    modules/
+      catalog/
+        index.ts                    # re-exports CatalogModule (+ entity barrel later)
+        catalog.module.ts           # empty @Module({}) for now — providers/controllers added later
 ```
 
-`main.ts` opens with `import '@retail-inventory-system/observability/tracer';` as the very first line (matches the convention used by the four existing microservices — see ADR-007 §"`libs/observability` is the host for both Pino and OTel"; runtime trace routing follows from `OTEL_SERVICE_NAME=catalog-microservice` set in the docker-compose env block, not from any app-local bootstrap file). After the tracer side-effect import, the file bootstraps a `NestFactory.createMicroservice(AppModule, { transport: Transport.RMQ, options: { urls: [process.env.RABBITMQ_URL!], queue: MicroserviceQueueEnum.CATALOG_QUEUE, queueOptions: { durable: true }, noAck: false } })`. Mirror the exact options block from `apps/inventory-microservice/src/main.ts`.
+- `main.ts` mirrors `apps/inventory-microservice/src/main.ts`:
+  `NestFactory.createMicroservice<MicroserviceOptions>(AppModule, { transport: Transport.RMQ, options: { urls: [RABBITMQ_URL], queue: MicroserviceQueueEnum.CATALOG_QUEUE, queueOptions: { durable: true } } })`,
+  `PinoLogger(new LoggerModuleConfig(AppNameEnum.CATALOG_MICROSERVICE))`, HMR
+  block, `logger.info('Catalog Microservice is listening for messages')`.
+  **The tracer side-effect import stays the first executable line** (ADR-007).
+- `app.module.ts` mirrors `apps/inventory-microservice/src/app/app.module.ts`
+  **minus** `CacheModule` and **minus** `DatabaseModule.forRoot(...)` for now
+  (no entities yet — task-04 adds `DatabaseModule.forRoot(catalogEntities)`):
+  `ConfigModule.forRoot(configModuleConfig)`,
+  `LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.CATALOG_MICROSERVICE))`,
+  `CatalogModule`.
+- `catalog.module.ts` is an empty `@Module({})` exported class for now.
 
-`app.module.ts` imports — in this order, matching the existing apps — `LoggerModule`, `DatabaseModule.forRoot([])` (empty entity list; task-02 adds `ProductEntity` + `ProductVariantEntity`), `MessagingModule`, the empty `CatalogModule` placeholder. The empty `CatalogModule` is intentional — its presence asserts the per-module tree exists so the boundaries config "sees" it; task-02 fills it.
+## Monorepo + ops wiring
 
-## `libs/messaging/microservice-client-catalog.module.ts`
+- `nest-cli.json` → add a `catalog-microservice` entry to `projects` mirroring
+  the `inventory-microservice` block (root `apps/catalog-microservice`,
+  `entryFile: main`, `sourceRoot: apps/catalog-microservice/src`,
+  `tsConfigPath: apps/catalog-microservice/tsconfig.app.json`).
+- `package.json` scripts → add `build:catalog-microservice`,
+  `start:dev:catalog-microservice`, `start:prod:catalog-microservice`
+  mirroring the inventory entries.
+- `docker-compose.yml` → add a `catalog-microservice` service mirroring the
+  **notification-microservice** block (it has `DATABASE_URL`, `REDIS_URL`,
+  `RABBITMQ_URL`, `CACHE_TTL_MS_DEFAULT`, `OTEL_SERVICE_NAME`,
+  `OTEL_EXPORTER_OTLP_ENDPOINT`, the three `depends_on` health conditions, the
+  bind-mount volumes, `command: yarn start:dev:catalog-microservice`, network
+  `backend`). Set `OTEL_SERVICE_NAME: catalog-microservice` and
+  `container_name: catalog-microservice`. Keep `REDIS_URL` /
+  `CACHE_TTL_MS_DEFAULT` to satisfy the shared `libs/config` Joi schema even
+  though catalog does not cache — verify against `libs/config` and trim only if
+  the schema marks them optional.
+- `scripts/bash/start-dev.sh` → extend the `concurrently` block: add `CAT` to
+  `--names`, add a colour, and add `"yarn start:dev:catalog-microservice"`.
 
-Mirror `microservice-client-notification.module.ts`. Concretely:
+## Architecture-lint note (do not skip)
 
-```ts
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { ClientsModule } from '@nestjs/microservices';
-
-import {
-  MicroserviceClientTokenEnum,
-  MicroserviceQueueEnum,
-} from '@retail-inventory-system/contracts';
-
-import { MicroserviceClientConfiguration } from './microservice-client.configuration';
-
-@Module({
-  imports: [
-    ConfigModule,
-    ClientsModule.registerAsync([
-      new MicroserviceClientConfiguration(
-        MicroserviceClientTokenEnum.CATALOG_MICROSERVICE,
-        MicroserviceQueueEnum.CATALOG_QUEUE,
-      ),
-    ]),
-  ],
-  exports: [ClientsModule],
-})
-export class MicroserviceClientCatalogModule {}
-```
-
-Add the export to `libs/messaging/index.ts`.
-
-## `nest-cli.json` — `projects` entry to add
-
-```json
-"catalog-microservice": {
-  "type": "application",
-  "root": "apps/catalog-microservice",
-  "entryFile": "main",
-  "sourceRoot": "apps/catalog-microservice/src",
-  "compilerOptions": {
-    "tsConfigPath": "apps/catalog-microservice/tsconfig.app.json"
-  }
-}
-```
-
-## `package.json` — scripts to add
-
-```json
-"build:catalog-microservice": "nest build catalog-microservice",
-"start:dev:catalog-microservice": "nest start catalog-microservice --watch",
-```
-
-Match the alphabetical positioning of the existing four script families (build/start:dev each as their own block).
-
-## `docker-compose.yml` — service to add
-
-Identical shape to `inventory-microservice`, swapping app name + service name. Env vars:
-
-```yaml
-catalog-microservice:
-  build:
-    context: .
-    dockerfile: Dockerfile
-    args:
-      APP_NAME: catalog-microservice
-  container_name: catalog-microservice
-  depends_on:
-    rabbitmq:
-      condition: service_healthy
-    mysql:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
-  environment:
-    NODE_ENV: development
-    DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
-    REDIS_URL: redis://redis:6379
-    RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-    CACHE_TTL_MS_DEFAULT: 60000
-    OTEL_SERVICE_NAME: catalog-microservice
-    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
-  volumes:
-    - .:/app
-    - /app/node_modules
-  command: yarn start:dev:catalog-microservice
-  networks:
-    - backend
-```
-
-Note: the catalog-microservice does not expose an external port — it is consumer-only on `catalog_queue`. Matches the inventory/retail/notification shape.
-
-## `infrastructure/otel-collector-config.yaml`
-
-The existing config groups by `service.name` (per ADR-014/015). Add `catalog-microservice` to whatever existing list/processor controls the per-service routing — concrete change depends on the file shape; verify by `grep -n 'inventory-microservice' infrastructure/otel-collector-config.yaml` and applying the same pattern for `catalog-microservice`.
-
-## `eslint.config.mjs` — boundaries
-
-Skim `boundariesElements` (line ~9 onward). The current `pattern: 'apps/*/src/modules/*/...'` already matches the new tree without an allowlist of app names — no edit should be required. To be defensive, run `yarn lint apps/catalog-microservice` after the scaffold lands; if any rule produces an `unknown-element` warning, add the new app to the explicit allowlist in `boundariesElements`. Document the decision (no change vs. explicit allowlist) in the doc deliverable.
-
-## `spec/architecture-lint.spec.ts` — fixture extension
-
-Add a new `describe('catalog-microservice boundaries', ...)` block that runs at least one fixture per element type (domain, application-use-case, application-port, presentation, infrastructure) against synthetic paths under `apps/catalog-microservice/src/modules/catalog/`. Mirror the existing inventory/retail blocks: invent a small TypeScript snippet that violates a rule, assert the expected `boundaries/*` ruleId is reported. The point is regression coverage — task-09 will revisit this if any of the new modules need additional fixtures.
+`eslint.config.mjs` and `spec/architecture-lint.spec.ts` express the boundaries
+rules **generically** via `apps/*/src/modules/*/...` element patterns with
+`capture: ['app', 'module']`. A new microservice is matched automatically — there
+is **no** per-app entry to add, and you must **not** add one. The
+boundaries config is unchanged by this task. (The regression fixtures for the
+catalog paths are added later, in task-10.) Just place files at the canonical
+paths above so the generic patterns classify them correctly.
 
 ## Files to add
 
-- `apps/catalog-microservice/tsconfig.app.json` (copy from `apps/notification-microservice/tsconfig.app.json` and adjust the `outDir` path).
-- `apps/catalog-microservice/src/main.ts`.
-- `apps/catalog-microservice/src/app/app.module.ts`.
-- `apps/catalog-microservice/src/app/index.ts`.
-- `apps/catalog-microservice/src/modules/catalog/index.ts` (empty barrel).
-- `apps/catalog-microservice/src/modules/catalog/infrastructure/catalog.module.ts` (empty NestJS module).
-- `apps/catalog-microservice/src/modules/catalog/domain/.gitkeep`.
-- `apps/catalog-microservice/src/modules/catalog/application/.gitkeep`.
-- `apps/catalog-microservice/src/modules/catalog/presentation/.gitkeep`.
-- `libs/messaging/microservice-client-catalog.module.ts`.
-- `docs/implementation/02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md`.
+- `apps/catalog-microservice/tsconfig.app.json`
+- `apps/catalog-microservice/src/main.ts`
+- `apps/catalog-microservice/src/app/app.module.ts`
+- `apps/catalog-microservice/src/app/index.ts`
+- `apps/catalog-microservice/src/modules/catalog/index.ts`
+- `apps/catalog-microservice/src/modules/catalog/catalog.module.ts`
 
 ## Files to modify
 
-- `libs/contracts/microservices/microservice-queue.enum.ts` — add `CATALOG_QUEUE = 'catalog_queue'`.
-- `libs/contracts/microservices/microservice-client-token.enum.ts` — add `CATALOG_MICROSERVICE = 'CATALOG_MICROSERVICE'`.
-- `libs/messaging/index.ts` — re-export `MicroserviceClientCatalogModule`.
-- `nest-cli.json` — add the fifth projects entry.
-- `package.json` — add `start:dev:catalog-microservice` + `build:catalog-microservice` scripts.
-- `docker-compose.yml` — add the `catalog-microservice` service block.
-- `infrastructure/otel-collector-config.yaml` — add `catalog-microservice` to the OTel service routing.
-- `eslint.config.mjs` — only if a defensive allowlist is required; otherwise leave unchanged.
-- `spec/architecture-lint.spec.ts` — append the `catalog-microservice` fixture block.
+- `libs/contracts/microservices/microservice-queue.enum.ts`
+- `libs/contracts/microservices/app-name.enum.ts`
+- `nest-cli.json`
+- `package.json`
+- `docker-compose.yml`
+- `scripts/bash/start-dev.sh`
 
 ## Files to delete
 
-None.
+- None.
 
 ## Tests
 
-- No domain spec exists yet — the new app has no business logic until task-02.
-- The arch-lint spec extension (`spec/architecture-lint.spec.ts`) is the only new test in this task. It must run green under `yarn test:unit`.
-- Verify boot manually: `docker compose up -d mysql rabbitmq redis && yarn start:dev:catalog-microservice` should log `Nest microservice successfully started` and `[RabbitMQ] queue=catalog_queue` (or the equivalent log line that the existing microservices emit).
+- No new unit/e2e specs in this task (the service has no behaviour yet). The
+  existing `yarn test:unit` and `yarn test:e2e` suites must stay green.
+- `scripts/test-db-seed.ts` — no change.
+- Boot verification (manual / in carryover "How to verify"):
+  `docker compose up -d rabbitmq mysql redis` then `yarn start:dev:catalog-microservice`
+  → expect the "Catalog Microservice is listening for messages" log line and a
+  bound `catalog_queue` in the RabbitMQ management UI (`http://localhost:15672`).
 
 ## Doc deliverable
 
-Write `docs/implementation/02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md`. Target ~150 lines. Sections:
+`docs/implementation/02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md`.
+Outline:
 
-1. **Why a fifth microservice (and not a fifth module inside an existing one).** Cite the report's bounded-context boundary: catalog is the source of truth for `Product`/`ProductVariant` and every downstream cluster keys on `variantId`. Splitting it out keeps catalog reads/writes off the inventory-microservice's hot path and lets the inventory store reduce to its own concerns (stock + movements + reservations).
-2. **The per-module shape, recapped.** Reference ADR-004/009/012/013 and the canonical `apps/notification-microservice/src/modules/notifications/` template. The new tree mirrors it line-for-line.
-3. **Monorepo wiring summary.** What changed in `nest-cli.json`, `package.json`, `docker-compose.yml`, the OTel collector. Why the same `DATABASE_URL` is reused (single MySQL instance, single schema; the catalog tables live alongside the rest by deliberate choice — split is a Day-2 question).
-4. **MessagingModule + the new `catalog_queue`.** The new `MicroserviceClientCatalogModule` mirrors the three existing client modules. The queue name `catalog_queue` lands in `MicroserviceQueueEnum`. Routing keys are deferred to task-03.
-5. **Tracer-first-import discipline.** Why `import '@retail-inventory-system/observability/tracer';` is the very first line of `main.ts` ([ADR-007](../../adr/007-pino-and-opentelemetry.md) §"Side-effect import for OTel bootstrap" — the binding ADR for the import-order rule and for the single-host invariant; ADR-014/015 layer on top of that decision but do not redefine it): the OTel SDK must wrap the Node module loader before any Nest import. Failure to honour this silently disables trace correlation. No app-local `otel.setup.ts` is created — every microservice in the repo imports the shared library, and the catalog scaffold follows that convention.
-6. **Boundaries lint coverage.** The existing `eslint-plugin-boundaries` configuration already matches the new tree via the `apps/*/...` glob. The arch-lint spec is extended with a new fixture block to assert this guarantee under CI.
-7. **What this task did NOT do.** Cross-references to task-02 (domain + persistence + migration), task-03 (write-side use cases + events + routing keys), and task-08 (drop the old inventory `product` table).
+1. **What this service is** — the catalog bounded context's home; why a separate
+   deployable (ADR-018) rather than a module inside an existing service.
+2. **Boot shape** — RMQ server on `catalog_queue`, tracer-first import, Pino
+   logger, no HTTP surface (writes/reads are proxied by the gateway later).
+3. **Per-module hexagonal skeleton** — the `modules/catalog/{domain,application,infrastructure,presentation}`
+   split it will grow into (ADR-004), modelled on the notification template.
+4. **Monorepo + ops wiring** — `nest-cli.json`, `tsconfig.app.json`, scripts,
+   `docker-compose.yml`, `start-dev.sh`; the OTel env vars (ADR-014).
+5. **Why boundaries needed no config change** — the generic capture-based rules.
 
-## Carryover produced (consumed by task-02 onward)
+Write for a reader who has only the repository. No `tmp/` references; do not use
+the words "epic"/"task".
 
-- The new application boots empty: an empty `CatalogModule` placeholder, no entities registered with `DatabaseModule`, no presentation handlers, no use cases. Task-02 fills these in.
-- `MicroserviceQueueEnum.CATALOG_QUEUE` + `MicroserviceClientTokenEnum.CATALOG_MICROSERVICE` are available to task-06 (gateway adapter) and to any future consumer.
-- The new `MicroserviceClientCatalogModule` is exported from `libs/messaging/`.
-- The monorepo's `start:dev:catalog-microservice` script exists; CI in any future task can rely on it.
-- Doc `01-new-catalog-microservice-scaffold.md` exists.
+## Carryover to read
+
+None — first task.
+
+## Carryover to produce
+
+Write `tmp/tasks/epic-02-catalog-product-and-variant/carryover-01.md` capturing:
+
+- **Entry state for task-02** — the catalog app boots empty on `catalog_queue`;
+  `MicroserviceQueueEnum.CATALOG_QUEUE` and `AppNameEnum.CATALOG_MICROSERVICE`
+  now exist; the `retail_db` schema is unchanged (the inventory `product` stub
+  still exists and is task-02's target).
+- **Files added / modified** — the list above.
+- **Key decisions** — no `CacheModule`/`DatabaseModule.forRoot` yet; no client
+  token yet; boundaries config intentionally untouched.
+- **Known gaps** — `catalog.module.ts` is empty; `DatabaseModule.forRoot` is
+  added in task-04; the publisher client token + module in task-05.
+- **How to verify** — boot command above; `yarn lint`; `yarn test:unit`.
 
 ## Exit criteria
 
-- [ ] `yarn lint` passes (`--max-warnings 0`).
-- [ ] `yarn test:unit` passes; the new arch-lint fixture block is green.
-- [ ] `yarn build:catalog-microservice` produces a `dist/apps/catalog-microservice/main.js` without error.
-- [ ] `docker compose up -d mysql rabbitmq redis && yarn start:dev:catalog-microservice` boots the new app; the log line confirms RabbitMQ subscription on `catalog_queue`.
-- [ ] `docker compose up -d` brings up all five app containers + dependencies; no container restart-loops.
-- [ ] No file outside `tmp/` references `tmp/`.
-- [ ] Doc `01-new-catalog-microservice-scaffold.md` exists at the path above and is filled per the section list.
+- [ ] `apps/catalog-microservice/` boots as an RMQ server on `catalog_queue`
+      and logs the "listening" line; `catalog_queue` appears in RabbitMQ.
+- [ ] `MicroserviceQueueEnum.CATALOG_QUEUE` and `AppNameEnum.CATALOG_MICROSERVICE`
+      exist; no `MicroserviceClientTokenEnum` change.
+- [ ] `nest-cli.json`, `package.json` scripts, `docker-compose.yml`, and
+      `start-dev.sh` include the catalog service.
+- [ ] `eslint.config.mjs` is unchanged for boundaries; `yarn lint` passes
+      (`--max-warnings 0`).
+- [ ] `yarn test:unit` passes; `yarn test:e2e` passes (regression — no new e2e).
+- [ ] `docs/implementation/02-catalog-product-and-variant/01-new-catalog-microservice-scaffold.md` is written.
+- [ ] The self-containment grep is clean:
+      `grep -rniE 'tmp/|\bepic\b|\btask\b' docs/ apps/ libs/ http/ scripts/ spec/ migrations/ README.md CLAUDE.md`.
+- [ ] `carryover-01.md` is written.

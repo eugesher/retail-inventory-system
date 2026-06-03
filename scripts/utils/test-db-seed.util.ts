@@ -2,10 +2,11 @@ import * as fs from 'fs';
 
 export class TestDbSeedUtil {
   public static seedFiles: string[] = [
-    'product.sql',
     'product-stock.sql',
     'order.sql',
     'order-product.sql',
+    'catalog-product.sql',
+    'catalog-product-variant.sql',
   ];
 
   public static readStatements(filePath: string): string[] {

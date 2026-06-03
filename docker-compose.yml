@@ -168,6 +168,34 @@ services:
     networks:
       - backend
 
+  catalog-microservice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: catalog-microservice
+    container_name: catalog-microservice
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      OTEL_SERVICE_NAME: catalog-microservice
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: yarn start:dev:catalog-microservice
+    networks:
+      - backend
+
 networks:
   backend:
     driver: bridge
