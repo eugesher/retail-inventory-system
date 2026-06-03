@@ -74,6 +74,28 @@ describe('Customer auth flow (e2e)', () => {
         .send({ email, password: CUSTOMER_PASSWORD });
       expect(second.status).toBe(HttpStatus.CONFLICT);
     });
+
+    it('never returns 500 under a concurrent same-email race (DuplicateKeyExceptionFilter)', async () => {
+      const email = customerEmail();
+      // Fire identical registrations at once so two can clear the
+      // application-level findByEmail guard before either commits; the DB
+      // unique constraint then rejects the losers and the filter maps those
+      // raw QueryFailedErrors to 409 instead of a bare 500.
+      const responses = await Promise.all(
+        Array.from({ length: 4 }, () =>
+          supertest(apiGatewayApp.getHttpServer())
+            .post('/api/auth/customer/register')
+            .send({ email, password: CUSTOMER_PASSWORD }),
+        ),
+      );
+
+      const statuses = responses.map((r) => r.status as HttpStatus);
+      // Exactly one insert wins; every loser is a clean 409 — never a 500.
+      expect(statuses.filter((s) => s === HttpStatus.CREATED)).toHaveLength(1);
+      expect(statuses.every((s) => s === HttpStatus.CREATED || s === HttpStatus.CONFLICT)).toBe(
+        true,
+      );
+    });
   });
 
   describe('POST /api/auth/customer/login', () => {
@@ -153,6 +175,64 @@ describe('Customer auth flow (e2e)', () => {
 
       expect(status).toBe(HttpStatus.FORBIDDEN);
       expect(body.message).toBe('Insufficient permissions');
+    });
+  });
+
+  describe('Customer refresh-token rotation (shared /api/auth/refresh)', () => {
+    it('rotates a customer token pair and rejects the replayed original', async () => {
+      const email = customerEmail();
+      await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/auth/customer/register')
+        .send({ email, password: CUSTOMER_PASSWORD });
+      const login = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/auth/customer/login')
+        .send({ email, password: CUSTOMER_PASSWORD });
+      const tokens = login.body as ITokenResponse;
+
+      // The refresh route is staff+customer shared; a customer subject must
+      // resolve here (regression: it previously hit the staff repo only → 401).
+      const rotated = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: tokens.refreshToken });
+      expect(rotated.status).toBe(HttpStatus.OK);
+      expect(rotated.body.refreshToken).not.toBe(tokens.refreshToken);
+
+      // The rotated customer access token still carries empty claims.
+      const payload = decodeJwtBody((rotated.body as ITokenResponse).accessToken);
+      expect(payload.roles).toEqual([]);
+      expect(payload.permissions).toEqual([]);
+      expect(payload.email).toBe(email);
+
+      // Replaying the original (now-stale) refresh token is rejected.
+      const replay = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: tokens.refreshToken });
+      expect(replay.status).toBe(HttpStatus.UNAUTHORIZED);
+    });
+  });
+
+  describe('Customer logout (shared /api/auth/logout)', () => {
+    it('clears the customer refresh-token hash so a later refresh fails', async () => {
+      const email = customerEmail();
+      await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/auth/customer/register')
+        .send({ email, password: CUSTOMER_PASSWORD });
+      const login = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/auth/customer/login')
+        .send({ email, password: CUSTOMER_PASSWORD });
+      const tokens = login.body as ITokenResponse;
+
+      // Logout is a bearer route; a customer subject must resolve here
+      // (regression: it previously hit the staff repo only → 404).
+      const logout = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/auth/logout')
+        .set('Authorization', `Bearer ${tokens.accessToken}`);
+      expect(logout.status).toBe(HttpStatus.OK);
+
+      const replay = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: tokens.refreshToken });
+      expect(replay.status).toBe(HttpStatus.UNAUTHORIZED);
     });
   });
 

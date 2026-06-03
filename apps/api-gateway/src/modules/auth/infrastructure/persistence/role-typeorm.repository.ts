@@ -70,33 +70,44 @@ export class RoleTypeormRepository implements IRoleRepositoryPort {
     return RoleMapper.toDomain(saved);
   }
 
-  // Hand-rolled DELETE + INSERT inside a single tx — `repository.save` with
-  // a `permissions: []` relation does not reliably clear the join rows in
-  // every TypeORM version, and we want observers reading `role_permissions`
-  // to never see a transient empty set.
-  public async replacePermissions(
-    role: RoleAggregate,
-    codes: PermissionCodeEnum[],
-  ): Promise<RoleAggregate> {
+  // Single-transaction update: persists the scalar columns (description) and,
+  // when `codes` is supplied, replaces the `role_permissions` set in the same
+  // tx so the two never commit independently (no partial update on failure)
+  // and a description-only patch does not rewrite the join at all. The
+  // hand-rolled relation reassignment is deliberate — `repository.save` with a
+  // `permissions: []` relation does not reliably clear the join rows in every
+  // TypeORM version, and observers reading `role_permissions` must never see a
+  // transient empty set.
+  public async update(role: RoleAggregate, codes?: PermissionCodeEnum[]): Promise<RoleAggregate> {
     await this.entityManager.transaction(async (mgr) => {
       const roleRepo = mgr.getRepository(RoleEntity);
-      const permRepo = mgr.getRepository(PermissionEntity);
 
-      const existingRole = await roleRepo.findOne({ where: { id: role.id } });
+      // Only load the permissions relation when we intend to replace it —
+      // leaving it unloaded keeps `save` from touching the join table.
+      const existingRole = await roleRepo.findOne({
+        where: { id: role.id },
+        relations: codes === undefined ? [] : ['permissions'],
+      });
       if (!existingRole) {
         throw new NotFoundException(`Role ${role.id} not found`);
       }
 
-      // Setting the inverse side + saving via the parent does the
-      // delete-old + insert-new on the join table in one logical step.
-      existingRole.permissions =
-        codes.length === 0 ? [] : await permRepo.find({ where: { code: In(codes) } });
+      existingRole.description = role.description;
+
+      if (codes !== undefined) {
+        // Setting the inverse side + saving via the parent does the
+        // delete-old + insert-new on the join table in one logical step.
+        const permRepo = mgr.getRepository(PermissionEntity);
+        existingRole.permissions =
+          codes.length === 0 ? [] : await permRepo.find({ where: { code: In(codes) } });
+      }
+
       await roleRepo.save(existingRole);
     });
 
     const reloaded = await this.findById(role.id);
     if (!reloaded) {
-      throw new NotFoundException(`Role ${role.id} not found after replacePermissions`);
+      throw new NotFoundException(`Role ${role.id} not found after update`);
     }
     return reloaded;
   }
