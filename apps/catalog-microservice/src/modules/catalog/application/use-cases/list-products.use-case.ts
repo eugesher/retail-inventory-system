@@ -32,11 +32,16 @@ export class ListProductsUseCase {
 
   public async execute(query: IListProductsQuery): Promise<IPage<ProductWithVariantsView>> {
     const { search, correlationId } = query;
-    const page = query.page && query.page > 0 ? Math.floor(query.page) : DEFAULT_PAGE;
-    const size =
-      query.pageSize && query.pageSize > 0
-        ? Math.min(Math.floor(query.pageSize), MAX_PAGE_SIZE)
-        : DEFAULT_PAGE_SIZE;
+    // Floor BEFORE the positivity guard. A fractional page in (0, 1) passes a
+    // `> 0` check but floors to 0, which the repository turns into a negative
+    // OFFSET (`skip((page - 1) * size)`); flooring first collapses it to the
+    // default. The gateway DTO already enforces an integer >= 1 over HTTP, so
+    // this guards the directly-reachable RMQ handler (page is an unconstrained
+    // number on the wire contract).
+    const flooredPage = Math.floor(query.page ?? 0);
+    const page = flooredPage > 0 ? flooredPage : DEFAULT_PAGE;
+    const flooredSize = Math.floor(query.pageSize ?? 0);
+    const size = flooredSize > 0 ? Math.min(flooredSize, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
 
     this.logger.info({ correlationId, page, size, search }, 'Received RPC: list products');
 
@@ -46,11 +51,11 @@ export class ListProductsUseCase {
     // future non-active browse — it is not honoured by a separate path yet.
     const result = await this.repository.listActive({ page, size, search });
 
+    // Carry total/page/size through unchanged; only `items` is re-projected onto
+    // the wire view, so the page metadata cannot drift if the envelope grows a field.
     return {
+      ...result,
       items: result.items.map((product) => toProductWithVariantsView(product)),
-      total: result.total,
-      page: result.page,
-      size: result.size,
     };
   }
 }

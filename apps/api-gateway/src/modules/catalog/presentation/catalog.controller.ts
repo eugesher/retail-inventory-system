@@ -12,11 +12,13 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiProduces,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 
 import { Public, RequiresPermission } from '@retail-inventory-system/auth';
@@ -121,10 +123,21 @@ export class CatalogController {
   @Get('products')
   @Public()
   @ApiOperation({ summary: 'Browse the active catalogue (paginated)' })
+  @ApiExtraModels(ProductWithVariantsView)
   @ApiOkResponse({
     description: 'Active products with their active variants, paginated',
-    type: ProductWithVariantsView,
-    isArray: true,
+    // The handler returns the `IPage` envelope ({ items, total, page, size }),
+    // not a bare array — describe the real shape so generated clients read
+    // `body.items` rather than indexing the response as an array.
+    schema: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { $ref: getSchemaPath(ProductWithVariantsView) } },
+        total: { type: 'integer', example: 1 },
+        page: { type: 'integer', example: 1 },
+        size: { type: 'integer', example: 20 },
+      },
+    },
   })
   @ApiProduces('application/json')
   public async listProducts(

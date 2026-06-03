@@ -104,6 +104,8 @@ otel-collector → Jaeger UI at http://localhost:16686 (see the
 "Distributed tracing" section below).
 ```
 
+The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. The `product_stock.product_id` / `order_product.product_id` columns survive today as plain integers with **no foreign key** (the standalone inventory `product` table was dropped); a later inventory/retail capability reshapes them onto a catalog `variantId`.
+
 ## Shared libraries
 
 Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-system/<name>`:
@@ -354,7 +356,7 @@ What the boundaries rules cover today:
 - `libs/ddd/` is framework-free (no `@nestjs/*`, no TypeORM, no I/O packages).
 - Cross-service (`apps/X` → `apps/Y`) and cross-module imports are rejected by `boundaries/dependencies` via the `{{from.captured.app}}` / `{{from.captured.module}}` template-matched selectors.
 
-The rules are regression-tested in `tests/lint/architecture-lint.spec.ts` — every rule has a fixture that intentionally violates it and asserts the expected `boundaries/*` ruleId fires, so silent weakening of a rule fails the unit suite.
+The rules are regression-tested in `spec/architecture-lint.spec.ts` — every rule has a fixture that intentionally violates it and asserts the expected `boundaries/*` ruleId fires, so silent weakening of a rule fails the unit suite. The suite covers the inventory `stock` module, the gateway `auth`/`iam` modules, and the catalog microservice's `catalog` module.
 
 ## API
 

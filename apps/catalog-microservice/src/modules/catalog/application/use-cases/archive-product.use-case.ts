@@ -10,6 +10,7 @@ import {
   ICatalogEventsPublisherPort,
   ICatalogRepositoryPort,
 } from '../ports';
+import { toProductView } from './catalog-view.factory';
 
 // Archive Product flips a product `active → archived` — the catalog's terminal
 // soft-delete. The domain (`Product.archive`) rejects archiving a non-active
@@ -82,13 +83,6 @@ export class ArchiveProductUseCase {
       );
     }
 
-    return {
-      id: saved.id ?? productId,
-      name: saved.name,
-      slug: saved.slug,
-      description: saved.description,
-      status: saved.status,
-      archivedAt,
-    };
+    return { ...toProductView(saved), archivedAt };
   }
 }

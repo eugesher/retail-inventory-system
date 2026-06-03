@@ -140,7 +140,6 @@ export class Product extends AggregateRoot<number | null> {
     this.addDomainEvent(
       new VariantCreatedEvent({
         productId: this.id ?? 0,
-        variantId: variant.id,
         sku: variant.sku,
       }),
     );
