@@ -94,6 +94,11 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     code: PermissionCodeEnum.AUDIT_READ,
     description: 'Read audit log',
   },
+  {
+    id: '00000000-0000-4000-b000-00000000000d',
+    code: PermissionCodeEnum.PRICING_WRITE,
+    description: 'Set or schedule prices and manage tax categories',
+  },
 ];
 
 const ROLE_SEEDS: {
@@ -116,6 +121,7 @@ const ROLE_SEEDS: {
       PermissionCodeEnum.CATALOG_READ,
       PermissionCodeEnum.CATALOG_WRITE,
       PermissionCodeEnum.CATALOG_PUBLISH,
+      PermissionCodeEnum.PRICING_WRITE,
     ],
   },
   {

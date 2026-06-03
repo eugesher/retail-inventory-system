@@ -79,18 +79,6 @@ describe('PublishProductUseCase', () => {
     expect(correlationId).toBe('corr-1');
   });
 
-  it('warns that the active-price precondition is deferred and still proceeds', async () => {
-    seedDraft([draftVariant()]);
-
-    await useCase.execute(payload);
-
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ correlationId: 'corr-1', productId: SEEDED_PRODUCT_ID }),
-      'active price precondition not yet enforced — pricing capability pending',
-    );
-    expect(repository.saved).toHaveLength(1);
-  });
-
   it('rejects publishing a product with no variants', async () => {
     seedDraft([]);
 
