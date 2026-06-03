@@ -399,6 +399,81 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
+  // The catalog microservice's single `catalog` module follows the same
+  // per-layer rules as the inventory/stock module and the gateway auth/iam
+  // modules. These fixtures repeat the bumpers there — pointed at the real
+  // catalog paths (the generic `apps/*/src/modules/*/...` element patterns
+  // classify them automatically) — so a future refactor cannot silently
+  // exempt the catalog tree from the boundaries.
+  describe('boundaries/dependencies — catalog microservice', () => {
+    it('catalog domain (Product, ProductVariant, the VOs + events) may not import @nestjs/common', () => {
+      const code = `import { Injectable } from '@nestjs/common';\nexport const x = Injectable;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog domain may not import typeorm', () => {
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog application use-case may not import typeorm', () => {
+      // Register/AddVariant/Publish/Archive + the read use cases reach the DB
+      // via ICatalogRepositoryPort — never via EntityManager.
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog application use-case may not import @nestjs/typeorm', () => {
+      const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog application port may not import typeorm', () => {
+      // ICatalogRepositoryPort returns domain types only; it declares its own
+      // local pagination shapes rather than leaking a TypeORM Repository.
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/application/ports/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog presentation may not import @retail-inventory-system/database', () => {
+      const code = `import { DatabaseModule } from '@retail-inventory-system/database';\nexport const y = DatabaseModule;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/presentation/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('catalog presentation may not import typeorm', () => {
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/catalog/presentation/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+  });
+
   describe('positive cases — allowed edges do not flag', () => {
     it('domain importing lib-ddd is allowed', () => {
       const code = `import { AggregateRoot } from '@retail-inventory-system/ddd';\nexport const x = AggregateRoot;\n`;
