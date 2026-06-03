@@ -1,8 +1,9 @@
 import { DomainException } from '@retail-inventory-system/common';
 
 // Stable, greppable codes for every catalog domain invariant violation. The
-// code is the part a later use-case/presentation layer can map onto an HTTP
-// status or a wire error shape; the domain itself stays transport-free.
+// code is the part the presentation-layer `CatalogRpcExceptionFilter` maps onto
+// an HTTP status + wire error shape (`{ statusCode, message, code }`); the domain
+// itself stays transport-free.
 export enum CatalogErrorCodeEnum {
   PRODUCT_NAME_REQUIRED = 'CATALOG_PRODUCT_NAME_REQUIRED',
   PRODUCT_SLUG_REQUIRED = 'CATALOG_PRODUCT_SLUG_REQUIRED',

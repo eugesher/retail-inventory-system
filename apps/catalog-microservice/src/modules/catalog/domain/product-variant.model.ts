@@ -56,7 +56,12 @@ export class ProductVariant extends Entity<number | null> {
     super(props.id);
     this._productId = props.productId;
     this._sku = props.sku;
-    this._gtin = props.gtin ?? null;
+    // Normalize an empty/whitespace gtin to null. MySQL's `UNIQUE (gtin)` permits
+    // multiple NULLs but not multiple ''; an absent gtin arriving as '' (an
+    // optional field left blank at the edge) would otherwise be stored verbatim
+    // and collide on the second variant, surfacing as a raw driver 500 (ADR-025).
+    const trimmedGtin = props.gtin?.trim() ?? '';
+    this._gtin = trimmedGtin.length > 0 ? trimmedGtin : null;
     // The VO constructors carry the non-empty-map and non-negative-mm invariants.
     this._optionValues = new OptionValues(props.optionValues);
     this._weightG = props.weightG ?? null;

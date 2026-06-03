@@ -269,4 +269,58 @@ describe('Catalog gateway endpoints (e2e)', () => {
       expect(status).toBe(HttpStatus.OK);
     });
   });
+
+  // The catalog microservice maps each typed CatalogDomainException onto an HTTP
+  // status via CatalogRpcExceptionFilter; the gateway's throwRpcError resolves it
+  // (ADR-025). These reuse the fixtures the happy-path flow left behind:
+  // `productSlug`/`skuA` are taken and `productId` is archived (a non-draft).
+  describe('typed domain errors map to HTTP statuses', () => {
+    it('get-by-slug for an unknown product returns 404 (not 500)', async () => {
+      const { status } = await supertest(apiGatewayApp.getHttpServer()).get(
+        `/api/catalog/products/no-such-slug-${stamp}`,
+      );
+
+      expect(status).toBe(HttpStatus.NOT_FOUND);
+    });
+
+    it('get-variant for an unknown id returns 404 (not 500)', async () => {
+      const { status } = await supertest(apiGatewayApp.getHttpServer()).get(
+        '/api/catalog/variants/999999999',
+      );
+
+      expect(status).toBe(HttpStatus.NOT_FOUND);
+    });
+
+    it('registering a product with a taken slug returns 409', async () => {
+      const auth = await bearer(ADMIN_EMAIL, ADMIN_PASSWORD);
+
+      const { status } = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/catalog/products')
+        .set('Authorization', auth)
+        .send({ name: `Dup ${stamp}`, slug: productSlug });
+
+      expect(status).toBe(HttpStatus.CONFLICT);
+    });
+
+    it('adding a variant with a taken sku returns 409', async () => {
+      const auth = await bearer(ADMIN_EMAIL, ADMIN_PASSWORD);
+
+      const { status } = await supertest(apiGatewayApp.getHttpServer())
+        .post(`/api/catalog/products/${productId}/variants`)
+        .set('Authorization', auth)
+        .send({ sku: skuA, optionValues: { color: 'black', size: 'M' } });
+
+      expect(status).toBe(HttpStatus.CONFLICT);
+    });
+
+    it('publishing a non-draft (archived) product returns 409', async () => {
+      const auth = await bearer(ADMIN_EMAIL, ADMIN_PASSWORD);
+
+      const { status } = await supertest(apiGatewayApp.getHttpServer())
+        .post(`/api/catalog/products/${productId}/publish`)
+        .set('Authorization', auth);
+
+      expect(status).toBe(HttpStatus.CONFLICT);
+    });
+  });
 });
