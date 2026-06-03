@@ -10,6 +10,7 @@ import {
   ICatalogEventsPublisherPort,
   ICatalogRepositoryPort,
 } from '../ports';
+import { toProductView } from './catalog-view.factory';
 
 // Publish Product flips a product `draft → active`. The domain (`Product.publish`)
 // enforces the two write-side preconditions it can see: the product is in `draft`
@@ -93,13 +94,6 @@ export class PublishProductUseCase {
       );
     }
 
-    return {
-      id: saved.id ?? productId,
-      name: saved.name,
-      slug: saved.slug,
-      description: saved.description,
-      status: saved.status,
-      publishedAt,
-    };
+    return { ...toProductView(saved), publishedAt };
   }
 }

@@ -5,6 +5,7 @@ import { IRegisterProductPayload, ProductView } from '@retail-inventory-system/c
 
 import { CatalogDomainException, CatalogErrorCodeEnum, Product } from '../../domain';
 import { CATALOG_REPOSITORY, ICatalogRepositoryPort } from '../ports';
+import { toProductView } from './catalog-view.factory';
 
 // Register Product is the first catalog write operation: it creates a `draft`
 // product with no variants. Variants (and the eventual publish) are separate
@@ -46,12 +47,6 @@ export class RegisterProductUseCase {
 
     this.logger.info({ correlationId, productId: saved.id, slug }, 'Product registered');
 
-    return {
-      id: saved.id,
-      name: saved.name,
-      slug: saved.slug,
-      description: saved.description,
-      status: saved.status,
-    };
+    return toProductView(saved);
   }
 }

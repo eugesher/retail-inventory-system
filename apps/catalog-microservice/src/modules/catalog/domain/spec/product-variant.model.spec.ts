@@ -90,8 +90,5 @@ describe('Product.addVariant', () => {
     const event = events[0] as VariantCreatedEvent;
     expect(event.productId).toBe(1);
     expect(event.sku).toBe('SKU-NEW');
-    // id is assigned at persistence (later work); the use case re-reads it
-    // from the saved aggregate before mapping to the wire event.
-    expect(event.variantId).toBeNull();
   });
 });

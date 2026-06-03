@@ -10,14 +10,15 @@ import {
   ICatalogEventsPublisherPort,
   ICatalogRepositoryPort,
 } from '../ports';
+import { toProductVariantView } from './catalog-view.factory';
 
 // Add Variant appends a variant to an existing product through the aggregate
-// root (`Product.addVariant`), which records an in-process `VariantCreatedEvent`
-// (its `variantId` is null until persistence assigns one). After save, the use
-// case re-reads the concrete id from the persisted aggregate, maps the drained
-// event to the versioned wire event, and emits `catalog.variant.created`. The
-// publish is best-effort post-commit — a failure is warn-logged and swallowed,
-// the variant is persisted regardless (ADR-020 / ADR-025).
+// root (`Product.addVariant`), which records an in-process `VariantCreatedEvent`.
+// After save, the use case re-reads the concrete id from the persisted aggregate,
+// maps the drained event to the versioned wire event (stamping that concrete id),
+// and emits `catalog.variant.created`. The publish is best-effort post-commit — a
+// failure is warn-logged and swallowed, the variant is persisted regardless
+// (ADR-020 / ADR-025).
 @Injectable()
 export class AddVariantUseCase {
   constructor(
@@ -51,7 +52,8 @@ export class AddVariantUseCase {
       );
     }
 
-    // Records `VariantCreatedEvent` on the aggregate (variantId null pre-save).
+    // Records `VariantCreatedEvent` on the aggregate (the concrete id is read
+    // back from the persisted graph below, after `save`).
     product.addVariant({ sku, gtin, optionValues, weightG, dimensionsMm });
 
     // `save` re-reads the persisted graph, so the returned variants carry
@@ -70,44 +72,37 @@ export class AddVariantUseCase {
       'Variant created',
     );
 
-    // Drain the in-process events and publish the matching wire event built with
-    // the concrete id. addVariant records exactly one event here, but the loop
-    // keeps the map-after-persistence shape honest if that ever changes.
+    // Drain the in-process events and map the variant-created to its versioned
+    // wire event, built with the concrete persisted id. `addVariant` records
+    // exactly one `VariantCreatedEvent`.
     const events = product.pullDomainEvents();
-    for (const event of events) {
-      if (!(event instanceof VariantCreatedEvent)) continue;
-      const variant = saved.variants.find((candidate) => candidate.sku === event.sku);
-      if (variant?.id == null) continue;
-      try {
-        await this.publisher.publishVariantCreated(
-          {
-            productId,
-            variantId: variant.id,
-            sku: event.sku,
-            eventVersion: 'v1',
-            occurredAt: event.occurredAt.toISOString(),
-            correlationId: correlationId ?? '',
-          },
-          correlationId,
-        );
-      } catch (err) {
-        // Publish failures never raise — the variant is already persisted.
-        this.logger.warn(
-          { err: err as Error, correlationId, productId, variantId: variant.id },
-          'Failed to publish catalog.variant.created event',
-        );
-      }
+    const createdEvent = events.find(
+      (event): event is VariantCreatedEvent => event instanceof VariantCreatedEvent,
+    );
+    if (createdEvent === undefined) {
+      throw new Error('AddVariantUseCase: VariantCreatedEvent missing after addVariant()');
     }
 
-    return {
-      id: persistedVariant.id,
-      productId: persistedVariant.productId ?? productId,
-      sku: persistedVariant.sku,
-      gtin: persistedVariant.gtin,
-      optionValues: persistedVariant.optionValues,
-      weightG: persistedVariant.weightG,
-      dimensionsMm: persistedVariant.dimensionsMm,
-      status: persistedVariant.status,
-    };
+    try {
+      await this.publisher.publishVariantCreated(
+        {
+          productId,
+          variantId: persistedVariant.id,
+          sku: persistedVariant.sku,
+          eventVersion: 'v1',
+          occurredAt: createdEvent.occurredAt.toISOString(),
+          correlationId: correlationId ?? '',
+        },
+        correlationId,
+      );
+    } catch (err) {
+      // Publish failures never raise — the variant is already persisted.
+      this.logger.warn(
+        { err: err as Error, correlationId, productId, variantId: persistedVariant.id },
+        'Failed to publish catalog.variant.created event',
+      );
+    }
+
+    return toProductVariantView(persistedVariant);
   }
 }

@@ -6,11 +6,12 @@ import {
 
 import { Product, ProductVariant } from '../../domain';
 
-// Pure mapping functions from the catalog domain onto the read-path wire views.
-// Kept framework-free (no Nest decorators) and shared across the three read use
-// cases so the verbose variant projection lives in exactly one place. The write
-// use cases build their (simpler, single-object) views inline; these helpers
-// exist for the composite read shapes (product + variants, variant + product).
+// Pure mapping functions from the catalog domain onto the wire views. Kept
+// framework-free (no Nest decorators) and shared across both the read use cases
+// (the composite product + variants / variant + product shapes) and the write
+// use cases (which return the plain `ProductView` / `ProductVariantView` header,
+// with publish/archive spreading in their lifecycle timestamp), so each
+// projection lives in exactly one place.
 
 // Product header — the shape reused by the write `ProductView` and as the base
 // of the composite read views. The lifecycle-transition timestamps
