@@ -83,6 +83,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  order / order_product / product_stock                    │ │
 │  storage / order_status / order_product_status            │ │
 │  product / product_variant                                │ │
+│  price / tax_category                                     │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
@@ -105,6 +106,8 @@ otel-collector → Jaeger UI at http://localhost:16686 (see the
 ```
 
 The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. The `product_stock.product_id` / `order_product.product_id` columns survive today as plain integers with **no foreign key** (the standalone inventory `product` table was dropped); a later inventory/retail capability reshapes them onto a catalog `variantId`.
+
+A sibling **`pricing`** module colocates inside the same microservice (it shares `catalog_queue` and keys on the same `variantId`). It owns two tables: `price` — an append-only-for-history, `(variantId, currency)`-scoped, time-bounded ledger where a price change is a new row plus a close of the predecessor's `[validFrom, validTo)` interval (at most one open row per scope, backstopped by a generated-column UNIQUE index) — and `tax_category`, a classification label that variants point at through the nullable `product_variant.tax_category_id` FK (`ON DELETE SET NULL`). See [ADR-026](docs/adr/026-price-append-only-ledger-and-tax-category.md). Rates/jurisdictions and the pricing RPCs are later work.
 
 ## Shared libraries
 
