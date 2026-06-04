@@ -148,11 +148,12 @@ export class Product extends AggregateRoot<number | null> {
 
   // draft → active. Precondition enforced here: at least one variant.
   //
-  // A second precondition — "at least one ACTIVE Price" — belongs to a future
-  // pricing capability and is deliberately NOT modelled in the domain. Until
-  // pricing lands, the publish *use case* will warn (not block) on a price-less
-  // product; the domain only guards the variant-count precondition. This is the
-  // documented placeholder/seam for that future check (ADR-025).
+  // A second precondition — "every variant has an ACTIVE Price" — is a
+  // cross-aggregate fact the `Product` cannot see, so it is deliberately NOT
+  // modelled in the domain. It is enforced in the publish *use case* via a
+  // catalog-side probe of the pricing-owned `price` table, which hard-fails the
+  // publish (409 `PRODUCT_PUBLISH_REQUIRES_PRICE`) when any variant is unpriced.
+  // The domain keeps only the variant-count guard (ADR-025 §6 / ADR-026).
   public publish(): void {
     if (!this.isDraft()) {
       throw new CatalogDomainException(

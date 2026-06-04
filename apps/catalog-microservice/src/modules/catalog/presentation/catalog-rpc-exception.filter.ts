@@ -20,6 +20,10 @@ const CATALOG_ERROR_STATUS: Record<CatalogErrorCodeEnum, HttpStatus> = {
   [CatalogErrorCodeEnum.VARIANT_SKU_TAKEN]: HttpStatus.CONFLICT,
   [CatalogErrorCodeEnum.PRODUCT_INVALID_STATE_TRANSITION]: HttpStatus.CONFLICT,
   [CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_VARIANT]: HttpStatus.CONFLICT,
+  // Publish blocked by a missing active Price: the request is well-formed but the
+  // resource state forbids the transition — a 409, the same class as the
+  // variant-count and illegal-transition conflicts above (ADR-026).
+  [CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_PRICE]: HttpStatus.CONFLICT,
 
   // Malformed input invariants → 400. These are normally caught by the gateway
   // request DTOs first; this is the backstop for the directly-reachable RMQ path.

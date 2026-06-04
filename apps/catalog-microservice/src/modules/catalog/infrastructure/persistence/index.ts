@@ -12,3 +12,4 @@ export { ProductEntity, ProductVariantEntity };
 export * from './product.mapper';
 export * from './product-variant.mapper';
 export * from './catalog-typeorm.repository';
+export * from './active-price-probe.typeorm.adapter';
