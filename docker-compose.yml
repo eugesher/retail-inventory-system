@@ -187,6 +187,7 @@ services:
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      DEFAULT_CURRENCY: USD
       OTEL_SERVICE_NAME: catalog-microservice
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     volumes:

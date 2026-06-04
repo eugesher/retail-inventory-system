@@ -8,8 +8,9 @@ application-layer rules they follow.
 - **Register Product** — creates a `draft` product with no variants.
 - **Add Variant** — appends a variant to an existing product, enforces global
   `sku` uniqueness, and emits a `catalog.variant.created` event.
-- **Publish Product** — transitions a product `draft → active` (precondition: ≥1
-  variant) and emits a `catalog.product.published` event.
+- **Publish Product** — transitions a product `draft → active` (preconditions: ≥1
+  variant, and an in-effect Price in the default currency for **every** variant)
+  and emits a `catalog.product.published` event.
 - **Archive Product** — transitions a product `active → archived` (terminal) and
   emits a `catalog.product.archived` event.
 
@@ -122,32 +123,44 @@ transition timestamp.
 
 1. **Load.** `repository.findById(productId)` — a missing product is rejected
    (see §6).
-2. **Transition.** `product.publish()` — the domain enforces the two write-side
+2. **Check the price precondition.** Collect the product's variant ids and ask
+   the active-price probe which of them lack an in-effect Price in the default
+   currency. If any do, the publish hard-fails with
+   `PRODUCT_PUBLISH_REQUIRES_PRICE` (409) — nothing is persisted, no event is
+   emitted (see the dedicated subsection below).
+3. **Transition.** `product.publish()` — the domain enforces the two write-side
    preconditions it can see: the product is in `draft` and has **at least one
    variant**. A non-draft product raises `PRODUCT_INVALID_STATE_TRANSITION`; a
    variant-less product raises `PRODUCT_PUBLISH_REQUIRES_VARIANT`. On success the
    aggregate flips to `active` and records a `ProductPublishedEvent` carrying the
    slug and the concrete `variantIds`.
-3. **Persist** via `repository.save(product)`.
-4. **Emit after commit.** Drain `product.pullDomainEvents()`, map the
+4. **Persist** via `repository.save(product)`.
+5. **Emit after commit.** Drain `product.pullDomainEvents()`, map the
    `ProductPublishedEvent` to `ICatalogProductPublishedEvent`, and publish it
    through the events port (best-effort — see §7).
-5. **Return** the `ProductView` with `status: 'active'` and `publishedAt`.
+6. **Return** the `ProductView` with `status: 'active'` and `publishedAt`.
 
-### The active-Price publish precondition is owned by pricing
+### The active-Price publish precondition — enforced via a probe
 
-`PublishProductUseCase` enforces exactly one publish precondition of its own: the
-variant count, delegated to `Product.publish()` (the domain rejects a `draft`
-product with zero variants). It performs **no price awareness**.
+`PublishProductUseCase` enforces two preconditions. The variant count is
+delegated to `Product.publish()` (the domain rejects a `draft` product with zero
+variants). The second — "**every** variant has an in-effect Price in the default
+currency" — is a real business rule, but it is a **cross-aggregate fact** the
+catalog `Product` cannot see, so it never belongs in the `Product` model. It is
+enforced **in this use case**, not the domain, via a catalog-side
+`IActivePriceProbePort`: the probe reads the pricing-owned `price` table with a
+parameterized query and reports which variant ids are unpriced. A non-empty
+result hard-fails the publish with `PRODUCT_PUBLISH_REQUIRES_PRICE` → **409
+Conflict**.
 
-A second precondition — "the product has **≥1 active Price**" — is a real business
-rule, but it is **owned by the pricing capability**, not by this use case. Price is
-a cross-aggregate fact the catalog `Product` cannot see, so it never belongs in the
-`Product` model; and the catalog publish use case does not reach across into
-pricing state. The capability that owns `Price` owns that precondition and enforces
-it where pricing is wired into the publish path. This use case therefore stays
-free of any price check — there is no placeholder, no warn, and no deferred seam
-here.
+The catalog module imports **nothing** from the pricing module — the probe's
+`price`-table read is the symmetric mirror of how pricing writes the
+catalog-owned `product_variant.tax_category_id`, with the opaque `variantId` and
+the table as the only coupling. The two precondition layers stay independent: a
+variant-less product hands the probe an empty id list (a no-op), so it still
+fails on the domain's `PRODUCT_PUBLISH_REQUIRES_VARIANT`, not the price rule. The
+full rationale — why 409, the probe port, the `DEFAULT_CURRENCY` knob — is in
+[03-pricing · 04 — Publishing hard-fails on a missing active Price](../03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md).
 
 ## 5. Archive Product
 

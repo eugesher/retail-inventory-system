@@ -12,22 +12,35 @@ import {
   ProductVariantStatusEnum,
 } from '../../../domain';
 import { PublishProductUseCase } from '../publish-product.use-case';
-import { InMemoryCatalogEventsPublisher, InMemoryCatalogRepository } from './test-doubles';
+import {
+  InMemoryActivePriceProbe,
+  InMemoryCatalogEventsPublisher,
+  InMemoryCatalogRepository,
+} from './test-doubles';
 
 describe('PublishProductUseCase', () => {
   const SEEDED_PRODUCT_ID = 100;
   const SEEDED_VARIANT_ID = 5001;
+  const DEFAULT_CURRENCY = 'USD';
 
   let repository: InMemoryCatalogRepository;
   let publisher: InMemoryCatalogEventsPublisher;
+  let priceProbe: InMemoryActivePriceProbe;
   let logger: PinoLoggerMock;
   let useCase: PublishProductUseCase;
 
   beforeEach(() => {
     repository = new InMemoryCatalogRepository();
     publisher = new InMemoryCatalogEventsPublisher();
+    priceProbe = new InMemoryActivePriceProbe();
     logger = makePinoLoggerMock();
-    useCase = new PublishProductUseCase(repository, publisher, logger as unknown as PinoLogger);
+    useCase = new PublishProductUseCase(
+      repository,
+      publisher,
+      priceProbe,
+      DEFAULT_CURRENCY,
+      logger as unknown as PinoLogger,
+    );
   });
 
   const draftVariant = (): ProductVariant =>
@@ -53,7 +66,7 @@ describe('PublishProductUseCase', () => {
 
   const payload: IPublishProductPayload = { productId: SEEDED_PRODUCT_ID, correlationId: 'corr-1' };
 
-  it('publishes a draft product with ≥1 variant and emits catalog.product.published', async () => {
+  it('publishes a draft product with ≥1 priced variant and emits catalog.product.published', async () => {
     seedDraft([draftVariant()]);
 
     const view = await useCase.execute(payload);
@@ -64,6 +77,14 @@ describe('PublishProductUseCase', () => {
 
     expect(repository.saved).toHaveLength(1);
     expect(repository.saved[0].isActive()).toBe(true);
+
+    // The probe was consulted with the product's concrete variant ids and the
+    // configured default currency before the transition ran.
+    expect(priceProbe.calls).toHaveLength(1);
+    expect(priceProbe.calls[0]).toEqual({
+      variantIds: [SEEDED_VARIANT_ID],
+      currency: DEFAULT_CURRENCY,
+    });
 
     // The wire event carries the concrete variant ids that are now part of the
     // published product, the slug, and the version/correlation envelope.
@@ -79,9 +100,26 @@ describe('PublishProductUseCase', () => {
     expect(correlationId).toBe('corr-1');
   });
 
-  it('rejects publishing a product with no variants', async () => {
+  it('rejects publishing when a variant has no active price (PRODUCT_PUBLISH_REQUIRES_PRICE)', async () => {
+    seedDraft([draftVariant()]);
+    priceProbe.unpriced.add(SEEDED_VARIANT_ID);
+
+    await expect(useCase.execute(payload)).rejects.toMatchObject({
+      code: CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_PRICE,
+    });
+    await expect(useCase.execute(payload)).rejects.toBeInstanceOf(CatalogDomainException);
+
+    // Hard fail: nothing is persisted and no event is emitted — the probe ran
+    // before the transition, so the product never flips to active.
+    expect(repository.saved).toHaveLength(0);
+    expect(publisher.productPublished).toHaveLength(0);
+  });
+
+  it('rejects publishing a product with no variants on the variant rule, not the price probe', async () => {
     seedDraft([]);
 
+    // A variant-less product: the probe is a no-op on the empty id list, so the
+    // domain's ≥1-variant rule is what fails — independent of price awareness.
     await expect(useCase.execute(payload)).rejects.toMatchObject({
       code: CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_VARIANT,
     });
@@ -99,6 +137,8 @@ describe('PublishProductUseCase', () => {
     });
     expect(repository.saved).toHaveLength(0);
     expect(publisher.productPublished).toHaveLength(0);
+    // The not-found check short-circuits before the price probe is reached.
+    expect(priceProbe.calls).toHaveLength(0);
   });
 
   it('still returns the product view when the publish rejects (best-effort post-commit)', async () => {
