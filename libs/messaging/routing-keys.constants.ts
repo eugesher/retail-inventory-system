@@ -18,6 +18,11 @@ export const ROUTING_KEYS = {
   CATALOG_PRODUCT_LIST: 'catalog.product.list',
   CATALOG_PRODUCT_GET: 'catalog.product.get',
   CATALOG_VARIANT_GET: 'catalog.variant.get',
+  CATALOG_PRICE_SET: 'catalog.price.set',
+  CATALOG_PRICE_LIST: 'catalog.price.list',
+  CATALOG_PRICE_SELECT: 'catalog.price.select',
+  CATALOG_PRICE_CHANGED: 'catalog.price.changed',
+  CATALOG_PRICE_SCHEDULED: 'catalog.price.scheduled',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

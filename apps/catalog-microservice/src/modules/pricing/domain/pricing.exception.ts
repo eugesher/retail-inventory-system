@@ -12,6 +12,11 @@ export enum PricingErrorCodeEnum {
   PRICE_INTERVAL_INVALID = 'PRICING_PRICE_INTERVAL_INVALID',
   PRICE_VALID_FROM_IN_PAST = 'PRICING_PRICE_VALID_FROM_IN_PAST',
   PRICE_PRIORITY_INVALID = 'PRICING_PRICE_PRIORITY_INVALID',
+  // Write-path scheduling conflict surfaced by `SetPriceUseCase`: a new row
+  // cannot start at-or-before the existing open row for the scope (there is no
+  // cancel/reschedule flow in this capability). Raised by the use case, not the
+  // `Price` model — the aggregate cannot see the other open row.
+  PRICE_SCHEDULE_CONFLICT = 'PRICING_PRICE_SCHEDULE_CONFLICT',
   // TaxCategory invariants (enforced in the `TaxCategory` model).
   TAX_CATEGORY_CODE_INVALID = 'PRICING_TAX_CATEGORY_CODE_INVALID',
   TAX_CATEGORY_NAME_REQUIRED = 'PRICING_TAX_CATEGORY_NAME_REQUIRED',
