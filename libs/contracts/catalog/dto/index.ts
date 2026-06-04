@@ -3,4 +3,6 @@ export * from './price.view';
 export * from './product.view';
 export * from './product-variant.view';
 export * from './product-with-variants.view';
+export * from './tax-category.view';
+export * from './variant-tax-header.view';
 export * from './variant-with-product.view';

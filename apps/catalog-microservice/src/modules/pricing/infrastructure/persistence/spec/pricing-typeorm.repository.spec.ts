@@ -97,7 +97,9 @@ describe('pricing mappers', () => {
 
 describe('PricingTypeormRepository', () => {
   let priceRepo: jest.Mocked<
-    Pick<Repository<PriceEntity>, 'findOne'> & { manager: Pick<EntityManager, 'transaction'> }
+    Pick<Repository<PriceEntity>, 'findOne'> & {
+      manager: Pick<EntityManager, 'transaction' | 'query'>;
+    }
   >;
   let taxCategoryRepo: jest.Mocked<
     Pick<Repository<TaxCategoryEntity>, 'findOne' | 'find' | 'save'>
@@ -109,7 +111,7 @@ describe('PricingTypeormRepository', () => {
     jest.resetAllMocks();
     priceRepo = {
       findOne: jest.fn(),
-      manager: { transaction: jest.fn() },
+      manager: { transaction: jest.fn(), query: jest.fn() },
     } as never;
     taxCategoryRepo = { findOne: jest.fn(), find: jest.fn(), save: jest.fn() } as never;
     logger = makePinoLoggerMock();
@@ -230,6 +232,72 @@ describe('PricingTypeormRepository', () => {
     it('returns null when no category matches', async () => {
       taxCategoryRepo.findOne.mockResolvedValue(null);
       await expect(repository.findTaxCategoryByCode('NOPE')).resolves.toBeNull();
+    });
+  });
+
+  // The variant-tax FK lives on the catalog-owned `product_variant` table; pricing
+  // reaches it with a PARAMETERIZED query through the injected manager rather than
+  // importing the catalog entity (ADR-026 §5). These specs assert the SQL is
+  // parameterized (placeholders + a bound args array, never string interpolation)
+  // and that the numeric coercion / null-guard hold.
+  describe('attachTaxCategoryToVariant', () => {
+    it('writes the FK with a parameterized UPDATE bound to [taxCategoryId, variantId]', async () => {
+      const query = priceRepo.manager.query as unknown as jest.Mock;
+      query.mockResolvedValue({ affectedRows: 1 });
+
+      await repository.attachTaxCategoryToVariant(42, 3);
+
+      // The `?` placeholders + the bound args array are the parameterization: the
+      // ids are never string-interpolated into the SQL. Order is
+      // [taxCategoryId, variantId].
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE product_variant SET tax_category_id = ? WHERE id = ?'),
+        [3, 42],
+      );
+    });
+  });
+
+  describe('findVariantTaxHeader', () => {
+    it('returns null when the variant does not exist (empty result set)', async () => {
+      const query = priceRepo.manager.query as unknown as jest.Mock;
+      query.mockResolvedValue([]);
+
+      await expect(repository.findVariantTaxHeader(999)).resolves.toBeNull();
+      expect(query).toHaveBeenCalledWith(expect.stringContaining('FROM product_variant'), [999]);
+    });
+
+    it('coerces string numerics and preserves null for an unclassified variant', async () => {
+      const query = priceRepo.manager.query as unknown as jest.Mock;
+      query.mockResolvedValue([
+        { variantId: '42', sku: 'SKU-1', taxCategoryId: null, taxCategoryCode: null },
+      ]);
+
+      const header = await repository.findVariantTaxHeader(42);
+
+      expect(header).toEqual({
+        variantId: 42,
+        sku: 'SKU-1',
+        taxCategoryId: null,
+        taxCategoryCode: null,
+      });
+      expect(typeof header?.variantId).toBe('number');
+    });
+
+    it('returns the joined category code for a classified variant', async () => {
+      const query = priceRepo.manager.query as unknown as jest.Mock;
+      query.mockResolvedValue([
+        { variantId: 42, sku: 'SKU-1', taxCategoryId: '3', taxCategoryCode: 'STANDARD' },
+      ]);
+
+      const header = await repository.findVariantTaxHeader(42);
+
+      expect(header).toEqual({
+        variantId: 42,
+        sku: 'SKU-1',
+        taxCategoryId: 3,
+        taxCategoryCode: 'STANDARD',
+      });
     });
   });
 });

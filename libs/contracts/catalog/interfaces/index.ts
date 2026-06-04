@@ -7,3 +7,5 @@ export * from './price-query.interface';
 export * from './price-set.interface';
 export * from './publish-product.interface';
 export * from './register-product.interface';
+export * from './tax-category-create.interface';
+export * from './variant-tax-category.interface';
