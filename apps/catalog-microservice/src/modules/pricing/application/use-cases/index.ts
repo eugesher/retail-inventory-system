@@ -1,4 +1,3 @@
-// Pricing application use-cases barrel. The set / schedule / select-price and
-// tax-category use cases land here. Kept alive as an empty module so the
-// `application/use-cases/` folder is tracked.
-export {};
+export * from './list-prices.use-case';
+export * from './select-applicable-price.use-case';
+export * from './set-price.use-case';

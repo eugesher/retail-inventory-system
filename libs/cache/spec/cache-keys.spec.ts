@@ -140,6 +140,34 @@ describe('CACHE_KEYS', () => {
     });
   });
 
+  describe('catalogPrice (reserved pricing read-path builder — not consumed yet)', () => {
+    // Locks the reserved pricing read-path key shape (ADR-016 / ADR-022 /
+    // ADR-026). The builder keys on `(variantId, currency)` — the entire price
+    // scope. It is **not consumed** by any code path today: the pricing module
+    // does not import `CacheModule`. This assertion exists so a future cached
+    // Select-Applicable-Price read path adopts the locked v1 shape without
+    // re-keying.
+    it('embeds the v1 schema-version segment in the single-tenant prefix', () => {
+      expect(CACHE_KEYS.catalogPricePrefix(5001)).toBe('ris:catalog:price:v1:5001:');
+      expect(CACHE_KEYS.catalogPrice(5001, 'USD')).toBe('ris:catalog:price:v1:5001:USD');
+    });
+
+    it('appends the currency as the facet so the prefix wipes every currency', () => {
+      const prefix = CACHE_KEYS.catalogPricePrefix(5001);
+      expect(CACHE_KEYS.catalogPrice(5001, 'USD').startsWith(prefix)).toBe(true);
+      expect(CACHE_KEYS.catalogPrice(5001, 'EUR').startsWith(prefix)).toBe(true);
+    });
+
+    it('prepends `t:<tenantId>:` immediately after the `ris:` root when tenantId is supplied', () => {
+      expect(CACHE_KEYS.catalogPricePrefix(5001, { tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:catalog:price:v1:5001:',
+      );
+      expect(CACHE_KEYS.catalogPrice(5001, 'USD', { tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:catalog:price:v1:5001:USD',
+      );
+    });
+  });
+
   describe('productStock (pre-ADR-016 legacy — kept for original transition window)', () => {
     it('uses the bare stock prefix', () => {
       expect(CACHE_KEYS.productStockPrefix(42)).toBe('stock:42:');
