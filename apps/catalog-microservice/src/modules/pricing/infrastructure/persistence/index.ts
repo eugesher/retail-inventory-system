@@ -1,4 +1,5 @@
-// Pricing persistence barrel. The `Price` / `TaxCategory` TypeORM entities,
-// their mappers, and the repository adapter land here. Kept alive as an empty
-// module so the `infrastructure/persistence/` folder is tracked.
-export {};
+export { PriceEntity } from './price.entity';
+export { TaxCategoryEntity } from './tax-category.entity';
+export * from './price.mapper';
+export * from './tax-category.mapper';
+export * from './pricing-typeorm.repository';
