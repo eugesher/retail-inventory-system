@@ -26,5 +26,8 @@ export enum MicroserviceMessagePatternEnum {
   CATALOG_PRICE_SELECT = 'catalog.price.select',
   CATALOG_PRICE_CHANGED = 'catalog.price.changed',
   CATALOG_PRICE_SCHEDULED = 'catalog.price.scheduled',
+  CATALOG_TAX_CATEGORY_CREATE = 'catalog.tax-category.create',
+  CATALOG_TAX_CATEGORY_LIST = 'catalog.tax-category.list',
+  CATALOG_VARIANT_SET_TAX_CATEGORY = 'catalog.variant.set-tax-category',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
 }

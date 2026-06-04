@@ -6,7 +6,10 @@ import { MicroserviceClientCatalogModule } from '@retail-inventory-system/messag
 
 import { PRICING_EVENTS_PUBLISHER, PRICING_REPOSITORY } from './application/ports';
 import {
+  AttachTaxCategoryToVariantUseCase,
+  CreateTaxCategoryUseCase,
   ListPricesUseCase,
+  ListTaxCategoriesUseCase,
   SelectApplicablePriceUseCase,
   SetPriceUseCase,
 } from './application/use-cases';
@@ -51,6 +54,9 @@ import { PricingController, PricingRpcExceptionFilter } from './presentation';
     SetPriceUseCase,
     ListPricesUseCase,
     SelectApplicablePriceUseCase,
+    CreateTaxCategoryUseCase,
+    ListTaxCategoriesUseCase,
+    AttachTaxCategoryToVariantUseCase,
   ],
 })
 export class PricingModule {}

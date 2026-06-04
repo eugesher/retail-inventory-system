@@ -8,11 +8,12 @@ category. It is the companion to
 both realize
 [ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md).
 
-> **Status:** the domain model, the entity/table, the FK column, and the
-> repository read/write methods exist. The **attach use case and the gateway
-> endpoint** that let an operator point a variant at a tax category are completed
-> by a later document in this folder — see
-> [§4 Completed later](#4-completed-later) for the exact surface that remains.
+> **Status:** complete through the microservice RPC surface. The domain model,
+> the `tax_category` table, the `product_variant.tax_category_id` FK, the
+> repository read/write methods, the three tax use cases, and their three
+> `catalog_queue` RPC handlers all exist (§4–§6). The **gateway HTTP endpoints**
+> that front these RPCs over `/api/...` (permission-gated by `pricing:write`) are
+> the remaining surface and land with the gateway pricing endpoints.
 
 ## 1. Classification-only semantics
 
@@ -116,23 +117,140 @@ the **pricing** migration because the link is a pricing concern — pricing depe
 on catalog (the variant exists first), not the reverse. The pricing domain still
 never imports the catalog domain; the coupling is the FK only (ADR-026 §5).
 
-## 4. Completed later
+## 4. The tax-category use cases (Create / List)
 
-The pieces that turn this label into an operator-usable feature are completed by
-a later document in this folder. What remains:
+Two write/read use cases wrap the label set
+(`application/use-cases/`). Both return the `TaxCategoryView` wire DTO (a class
+carrying `@ApiResponseProperty`, mirroring `PriceView` / `ProductView`) through a
+shared `tax-category-view.factory.ts` so the projection lives in one place.
 
-- **`attachTaxCategoryToVariant` on the repository port** — write the
-  `product_variant.tax_category_id` FK for a given `(variantId, taxCategoryId)`,
-  plus the variant-tax-header read method that resolves a variant's current
-  category.
-- **The attach use case** — validate that both the variant and the tax category
-  exist (raising `VARIANT_NOT_FOUND` / `TAX_CATEGORY_NOT_FOUND` from the already
-  defined `PricingErrorCodeEnum`), then set the FK.
-- **The create-tax-category and list-tax-category use cases** — wrapping
-  `createTaxCategory` (with the `TAX_CATEGORY_CODE_TAKEN` pre-check) and
-  `listTaxCategories`.
-- **The gateway endpoints and their `http/*.http` entries** — the HTTP surface
-  that fronts the above over `/api/...`, permission-gated by `pricing:write`.
+**`CreateTaxCategoryUseCase`** (`catalog.tax-category.create`):
 
-Those build directly on the model, the table, the FK column, and the three
-repository methods recorded here — none of which they reshape.
+1. **Build first.** `TaxCategory.create({ code, name, description })` runs the
+   domain invariants — a malformed `code` raises `TAX_CATEGORY_CODE_INVALID`, a
+   blank `name` raises `TAX_CATEGORY_NAME_REQUIRED` — *before* the use case
+   touches the repository. A bad payload should never reach the uniqueness check.
+2. **Pre-check uniqueness.** `findTaxCategoryByCode(code)`; a non-null hit raises
+   `TAX_CATEGORY_CODE_TAKEN`. This is the two-layer guard ADR-026 §6 describes: the
+   pre-check turns the common duplicate into a tidy typed rejection, and the
+   `UC_TAX_CATEGORY_CODE` UNIQUE constraint is the hard backstop if two creates
+   race past the pre-check.
+3. **Persist.** `createTaxCategory(...)` → `TaxCategoryView`. **No event** — a tax
+   label is static reference data, not a business fact other services react to.
+
+**`ListTaxCategoriesUseCase`** (`catalog.tax-category.list`): `listTaxCategories()`
+(ordered by `code`) → `TaxCategoryView[]`. There is no paging or filter: a
+tax-category set is a small, static handful of rows, so the whole list returns in
+one shot. The query carries only a `correlationId` (`ICorrelationPayload`) — there
+is nothing to scope by. No event.
+
+## 5. Attaching a tax category to a variant
+
+`AttachTaxCategoryToVariantUseCase` (`catalog.variant.set-tax-category`) points a
+variant at one category by writing the `product_variant.tax_category_id` FK. The
+flow:
+
+1. **Resolve the category by code.** The caller references the category by its
+   stable `taxCategoryCode`, not its surrogate id — it should not need to know the
+   internal id of a label it names by code. `findTaxCategoryByCode(code)`; a miss
+   raises `TAX_CATEGORY_NOT_FOUND` (→ 404).
+2. **Check the variant exists.** `findVariantTaxHeader(variantId)`; `null` (an
+   empty result set) raises `VARIANT_NOT_FOUND` (→ 404). The header read doubles
+   as the existence guard — without it the FK write would silently affect zero
+   rows.
+3. **Write the FK.** `attachTaxCategoryToVariant(variantId, taxCategory.id)`.
+4. **Re-read and return the updated header.** A second `findVariantTaxHeader`
+   builds the `VariantTaxHeaderView` from storage rather than assembling it from
+   the inputs, so the response reflects exactly what was persisted.
+
+Re-classifying a variant that already carries a category is the same path — the
+FK is simply overwritten. There is **no event**: re-classifying a variant is an
+operator edit, not a fact other services subscribe to.
+
+### Why the FK write goes through a parameterized query, not a cross-module import
+
+`tax_category_id` is a **pricing-introduced column on the catalog-owned
+`product_variant` table** (§3): the pricing migration added it because the link is
+a pricing concern, even though the table belongs to catalog. Pricing owns the
+column's semantics — but it must reach it **without importing the catalog
+`ProductVariantEntity`**. A cross-module infrastructure import is exactly what the
+boundaries lint forbids (ADR-017): the pricing and catalog modules colocate in one
+microservice but stay independently reasoned, coupled only by the opaque
+`variantId` and the database foreign key (ADR-025 / ADR-026 §5).
+
+So `PricingTypeormRepository` reads and writes the column with **parameterized
+SQL** through its injected TypeORM manager:
+
+```sql
+-- attachTaxCategoryToVariant
+UPDATE product_variant SET tax_category_id = ? WHERE id = ?
+
+-- findVariantTaxHeader
+SELECT pv.id, pv.sku, pv.tax_category_id, tc.code
+  FROM product_variant pv
+  LEFT JOIN tax_category tc ON tc.id = pv.tax_category_id
+ WHERE pv.id = ?
+```
+
+The `?` placeholders are bound by the driver, so the ids are never
+string-interpolated into the SQL (no injection surface). The `LEFT JOIN` returns
+`NULL` category columns for an unclassified variant rather than dropping the row,
+and an empty result set means the variant does not exist. The numeric columns are
+coerced defensively (`Number(...)`, guarding `null` so an unclassified variant's
+`tax_category_id` stays `null` rather than collapsing to `0`) — mysql2 can surface
+them as strings. This is the **same opaque-`variantId` boundary** the `Price`
+ledger uses for its `FK_PRICE_VARIANT` (ADR-026 §5): the FK is the only structural
+coupling; the TypeScript modules never see each other's types.
+
+### The "updated variant header" response
+
+The attach command returns a `VariantTaxHeaderView` — the minimal projection of a
+variant's tax classification *after* the write:
+
+```ts
+class VariantTaxHeaderView {
+  variantId: number;
+  sku: string;
+  taxCategoryId: number | null;   // null when unclassified
+  taxCategoryCode: string | null; // the joined code, null when unclassified
+}
+```
+
+It is deliberately **not** the full variant view: pricing reads only the columns it
+needs through the parameterized query, so it never depends on the shape of the
+catalog read model. The gateway PATCH that fronts this RPC returns the header
+verbatim, so an operator immediately sees the variant's new classification.
+
+## 6. The RPC surface
+
+Three routing keys join `catalog_queue`, registered lock-step in both
+`ROUTING_KEYS` (`libs/messaging`) and `MicroserviceMessagePatternEnum`
+(`libs/contracts`) — the alignment is asserted by `routing-keys.constants.spec.ts`
+(ADR-008):
+
+| Routing key | RPC | Use case |
+| --- | --- | --- |
+| `catalog.tax-category.create` | Create a tax category | `CreateTaxCategoryUseCase` |
+| `catalog.tax-category.list` | List all tax categories | `ListTaxCategoriesUseCase` |
+| `catalog.variant.set-tax-category` | Attach a category to a variant | `AttachTaxCategoryToVariantUseCase` |
+
+`PricingController` (`presentation/pricing.controller.ts`) carries the three thin
+`@MessagePattern` handlers alongside the three price RPCs — six in all on
+`catalog_queue`. A failure raises a `PricingDomainException` whose typed code the
+`PricingRpcExceptionFilter` maps onto an HTTP status (`TAX_CATEGORY_CODE_TAKEN` →
+409; `TAX_CATEGORY_NOT_FOUND` / `VARIANT_NOT_FOUND` → 404; the `*_INVALID` /
+`*_REQUIRED` codes → 400) so the gateway surfaces the right status rather than a
+blanket 500.
+
+## 7. What is still deferred
+
+Rates and jurisdictions remain out of scope, as §1 ("Rate computation is
+explicitly deferred") records: a `TaxCategory` stays a jurisdiction-neutral
+classification label, and computing tax —
+`(category, jurisdiction) → rate`, rounded and converted — is a separate future
+tax-computation capability that maps over this label set without reshaping it.
+
+The only remaining piece of *this* capability is the **gateway HTTP surface** that
+fronts the three RPCs over `/api/...` (permission-gated by `pricing:write`) and its
+`http/*.http` entries. Those build directly on the use cases and contracts recorded
+here — none of which they reshape.

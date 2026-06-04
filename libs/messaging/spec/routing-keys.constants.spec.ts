@@ -74,6 +74,15 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.CATALOG_PRICE_SCHEDULED).toBe(
       MicroserviceMessagePatternEnum.CATALOG_PRICE_SCHEDULED,
     );
+    expect(ROUTING_KEYS.CATALOG_TAX_CATEGORY_CREATE).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_TAX_CATEGORY_CREATE,
+    );
+    expect(ROUTING_KEYS.CATALOG_TAX_CATEGORY_LIST).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_TAX_CATEGORY_LIST,
+    );
+    expect(ROUTING_KEYS.CATALOG_VARIANT_SET_TAX_CATEGORY).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_VARIANT_SET_TAX_CATEGORY,
+    );
     expect(ROUTING_KEYS.NOTIFICATION_HEALTH_PING).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATION_HEALTH_PING,
     );

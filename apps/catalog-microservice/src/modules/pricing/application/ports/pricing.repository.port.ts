@@ -36,4 +36,25 @@ export interface IPricingRepositoryPort {
   createTaxCategory(taxCategory: TaxCategory): Promise<TaxCategory>;
   listTaxCategories(): Promise<TaxCategory[]>;
   findTaxCategoryByCode(code: string): Promise<TaxCategory | null>;
+
+  // Writes the `product_variant.tax_category_id` FK for a variant. The column is
+  // a pricing-introduced column on a table the catalog module owns; pricing owns
+  // its semantics and reaches it with a **parameterized query**, never the catalog
+  // `ProductVariantEntity` (a cross-module infrastructure import the boundaries
+  // lint forbids — the opaque `variantId` + the FK are the only coupling, ADR-026
+  // §5). The caller resolves the code → id and checks variant existence first.
+  attachTaxCategoryToVariant(variantId: number, taxCategoryId: number): Promise<void>;
+
+  // The minimal tax projection of a variant — its identity plus its current tax
+  // category (joined `LEFT` so an unclassified variant returns `null` columns).
+  // `null` (the whole result) means the variant does not exist. Also a
+  // parameterized query against `product_variant` / `tax_category`, never a
+  // catalog entity import. Used both as the attach pre-check (variant existence)
+  // and to build the "updated variant header" the attach command returns.
+  findVariantTaxHeader(variantId: number): Promise<{
+    variantId: number;
+    sku: string;
+    taxCategoryId: number | null;
+    taxCategoryCode: string | null;
+  } | null>;
 }
