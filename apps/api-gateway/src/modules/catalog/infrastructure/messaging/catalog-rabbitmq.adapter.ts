@@ -4,25 +4,37 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   IArchiveProductPayload,
+  IAttachVariantTaxCategoryPayload,
+  ICorrelationPayload,
+  ICreateTaxCategoryPayload,
   ICreateVariantPayload,
   IGetProductBySlugQuery,
   IGetVariantQuery,
   IListProductsQuery,
   IPage,
+  IPriceQuery,
+  IPriceSetPayload,
   IPublishProductPayload,
   IRegisterProductPayload,
+  PriceView,
   ProductVariantView,
   ProductView,
   ProductWithVariantsView,
+  TaxCategoryView,
+  VariantTaxHeaderView,
   VariantWithProductView,
 } from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import {
+  IAttachVariantTaxCategoryCommand,
   ICatalogGatewayPort,
+  ICreateTaxCategoryCommand,
   ICreateVariantCommand,
   IListProductsCommand,
+  IPriceQueryCommand,
   IRegisterProductCommand,
+  ISetPriceCommand,
 } from '../../application/ports';
 
 // The single `ClientProxy` holder for the catalog gateway module (ADR-009 /
@@ -114,6 +126,69 @@ export class CatalogRabbitmqAdapter implements ICatalogGatewayPort {
         variantId,
         correlationId,
       }),
+    );
+  }
+
+  public async setPrice(command: ISetPriceCommand, correlationId: string): Promise<PriceView> {
+    return firstValueFrom(
+      this.client.send<PriceView, IPriceSetPayload>(ROUTING_KEYS.CATALOG_PRICE_SET, {
+        ...command,
+        correlationId,
+      }),
+    );
+  }
+
+  public async listPrices(query: IPriceQueryCommand, correlationId: string): Promise<PriceView[]> {
+    return firstValueFrom(
+      this.client.send<PriceView[], IPriceQuery>(ROUTING_KEYS.CATALOG_PRICE_LIST, {
+        ...query,
+        correlationId,
+      }),
+    );
+  }
+
+  public async getApplicablePrice(
+    query: IPriceQueryCommand,
+    correlationId: string,
+  ): Promise<PriceView | null> {
+    return firstValueFrom(
+      this.client.send<PriceView | null, IPriceQuery>(ROUTING_KEYS.CATALOG_PRICE_SELECT, {
+        ...query,
+        correlationId,
+      }),
+    );
+  }
+
+  public async createTaxCategory(
+    command: ICreateTaxCategoryCommand,
+    correlationId: string,
+  ): Promise<TaxCategoryView> {
+    return firstValueFrom(
+      this.client.send<TaxCategoryView, ICreateTaxCategoryPayload>(
+        ROUTING_KEYS.CATALOG_TAX_CATEGORY_CREATE,
+        { ...command, correlationId },
+      ),
+    );
+  }
+
+  public async listTaxCategories(correlationId: string): Promise<TaxCategoryView[]> {
+    return firstValueFrom(
+      this.client.send<TaxCategoryView[], ICorrelationPayload>(
+        ROUTING_KEYS.CATALOG_TAX_CATEGORY_LIST,
+        { correlationId },
+      ),
+    );
+  }
+
+  public async attachVariantTaxCategory(
+    command: IAttachVariantTaxCategoryCommand,
+    correlationId: string,
+  ): Promise<VariantTaxHeaderView> {
+    return firstValueFrom(
+      this.client.send<VariantTaxHeaderView, IAttachVariantTaxCategoryPayload>(
+        ROUTING_KEYS.CATALOG_VARIANT_SET_TAX_CATEGORY,
+        { ...command, correlationId },
+      ),
     );
   }
 }

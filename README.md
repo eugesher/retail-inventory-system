@@ -55,6 +55,12 @@ The system handles order lifecycle management and product stock tracking across 
 │  GET   /api/catalog/products                              │
 │  GET   /api/catalog/products/:slug                        │
 │  GET   /api/catalog/variants/:id                          │
+│  POST  /api/catalog/variants/:id/prices                   │
+│  GET   /api/catalog/variants/:id/prices                   │
+│  GET   /api/catalog/variants/:id/price                    │
+│  POST  /api/catalog/tax-categories                        │
+│  GET   /api/catalog/tax-categories                        │
+│  PATCH /api/catalog/variants/:id/tax-category             │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -165,15 +171,17 @@ apps/api-gateway/src/
     │   └── presentation/
     │       ├── product.controller.ts          # GET /api/product/:id/stock
     │       └── dto/product-stock-get-query.dto.ts
-    └── catalog/                               # talks to catalog-microservice
+    └── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
         ├── application/
         │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
         │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
+        │                                      #   + SetPrice/ListPrices/GetApplicablePrice
+        │                                      #   + CreateTaxCategory/ListTaxCategories/AttachVariantTaxCategory
         ├── infrastructure/
-        │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder
+        │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder (catalog + pricing RPCs)
         ├── presentation/
-        │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id
-        │   └── dto/                           # Register/CreateVariant request + ListProducts query DTOs
+        │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id[/prices|/price|/tax-category], /tax-categories
+        │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory request + ListProducts/PriceQuery query DTOs
         └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
 ```
 
@@ -379,13 +387,21 @@ GET /product/:productId/stock
 ### Catalog
 
 ```
-POST /api/catalog/products                      # bearer + catalog:write
-POST /api/catalog/products/:productId/variants  # bearer + catalog:write
-POST /api/catalog/products/:productId/publish   # bearer + catalog:publish
-POST /api/catalog/products/:productId/archive   # bearer + catalog:write
-GET  /api/catalog/products                       # public  — paged active-catalogue browse
-GET  /api/catalog/products/:slug                 # public  — product + active variants
-GET  /api/catalog/variants/:variantId            # public  — variant + parent product
+POST  /api/catalog/products                       # bearer + catalog:write
+POST  /api/catalog/products/:productId/variants   # bearer + catalog:write
+POST  /api/catalog/products/:productId/publish    # bearer + catalog:publish
+POST  /api/catalog/products/:productId/archive    # bearer + catalog:write
+GET   /api/catalog/products                        # public  — paged active-catalogue browse
+GET   /api/catalog/products/:slug                  # public  — product + active variants
+GET   /api/catalog/variants/:variantId             # public  — variant + parent product
+
+# Pricing + tax categories (fronts the colocated pricing RPCs on catalog_queue)
+POST  /api/catalog/variants/:variantId/prices         # bearer + pricing:write  — set or schedule a price
+GET   /api/catalog/variants/:variantId/prices         # public  — prices in effect at ?asOf (?currency=USD)
+GET   /api/catalog/variants/:variantId/price          # public  — single applicable price (or null body)
+POST  /api/catalog/tax-categories                     # bearer + pricing:write  — create a tax category
+GET   /api/catalog/tax-categories                     # public  — list tax categories
+PATCH /api/catalog/variants/:variantId/tax-category   # bearer + pricing:write  — attach a tax category by code
 ```
 
 ### Auth
@@ -416,7 +432,7 @@ Interactive API reference is available at `http://localhost:3000/api/reference` 
 
 ## Authentication
 
-Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, and the three `GET /api/catalog/...` browse/resolve routes). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
+Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, and the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
 
 Two subject kinds share the JWT pipeline:
 
