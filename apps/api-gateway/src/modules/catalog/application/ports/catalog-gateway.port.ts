@@ -1,8 +1,11 @@
 import {
   IPage,
+  PriceView,
   ProductVariantView,
   ProductView,
   ProductWithVariantsView,
+  TaxCategoryView,
+  VariantTaxHeaderView,
   VariantWithProductView,
 } from '@retail-inventory-system/contracts';
 
@@ -34,6 +37,38 @@ export interface IListProductsCommand {
   search?: string;
 }
 
+// Pricing/tax command + query inputs. `variantId` is resolved from the route
+// param (the downstream backbone key, ADR-025) and folded into the command in
+// the controller, the same split `ICreateVariantCommand` follows for
+// `productId`. Timestamps are ISO-8601 strings on the wire; `amountMinor` is an
+// integer count of minor units (cents). The pricing domain has the final say on
+// every invariant — these shapes are the gateway's edge contract.
+export interface ISetPriceCommand {
+  variantId: number;
+  currency: string;
+  amountMinor: number;
+  validFrom?: string;
+  validTo?: string | null;
+  priority?: number;
+}
+
+export interface IPriceQueryCommand {
+  variantId: number;
+  currency: string;
+  asOf?: string;
+}
+
+export interface ICreateTaxCategoryCommand {
+  code: string;
+  name: string;
+  description?: string;
+}
+
+export interface IAttachVariantTaxCategoryCommand {
+  variantId: number;
+  taxCategoryCode: string;
+}
+
 // The gateway-side seam onto the catalog microservice's seven RPCs. The
 // concrete implementation (`CatalogRabbitmqAdapter`) is the only holder of a
 // `ClientProxy`; use cases and the controller depend on this interface
@@ -50,4 +85,20 @@ export interface ICatalogGatewayPort {
   ): Promise<IPage<ProductWithVariantsView>>;
   getProductBySlug(slug: string, correlationId: string): Promise<ProductWithVariantsView>;
   getVariant(variantId: number, correlationId: string): Promise<VariantWithProductView>;
+  setPrice(command: ISetPriceCommand, correlationId: string): Promise<PriceView>;
+  listPrices(query: IPriceQueryCommand, correlationId: string): Promise<PriceView[]>;
+  // The catalog `catalog.price.select` RPC resolves to a single Price or `null`
+  // when none is in effect for the `(variantId, currency)` scope at `asOf`; the
+  // gateway surfaces that `null` unchanged (the route returns `200` with a
+  // `null` body — see `CatalogController.getApplicablePrice`).
+  getApplicablePrice(query: IPriceQueryCommand, correlationId: string): Promise<PriceView | null>;
+  createTaxCategory(
+    command: ICreateTaxCategoryCommand,
+    correlationId: string,
+  ): Promise<TaxCategoryView>;
+  listTaxCategories(correlationId: string): Promise<TaxCategoryView[]>;
+  attachVariantTaxCategory(
+    command: IAttachVariantTaxCategoryCommand,
+    correlationId: string,
+  ): Promise<VariantTaxHeaderView>;
 }
