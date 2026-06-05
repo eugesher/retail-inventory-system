@@ -15,4 +15,5 @@ export enum PermissionCodeEnum {
   IAM_ASSIGN = 'iam:assign',
   IAM_ROLE_EDIT = 'iam:role-edit',
   AUDIT_READ = 'audit:read',
+  PRICING_WRITE = 'pricing:write',
 }

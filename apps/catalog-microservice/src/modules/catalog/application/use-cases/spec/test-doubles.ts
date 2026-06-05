@@ -6,6 +6,7 @@ import {
 
 import { Product, ProductVariant } from '../../../domain';
 import {
+  IActivePriceProbePort,
   ICatalogEventsPublisherPort,
   ICatalogListActiveQuery,
   ICatalogRepositoryPort,
@@ -118,6 +119,22 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
     const start = (page - 1) * size;
     const items = matched.slice(start, start + size);
     return Promise.resolve({ items, total, page, size });
+  }
+}
+
+// In-memory active-price probe. By default every variant is treated as priced
+// (empty `unpriced` set), so the happy publish path proceeds. Add a variant id to
+// `unpriced` to simulate a variant with no in-effect price; the probe then
+// reports it as missing — mirroring the real adapter's "diff requested ids
+// against the priced set" semantics. `calls` records each invocation so a spec
+// can assert the probe received the default currency and the right variant ids.
+export class InMemoryActivePriceProbe implements IActivePriceProbePort {
+  public readonly unpriced = new Set<number>();
+  public readonly calls: { variantIds: number[]; currency: string }[] = [];
+
+  public findVariantsMissingActivePrice(variantIds: number[], currency: string): Promise<number[]> {
+    this.calls.push({ variantIds, currency });
+    return Promise.resolve(variantIds.filter((id) => this.unpriced.has(id)));
   }
 }
 

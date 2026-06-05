@@ -7,6 +7,8 @@ import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/
 import { AppModule as CatalogMicroserviceAppModule } from '@retail-inventory-system/apps/catalog-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
+import { CatalogE2ESpecDataSource } from './data-source/catalog.e2e-spec.data-source';
+
 // Seeded staff users (scripts/test-db-seed.ts). `admin` carries every
 // permission (incl. `catalog:write` / `catalog:publish`); `warehouse` carries
 // only `inventory:*` — no catalog codes — so it is the negative fixture for the
@@ -59,6 +61,7 @@ describe('Catalog gateway endpoints (e2e)', () => {
 
   let apiGatewayApp: INestApplication;
   let catalogMicroservice: INestMicroservice;
+  let dataSource: CatalogE2ESpecDataSource;
 
   // Stamped so the flow stays idempotent under `yarn test:e2e:run` against an
   // already-seeded DB: a fresh slug/sku set every run, and `search=<stamp>`
@@ -108,11 +111,15 @@ describe('Catalog gateway endpoints (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
     );
     await apiGatewayApp.init();
+
+    dataSource = new CatalogE2ESpecDataSource({ type: 'mysql', url: process.env.DATABASE_URL! });
+    await dataSource.initialize();
   }, timeout);
 
   afterAll(async () => {
     await apiGatewayApp?.close();
     await catalogMicroservice?.close();
+    await dataSource?.destroy();
   });
 
   describe('register → add variants → publish → browse → archive → browse', () => {
@@ -155,6 +162,19 @@ describe('Catalog gateway endpoints (e2e)', () => {
       }
 
       expect(variantIds).toHaveLength(2);
+    });
+
+    it('gives each variant an active USD price so the publish precondition is met', async () => {
+      // Publish hard-fails (409 `PRODUCT_PUBLISH_REQUIRES_PRICE`) unless every
+      // variant has an in-effect Price in the default currency. The gateway has
+      // no pricing route yet, so the prices are seeded directly via SQL — the
+      // open row (`valid_to NULL`) the catalog publish probe reads back.
+      for (const variantId of variantIds) {
+        const result = (await dataSource.insertActivePrice(variantId, 'USD', 1999)) as {
+          affectedRows: number;
+        };
+        expect(result.affectedRows).toBe(1);
+      }
     });
 
     it('admin publishes the product (draft → active)', async () => {

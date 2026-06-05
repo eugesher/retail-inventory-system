@@ -8,8 +8,9 @@ application-layer rules they follow.
 - **Register Product** — creates a `draft` product with no variants.
 - **Add Variant** — appends a variant to an existing product, enforces global
   `sku` uniqueness, and emits a `catalog.variant.created` event.
-- **Publish Product** — transitions a product `draft → active` (precondition: ≥1
-  variant) and emits a `catalog.product.published` event.
+- **Publish Product** — transitions a product `draft → active` (preconditions: ≥1
+  variant, and an in-effect Price in the default currency for **every** variant)
+  and emits a `catalog.product.published` event.
 - **Archive Product** — transitions a product `active → archived` (terminal) and
   emits a `catalog.product.archived` event.
 
@@ -122,7 +123,11 @@ transition timestamp.
 
 1. **Load.** `repository.findById(productId)` — a missing product is rejected
    (see §6).
-2. **Pricing precondition seam (warn, don't block).** See below.
+2. **Check the price precondition.** Collect the product's variant ids and ask
+   the active-price probe which of them lack an in-effect Price in the default
+   currency. If any do, the publish hard-fails with
+   `PRODUCT_PUBLISH_REQUIRES_PRICE` (409) — nothing is persisted, no event is
+   emitted (see the dedicated subsection below).
 3. **Transition.** `product.publish()` — the domain enforces the two write-side
    preconditions it can see: the product is in `draft` and has **at least one
    variant**. A non-draft product raises `PRODUCT_INVALID_STATE_TRANSITION`; a
@@ -135,23 +140,27 @@ transition timestamp.
    through the events port (best-effort — see §7).
 6. **Return** the `ProductView` with `status: 'active'` and `publishedAt`.
 
-### The deferred active-price precondition
+### The active-Price publish precondition — enforced via a probe
 
-A second precondition — "the product has **≥1 active Price**" — is *not* enforced
-yet. Price is owned by a **future pricing capability** that does not exist in the
-system today (there is no `Price` entity, table, or column). Until that capability
-lands, `PublishProductUseCase` does **not** block a price-less product: where the
-real check will live, it logs a `warn`
-(`active price precondition not yet enforced — pricing capability pending`) and
-proceeds.
+`PublishProductUseCase` enforces two preconditions. The variant count is
+delegated to `Product.publish()` (the domain rejects a `draft` product with zero
+variants). The second — "**every** variant has an in-effect Price in the default
+currency" — is a real business rule, but it is a **cross-aggregate fact** the
+catalog `Product` cannot see, so it never belongs in the `Product` model. It is
+enforced **in this use case**, not the domain, via a catalog-side
+`IActivePriceProbePort`: the probe reads the pricing-owned `price` table with a
+parameterized query and reports which variant ids are unpriced. A non-empty
+result hard-fails the publish with `PRODUCT_PUBLISH_REQUIRES_PRICE` → **409
+Conflict**.
 
-This is a deliberate, named **seam**. The warn sits at the point in the flow where
-the future hard check belongs (right before the `publish()` transition), so the
-pricing capability replaces the warn with a real assertion — and, if it fails it,
-a typed rejection — **without reshaping the use case**. The domain is left out of
-this entirely: `Product.publish()` guards only the variant count (ADR-025);
-"≥1 active Price" is a cross-aggregate fact the `Product` cannot see, so it lives
-in the use case, never in the model.
+The catalog module imports **nothing** from the pricing module — the probe's
+`price`-table read is the symmetric mirror of how pricing writes the
+catalog-owned `product_variant.tax_category_id`, with the opaque `variantId` and
+the table as the only coupling. The two precondition layers stay independent: a
+variant-less product hands the probe an empty id list (a no-op), so it still
+fails on the domain's `PRODUCT_PUBLISH_REQUIRES_VARIANT`, not the price rule. The
+full rationale — why 409, the probe port, the `DEFAULT_CURRENCY` knob — is in
+[03-pricing · 04 — Publishing hard-fails on a missing active Price](../03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md).
 
 ## 5. Archive Product
 
@@ -369,9 +378,8 @@ the catalog service still does not import `CacheModule`.
     rejections, and the best-effort publish (the variant is still returned when
     the publisher rejects).
   - **Publish** — happy path (`draft` + ≥1 variant → `active`, emits
-    `catalog.product.published` with the right `variantIds`), the deferred-price
-    warn-and-proceed, the no-variants rejection, the not-found rejection, and the
-    best-effort publish.
+    `catalog.product.published` with the right `variantIds`), the no-variants
+    rejection, the not-found rejection, and the best-effort publish.
   - **Archive** — happy path (`active → archived`, emits
     `catalog.product.archived`), the non-active rejection, the not-found
     rejection, and the best-effort publish.
@@ -389,9 +397,10 @@ the catalog service still does not import `CacheModule`.
 
 ## What this does not do
 
-The "≥1 active Price" publish precondition is a deferred warn-not-block seam (§4) —
-the pricing capability that turns it into a hard check is future work. The read
-path is **not cached** (§9.4 reserves the key builder but the service does not
-import `CacheModule`). The API gateway catalog module — the HTTP surface that
+The "≥1 active Price" publish precondition is **not** part of this use case (§4):
+`PublishProductUseCase` enforces only the ≥1-variant rule, and the active-Price
+check is owned by the pricing capability and enforced where pricing joins the
+publish path. The read path is **not cached** (§9.4 reserves the key builder but
+the service does not import `CacheModule`). The API gateway catalog module — the HTTP surface that
 exposes these RPCs and maps `CatalogErrorCodeEnum` → HTTP status — is later work,
 described in its own document as it lands.

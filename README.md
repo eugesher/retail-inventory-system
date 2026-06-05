@@ -55,6 +55,12 @@ The system handles order lifecycle management and product stock tracking across 
 │  GET   /api/catalog/products                              │
 │  GET   /api/catalog/products/:slug                        │
 │  GET   /api/catalog/variants/:id                          │
+│  POST  /api/catalog/variants/:id/prices                   │
+│  GET   /api/catalog/variants/:id/prices                   │
+│  GET   /api/catalog/variants/:id/price                    │
+│  POST  /api/catalog/tax-categories                        │
+│  GET   /api/catalog/tax-categories                        │
+│  PATCH /api/catalog/variants/:id/tax-category             │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -83,6 +89,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  order / order_product / product_stock                    │ │
 │  storage / order_status / order_product_status            │ │
 │  product / product_variant                                │ │
+│  price / tax_category                                     │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
@@ -105,6 +112,8 @@ otel-collector → Jaeger UI at http://localhost:16686 (see the
 ```
 
 The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. The `product_stock.product_id` / `order_product.product_id` columns survive today as plain integers with **no foreign key** (the standalone inventory `product` table was dropped); a later inventory/retail capability reshapes them onto a catalog `variantId`.
+
+A sibling **`pricing`** module colocates inside the same microservice (it shares `catalog_queue` and keys on the same `variantId`). It owns two tables: `price` — an append-only-for-history, `(variantId, currency)`-scoped, time-bounded ledger where a price change is a new row plus a close of the predecessor's `[validFrom, validTo)` interval (at most one open row per scope, backstopped by a generated-column UNIQUE index) — and `tax_category`, a classification label that variants point at through the nullable `product_variant.tax_category_id` FK (`ON DELETE SET NULL`). See [ADR-026](docs/adr/026-price-append-only-ledger-and-tax-category.md). It exposes six RPCs on `catalog_queue` — three price (`catalog.price.set`, one command for both Set and Schedule distinguished by `validFrom`; `catalog.price.list`; and `catalog.price.select`, Select Applicable Price: the deterministic `(variantId, currency, asOf)` → single price, resolved priority-then-recency in the use case) and three tax-category (`catalog.tax-category.create`, `catalog.tax-category.list`, and `catalog.variant.set-tax-category`, which attaches a category to a variant by writing the `product_variant.tax_category_id` FK through a parameterized query rather than a cross-module entity import) — and emits `catalog.price.changed` / `catalog.price.scheduled`. Rates/jurisdictions and the gateway HTTP endpoints are later work.
 
 ## Shared libraries
 
@@ -130,7 +139,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
-| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, and emits `catalog.variant.created` / `catalog.product.published` / `catalog.product.archived` |
+| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, and emits `catalog.variant.created` / `catalog.product.published` / `catalog.product.archived`. Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
 
@@ -162,15 +171,17 @@ apps/api-gateway/src/
     │   └── presentation/
     │       ├── product.controller.ts          # GET /api/product/:id/stock
     │       └── dto/product-stock-get-query.dto.ts
-    └── catalog/                               # talks to catalog-microservice
+    └── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
         ├── application/
         │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
         │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
+        │                                      #   + SetPrice/ListPrices/GetApplicablePrice
+        │                                      #   + CreateTaxCategory/ListTaxCategories/AttachVariantTaxCategory
         ├── infrastructure/
-        │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder
+        │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder (catalog + pricing RPCs)
         ├── presentation/
-        │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id
-        │   └── dto/                           # Register/CreateVariant request + ListProducts query DTOs
+        │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id[/prices|/price|/tax-category], /tax-categories
+        │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory request + ListProducts/PriceQuery query DTOs
         └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
 ```
 
@@ -376,14 +387,28 @@ GET /product/:productId/stock
 ### Catalog
 
 ```
-POST /api/catalog/products                      # bearer + catalog:write
-POST /api/catalog/products/:productId/variants  # bearer + catalog:write
-POST /api/catalog/products/:productId/publish   # bearer + catalog:publish
-POST /api/catalog/products/:productId/archive   # bearer + catalog:write
-GET  /api/catalog/products                       # public  — paged active-catalogue browse
-GET  /api/catalog/products/:slug                 # public  — product + active variants
-GET  /api/catalog/variants/:variantId            # public  — variant + parent product
+POST  /api/catalog/products                       # bearer + catalog:write
+POST  /api/catalog/products/:productId/variants   # bearer + catalog:write
+POST  /api/catalog/products/:productId/publish    # bearer + catalog:publish
+POST  /api/catalog/products/:productId/archive    # bearer + catalog:write
+GET   /api/catalog/products                        # public  — paged active-catalogue browse
+GET   /api/catalog/products/:slug                  # public  — product + active variants
+GET   /api/catalog/variants/:variantId             # public  — variant + parent product
+
+# Pricing + tax categories (fronts the colocated pricing RPCs on catalog_queue)
+POST  /api/catalog/variants/:variantId/prices         # bearer + pricing:write  — set or schedule a price
+GET   /api/catalog/variants/:variantId/prices         # public  — prices in effect at ?asOf (?currency=USD)
+GET   /api/catalog/variants/:variantId/price          # public  — single applicable price (or null body)
+POST  /api/catalog/tax-categories                     # bearer + pricing:write  — create a tax category
+GET   /api/catalog/tax-categories                     # public  — list tax categories
+PATCH /api/catalog/variants/:variantId/tax-category   # bearer + pricing:write  — attach a tax category by code
 ```
+
+The publish route enforces an **active-price precondition**: it `409`s (`PRODUCT_PUBLISH_REQUIRES_PRICE`) unless *every* variant has an in-effect price in the configured currency. That currency is an environment variable read by the catalog microservice:
+
+| Variable | Default | Notes |
+| -------- | ------- | ----- |
+| `DEFAULT_CURRENCY` | `USD` | ISO-4217 currency the catalog publish precondition resolves against (Joi-validated `length(3).uppercase()`). A product publishes only when each variant has a price in this currency. |
 
 ### Auth
 
@@ -413,7 +438,7 @@ Interactive API reference is available at `http://localhost:3000/api/reference` 
 
 ## Authentication
 
-Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, and the three `GET /api/catalog/...` browse/resolve routes). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
+Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, and the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
 
 Two subject kinds share the JWT pipeline:
 
@@ -454,7 +479,7 @@ Roles are stored relationally in the `role` table and bound to permission codes 
 | Role | Permission codes |
 | --- | --- |
 | `admin` | every code |
-| `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish` |
+| `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish`, `pricing:write` |
 | `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer` |
 | `order-support` | `order:read`, `order:cancel`, `order:refund` |
 
@@ -486,6 +511,7 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `iam:assign` | `admin` |
 | `iam:role-edit` | `admin` |
 | `audit:read` | `admin` |
+| `pricing:write` | `admin`, `catalog-manager` |
 
 ### Required environment variables
 
@@ -510,6 +536,36 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `warehouse@example.com` | `warehouse1234` | `warehouse-staff` | StaffUser |
 | `support@example.com` | `support1234` | `order-support` | StaffUser |
 | `customer@example.com` | `customer1234` | — | Customer |
+
+The same seed loads a small **catalog + pricing** fixture so the catalog read paths and the publish precondition return seeded answers. Two products carry four variants; each variant has one open `USD` price; three tax categories exist as classification labels (none attached to a variant by default).
+
+Catalog products → variants:
+
+| Variant id | SKU | Product (slug) | Status |
+| --- | --- | --- | --- |
+| 1 | `AURORA-WARM` | `aurora-desk-lamp` | active |
+| 2 | `AURORA-COOL` | `aurora-desk-lamp` | active |
+| 3 | `NIMBUS-BLACK` | `nimbus-office-chair` | active |
+| 4 | `NIMBUS-GREY` | `nimbus-office-chair` | active |
+
+Tax categories (`tax_category` — labels only, no rate):
+
+| id | Code | Name |
+| --- | --- | --- |
+| 1 | `STANDARD` | Standard rate |
+| 2 | `REDUCED` | Reduced rate |
+| 3 | `EXEMPT` | Exempt |
+
+Prices (`price` — one open `USD` row per variant, `valid_to IS NULL`):
+
+| Variant id | Currency | `amountMinor` | Display |
+| --- | --- | --- | --- |
+| 1 | `USD` | 4999 | $49.99 |
+| 2 | `USD` | 4999 | $49.99 |
+| 3 | `USD` | 19999 | $199.99 |
+| 4 | `USD` | 19999 | $199.99 |
+
+Every catalog/pricing seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
 
 Auth events emit Pino log lines with `userId` and `correlationId`, and (when wired) flow through the `AUDIT_LOG_PUBLISHER` port; the default binding is the in-process `NoOpAuditLogPublisher` (logs the event at `debug` under the `AuditLog` context). They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.*` routing key plus a publisher binding are missing.
 
@@ -640,6 +696,10 @@ The product stock query (`GET /product/:productId/stock`) reads from an append-o
 The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. `GetStockUseCase` orchestrates the cache-aside read; `StockCache` (the `STOCK_CACHE` adapter) is a thin domain-shaped wrapper over the generic `CACHE_PORT`; `StockTypeormRepository` materializes the SUM/GROUP BY aggregate. The presentation-layer `StockController` is unaware of the cache.
 
 The cache layer follows the conventions formalized in [ADR-016](docs/adr/016-cache-aside-generalized.md): every cache key is built via `CACHE_KEYS.*` (no string literals in `apps/*/src`), and apps depend on `ICachePort` rather than `@nestjs/cache-manager` directly.
+
+### What is not cached
+
+Only the stock query is cached today. The catalog browse/resolve reads and the **pricing** reads (`catalog.price.select` / `catalog.price.list` and their gateway routes) deliberately go straight to MySQL on every call — their read volume has not crossed the threshold where cache-aside complexity (key versioning plus post-commit invalidation on every price append/close) pays for itself. The key shape is already reserved for when it does: `CACHE_KEYS.catalogPrice(variantId, currency)` builds `ris:catalog:price:v1:<variantId>:<currency>` (mirroring the stock keys and the reserved `catalogProduct*` block), versioned and ready — but no catalog/pricing module imports `CacheModule` for it yet. Caching pricing reads is a later capability gated on measured read pressure, not a missing feature.
 
 ### Read flow
 

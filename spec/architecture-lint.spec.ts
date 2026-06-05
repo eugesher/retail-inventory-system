@@ -474,6 +474,84 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
+  // The pricing module is the catalog microservice's second bounded context. It
+  // obeys the same generic per-layer rules with no `eslint.config.mjs` change —
+  // the `apps/*/src/modules/*/...` element patterns classify its layers
+  // automatically. These fixtures repeat the bumpers there, and add the
+  // pricing↔catalog domain cross-module bumper: pricing communicates with
+  // catalog via the opaque `variantId`, never a cross-module domain import.
+  describe('boundaries/dependencies — pricing module', () => {
+    it('pricing domain may not import @nestjs/common', () => {
+      const code = `import { Injectable } from '@nestjs/common';\nexport const x = Injectable;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/pricing/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('pricing domain may not import typeorm', () => {
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/pricing/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('pricing application use-case may not import typeorm', () => {
+      // Pricing use cases reach the DB via a repository port — never via
+      // EntityManager (the same ITransactionPort/repository-port seam as catalog).
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/pricing/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('pricing application use-case may not import @nestjs/typeorm', () => {
+      const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/pricing/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('pricing application port may not import typeorm', () => {
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/pricing/application/ports/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('pricing presentation may not import @retail-inventory-system/database', () => {
+      const code = `import { DatabaseModule } from '@retail-inventory-system/database';\nexport const y = DatabaseModule;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/pricing/presentation/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('pricing domain may not import the catalog module domain (cross-module)', () => {
+      // Resolves to a real catalog file, so the boundaries resolver types the
+      // target as catalog's `domain`. `sameModule('domain')` requires the same
+      // app *and* module, so a pricing→catalog domain edge is cross-module and
+      // disallowed — locking in the pricing↔catalog domain isolation (the two
+      // contexts communicate via the opaque `variantId`, never a domain import).
+      const code = `import { Product } from '../../catalog/domain/product.model';\nexport type Y = Product;\n`;
+      const messages = lint(
+        code,
+        'apps/catalog-microservice/src/modules/pricing/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+  });
+
   describe('positive cases — allowed edges do not flag', () => {
     it('domain importing lib-ddd is allowed', () => {
       const code = `import { AggregateRoot } from '@retail-inventory-system/ddd';\nexport const x = AggregateRoot;\n`;

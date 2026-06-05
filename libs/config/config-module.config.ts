@@ -13,6 +13,11 @@ export const configModuleConfig = {
     DATABASE_URL: Joi.string().uri({ scheme: 'mysql' }).required(),
     DATABASE_LOGGING: Joi.boolean().default(process.env.NODE_ENV !== 'production'),
 
+    // ISO-4217 currency the catalog publish precondition resolves against — a
+    // product publishes only when every variant has an in-effect price in this
+    // currency. Defaulted, so a missing var never fails boot.
+    DEFAULT_CURRENCY: Joi.string().length(3).uppercase().default('USD'),
+
     LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace').optional(),
 
     RABBITMQ_URL: Joi.string().uri({ scheme: 'amqp' }).required(),

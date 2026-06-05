@@ -7,6 +7,10 @@ export class TestDbSeedUtil {
     'order-product.sql',
     'catalog-product.sql',
     'catalog-product-variant.sql',
+    // After the variants: tax_category has no FK dependency, and price.variant_id
+    // references product_variant.id, so both must follow catalog-product-variant.sql.
+    'tax-category.sql',
+    'price.sql',
   ];
 
   public static readStatements(filePath: string): string[] {

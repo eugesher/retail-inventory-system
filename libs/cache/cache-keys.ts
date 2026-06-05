@@ -37,6 +37,14 @@ const RETAIL_ORDER_KEY_VERSION = 'v1';
 // backbone — inventory stock, pricing, and order lines all key on the variant
 // (ADR-025). The `catalogProduct*` builders below are not consumed yet.
 const CATALOG_PRODUCT_KEY_VERSION = 'v1';
+// Reserved for a future cached pricing read path (Select Applicable Price). Keyed
+// on `(variantId, currency)` because that pair is the entire price scope (ADR-026)
+// — the variant is the downstream backbone (ADR-025) and currency is the only
+// other axis. The `catalogPrice*` builders below are not consumed yet: the pricing
+// module does not import `CacheModule` (the threshold for caching pricing reads is
+// unmet). They exist so a future cached read path adopts the v1 key shape without
+// re-keying; a bump of this constant re-keys every entry on the next deploy.
+const CATALOG_PRICE_KEY_VERSION = 'v1';
 
 // Sentinel for the "every facet for this id" key. Non-glob so the literal
 // cannot be confused with a Redis MATCH pattern (CACHE-011 fix from ADR-016).
@@ -85,6 +93,18 @@ export const CACHE_KEYS = {
 
   catalogProduct: (variantId: number, opts?: ITenantOptions): string =>
     `${CACHE_KEYS.catalogProductPrefix(variantId, opts)}${ALL_FACETS_SENTINEL}`,
+
+  // Reserved pricing read-path builder (ADR-016 / ADR-022 / ADR-026). Keyed on
+  // `(variantId, currency)` — the entire price scope. **Not consumed yet**: the
+  // pricing module does not import `CacheModule`; this builder +
+  // `CATALOG_PRICE_KEY_VERSION` exist so a future cached Select-Applicable-Price
+  // read path can adopt the v1 key shape without re-keying. Key shape:
+  // `ris:[t:<tenantId>:]catalog:price:v1:<variantId>:<currency>`.
+  catalogPricePrefix: (variantId: number, opts?: ITenantOptions): string =>
+    `${rootPrefix(opts)}catalog:price:${CATALOG_PRICE_KEY_VERSION}:${variantId}:`,
+
+  catalogPrice: (variantId: number, currency: string, opts?: ITenantOptions): string =>
+    `${CACHE_KEYS.catalogPricePrefix(variantId, opts)}${currency}`,
 
   // -- Pre-v1 (post-ADR-016) shape — invalidate-only ------------------------
   // Returns the pre-v1 stock prefix `ris:inventory:stock:<productId>:`.

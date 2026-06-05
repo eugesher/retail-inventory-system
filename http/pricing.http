@@ -1,0 +1,193 @@
+# Pricing & tax-category endpoints
+# (apps/api-gateway/src/modules/catalog/presentation/catalog.controller.ts)
+#
+# The API gateway fronts the catalog microservice's six pricing/tax RPCs over
+# HTTP at /api/catalog: three protected write commands (set or schedule a price,
+# create a tax category, attach a tax category to a variant) and three public
+# read queries (list the prices in effect, resolve the single applicable price,
+# list tax categories). Write routes are permission-gated (pricing:write, held by
+# the admin and catalog-manager roles); read routes are @Public(), so an
+# unauthenticated shopper can read prices while browsing.
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures the seeded admin's bearer token
+#      into @accessToken, which every write request below substitutes into its
+#      Authorization header. The three GETs send no token, proving the @Public()
+#      read routes work unauthenticated (and the writes 401 without the bearer).
+#   3. This file is self-contained on a freshly-seeded stack — it assumes NO
+#      price/tax seed rows. It Creates a tax category before it lists/attaches
+#      one, and it Sets a price before it lists/resolves one. It targets the
+#      seeded catalog variants: 1 (AURORA-WARM), 2 (AURORA-COOL) under product
+#      aurora-desk-lamp; 3 (NIMBUS-BLACK), 4 (NIMBUS-GREY) under
+#      nimbus-office-chair. The flow drives variant 1.
+#   4. A second top-to-bottom run wants a fresh database. The tax-category `code`
+#      is unique (a repeat LUXURY → 409 TAX_CATEGORY_CODE_TAKEN), and a variant's
+#      open price row is stateful (after the future price is scheduled, a fresh
+#      immediate Set against the same scope conflicts on the single-open-row
+#      invariant). Re-seed between runs with `yarn test:infra:reload`.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+# Non-seed classification code, defined once and reused by the create + attach
+# bodies below so the chosen code lives in a single place.
+@taxCode = LUXURY
+
+###
+
+# @name login
+# POST /api/auth/staff/login
+# Seeded admin login (admin@example.com / admin1234). The admin role holds every
+# permission code, including pricing:write, so this single token unlocks all
+# three write routes below. Response is TokenResponseDto
+# { accessToken, refreshToken, expiresIn }.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name createTaxCategory
+# POST /api/catalog/tax-categories  (Bearer — pricing:write)
+# Creates a classification label (code + name + optional description); it carries
+# no rate — tax computation is a deferred capability. Body shape
+# (CreateTaxCategoryRequestDto):
+#   code:         UPPER_SNAKE_CASE, unique (^[A-Z][A-Z0-9_]*$)
+#   name:         1..255
+#   description?: <= 1000
+# LUXURY (the @taxCode set above) is deliberately NOT a seeded code, so this runs
+# on a fresh seed; a repeat → 409 TAX_CATEGORY_CODE_TAKEN. @taxCode feeds both
+# this create body and the attach body below. Response is TaxCategoryView
+# { id, code, name, description }.
+POST {{baseUrl}}/catalog/tax-categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "code": "{{taxCode}}",
+  "name": "Luxury goods",
+  "description": "Higher-band classification"
+}
+
+###
+
+# @name listTaxCategories
+# GET /api/catalog/tax-categories  (public)
+# Lists every tax category, ordered by code. No Authorization header — the
+# @Public() route serves an unauthenticated caller. On a freshly-seeded stack the
+# only row is the LUXURY category just created; any later-seeded labels would
+# appear here too. Response is TaxCategoryView[].
+GET {{baseUrl}}/catalog/tax-categories
+
+###
+
+# @name setPriceVariant1
+# POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+# Sets an IMMEDIATE price for seeded variant 1 (AURORA-WARM): validFrom is
+# omitted, so the domain stamps it to now and opens the row (validTo = null).
+# Body shape (SetPriceRequestDto):
+#   currency:    ISO-4217 3-letter (^[A-Z]{3}$)
+#   amountMinor: integer minor units / cents (>= 0)
+#   validFrom?:  ISO-8601; omitted/<= now is immediate, a future instant schedules
+#   validTo?:    ISO-8601 close instant; omitted means open-ended
+#   priority?:   resolution tiebreak (default 0)
+# This is the "Set before Get" that makes the read blocks below self-contained.
+# Response is the persisted PriceView
+# { id, variantId, currency, amountMinor, validFrom, validTo: null, priority }.
+POST {{baseUrl}}/catalog/variants/1/prices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD",
+  "amountMinor": 4999,
+  "priority": 0
+}
+
+###
+
+# @name listPricesVariant1
+# GET /api/catalog/variants/:variantId/prices?currency=USD  (public)
+# Lists EVERY price row in effect for (variant 1, USD) at `asOf` (omitted => now).
+# Query (PriceQueryDto): currency (default USD), asOf (default now, ISO-8601). The
+# immediate price just set is in effect, so it appears here. Response is
+# PriceView[].
+GET {{baseUrl}}/catalog/variants/1/prices?currency=USD
+
+###
+
+# @name getApplicablePriceVariant1
+# GET /api/catalog/variants/:variantId/price?currency=USD  (public)
+# Resolves the SINGLE applicable price for (variant 1, USD) at `asOf` (omitted =>
+# now) — highest priority, then latest validFrom. Returns 200 with one PriceView,
+# or 200 with a `null` body when none is in effect (the gateway does not promote
+# "no price" to a 404). Right now this returns the immediate price set in
+# `setPriceVariant1`.
+GET {{baseUrl}}/catalog/variants/1/price?currency=USD
+
+###
+
+# @name schedulePriceVariant1
+# POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+# Schedules a FUTURE price for variant 1 by passing a validFrom ahead of now — the
+# same route/body as the immediate Set; a future validFrom is what turns a Set
+# into a schedule. The use case appends this row and closes the open predecessor
+# (the `setPriceVariant1` price) at this validFrom, tiling the timeline; a second
+# OPEN row for the same (variant, currency) scope would otherwise hit the
+# open_scope_key conflict.
+#
+# validFrom below is a fixed, comfortably-future instant so this file stays
+# runnable as-is. For a realistic "schedule, then watch it activate" demo, paste a
+# ~1h-ahead UTC ISO-8601 timestamp instead, e.g.
+#   date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%S.000Z   (GNU/Linux)
+#   date -u -v+1H        +%Y-%m-%dT%H:%M:%S.000Z   (macOS/BSD)
+#
+# The CURRENT applicable answer (getApplicablePriceVariant1, asOf = now) is
+# UNCHANGED — the scheduled row is not yet in effect. Re-run that GET with ?asOf
+# at/after this validFrom to see the scheduled price win, e.g.
+#   GET {{baseUrl}}/catalog/variants/1/price?currency=USD&asOf=2030-01-01T00:00:01.000Z
+# Response is the scheduled PriceView (the new open row, validTo: null).
+POST {{baseUrl}}/catalog/variants/1/prices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD",
+  "amountMinor": 5999,
+  "validFrom": "2030-01-01T00:00:00.000Z",
+  "priority": 10
+}
+
+###
+
+# @name attachTaxCategoryVariant1
+# PATCH /api/catalog/variants/:variantId/tax-category  (Bearer — pricing:write)
+# Attaches the LUXURY category (created above, referenced by @taxCode) to variant
+# 1 — it writes the variant's tax_category_id FK and returns the updated header.
+# Body shape (AttachTaxCategoryRequestDto):
+#   taxCategoryCode: UPPER_SNAKE_CASE code of an existing category
+# An unknown code => 404 TAX_CATEGORY_NOT_FOUND; an unknown variant => 404
+# VARIANT_NOT_FOUND. Returns 200 with VariantTaxHeaderView
+# { variantId, sku, taxCategoryId, taxCategoryCode } carrying the attached code.
+PATCH {{baseUrl}}/catalog/variants/1/tax-category
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "taxCategoryCode": "{{taxCode}}"
+}

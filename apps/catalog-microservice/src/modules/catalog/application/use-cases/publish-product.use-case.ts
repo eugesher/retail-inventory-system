@@ -5,20 +5,27 @@ import { IPublishProductPayload, ProductView } from '@retail-inventory-system/co
 
 import { CatalogDomainException, CatalogErrorCodeEnum, ProductPublishedEvent } from '../../domain';
 import {
+  ACTIVE_PRICE_PROBE,
+  CATALOG_DEFAULT_CURRENCY,
   CATALOG_EVENTS_PUBLISHER,
   CATALOG_REPOSITORY,
+  IActivePriceProbePort,
   ICatalogEventsPublisherPort,
   ICatalogRepositoryPort,
 } from '../ports';
 import { toProductView } from './catalog-view.factory';
 
-// Publish Product flips a product `draft → active`. The domain (`Product.publish`)
-// enforces the two write-side preconditions it can see: the product is in `draft`
-// and has at least one variant; either violation raises a typed
-// `CatalogDomainException`. After persistence the use case drains the recorded
-// `ProductPublishedEvent` and emits `catalog.product.published`. The publish is
-// best-effort post-commit — a broker failure is warn-logged and swallowed, the
-// product stays active regardless (ADR-020 / ADR-025).
+// Publish Product flips a product `draft → active`. Two layers of preconditions
+// guard the transition. The domain (`Product.publish`) enforces what the
+// aggregate can see — the product is in `draft` and has at least one variant.
+// This use case adds the one cross-aggregate precondition the domain cannot see:
+// every variant must have an in-effect Price in the default currency, probed
+// through `ACTIVE_PRICE_PROBE` (the catalog module cannot import pricing state,
+// so it asks the probe instead — ADR-017 / ADR-025 §6). A missing active price
+// raises `PRODUCT_PUBLISH_REQUIRES_PRICE` → 409. After persistence the use case
+// drains the recorded `ProductPublishedEvent` and emits `catalog.product.published`;
+// that publish is best-effort post-commit — a broker failure is warn-logged and
+// swallowed, the product stays active regardless (ADR-020 / ADR-025).
 @Injectable()
 export class PublishProductUseCase {
   constructor(
@@ -26,6 +33,10 @@ export class PublishProductUseCase {
     private readonly repository: ICatalogRepositoryPort,
     @Inject(CATALOG_EVENTS_PUBLISHER)
     private readonly publisher: ICatalogEventsPublisherPort,
+    @Inject(ACTIVE_PRICE_PROBE)
+    private readonly priceProbe: IActivePriceProbePort,
+    @Inject(CATALOG_DEFAULT_CURRENCY)
+    private readonly defaultCurrency: string,
     @InjectPinoLogger(PublishProductUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -43,15 +54,27 @@ export class PublishProductUseCase {
       );
     }
 
-    // Pricing precondition seam. A future pricing capability will assert the
-    // product has at least one active Price before it can be published; Price is
-    // owned by that capability and does not exist yet. Until it lands this warns
-    // and proceeds rather than blocking, so the publish path keeps its shape and
-    // the real check slots in here without reshaping the use case.
-    this.logger.warn(
-      { correlationId, productId },
-      'active price precondition not yet enforced — pricing capability pending',
+    // Cross-aggregate publish precondition: every variant must carry an in-effect
+    // Price in the default currency. The catalog module cannot read pricing
+    // state, so it asks the probe (a parameterized read of the `price` table —
+    // ADR-017). An empty variant list makes the probe a no-op; the ≥1-variant
+    // rule is the domain's, enforced by `product.publish()` just below, so a
+    // variant-less product still fails on `PRODUCT_PUBLISH_REQUIRES_VARIANT`, not
+    // here. A missing price is a conflict with the resource state, not malformed
+    // input → 409 (`PRODUCT_PUBLISH_REQUIRES_PRICE`).
+    const variantIds = product.variants
+      .map((variant) => variant.id)
+      .filter((id): id is number => id !== null);
+    const missing = await this.priceProbe.findVariantsMissingActivePrice(
+      variantIds,
+      this.defaultCurrency,
     );
+    if (missing.length > 0) {
+      throw new CatalogDomainException(
+        CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_PRICE,
+        `Cannot publish #${productId}: variant(s) ${missing.join(', ')} have no active ${this.defaultCurrency} price`,
+      );
+    }
 
     // Domain transition: rejects a non-draft product or a product with no
     // variants, and records a `ProductPublishedEvent` on success.

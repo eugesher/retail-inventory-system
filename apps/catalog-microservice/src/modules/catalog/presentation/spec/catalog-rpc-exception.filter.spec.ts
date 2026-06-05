@@ -38,6 +38,7 @@ describe('CatalogRpcExceptionFilter', () => {
       CatalogErrorCodeEnum.VARIANT_SKU_TAKEN,
       CatalogErrorCodeEnum.PRODUCT_INVALID_STATE_TRANSITION,
       CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_VARIANT,
+      CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_PRICE,
     ]) {
       await expect(statusFor(code)).resolves.toMatchObject({
         statusCode: HttpStatus.CONFLICT,

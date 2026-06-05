@@ -125,11 +125,14 @@ draft ───────────────▶ active ──────
 ```
 
 - **`draft → active`** via `Product.publish()`. Precondition enforced in the
-  domain: **at least one variant**. (A second precondition — "≥1 active Price" —
-  belongs to a future pricing capability and is a *documented seam*, not code:
-  `publish()` enforces only the variant count, and the publish use case will
-  *warn* rather than *block* on a price-less product until pricing lands. See
-  ADR-025 §6.)
+  domain: **at least one variant**. (A second precondition — "every variant has
+  an active Price" — is **not** a domain rule: `publish()` enforces only the
+  variant count. An active Price is a cross-aggregate fact the `Product` cannot
+  see, so it is enforced in the publish **use case**, which hard-fails with 409
+  `PRODUCT_PUBLISH_REQUIRES_PRICE` after probing the `price` table — never in the
+  model. ADR-025 §6 records why the domain stays out of it; the enforcement is
+  detailed in
+  [03-pricing · 04 — Publishing hard-fails on a missing active Price](../03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md).)
 - **`active → archived`** via `Product.archive()`.
 - **Rejected transitions** (each raises a `CatalogDomainException`):
   - `publish()` on a non-draft product (already active, or archived).

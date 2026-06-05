@@ -9,6 +9,13 @@ export enum CatalogErrorCodeEnum {
   PRODUCT_SLUG_REQUIRED = 'CATALOG_PRODUCT_SLUG_REQUIRED',
   PRODUCT_INVALID_STATE_TRANSITION = 'CATALOG_PRODUCT_INVALID_STATE_TRANSITION',
   PRODUCT_PUBLISH_REQUIRES_VARIANT = 'CATALOG_PRODUCT_PUBLISH_REQUIRES_VARIANT',
+  // Publish precondition the domain cannot see: every variant must have an
+  // in-effect Price in the configured default currency. Enforced in the publish
+  // use case via the active-price probe (not the `Product` model — price is a
+  // cross-aggregate fact), and mapped to 409 by the presentation filter (ADR-025
+  // / ADR-026). A well-formed request the resource state forbids — a missing
+  // active price — not malformed input.
+  PRODUCT_PUBLISH_REQUIRES_PRICE = 'CATALOG_PRODUCT_PUBLISH_REQUIRES_PRICE',
   VARIANT_SKU_REQUIRED = 'CATALOG_VARIANT_SKU_REQUIRED',
   VARIANT_OPTION_VALUES_REQUIRED = 'CATALOG_VARIANT_OPTION_VALUES_REQUIRED',
   VARIANT_WEIGHT_INVALID = 'CATALOG_VARIANT_WEIGHT_INVALID',
