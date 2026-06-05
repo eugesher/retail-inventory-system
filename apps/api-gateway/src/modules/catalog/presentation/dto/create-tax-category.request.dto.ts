@@ -1,9 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
-// UPPER_SNAKE_CASE classification code: starts with a letter, then letters,
-// digits, or underscores.
-const TAX_CATEGORY_CODE_REGEX = /^[A-Z][A-Z0-9_]*$/;
+import { TAX_CATEGORY_CODE_PATTERN, TAX_CATEGORY_CODE_REGEX } from './validation.constants';
 
 // Request body for `POST /api/catalog/tax-categories`. A tax category is a
 // classification label only — code + name (+ optional description); it carries no
@@ -14,10 +12,10 @@ export class CreateTaxCategoryRequestDto {
   @ApiProperty({
     example: 'STANDARD',
     description: 'Stable UPPER_SNAKE_CASE identifier',
-    pattern: '^[A-Z][A-Z0-9_]*$',
+    pattern: TAX_CATEGORY_CODE_PATTERN,
   })
   @Matches(TAX_CATEGORY_CODE_REGEX, {
-    message: 'code must be UPPER_SNAKE_CASE (^[A-Z][A-Z0-9_]*$)',
+    message: `code must be UPPER_SNAKE_CASE (${TAX_CATEGORY_CODE_PATTERN})`,
   })
   public code: string;
 

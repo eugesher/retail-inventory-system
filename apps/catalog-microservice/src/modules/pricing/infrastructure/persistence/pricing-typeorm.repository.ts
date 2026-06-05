@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { DeepPartial, IsNull, Repository } from 'typeorm';
 
+import { VariantTaxHeaderView } from '@retail-inventory-system/contracts';
 import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import { Price, TaxCategory } from '../../domain';
@@ -152,12 +153,7 @@ export class PricingTypeormRepository
     );
   }
 
-  public async findVariantTaxHeader(variantId: number): Promise<{
-    variantId: number;
-    sku: string;
-    taxCategoryId: number | null;
-    taxCategoryCode: string | null;
-  } | null> {
+  public async findVariantTaxHeader(variantId: number): Promise<VariantTaxHeaderView | null> {
     // Same parameterized-query boundary: read only the columns the tax header
     // needs, joining `tax_category` LEFT so an unclassified variant returns NULL
     // category columns rather than dropping the row. A missing variant yields an

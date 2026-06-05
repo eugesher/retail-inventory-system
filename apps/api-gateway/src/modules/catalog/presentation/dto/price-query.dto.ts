@@ -1,6 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO8601, IsOptional, Matches } from 'class-validator';
 
+import { CURRENCY_CODE_PATTERN, CURRENCY_CODE_REGEX } from './validation.constants';
+
 // Query string shared by `GET /api/catalog/variants/:variantId/prices` (list) and
 // `GET /api/catalog/variants/:variantId/price` (single applicable). Both ask the
 // same `(variantId, currency)`-scoped question at a point in time. The currency
@@ -14,10 +16,10 @@ export class PriceQueryDto {
     example: 'USD',
     default: 'USD',
     description: 'ISO-4217 3-letter code (defaults to USD)',
-    pattern: '^[A-Z]{3}$',
+    pattern: CURRENCY_CODE_PATTERN,
   })
   @IsOptional()
-  @Matches(/^[A-Z]{3}$/, { message: 'currency must be a 3-letter uppercase ISO-4217 code' })
+  @Matches(CURRENCY_CODE_REGEX, { message: 'currency must be a 3-letter uppercase ISO-4217 code' })
   public currency = 'USD';
 
   @ApiPropertyOptional({
