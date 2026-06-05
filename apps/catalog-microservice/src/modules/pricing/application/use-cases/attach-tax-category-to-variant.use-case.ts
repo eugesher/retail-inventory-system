@@ -76,11 +76,8 @@ export class AttachTaxCategoryToVariantUseCase {
       'Variant tax category set',
     );
 
-    return {
-      variantId: after.variantId,
-      sku: after.sku,
-      taxCategoryId: after.taxCategoryId,
-      taxCategoryCode: after.taxCategoryCode,
-    };
+    // `after` already has the exact `VariantTaxHeaderView` shape the repository
+    // projects, so return it straight through rather than re-spreading field-by-field.
+    return after;
   }
 }

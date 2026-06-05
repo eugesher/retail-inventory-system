@@ -1,8 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Matches } from 'class-validator';
 
-// UPPER_SNAKE_CASE classification code (matches `CreateTaxCategoryRequestDto`).
-const TAX_CATEGORY_CODE_REGEX = /^[A-Z][A-Z0-9_]*$/;
+import { TAX_CATEGORY_CODE_PATTERN, TAX_CATEGORY_CODE_REGEX } from './validation.constants';
 
 // Request body for `PATCH /api/catalog/variants/:variantId/tax-category`. The
 // variant is addressed by the route param; the category by its stable `code`
@@ -12,10 +11,10 @@ export class AttachTaxCategoryRequestDto {
   @ApiProperty({
     example: 'STANDARD',
     description: 'Stable UPPER_SNAKE_CASE tax-category code',
-    pattern: '^[A-Z][A-Z0-9_]*$',
+    pattern: TAX_CATEGORY_CODE_PATTERN,
   })
   @Matches(TAX_CATEGORY_CODE_REGEX, {
-    message: 'taxCategoryCode must be UPPER_SNAKE_CASE (^[A-Z][A-Z0-9_]*$)',
+    message: `taxCategoryCode must be UPPER_SNAKE_CASE (${TAX_CATEGORY_CODE_PATTERN})`,
   })
   public taxCategoryCode: string;
 }

@@ -1,3 +1,5 @@
+import { VariantTaxHeaderView } from '@retail-inventory-system/contracts';
+
 import { Price, TaxCategory } from '../../domain';
 
 export const PRICING_REPOSITORY = Symbol('PRICING_REPOSITORY');
@@ -50,11 +52,8 @@ export interface IPricingRepositoryPort {
   // `null` (the whole result) means the variant does not exist. Also a
   // parameterized query against `product_variant` / `tax_category`, never a
   // catalog entity import. Used both as the attach pre-check (variant existence)
-  // and to build the "updated variant header" the attach command returns.
-  findVariantTaxHeader(variantId: number): Promise<{
-    variantId: number;
-    sku: string;
-    taxCategoryId: number | null;
-    taxCategoryCode: string | null;
-  } | null>;
+  // and to build the "updated variant header" the attach command returns — its
+  // shape *is* the `VariantTaxHeaderView` the command resolves to, so the use case
+  // returns the row straight through.
+  findVariantTaxHeader(variantId: number): Promise<VariantTaxHeaderView | null>;
 }

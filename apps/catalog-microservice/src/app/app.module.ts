@@ -19,8 +19,9 @@ import { PricingModule, pricingEntities } from '../modules/pricing';
     // the type system also allows to be an object map or `undefined`, neither of
     // which can be spread; at runtime it is always the catalog entity-class array,
     // so we treat it as the same concrete entity-array shape as `pricingEntities`
-    // and merge both halves into the single `forRoot`. `pricingEntities` is empty
-    // today and gains the pricing entities later — no further change here.
+    // and merge both halves into the single `forRoot`. `pricingEntities` carries
+    // the pricing module's entities (`PriceEntity`, `TaxCategoryEntity`), so both
+    // colocated modules share this one connection.
     DatabaseModule.forRoot([...(catalogEntities as typeof pricingEntities), ...pricingEntities]),
     CatalogModule,
     PricingModule,

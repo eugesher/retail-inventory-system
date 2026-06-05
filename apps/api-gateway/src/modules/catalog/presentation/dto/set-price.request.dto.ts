@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsISO8601, IsOptional, Matches, Min } from 'class-validator';
 
+import { CURRENCY_CODE_PATTERN, CURRENCY_CODE_REGEX } from './validation.constants';
+
 // Request body for `POST /api/catalog/variants/:variantId/prices`. The owning
 // variant is taken from the route param, not the body. One body backs both Set
 // and Schedule — omit `validFrom` (or pass one `<= now`) for an immediate price,
@@ -10,8 +12,12 @@ import { IsInt, IsISO8601, IsOptional, Matches, Min } from 'class-validator';
 // these decorators are the gateway's edge guard so a malformed request fails
 // fast with a 400 before an RPC is dispatched.
 export class SetPriceRequestDto {
-  @ApiProperty({ example: 'USD', description: 'ISO-4217 3-letter code', pattern: '^[A-Z]{3}$' })
-  @Matches(/^[A-Z]{3}$/, { message: 'currency must be a 3-letter uppercase ISO-4217 code' })
+  @ApiProperty({
+    example: 'USD',
+    description: 'ISO-4217 3-letter code',
+    pattern: CURRENCY_CODE_PATTERN,
+  })
+  @Matches(CURRENCY_CODE_REGEX, { message: 'currency must be a 3-letter uppercase ISO-4217 code' })
   public currency: string;
 
   @ApiProperty({ example: 1999, minimum: 0, description: 'Integer count of minor units (cents)' })

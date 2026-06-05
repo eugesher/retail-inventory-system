@@ -73,7 +73,15 @@ export class SetPriceUseCase {
     const saved = await this.repository.appendPrice(newPrice, predecessorToClose);
 
     // Immediate vs scheduled: a `validFrom` strictly after now is a future price.
-    const isScheduled = saved.validFrom.getTime() > now.getTime();
+    // Classify from the *intended* instant (`newPrice.validFrom`), NOT the
+    // round-tripped `saved.validFrom`. The `valid_from` column is second-granular
+    // (`TIMESTAMP(0)`), so MySQL rounds the sub-second instant to the nearest
+    // second and can round *up* — pushing a just-set immediate price up to ~1s
+    // into the future. Reading `saved.validFrom` here would then report
+    // `> now` for an immediate change and emit `catalog.price.scheduled` instead
+    // of `catalog.price.changed` (~half the time, whenever now's ms ≥ 500). The
+    // pre-persist `newPrice.validFrom` is exactly the instant the caller meant.
+    const isScheduled = newPrice.validFrom.getTime() > now.getTime();
 
     this.logger.info(
       { correlationId, variantId, currency, priceId: saved.id, isScheduled },
