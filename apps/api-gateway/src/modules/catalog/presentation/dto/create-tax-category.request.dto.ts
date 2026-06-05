@@ -13,10 +13,16 @@ export class CreateTaxCategoryRequestDto {
     example: 'STANDARD',
     description: 'Stable UPPER_SNAKE_CASE identifier',
     pattern: TAX_CATEGORY_CODE_PATTERN,
+    maxLength: 50,
   })
   @Matches(TAX_CATEGORY_CODE_REGEX, {
     message: `code must be UPPER_SNAKE_CASE (${TAX_CATEGORY_CODE_PATTERN})`,
   })
+  // Bound to the `tax_category.code` VARCHAR(50) column. The pattern has no upper
+  // length, so without this an over-length code passes the edge guard and the
+  // domain regex, then the DB rejects it ("Data too long") as a raw 500 instead
+  // of a clean 400.
+  @MaxLength(50)
   public code: string;
 
   @ApiProperty({ example: 'Standard rate', minLength: 1, maxLength: 255 })
