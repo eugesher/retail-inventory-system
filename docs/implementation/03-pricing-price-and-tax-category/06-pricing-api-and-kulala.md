@@ -177,9 +177,66 @@ first, publish later" gap) so the precondition is deterministically met.
 
 ## 7. Kulala HTTP exercises (`http/pricing.http`)
 
-A runnable Kulala request collection that exercises these six endpoints — the
-seeded-admin login → bearer capture, the set/schedule/list/select price flow, and
-the tax-category create/list/attach flow — is added as a follow-up alongside the
-seed rows that back it. This section is reserved for that walkthrough; until then,
-`test/pricing.e2e-spec.ts` is the executable reference for the request/response
-shapes and the auth posture.
+[`http/pricing.http`](../../../http/pricing.http) is a runnable, top-to-bottom
+Kulala collection for the six routes. It mirrors the conventions of
+[`http/catalog.http`](../../../http/catalog.http): `@baseUrl = {{ENV_BASE_URL}}`
+(resolved from [`http/http-client.env.json`](../../../http/http-client.env.json)),
+`###`-separated blocks, a `# @name <id>` per request, and header comments citing
+the controller path, the body/query shape, and the auth posture.
+
+### The flow
+
+| # | `# @name` | Method · path | Auth | What it proves |
+|---|---|---|---|---|
+| 1 | `login` | `POST /auth/staff/login` | — | Seeded admin (`admin@example.com`) → captures `@accessToken` |
+| 2 | `createTaxCategory` | `POST /catalog/tax-categories` | Bearer | Creates the non-seed `LUXURY` label |
+| 3 | `listTaxCategories` | `GET /catalog/tax-categories` | public | The created label appears, no token |
+| 4 | `setPriceVariant1` | `POST /catalog/variants/1/prices` | Bearer | Immediate Set (USD 4999, `validFrom` omitted) |
+| 5 | `listPricesVariant1` | `GET /catalog/variants/1/prices?currency=USD` | public | Every row in effect now |
+| 6 | `getApplicablePriceVariant1` | `GET /catalog/variants/1/price?currency=USD` | public | The single applicable row now |
+| 7 | `schedulePriceVariant1` | `POST /catalog/variants/1/prices` | Bearer | A future-`validFrom` schedule |
+| 8 | `attachTaxCategoryVariant1` | `PATCH /catalog/variants/1/tax-category` | Bearer | Attaches `LUXURY` to variant 1 |
+
+Run the `login` block first: it captures the seeded admin's bearer token into
+`@accessToken`, which every write substitutes into its `Authorization` header. The
+three GETs send no token, so they double as proof the `@Public()` reads work
+unauthenticated (and that the writes `401` without the bearer). The file targets
+the seeded catalog variants (1 `AURORA-WARM` … 4 `NIMBUS-GREY`) and drives variant
+`1`.
+
+### Why it Sets before it Gets (self-containment)
+
+The price and tax **seed rows do not exist** when this file is meant to run — the
+pricing seed is added later alongside the rest of the seed data, and the e2e never
+depends on a seeded price either. So the collection cannot assume any price or tax
+category is already present: it **Creates a tax category before it lists/attaches
+one** (block 2 before 3 and 8) and **Sets a price before it lists/resolves one**
+(block 4 before 5 and 6). A non-seed code, `LUXURY`, is chosen for the create so
+the block stays runnable on a freshly-seeded database where a seeded `STANDARD` /
+`REDUCED` / `EXEMPT` set might later exist — a repeat run against the same DB would
+`409` on the duplicate `code`, which is why a second top-to-bottom pass wants a
+fresh DB (`yarn test:infra:reload`).
+
+### The future-`validFrom` scheduling demonstration
+
+Block 7 reuses the **same** `POST .../prices` route and body as the immediate Set
+in block 4 — the only difference is a `validFrom` ahead of now, which is what turns
+a Set into a Schedule (§1, `SetPriceUseCase` handles both). Appending it closes the
+open predecessor (block 4's price) at the new `validFrom`, tiling the timeline so
+exactly one row stays open per `(variantId, currency)` scope (the `open_scope_key`
+invariant — a second *open* row would conflict).
+
+The demonstration is the **time-travel read**: immediately after scheduling, block
+6 (`?asOf` defaulting to now) still returns the block-4 immediate price — the
+scheduled row is not yet in effect. Re-running that GET with `?asOf` at or after
+the scheduled `validFrom` returns the scheduled price instead. The file pins a
+comfortably-future fixed instant so it runs as-is, and its header comment documents
+computing a realistic `~1h`-ahead UTC ISO-8601 timestamp
+(`date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%S.000Z`) for a live "schedule, then watch
+it activate" walkthrough. (A `validFrom` strictly in the past is rejected by the
+domain with `PRICE_VALID_FROM_IN_PAST`, so the scheduled instant must be in the
+future.)
+
+`test/pricing.e2e-spec.ts` remains the automated reference for the same
+request/response shapes and the full auth posture; `http/pricing.http` is the
+hand-runnable companion.
