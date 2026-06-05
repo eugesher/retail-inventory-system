@@ -404,6 +404,12 @@ GET   /api/catalog/tax-categories                     # public  — list tax cat
 PATCH /api/catalog/variants/:variantId/tax-category   # bearer + pricing:write  — attach a tax category by code
 ```
 
+The publish route enforces an **active-price precondition**: it `409`s (`PRODUCT_PUBLISH_REQUIRES_PRICE`) unless *every* variant has an in-effect price in the configured currency. That currency is an environment variable read by the catalog microservice:
+
+| Variable | Default | Notes |
+| -------- | ------- | ----- |
+| `DEFAULT_CURRENCY` | `USD` | ISO-4217 currency the catalog publish precondition resolves against (Joi-validated `length(3).uppercase()`). A product publishes only when each variant has a price in this currency. |
+
 ### Auth
 
 ```
@@ -530,6 +536,36 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `warehouse@example.com` | `warehouse1234` | `warehouse-staff` | StaffUser |
 | `support@example.com` | `support1234` | `order-support` | StaffUser |
 | `customer@example.com` | `customer1234` | — | Customer |
+
+The same seed loads a small **catalog + pricing** fixture so the catalog read paths and the publish precondition return seeded answers. Two products carry four variants; each variant has one open `USD` price; three tax categories exist as classification labels (none attached to a variant by default).
+
+Catalog products → variants:
+
+| Variant id | SKU | Product (slug) | Status |
+| --- | --- | --- | --- |
+| 1 | `AURORA-WARM` | `aurora-desk-lamp` | active |
+| 2 | `AURORA-COOL` | `aurora-desk-lamp` | active |
+| 3 | `NIMBUS-BLACK` | `nimbus-office-chair` | active |
+| 4 | `NIMBUS-GREY` | `nimbus-office-chair` | active |
+
+Tax categories (`tax_category` — labels only, no rate):
+
+| id | Code | Name |
+| --- | --- | --- |
+| 1 | `STANDARD` | Standard rate |
+| 2 | `REDUCED` | Reduced rate |
+| 3 | `EXEMPT` | Exempt |
+
+Prices (`price` — one open `USD` row per variant, `valid_to IS NULL`):
+
+| Variant id | Currency | `amountMinor` | Display |
+| --- | --- | --- | --- |
+| 1 | `USD` | 4999 | $49.99 |
+| 2 | `USD` | 4999 | $49.99 |
+| 3 | `USD` | 19999 | $199.99 |
+| 4 | `USD` | 19999 | $199.99 |
+
+Every catalog/pricing seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
 
 Auth events emit Pino log lines with `userId` and `correlationId`, and (when wired) flow through the `AUDIT_LOG_PUBLISHER` port; the default binding is the in-process `NoOpAuditLogPublisher` (logs the event at `debug` under the `AuditLog` context). They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.*` routing key plus a publisher binding are missing.
 
@@ -660,6 +696,10 @@ The product stock query (`GET /product/:productId/stock`) reads from an append-o
 The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. `GetStockUseCase` orchestrates the cache-aside read; `StockCache` (the `STOCK_CACHE` adapter) is a thin domain-shaped wrapper over the generic `CACHE_PORT`; `StockTypeormRepository` materializes the SUM/GROUP BY aggregate. The presentation-layer `StockController` is unaware of the cache.
 
 The cache layer follows the conventions formalized in [ADR-016](docs/adr/016-cache-aside-generalized.md): every cache key is built via `CACHE_KEYS.*` (no string literals in `apps/*/src`), and apps depend on `ICachePort` rather than `@nestjs/cache-manager` directly.
+
+### What is not cached
+
+Only the stock query is cached today. The catalog browse/resolve reads and the **pricing** reads (`catalog.price.select` / `catalog.price.list` and their gateway routes) deliberately go straight to MySQL on every call — their read volume has not crossed the threshold where cache-aside complexity (key versioning plus post-commit invalidation on every price append/close) pays for itself. The key shape is already reserved for when it does: `CACHE_KEYS.catalogPrice(variantId, currency)` builds `ris:catalog:price:v1:<variantId>:<currency>` (mirroring the stock keys and the reserved `catalogProduct*` block), versioned and ready — but no catalog/pricing module imports `CacheModule` for it yet. Caching pricing reads is a later capability gated on measured read pressure, not a missing feature.
 
 ### Read flow
 
