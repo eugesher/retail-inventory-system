@@ -311,6 +311,23 @@ describe('boundaries rules (ADR-017)', () => {
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
+    it('infrastructure consumer may not reach another app domain (cross-app)', () => {
+      // The inventory `catalog-events.consumer.ts` (infrastructure/consumers/)
+      // consumes `catalog.variant.created` ONLY through the
+      // ICatalogVariantCreatedEvent wire contract in lib-contracts — never the
+      // catalog microservice's domain. `infrastructure` allows same-module
+      // domain/ports/infrastructure + a fixed lib set, so a cross-app domain
+      // import from a consumer fails the rule (no `sameApp('domain')` edge).
+      // 6 levels up: consumers → infrastructure → stock → modules → src →
+      // inventory-microservice → apps.
+      const code = `import { Product } from '../../../../../../catalog-microservice/src/modules/catalog/domain/product.model';\nexport type Y = Product;\n`;
+      const messages = lint(
+        code,
+        'apps/inventory-microservice/src/modules/stock/infrastructure/consumers/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
     it('presentation may not import infrastructure', () => {
       const code = `import { StockLevelEntity } from '../infrastructure/persistence/stock-level.entity';\nexport const y = StockLevelEntity;\n`;
       const messages = lint(
