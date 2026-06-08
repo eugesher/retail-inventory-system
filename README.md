@@ -60,6 +60,11 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/catalog/tax-categories                        │
 │  GET   /api/catalog/tax-categories                        │
 │  PATCH /api/catalog/variants/:id/tax-category             │
+│                                                           │
+│  Inventory (locations: bearer + inventory:read,           │
+│             variant stock: public)                        │
+│  GET   /api/inventory/locations                           │
+│  GET   /api/inventory/variants/:id/stock                  │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -160,18 +165,28 @@ apps/api-gateway/src/
     │   └── presentation/
     │       ├── order.controller.ts            # POST/PUT /api/order…
     │       └── pipes/order-confirm.pipe.ts
-    └── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
+    ├── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
+    │   ├── application/
+    │   │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
+    │   │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
+    │   │                                      #   + SetPrice/ListPrices/GetApplicablePrice
+    │   │                                      #   + CreateTaxCategory/ListTaxCategories/AttachVariantTaxCategory
+    │   ├── infrastructure/
+    │   │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder (catalog + pricing RPCs)
+    │   ├── presentation/
+    │   │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id[/prices|/price|/tax-category], /tax-categories
+    │   │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory request + ListProducts/PriceQuery query DTOs
+    │   └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
+    └── inventory/                             # talks to inventory-microservice (read RPCs)
         ├── application/
-        │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
-        │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
-        │                                      #   + SetPrice/ListPrices/GetApplicablePrice
-        │                                      #   + CreateTaxCategory/ListTaxCategories/AttachVariantTaxCategory
+        │   ├── ports/inventory-gateway.port.ts # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
+        │   └── use-cases/                     # GetVariantStockUseCase, ListLocationsUseCase
         ├── infrastructure/
-        │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder (catalog + pricing RPCs)
+        │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read RPCs)
         ├── presentation/
-        │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id[/prices|/price|/tax-category], /tax-categories
-        │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory request + ListProducts/PriceQuery query DTOs
-        └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
+        │   ├── inventory.controller.ts        # GET /api/inventory/locations, /variants/:id/stock
+        │   └── dto/variant-stock-query.dto.ts # comma-separated ?locationIds
+        └── inventory.module.ts                # binds INVENTORY_GATEWAY_PORT -> InventoryRabbitmqAdapter
 ```
 
 The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, and `PermissionAggregate` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
@@ -400,6 +415,15 @@ The publish route enforces an **active-price precondition**: it `409`s (`PRODUCT
 | -------- | ------- | ----- |
 | `DEFAULT_CURRENCY` | `USD` | ISO-4217 currency the catalog publish precondition resolves against (Joi-validated `length(3).uppercase()`). A product publishes only when each variant has a price in this currency. |
 
+### Inventory
+
+```
+GET /api/inventory/locations                  # bearer + inventory:read  — list stock locations (?activeOnly)
+GET /api/inventory/variants/:variantId/stock  # public  — per-location availability + totals (?locationIds=a,b)
+```
+
+The variant-stock read is **cache-aside** (Redis): the `VariantStockView` response (per-location `StockLevelView` rows + cross-location `totalOnHand` / `totalAvailable`) is cached under `ris:inventory:stock:v2:<variantId>:<facet>`. Omitting `?locationIds` aggregates across all stock locations (the comma-separated facet is `__all__`); passing a subset scopes the answer. A variant with no stock rows is a `200` zero-availability answer (`locations: []`), not a 404. The migration provisions a `default-warehouse` location and the seed (`scripts/seeds/stock-level.sql`) gives every seeded catalog variant 100 on hand there, so the public read returns a real figure out of the box.
+
 ### Auth
 
 ```
@@ -428,7 +452,7 @@ Interactive API reference is available at `http://localhost:3000/api/reference` 
 
 ## Authentication
 
-Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, and the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
+Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes, and the public `GET /api/inventory/variants/:variantId/stock` availability read). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
 
 Two subject kinds share the JWT pipeline:
 

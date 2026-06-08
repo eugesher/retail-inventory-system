@@ -1,0 +1,89 @@
+# Inventory read endpoints
+# (apps/api-gateway/src/modules/inventory/presentation/inventory.controller.ts)
+#
+# The API gateway fronts the inventory microservice's two read RPCs over HTTP at
+# /api/inventory:
+#   - GET /inventory/locations                      (Bearer — inventory:read)
+#       Lists the stock locations. Protected: the location set is operational
+#       data, so it requires the inventory:read permission. Optional ?activeOnly
+#       drops deactivated locations.
+#   - GET /inventory/variants/:variantId/stock      (public)
+#       A variant's availability across stock locations: per-location rows plus
+#       the cross-location totalOnHand / totalAvailable. @Public(), so an
+#       unauthenticated shopper can check stock before checkout.
+#
+# Stock locations
+#   The migration provisions one default location with id `default-warehouse`,
+#   and the seed gives every catalog variant (ids 1..4) 100 on hand there. So
+#   variant 1 reads 100 on hand / 100 available at default-warehouse.
+#
+# ?locationIds encoding (variant stock route)
+#   Comma-separated stock-location ids, e.g. ?locationIds=default-warehouse,backup-store.
+#   Omit it to aggregate across ALL locations (the default). An empty value is
+#   treated as omitted. (default-warehouse is also the implicit target a stock
+#   write defaults to when its body names no location.)
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures a seeded staff bearer token into
+#      @accessToken, which the protected `listLocations` request substitutes into
+#      its Authorization header. admin@example.com holds every permission
+#      (including inventory:read); the seeded warehouse@example.com
+#      (warehouse-staff) also carries inventory:read and works here too.
+#   3. The two variant-stock GETs send no token — they prove the @Public() route
+#      works unauthenticated.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name login
+# POST /api/auth/staff/login
+# Seeded admin login (admin@example.com / admin1234). Response is
+# TokenResponseDto { accessToken, refreshToken, expiresIn }.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name listLocations
+# GET /api/inventory/locations  (Bearer — inventory:read)
+# Lists the stock locations. The seeded `default-warehouse` appears here.
+# Response is StockLocationView[] { id, name, code, type, gln, active }.
+GET {{baseUrl}}/inventory/locations
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name getVariantStockAllLocations
+# GET /api/inventory/variants/:variantId/stock  (public)
+# Variant 1's availability aggregated across all locations (no ?locationIds, no
+# Authorization header). Response is VariantStockView
+# { variantId, totalOnHand, totalAvailable, locations: StockLevelView[] }.
+# With the seed: totalOnHand 100, totalAvailable 100, one default-warehouse entry.
+GET {{baseUrl}}/inventory/variants/1/stock
+
+###
+
+# @name getVariantStockFiltered
+# GET /api/inventory/variants/:variantId/stock?locationIds=...  (public)
+# The same read scoped to a single location via the comma-separated ?locationIds
+# encoding. Scoped to default-warehouse it returns the same figures as the
+# all-locations read above (that is the only location holding stock for variant 1).
+GET {{baseUrl}}/inventory/variants/1/stock?locationIds=default-warehouse

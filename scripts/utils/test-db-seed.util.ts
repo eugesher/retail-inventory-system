@@ -10,6 +10,10 @@ export class TestDbSeedUtil {
     // references product_variant.id, so both must follow catalog-product-variant.sql.
     'tax-category.sql',
     'price.sql',
+    // stock_level.variant_id references product_variant.id, so this also follows
+    // catalog-product-variant.sql; stock_location ('default-warehouse') comes from
+    // the migration, not a seed.
+    'stock-level.sql',
   ];
 
   public static readStatements(filePath: string): string[] {
