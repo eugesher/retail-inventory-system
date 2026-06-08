@@ -30,6 +30,12 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_STOCK_LOW).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LOW,
     );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_GET).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_GET,
+    );
+    expect(ROUTING_KEYS.INVENTORY_LOCATION_LIST).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_LOCATION_LIST,
+    );
     expect(ROUTING_KEYS.CATALOG_PRODUCT_REGISTER).toBe(
       MicroserviceMessagePatternEnum.CATALOG_PRODUCT_REGISTER,
     );

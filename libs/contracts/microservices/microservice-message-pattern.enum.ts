@@ -4,6 +4,8 @@
 export enum MicroserviceMessagePatternEnum {
   INVENTORY_ORDER_CONFIRM = 'inventory.order.confirm',
   INVENTORY_STOCK_LOW = 'inventory.stock.low',
+  INVENTORY_STOCK_LEVEL_GET = 'inventory.stock-level.get',
+  INVENTORY_LOCATION_LIST = 'inventory.location.list',
   RETAIL_ORDER_CREATE = 'retail.order.create',
   RETAIL_ORDER_CONFIRM = 'retail.order.confirm',
   RETAIL_ORDER_GET = 'retail.order.get',

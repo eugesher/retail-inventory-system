@@ -1,24 +1,35 @@
 // Central registry of cache-key templates. Every cache key in `apps/*/src`
-// must come from this file — no string literals. Three key families coexist:
+// must come from this file — no string literals. For the inventory stock
+// aggregate, **four** key families coexist (the current shape plus three
+// invalidate-only legacy shapes the rolling-deploy invalidate path still wipes):
 //
-//   * **Current convention** (ADR-022): includes a per-aggregate
-//     schema-version segment (defaulted at the builder) and an opt-in
-//     tenant segment near the root:
+//   * **Current convention** (ADR-022 / ADR-027 `v2`): a per-aggregate
+//     schema-version segment (defaulted at the builder) and an opt-in tenant
+//     segment near the root:
 //       `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]`.
-//     Examples:
-//       - `ris:inventory:stock:v1:42:__all__`                 — single-tenant
-//       - `ris:t:store-7:inventory:stock:v1:42:__all__`        — tenant supplied
-//       - `ris:inventory:stock:v1:42:head-warehouse,west-warehouse`
+//     For stock the `<id>` axis is now the **`variantId`** (not the old
+//     `productId`) and the facet is a sorted stock-location set — the cached
+//     value is a per-variant `VariantStockView` projection, not a per-product
+//     `SUM` aggregate (ADR-027). Examples:
+//       - `ris:inventory:stock:v2:42:__all__`                          — single-tenant, all locations
+//       - `ris:t:store-7:inventory:stock:v2:42:__all__`                 — tenant supplied
+//       - `ris:inventory:stock:v2:42:head-warehouse,west-warehouse`     — a location subset
 //       - `ris:retail:order:v1:7:__all__`
 //
-//   * **Pre-v1 (post-ADR-016) convention**: `ris:<service>:<aggregate>:<id>[:<facet>]`
-//     — no version segment. Exposed as `inventoryStockLegacyPrefix` *only*
-//     so the invalidate path can wipe in-flight entries written under the
-//     old prefix during the rolling deploy that adopts v1.
+//   * **Pre-v2 (v1) shape** (`inventoryStockLegacyPrefixV1`): the now-retired
+//     `ris:inventory:stock:v1:<id>:…` family from the previous bump. Exposed
+//     **invalidate-only** so the write path can wipe in-flight v1 entries during
+//     the rolling deploy that adopts v2. (v1 keyed the OLD `productId` axis; we
+//     wipe by the now-`variantId` numeric id, which is sufficient for the
+//     transition window — no production data exists.)
 //
-//   * **Pre-ADR-016 legacy convention**: `stock:<productId>:[*|<storageIds>]`.
-//     Kept as builders so `StockCache.invalidate` can SCAN+UNLINK in-flight
-//     entries during the original ADR-016 transition window.
+//   * **Pre-v1 (post-ADR-016) shape** (`inventoryStockLegacyPrefix`):
+//     `ris:<service>:<aggregate>:<id>[:<facet>]` — no version segment.
+//     Invalidate-only, for the rolling deploy that originally adopted v1.
+//
+//   * **Pre-ADR-016 legacy shape** (`productStockPrefix`):
+//     `stock:<productId>:[*|<storageIds>]`. Kept so the invalidate path can
+//     SCAN+UNLINK in-flight entries during the original ADR-016 transition.
 //
 // Audit findings tracked here:
 //   * `CACHE-010` (storage-id sort comparator) and `CACHE-011` (literal-`*`
@@ -30,7 +41,7 @@
 // Per-aggregate schema versions. Bumping any of these is a one-line edit
 // that re-keys every entry on the next deploy; the StockCache invalidate
 // path keeps wiping the pre-bump shape for one transition window.
-const INVENTORY_STOCK_KEY_VERSION = 'v1';
+const INVENTORY_STOCK_KEY_VERSION = 'v2';
 const RETAIL_ORDER_KEY_VERSION = 'v1';
 // Reserved for a future cached catalog read path. The catalog product cache is
 // keyed on `variantId` (not `productId`) because the variant is the downstream
@@ -61,18 +72,26 @@ interface ITenantOptions {
 const rootPrefix = (opts?: ITenantOptions): string =>
   opts?.tenantId ? `ris:t:${opts.tenantId}:` : 'ris:';
 
-const sortedStorageFacet = (storageIds: readonly string[]): string =>
-  [...storageIds].sort((a, b) => a.localeCompare(b)).join(',');
+const sortedStockLocationFacet = (stockLocationIds: readonly string[]): string =>
+  [...stockLocationIds].sort((a, b) => a.localeCompare(b)).join(',');
 
 export const CACHE_KEYS = {
   // -- Current convention (ADR-022 — version + opt-in tenant) ---------------
-  inventoryStockPrefix: (productId: number, opts?: ITenantOptions): string =>
-    `${rootPrefix(opts)}inventory:stock:${INVENTORY_STOCK_KEY_VERSION}:${productId}:`,
+  // Keyed on `variantId` (the downstream backbone, ADR-025/ADR-027) with a
+  // sorted stock-location set as the facet (`__all__` when unscoped).
+  inventoryStockPrefix: (variantId: number, opts?: ITenantOptions): string =>
+    `${rootPrefix(opts)}inventory:stock:${INVENTORY_STOCK_KEY_VERSION}:${variantId}:`,
 
-  inventoryStock: (productId: number, storageIds?: string[], opts?: ITenantOptions): string => {
-    const prefix = CACHE_KEYS.inventoryStockPrefix(productId, opts);
+  inventoryStock: (
+    variantId: number,
+    stockLocationIds?: string[],
+    opts?: ITenantOptions,
+  ): string => {
+    const prefix = CACHE_KEYS.inventoryStockPrefix(variantId, opts);
     const facet =
-      storageIds && storageIds.length > 0 ? sortedStorageFacet(storageIds) : ALL_FACETS_SENTINEL;
+      stockLocationIds && stockLocationIds.length > 0
+        ? sortedStockLocationFacet(stockLocationIds)
+        : ALL_FACETS_SENTINEL;
     return `${prefix}${facet}`;
   },
 
@@ -106,15 +125,25 @@ export const CACHE_KEYS = {
   catalogPrice: (variantId: number, currency: string, opts?: ITenantOptions): string =>
     `${CACHE_KEYS.catalogPricePrefix(variantId, opts)}${currency}`,
 
+  // -- Pre-v2 (v1) shape — invalidate-only ----------------------------------
+  // Returns the retired v1 stock prefix `ris:inventory:stock:v1:<id>:`. The v1
+  // keys were `…inventory:stock:v1:<productId>:…` (the OLD productId axis); we
+  // wipe by the now-`variantId` numeric id, which is sufficient for the
+  // rolling-deploy transition window (no production data exists). Exposed solely
+  // so `StockCache.withInvalidation` can wipe in-flight v1 entries during the
+  // deploy that adopts v2. Reads and writes MUST use `inventoryStockPrefix` /
+  // `inventoryStock` above; this builder is for SCAN+UNLINK only.
+  inventoryStockLegacyPrefixV1: (id: number): string => `ris:inventory:stock:v1:${id}:`,
+
   // -- Pre-v1 (post-ADR-016) shape — invalidate-only ------------------------
-  // Returns the pre-v1 stock prefix `ris:inventory:stock:<productId>:`.
-  // Exposed solely so `StockCache.invalidate` can wipe in-flight entries
-  // written under the pre-v1 shape during the rolling deploy that adopts
-  // v1 (ADR-022 transition window). Reads and writes MUST use
+  // Returns the pre-v1 stock prefix `ris:inventory:stock:<id>:` (no version
+  // segment). Exposed solely so `StockCache.withInvalidation` can wipe in-flight
+  // entries written under the pre-v1 shape during the rolling deploy that
+  // originally adopted v1 (ADR-022 transition window). Reads and writes MUST use
   // `inventoryStockPrefix` / `inventoryStock` above; this builder is for
   // SCAN+UNLINK only and is unconditionally single-tenant — the pre-v1
   // shape never carried a tenant segment, so there is nothing to scope.
-  inventoryStockLegacyPrefix: (productId: number): string => `ris:inventory:stock:${productId}:`,
+  inventoryStockLegacyPrefix: (id: number): string => `ris:inventory:stock:${id}:`,
 
   // -- Pre-ADR-016 legacy convention ----------------------------------------
   // Retained so the SCAN-based invalidate path can wipe entries written
