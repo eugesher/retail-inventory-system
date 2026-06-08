@@ -8,6 +8,7 @@ export const ROUTING_KEYS = {
   INVENTORY_ORDER_CONFIRM: 'inventory.order.confirm',
   INVENTORY_STOCK_LOW: 'inventory.stock.low',
   INVENTORY_STOCK_LEVEL_GET: 'inventory.stock-level.get',
+  INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized',
   INVENTORY_LOCATION_LIST: 'inventory.location.list',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',
   CATALOG_PRODUCT_PUBLISH: 'catalog.product.publish',
