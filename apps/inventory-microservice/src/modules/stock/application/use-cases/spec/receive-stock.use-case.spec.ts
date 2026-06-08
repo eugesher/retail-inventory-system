@@ -1,4 +1,7 @@
+import { PinoLogger } from 'nestjs-pino';
+
 import { INVENTORY_DEFAULT_STOCK_LOCATION } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import {
   InventoryDomainException,
@@ -13,7 +16,6 @@ import {
   InMemoryStockCache,
   InMemoryStockRepository,
   RecordingStockEventsPublisher,
-  silentLogger,
 } from './test-doubles';
 
 const VARIANT_ID = 42;
@@ -40,7 +42,13 @@ describe('ReceiveStockUseCase', () => {
     publisher = new RecordingStockEventsPublisher();
     transaction = new ImmediateTransactionPort();
     repository.seedLocation(activeLocation());
-    useCase = new ReceiveStockUseCase(transaction, repository, cache, publisher, silentLogger());
+    useCase = new ReceiveStockUseCase(
+      transaction,
+      repository,
+      cache,
+      publisher,
+      makePinoLoggerMock() as unknown as PinoLogger,
+    );
   });
 
   it('raises on-hand by the received quantity and returns the updated view', async () => {

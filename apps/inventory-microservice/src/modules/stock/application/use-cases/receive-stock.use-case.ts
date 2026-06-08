@@ -23,6 +23,8 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { requireActiveLocation } from './stock-location.guard';
+import { toStockLevelView } from './stock-view.factory';
 
 // Receive Stock is the first Stage-1 write operation on the new model (ADR-027):
 // it raises a variant's on-hand quantity at one stock location by a positive
@@ -66,7 +68,7 @@ export class ReceiveStockUseCase {
       );
     }
 
-    await this.requireActiveLocation(stockLocationId);
+    await requireActiveLocation(this.repository, stockLocationId);
 
     // Transactional read-modify-write wrapped so the cache wipe runs post-commit
     // (ADR-023). `work` resolves only after the save has committed, so
@@ -94,23 +96,7 @@ export class ReceiveStockUseCase {
     // caller into thinking the receive did not happen.
     await this.emitReceived(saved, quantity, actorId, correlationId);
 
-    return this.toView(saved);
-  }
-
-  private async requireActiveLocation(stockLocationId: string): Promise<void> {
-    const location = await this.repository.findLocation(stockLocationId);
-    if (location === null) {
-      throw new InventoryDomainException(
-        InventoryErrorCodeEnum.STOCK_LOCATION_NOT_FOUND,
-        `Stock location '${stockLocationId}' does not exist`,
-      );
-    }
-    if (!location.active) {
-      throw new InventoryDomainException(
-        InventoryErrorCodeEnum.STOCK_LOCATION_INACTIVE,
-        `Stock location '${stockLocationId}' is deactivated`,
-      );
-    }
+    return toStockLevelView(saved);
   }
 
   private async emitReceived(
@@ -136,17 +122,5 @@ export class ReceiveStockUseCase {
         'Failed to publish inventory.stock.received (write already committed)',
       );
     }
-  }
-
-  private toView(level: StockLevel): StockLevelView {
-    return {
-      stockLocationId: level.stockLocationId,
-      quantityOnHand: level.quantityOnHand,
-      quantityAllocated: level.quantityAllocated,
-      quantityReserved: level.quantityReserved,
-      available: level.available,
-      version: level.version,
-      updatedAt: level.updatedAt,
-    };
   }
 }

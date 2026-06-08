@@ -1,14 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import {
-  IVariantStockGetPayload,
-  StockLevelView,
-  VariantStockView,
-} from '@retail-inventory-system/contracts';
+import { IVariantStockGetPayload, VariantStockView } from '@retail-inventory-system/contracts';
 
-import { StockLevel } from '../../domain';
 import { IStockCachePort, IStockRepositoryPort, STOCK_CACHE, STOCK_REPOSITORY } from '../ports';
+import { toStockLevelView } from './stock-view.factory';
 
 // Query Availability is the read path on the new model (ADR-027): given a
 // `variantId` (optionally scoped to a stock-location subset), return the
@@ -57,26 +53,12 @@ export class QueryAvailabilityUseCase {
     // DB state (the repository `find` does not order). Matches the cache-facet
     // `localeCompare` convention (ADR-016).
     const locations = levels
-      .map((level) => this.toView(level))
+      .map((level) => toStockLevelView(level))
       .sort((a, b) => a.stockLocationId.localeCompare(b.stockLocationId));
 
     const totalOnHand = locations.reduce((sum, location) => sum + location.quantityOnHand, 0);
     const totalAvailable = locations.reduce((sum, location) => sum + location.available, 0);
 
     return { variantId, totalOnHand, totalAvailable, locations };
-  }
-
-  private toView(level: StockLevel): StockLevelView {
-    return {
-      stockLocationId: level.stockLocationId,
-      quantityOnHand: level.quantityOnHand,
-      quantityAllocated: level.quantityAllocated,
-      quantityReserved: level.quantityReserved,
-      // `available` is the domain getter (onHand − allocated − reserved); the
-      // total is the sum of these per-location derived values.
-      available: level.available,
-      version: level.version,
-      updatedAt: level.updatedAt,
-    };
   }
 }

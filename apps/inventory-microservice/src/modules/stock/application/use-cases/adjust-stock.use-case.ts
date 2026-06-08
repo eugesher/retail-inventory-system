@@ -25,6 +25,8 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { requireActiveLocation } from './stock-location.guard';
+import { toStockLevelView } from './stock-view.factory';
 
 // Adjust Stock is the second Stage-1 write operation on the new model (ADR-027):
 // it applies a signed delta to a variant's on-hand quantity at one stock location
@@ -78,7 +80,7 @@ export class AdjustStockUseCase {
       );
     }
 
-    await this.requireActiveLocation(stockLocationId);
+    await requireActiveLocation(this.repository, stockLocationId);
 
     // Transactional read-modify-write wrapped so the cache wipe runs post-commit
     // (ADR-023). `changeOnHand` throws `STOCK_RESULT_NEGATIVE` before any save
@@ -103,27 +105,15 @@ export class AdjustStockUseCase {
       'Stock adjusted — signed delta applied',
     );
 
-    // Post-commit, best-effort (ADR-020).
-    await this.emitAdjusted(saved, quantityDelta, reasonCode, actorId, correlationId);
-    await this.maybeEmitLow(saved, correlationId);
+    // Post-commit, best-effort (ADR-020). The two emits are independent and
+    // each swallows its own failure, so they run concurrently — on the
+    // low-stock path this removes one serial broker round-trip from the RPC.
+    await Promise.all([
+      this.emitAdjusted(saved, quantityDelta, reasonCode, actorId, correlationId),
+      this.maybeEmitLow(saved, correlationId),
+    ]);
 
-    return this.toView(saved);
-  }
-
-  private async requireActiveLocation(stockLocationId: string): Promise<void> {
-    const location = await this.repository.findLocation(stockLocationId);
-    if (location === null) {
-      throw new InventoryDomainException(
-        InventoryErrorCodeEnum.STOCK_LOCATION_NOT_FOUND,
-        `Stock location '${stockLocationId}' does not exist`,
-      );
-    }
-    if (!location.active) {
-      throw new InventoryDomainException(
-        InventoryErrorCodeEnum.STOCK_LOCATION_INACTIVE,
-        `Stock location '${stockLocationId}' is deactivated`,
-      );
-    }
+    return toStockLevelView(saved);
   }
 
   private async emitAdjusted(
@@ -188,17 +178,5 @@ export class AdjustStockUseCase {
         'Failed to publish inventory.stock.low (write already committed)',
       );
     }
-  }
-
-  private toView(level: StockLevel): StockLevelView {
-    return {
-      stockLocationId: level.stockLocationId,
-      quantityOnHand: level.quantityOnHand,
-      quantityAllocated: level.quantityAllocated,
-      quantityReserved: level.quantityReserved,
-      available: level.available,
-      version: level.version,
-      updatedAt: level.updatedAt,
-    };
   }
 }

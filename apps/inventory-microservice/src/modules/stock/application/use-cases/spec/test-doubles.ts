@@ -196,17 +196,3 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
     return Promise.resolve();
   }
 }
-
-// A silent `PinoLogger` so specs assert behaviour, not log output. Uses plain
-// no-op functions (not `jest.fn()`) so this shared helper stays compilable by the
-// production webpack build, which includes non-`.spec.ts` files.
-export const silentLogger = (): import('nestjs-pino').PinoLogger => {
-  const noop = (): void => undefined;
-  return {
-    info: noop,
-    debug: noop,
-    warn: noop,
-    error: noop,
-    assign: noop,
-  } as unknown as import('nestjs-pino').PinoLogger;
-};

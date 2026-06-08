@@ -3,8 +3,8 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import { IStockLocationsListPayload, StockLocationView } from '@retail-inventory-system/contracts';
 
-import { StockLocation } from '../../domain';
 import { IStockRepositoryPort, STOCK_REPOSITORY } from '../ports';
+import { toStockLocationView } from './stock-view.factory';
 
 // List Locations returns the stock locations as wire views. `activeOnly: true`
 // drops deactivated locations (soft-delete is the `active` flag — ADR-027). This
@@ -26,20 +26,6 @@ export class ListLocationsUseCase {
     this.logger.info({ correlationId, activeOnly }, 'Received RPC: list stock locations');
 
     const locations = await this.repository.listLocations(activeOnly);
-    return locations.map((location) => this.toView(location));
-  }
-
-  private toView(location: StockLocation): StockLocationView {
-    return {
-      id: location.id,
-      name: location.name,
-      code: location.code,
-      // The enum values are strings; the wire view carries the plain string —
-      // the `StockLocationTypeEnum` is an internal domain concept, not a wire
-      // contract (the catalog `*StatusEnum` precedent, ADR-025).
-      type: location.type,
-      gln: location.gln,
-      active: location.active,
-    };
+    return locations.map((location) => toStockLocationView(location));
   }
 }
