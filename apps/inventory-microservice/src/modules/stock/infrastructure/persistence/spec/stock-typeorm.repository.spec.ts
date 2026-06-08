@@ -1,253 +1,164 @@
 import { PinoLogger } from 'nestjs-pino';
-import { Repository } from 'typeorm';
+import { FindOperator, Repository } from 'typeorm';
 
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import { ITransactionScope } from '../../../application/ports';
-import { ProductStock } from '../product-stock.entity';
+import { StockLevel } from '../../../domain';
+import { StockLevelEntity } from '../stock-level.entity';
+import { StockLocationEntity } from '../stock-location.entity';
 import { StockTypeormRepository } from '../stock-typeorm.repository';
 
-const correlationId = 'corr-1';
+const makeLevelEntity = (overrides: Partial<StockLevelEntity> = {}): StockLevelEntity =>
+  ({
+    id: 10,
+    variantId: 1,
+    stockLocationId: 'default-warehouse',
+    quantityOnHand: 7,
+    quantityAllocated: 0,
+    quantityReserved: 0,
+    version: 1,
+    createdAt: new Date('2026-01-01'),
+    updatedAt: new Date('2026-01-02'),
+    deletedAt: null,
+    ...overrides,
+  }) as StockLevelEntity;
 
-const makeQueryBuilder = (rawMany: jest.Mock): Record<string, jest.Mock> => {
-  const qb: Record<string, jest.Mock> = {
-    select: jest.fn(),
-    where: jest.fn(),
-    andWhere: jest.fn(),
-    groupBy: jest.fn(),
-    addSelect: jest.fn(),
-    setLock: jest.fn(),
-    getRawMany: rawMany,
-  };
-  for (const key of ['select', 'where', 'andWhere', 'groupBy', 'addSelect', 'setLock']) {
-    qb[key].mockReturnValue(qb);
-  }
-  return qb;
-};
-
-// `ITransactionScope` is opaque (unique-symbol brand); only the adapter
-// downcasts to `EntityManager`. The spec casts through `unknown` to
-// satisfy the type with a duck-typed fake.
-const asScope = (em: object): ITransactionScope => em as unknown as ITransactionScope;
+const makeLocationEntity = (overrides: Partial<StockLocationEntity> = {}): StockLocationEntity =>
+  ({
+    id: 'default-warehouse',
+    name: 'Default Warehouse',
+    code: 'default-warehouse',
+    type: 'warehouse',
+    address: null,
+    gln: null,
+    active: true,
+    createdAt: new Date('2026-01-01'),
+    updatedAt: new Date('2026-01-02'),
+    deletedAt: null,
+    ...overrides,
+  }) as StockLocationEntity;
 
 describe('StockTypeormRepository', () => {
-  let injectedRepo: jest.Mocked<
-    Pick<Repository<ProductStock>, 'createQueryBuilder' | 'insert' | 'findOne' | 'save'>
-  >;
+  let levelRepo: jest.Mocked<Pick<Repository<StockLevelEntity>, 'findOne' | 'find' | 'save'>>;
+  let locationRepo: jest.Mocked<Pick<Repository<StockLocationEntity>, 'findOne' | 'find'>>;
   let logger: PinoLoggerMock;
   let repository: StockTypeormRepository;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    injectedRepo = {
-      createQueryBuilder: jest.fn(),
-      insert: jest.fn(),
-      findOne: jest.fn(),
-      save: jest.fn(),
-    } as never;
+    levelRepo = { findOne: jest.fn(), find: jest.fn(), save: jest.fn() } as never;
+    locationRepo = { findOne: jest.fn(), find: jest.fn() } as never;
     logger = makePinoLoggerMock();
     repository = new StockTypeormRepository(
-      injectedRepo as unknown as Repository<ProductStock>,
+      levelRepo as unknown as Repository<StockLevelEntity>,
+      locationRepo as unknown as Repository<StockLocationEntity>,
       logger as unknown as PinoLogger,
     );
   });
 
-  describe('aggregateForProduct', () => {
-    it('aggregates rows by storage and returns the max updatedAt', async () => {
-      const date1 = new Date('2024-01-01');
-      const date2 = new Date('2024-02-01');
-      const rawMany = jest.fn().mockResolvedValue([
-        { storageId: 'a', quantity: '3', updatedAt: date1 },
-        { storageId: 'b', quantity: '4', updatedAt: date2 },
-      ]);
-      const qb = makeQueryBuilder(rawMany);
-      injectedRepo.createQueryBuilder.mockReturnValue(qb as never);
+  describe('saveStockLevel', () => {
+    it('inserts a new level and re-reads for the concrete id', async () => {
+      const level = StockLevel.initialAt(1, 'default-warehouse');
+      // No existing row → the lookup returns null; save assigns id 10; re-read.
+      levelRepo.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(makeLevelEntity());
+      levelRepo.save.mockResolvedValue(makeLevelEntity());
 
-      const result = await repository.aggregateForProduct({ productId: 1, correlationId });
+      const result = await repository.saveStockLevel(level);
 
-      expect(result).toEqual({
-        productId: 1,
-        quantity: 7,
-        updatedAt: date2,
-        items: [
-          { storageId: 'a', quantity: 3, updatedAt: date1 },
-          { storageId: 'b', quantity: 4, updatedAt: date2 },
-        ],
-      });
-      expect(qb.andWhere).not.toHaveBeenCalled();
-      expect(logger.debug).toHaveBeenCalledWith(
-        { correlationId, productId: 1, rowCount: 2 },
-        'Stock rows retrieved from DB',
-      );
+      // The first save argument carries no id → INSERT path.
+      const savedArg = levelRepo.save.mock.calls[0][0] as Partial<StockLevelEntity>;
+      expect(savedArg.id).toBeUndefined();
+      expect(result.id).toBe(10);
+      expect(result.quantityOnHand).toBe(7);
+      // Re-read keyed on the generated id.
+      expect(levelRepo.findOne).toHaveBeenLastCalledWith({ where: { id: 10 } });
     });
 
-    it('adds the storageIds filter when provided', async () => {
-      const rawMany = jest.fn().mockResolvedValue([]);
-      const qb = makeQueryBuilder(rawMany);
-      injectedRepo.createQueryBuilder.mockReturnValue(qb as never);
+    it('resolves a detached level to the existing row id so save updates instead of colliding', async () => {
+      const level = StockLevel.initialAt(1, 'default-warehouse');
+      levelRepo.findOne
+        .mockResolvedValueOnce(makeLevelEntity({ id: 7 })) // existing lookup
+        .mockResolvedValueOnce(makeLevelEntity({ id: 7, version: 5 })); // re-read
+      levelRepo.save.mockResolvedValue(makeLevelEntity({ id: 7, version: 5 }));
 
-      await repository.aggregateForProduct({
-        productId: 1,
-        storageIds: ['head-warehouse'],
-        correlationId,
-      });
+      const result = await repository.saveStockLevel(level);
 
-      expect(qb.andWhere).toHaveBeenCalledWith('ProductStock.storageId IN (:...storageIds)', {
-        storageIds: ['head-warehouse'],
-      });
+      const savedArg = levelRepo.save.mock.calls[0][0] as Partial<StockLevelEntity>;
+      expect(savedArg.id).toBe(7);
+      expect(result.id).toBe(7);
+      expect(result.version).toBe(5);
     });
 
-    it('uses the scope-backed repository when a transaction scope is provided', async () => {
-      const rawMany = jest.fn().mockResolvedValue([]);
-      const qb = makeQueryBuilder(rawMany);
-      const txRepo = { createQueryBuilder: jest.fn().mockReturnValue(qb) };
-      const getRepository = jest.fn().mockReturnValue(txRepo);
-      const scope = asScope({ getRepository });
+    it('throws when the row vanishes after commit', async () => {
+      const level = StockLevel.initialAt(1, 'default-warehouse');
+      levelRepo.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      levelRepo.save.mockResolvedValue(makeLevelEntity({ id: 9 }));
 
-      await repository.aggregateForProduct({ productId: 1, correlationId }, scope);
-
-      expect(getRepository).toHaveBeenCalledWith(ProductStock);
-      expect(txRepo.createQueryBuilder).toHaveBeenCalled();
-      expect(injectedRepo.createQueryBuilder).not.toHaveBeenCalled();
-    });
-
-    it('returns zero quantity and null updatedAt for an empty result set', async () => {
-      const rawMany = jest.fn().mockResolvedValue([]);
-      const qb = makeQueryBuilder(rawMany);
-      injectedRepo.createQueryBuilder.mockReturnValue(qb as never);
-
-      const result = await repository.aggregateForProduct({ productId: 99, correlationId });
-
-      expect(result).toEqual({ productId: 99, quantity: 0, updatedAt: null, items: [] });
-    });
-
-    it('error-logs and rethrows when getRawMany rejects', async () => {
-      const err = new Error('db-fail');
-      const rawMany = jest.fn().mockRejectedValue(err);
-      const qb = makeQueryBuilder(rawMany);
-      injectedRepo.createQueryBuilder.mockReturnValue(qb as never);
-
-      await expect(repository.aggregateForProduct({ productId: 1, correlationId })).rejects.toBe(
-        err,
-      );
-
-      expect(logger.error).toHaveBeenCalledWith(
-        { err, correlationId, productId: 1, storageIds: undefined },
-        'Failed to aggregate product stock by storage',
-      );
+      await expect(repository.saveStockLevel(level)).rejects.toThrow('vanished after commit');
     });
   });
 
-  describe('lockedTotalsByProduct', () => {
-    it('returns an empty Map without touching the database when productIds is empty', async () => {
-      const createQueryBuilder = jest.fn();
-      const scope = asScope({ createQueryBuilder });
+  describe('findStockLevelsByVariant', () => {
+    it('filters by the supplied location ids with an IN clause', async () => {
+      levelRepo.find.mockResolvedValue([]);
 
-      const result = await repository.lockedTotalsByProduct(
-        { productIds: [], correlationId },
-        scope,
-      );
+      await repository.findStockLevelsByVariant(1, ['a', 'b']);
 
-      expect(result.size).toBe(0);
-      expect(createQueryBuilder).not.toHaveBeenCalled();
+      const findArg = levelRepo.find.mock.calls[0][0] as unknown as {
+        where: { variantId: number; stockLocationId: FindOperator<string[]> };
+      };
+      expect(findArg.where.variantId).toBe(1);
+      expect(findArg.where.stockLocationId).toBeInstanceOf(FindOperator);
+      expect(findArg.where.stockLocationId.value).toEqual(['a', 'b']);
     });
 
-    it('issues a pessimistic_write-locked aggregate and returns a productId→quantity Map', async () => {
-      const rawMany = jest.fn().mockResolvedValue([
-        { productId: '1', totalQuantity: '5' },
-        { productId: '2', totalQuantity: '3' },
-      ]);
-      const qb = makeQueryBuilder(rawMany);
-      const scope = asScope({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+    it('omits the location filter when no ids are supplied', async () => {
+      levelRepo.find.mockResolvedValue([makeLevelEntity()]);
 
-      const result = await repository.lockedTotalsByProduct(
-        { productIds: [1, 2], correlationId },
-        scope,
-      );
+      const result = await repository.findStockLevelsByVariant(1);
 
-      expect(qb.setLock).toHaveBeenCalledWith('pessimistic_write');
-      expect(result.get(1)).toBe(5);
-      expect(result.get(2)).toBe(3);
-      expect(logger.debug).toHaveBeenCalledWith(
-        { correlationId, productIds: [1, 2], balanceCount: 2 },
-        'Locked stock totals loaded from DB',
-      );
-    });
-
-    it('error-logs and rethrows when the locked query rejects', async () => {
-      const err = new Error('lock-fail');
-      const rawMany = jest.fn().mockRejectedValue(err);
-      const qb = makeQueryBuilder(rawMany);
-      const scope = asScope({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
-
-      await expect(
-        repository.lockedTotalsByProduct({ productIds: [1], correlationId }, scope),
-      ).rejects.toBe(err);
-
-      expect(logger.error).toHaveBeenCalledWith(
-        { err, correlationId, productIds: [1] },
-        'Failed to load locked stock totals',
-      );
+      expect(levelRepo.find).toHaveBeenCalledWith({ where: { variantId: 1 } });
+      expect(result).toHaveLength(1);
+      expect(result[0].variantId).toBe(1);
     });
   });
 
-  describe('appendDeltas', () => {
-    const items = [
-      {
-        productId: 1,
-        storageId: 'head-warehouse',
-        actionId: 'order-product-confirm',
-        quantity: -1,
-        orderProductId: 11,
-      },
-      {
-        productId: 2,
-        storageId: 'head-warehouse',
-        actionId: 'order-product-confirm',
-        quantity: -1,
-        orderProductId: 12,
-      },
-    ];
+  describe('locations', () => {
+    it('findLocation maps the row to a StockLocation', async () => {
+      locationRepo.findOne.mockResolvedValue(makeLocationEntity());
 
-    it('inserts via the injected repository when no transaction scope is provided', async () => {
-      injectedRepo.insert.mockResolvedValue(undefined as never);
+      const location = await repository.findLocation('default-warehouse');
 
-      await repository.appendDeltas({ items, correlationId });
-
-      expect(injectedRepo.insert).toHaveBeenCalledWith(items);
-      expect(logger.debug).toHaveBeenCalledWith(
-        { correlationId, itemCount: 2, withinTransaction: false },
-        'Inserting product stock ledger rows',
-      );
-      expect(logger.info).toHaveBeenCalledWith(
-        { correlationId, itemCount: 2, productIds: [1, 2] },
-        'Product stock ledger rows inserted',
-      );
+      expect(locationRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'default-warehouse' },
+      });
+      expect(location?.id).toBe('default-warehouse');
+      expect(location?.active).toBe(true);
     });
 
-    it('inserts via the scope-backed repository when a transaction scope is provided', async () => {
-      const txRepo = { insert: jest.fn().mockResolvedValue(undefined) };
-      const getRepository = jest.fn().mockReturnValue(txRepo);
-      const scope = asScope({ getRepository });
-
-      await repository.appendDeltas({ items, correlationId }, scope);
-
-      expect(getRepository).toHaveBeenCalledWith(ProductStock);
-      expect(txRepo.insert).toHaveBeenCalledWith(items);
-      expect(injectedRepo.insert).not.toHaveBeenCalled();
+    it('findLocation returns null for a missing id', async () => {
+      locationRepo.findOne.mockResolvedValue(null);
+      await expect(repository.findLocation('nope')).resolves.toBeNull();
     });
 
-    it('error-logs and rethrows when the insert rejects', async () => {
-      const err = new Error('insert-fail');
-      injectedRepo.insert.mockRejectedValue(err);
+    it('listLocations(true) restricts to active rows', async () => {
+      locationRepo.find.mockResolvedValue([makeLocationEntity()]);
 
-      await expect(repository.appendDeltas({ items, correlationId })).rejects.toBe(err);
+      await repository.listLocations(true);
 
-      expect(logger.error).toHaveBeenCalledWith(
-        { err, correlationId, itemCount: 2 },
-        'Failed to insert product stock ledger rows',
-      );
-      expect(logger.info).not.toHaveBeenCalled();
+      expect(locationRepo.find).toHaveBeenCalledWith({
+        where: { active: true },
+        order: { id: 'ASC' },
+      });
+    });
+
+    it('listLocations() returns every row when activeOnly is omitted', async () => {
+      locationRepo.find.mockResolvedValue([makeLocationEntity()]);
+
+      const result = await repository.listLocations();
+
+      expect(locationRepo.find).toHaveBeenCalledWith({ where: {}, order: { id: 'ASC' } });
+      expect(result).toHaveLength(1);
     });
   });
 });

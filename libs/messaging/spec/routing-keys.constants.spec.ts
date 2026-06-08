@@ -24,9 +24,6 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.RETAIL_ORDER_CANCELLED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCELLED,
     );
-    expect(ROUTING_KEYS.INVENTORY_PRODUCT_STOCK_GET).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
-    );
     expect(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
     );

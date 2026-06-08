@@ -18,7 +18,6 @@ import {
 import { AuthModule } from '../modules/auth';
 import { CatalogModule } from '../modules/catalog';
 import { IamModule } from '../modules/iam';
-import { InventoryModule } from '../modules/inventory';
 import { RetailModule } from '../modules/retail';
 import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.filter';
 
@@ -30,7 +29,6 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
     AuthModule,
     IamModule,
     RetailModule,
-    InventoryModule,
     CatalogModule,
   ],
   providers: [

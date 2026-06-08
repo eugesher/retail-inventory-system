@@ -106,8 +106,8 @@ describe('Auth flow (e2e)', () => {
       expect(status).toBe(HttpStatus.UNAUTHORIZED);
     });
 
-    it('returns 401 on GET /api/product/:productId/stock without an Authorization header', async () => {
-      const { status } = await supertest(apiGatewayApp.getHttpServer()).get('/api/product/1/stock');
+    it('returns 401 on GET /api/auth/me without an Authorization header', async () => {
+      const { status } = await supertest(apiGatewayApp.getHttpServer()).get('/api/auth/me');
       expect(status).toBe(HttpStatus.UNAUTHORIZED);
     });
   });
@@ -154,7 +154,7 @@ describe('Auth flow (e2e)', () => {
       const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
       const { status } = await supertest(apiGatewayApp.getHttpServer())
-        .get('/api/product/1/stock')
+        .get('/api/auth/me')
         .set('Authorization', `Bearer ${tokens.accessToken}`);
 
       expect(status).toBe(HttpStatus.OK);

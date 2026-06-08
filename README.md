@@ -45,7 +45,6 @@ The system handles order lifecycle management and product stock tracking across 
 │  Domain                                                   │
 │  POST  /api/order                                         │
 │  PUT   /api/order/:id/confirm                             │
-│  GET   /api/product/:productId/stock                      │
 │                                                           │
 │  Catalog (write: bearer + permission, read: public)       │
 │  POST  /api/catalog/products                              │
@@ -67,7 +66,7 @@ The system handles order lifecycle management and product stock tracking across 
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
 │                        │  │                               │
-│  retail.order.create   │  │  inventory.product-stock.get  │
+│  retail.order.create   │  │                               │
 │  retail.order.confirm ─┼──► inventory.order.confirm       │
 │  retail.order.get      │  │                               │
 │                        │  │  Emits:                       │
@@ -86,8 +85,8 @@ The system handles order lifecycle management and product stock tracking across 
 │                        Shared DB                          │ │
 │  staff_user / customer / role / permission                │ │
 │  role_permissions / staff_user_roles                      │ │
-│  order / order_product / product_stock                    │ │
-│  storage / order_status / order_product_status            │ │
+│  order / order_product / order_status                     │ │
+│  order_product_status / stock_location / stock_level      │ │
 │  product / product_variant                                │ │
 │  price / tax_category                                     │ │
 └───────────────────────────────────────────────────────────┘ │
@@ -161,16 +160,6 @@ apps/api-gateway/src/
     │   └── presentation/
     │       ├── order.controller.ts            # POST/PUT /api/order…
     │       └── pipes/order-confirm.pipe.ts
-    ├── inventory/                             # talks to inventory-microservice
-    │   ├── application/
-    │   │   ├── ports/inventory-gateway.port.ts
-    │   │   └── use-cases/get-product-stock.use-case.ts
-    │   ├── infrastructure/
-    │   │   ├── messaging/inventory-rabbitmq.adapter.ts
-    │   │   └── inventory.module.ts
-    │   └── presentation/
-    │       ├── product.controller.ts          # GET /api/product/:id/stock
-    │       └── dto/product-stock-get-query.dto.ts
     └── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
         ├── application/
         │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
@@ -246,10 +235,17 @@ apps/inventory-microservice/src/
     │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (emit → notification queue)
     │   └── stock.module.ts                    # binds all four port symbols → adapters (TRANSACTION_PORT → TypeormTransactionAdapter)
     └── presentation/
-        └── stock.controller.ts                # @MessagePattern handlers for INVENTORY_PRODUCT_STOCK_GET / INVENTORY_ORDER_CONFIRM
+        └── stock.controller.ts                # @MessagePattern handler: INVENTORY_ORDER_CONFIRM (deprecation stub)
 ```
 
-`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts`; the use cases inject `STOCK_EVENTS_PUBLISHER` and await a plain Promise. See [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md) for the aggregate boundaries and the port-and-adapter split.
+> The tree above still reflects the superseded `StockItem` / `product_stock`
+> model. The inventory persistence foundation has been rewritten to per-location
+> `StockLevel` running totals + a location-aware `StockLocation` keyed on
+> `variantId` (see [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md));
+> the read/write operations, the cache rebuild, and the matching tree update land
+> with the inventory operations work.
+
+`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts`; the events publisher and the `STOCK_EVENTS_PUBLISHER` symbol are retained for that later work. See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the new aggregate boundaries.
 
 The retail microservice exposes a single `orders` bounded context laid out the same way:
 
@@ -376,12 +372,6 @@ The rules are regression-tested in `spec/architecture-lint.spec.ts` — every ru
 ```
 POST /api/order
 PUT  /api/order/:id/confirm
-```
-
-### Stock
-
-```
-GET /product/:productId/stock
 ```
 
 ### Catalog
@@ -691,7 +681,17 @@ Every service's `main.ts` must `import '@retail-inventory-system/observability/t
 
 ## Caching
 
-The product stock query (`GET /product/:productId/stock`) reads from an append-only `product_stock` ledger. Each row records a delta (positive or negative) against a `(productId, storageId)` pair, so producing a current balance requires a `SUM(quantity) ... GROUP BY storageId` aggregation. Aggregation cost grows linearly with the row count, while the read pattern is heavy and the write pattern is comparatively light — a good fit for caching.
+> **Status:** the inventory persistence foundation has been rewritten (per
+> [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md)): the
+> append-only `product_stock` ledger is replaced by per-location `StockLevel`
+> running totals, and the stock cache + its read path were removed in that cut.
+> The cache-aside **mechanism** is preserved (ADR-016/021/022/023); only the
+> cached **value shape** changes — a `StockLevel` projection keyed on `variantId`
+> rather than a `SUM` aggregate keyed on `productId`. The description below is
+> retained as the cache-aside pattern of record and is rebuilt over the new
+> projection by a later inventory capability.
+
+The original product stock query read from an append-only `product_stock` ledger. Each row recorded a delta (positive or negative) against a `(productId, storageId)` pair, so producing a current balance required a `SUM(quantity) ... GROUP BY storageId` aggregation. Aggregation cost grows linearly with the row count, while the read pattern is heavy and the write pattern is comparatively light — a good fit for caching.
 
 The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. `GetStockUseCase` orchestrates the cache-aside read; `StockCache` (the `STOCK_CACHE` adapter) is a thin domain-shaped wrapper over the generic `CACHE_PORT`; `StockTypeormRepository` materializes the SUM/GROUP BY aggregate. The presentation-layer `StockController` is unaware of the cache.
 

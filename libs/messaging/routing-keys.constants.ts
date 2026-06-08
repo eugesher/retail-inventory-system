@@ -5,7 +5,6 @@ export const ROUTING_KEYS = {
   RETAIL_ORDER_CREATED: 'retail.order.created',
   RETAIL_ORDER_CONFIRMED: 'retail.order.confirmed',
   RETAIL_ORDER_CANCELLED: 'retail.order.cancelled',
-  INVENTORY_PRODUCT_STOCK_GET: 'inventory.product-stock.get',
   INVENTORY_ORDER_CONFIRM: 'inventory.order.confirm',
   INVENTORY_STOCK_LOW: 'inventory.stock.low',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',

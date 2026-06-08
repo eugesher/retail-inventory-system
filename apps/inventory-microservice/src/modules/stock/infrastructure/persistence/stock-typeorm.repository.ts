@@ -1,208 +1,110 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepPartial, EntityManager, Repository } from 'typeorm';
+import { DeepPartial, FindOptionsWhere, In, Repository } from 'typeorm';
 
-import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
-import { StockItem } from '../../domain';
-import {
-  IStockAggregateForProductPayload,
-  IStockAppendDeltasPayload,
-  IStockLockedTotalsPayload,
-  IStockRepositoryPort,
-  ITransactionScope,
-} from '../../application/ports';
-import { ProductStock } from './product-stock.entity';
-import { StockItemMapper } from './stock-item.mapper';
+import { StockLevel, StockLocation } from '../../domain';
+import { IStockRepositoryPort } from '../../application/ports';
+import { StockLevelEntity } from './stock-level.entity';
+import { StockLevelMapper } from './stock-level.mapper';
+import { StockLocationEntity } from './stock-location.entity';
+import { StockLocationMapper } from './stock-location.mapper';
 
-interface IProductStockRawResult {
-  storageId: string;
-  quantity: `${number}`;
-  updatedAt: Date;
-}
-
+// The only `@InjectRepository` site for the inventory context. Extends
+// `BaseTypeormRepository` for the `toDomain`/`toEntity` seam over the primary
+// `StockLevel` aggregate; `StockLocation` is the secondary read model (its own
+// repository, like `TaxCategory` in pricing). Returns domain types only — no
+// TypeORM leak past this file (ADR-017).
 @Injectable()
 export class StockTypeormRepository
-  extends BaseTypeormRepository<ProductStock, StockItem>
+  extends BaseTypeormRepository<StockLevelEntity, StockLevel>
   implements IStockRepositoryPort
 {
   constructor(
-    @InjectRepository(ProductStock)
-    private readonly productStockRepository: Repository<ProductStock>,
+    @InjectRepository(StockLevelEntity)
+    private readonly stockLevelRepository: Repository<StockLevelEntity>,
+    @InjectRepository(StockLocationEntity)
+    private readonly stockLocationRepository: Repository<StockLocationEntity>,
     @InjectPinoLogger(StockTypeormRepository.name)
     private readonly logger: PinoLogger,
   ) {
-    super(productStockRepository);
+    super(stockLevelRepository);
   }
 
-  protected toDomain(entity: ProductStock): StockItem {
-    return StockItemMapper.toDomain(entity);
+  protected toDomain(entity: StockLevelEntity): StockLevel {
+    return StockLevelMapper.toDomain(entity);
   }
 
-  protected toEntity(domain: StockItem): DeepPartial<ProductStock> {
-    return {
-      productId: domain.productId,
-      storageId: domain.storageId,
-      quantity: domain.quantity,
-    };
+  protected toEntity(domain: StockLevel): DeepPartial<StockLevelEntity> {
+    return StockLevelMapper.toEntity(domain);
   }
 
-  private toEntityManager(scope: ITransactionScope | undefined): EntityManager | undefined {
-    return scope as unknown as EntityManager | undefined;
+  public async findLocation(id: string): Promise<StockLocation | null> {
+    const entity = await this.stockLocationRepository.findOne({ where: { id } });
+    return entity ? StockLocationMapper.toDomain(entity) : null;
   }
 
-  private repoFor(scope: ITransactionScope | undefined): Repository<ProductStock> {
-    const em = this.toEntityManager(scope);
-    return em ? em.getRepository(ProductStock) : this.productStockRepository;
+  public async listLocations(activeOnly = false): Promise<StockLocation[]> {
+    const where: FindOptionsWhere<StockLocationEntity> = activeOnly ? { active: true } : {};
+    const entities = await this.stockLocationRepository.find({ where, order: { id: 'ASC' } });
+    return entities.map((entity) => StockLocationMapper.toDomain(entity));
   }
 
-  public async findById(id: number): Promise<StockItem | null> {
-    const entity = await this.productStockRepository.findOne({ where: { id } });
-    return entity ? StockItemMapper.toDomain(entity) : null;
-  }
-
-  public findBySku(sku: string): Promise<StockItem | null> {
-    // Intentional null, not a "not implemented" stub — `product_stock` has
-    // no SKU column today; callers must tolerate the miss.
-    void sku;
-    return Promise.resolve(null);
-  }
-
-  public async aggregateForProduct(
-    payload: IStockAggregateForProductPayload,
-    scope?: ITransactionScope,
-  ): Promise<ProductStockGetResponseDto> {
-    const { productId, storageIds, correlationId } = payload;
-    const builder = this.repoFor(scope)
-      .createQueryBuilder('ProductStock')
-      .select([
-        'ProductStock.storageId      AS storageId',
-        'SUM(ProductStock.quantity)  AS quantity',
-        'MAX(ProductStock.createdAt) AS updatedAt',
-      ])
-      .where('ProductStock.productId = :productId', { productId })
-      .groupBy('storageId');
-
-    if (storageIds && storageIds.length > 0) {
-      builder.andWhere('ProductStock.storageId IN (:...storageIds)', { storageIds });
-    }
-
-    let stock: IProductStockRawResult[];
-
-    try {
-      stock = await builder.getRawMany<IProductStockRawResult>();
-    } catch (error) {
-      this.logger.error(
-        { err: error as Error, correlationId, productId, storageIds },
-        'Failed to aggregate product stock by storage',
-      );
-
-      throw error;
-    }
-
-    this.logger.debug(
-      { correlationId, productId, rowCount: stock.length },
-      'Stock rows retrieved from DB',
-    );
-
-    let quantity = 0;
-    let latestDate = new Date(0);
-
-    const items = stock.map((item) => {
-      const itemQuantity = Number(item.quantity);
-
-      quantity += itemQuantity;
-
-      if (item.updatedAt > latestDate) {
-        latestDate = item.updatedAt;
-      }
-
-      return { storageId: item.storageId, quantity: itemQuantity, updatedAt: item.updatedAt };
+  public async findStockLevel(
+    variantId: number,
+    stockLocationId: string,
+  ): Promise<StockLevel | null> {
+    const entity = await this.stockLevelRepository.findOne({
+      where: { variantId, stockLocationId },
     });
-    const updatedAt = stock.length > 0 ? latestDate : null;
-
-    return { productId, quantity, updatedAt, items };
+    return entity ? StockLevelMapper.toDomain(entity) : null;
   }
 
-  public async lockedTotalsByProduct(
-    payload: IStockLockedTotalsPayload,
-    scope: ITransactionScope,
-  ): Promise<Map<number, number>> {
-    const { productIds, correlationId } = payload;
+  public async findStockLevelsByVariant(
+    variantId: number,
+    stockLocationIds?: string[],
+  ): Promise<StockLevel[]> {
+    const where: FindOptionsWhere<StockLevelEntity> =
+      stockLocationIds && stockLocationIds.length > 0
+        ? { variantId, stockLocationId: In(stockLocationIds) }
+        : { variantId };
+    const entities = await this.stockLevelRepository.find({ where });
+    return entities.map((entity) => StockLevelMapper.toDomain(entity));
+  }
 
-    if (productIds.length === 0) {
-      return new Map();
+  public async saveStockLevel(stockLevel: StockLevel): Promise<StockLevel> {
+    const partial = StockLevelMapper.toEntity(stockLevel);
+
+    // A detached level (id null) for an existing `(variant_id, stock_location_id)`
+    // pair must UPDATE that row, not collide with the UNIQUE constraint on
+    // INSERT — resolve to the live id first so `save` takes the update path.
+    if (partial.id === undefined) {
+      const existing = await this.stockLevelRepository.findOne({
+        where: { variantId: stockLevel.variantId, stockLocationId: stockLevel.stockLocationId },
+      });
+      if (existing) {
+        partial.id = existing.id;
+      }
     }
 
-    const entityManager = this.toEntityManager(scope)!;
-    let rows: { productId: string; totalQuantity: string }[];
-
-    try {
-      rows = await entityManager
-        .createQueryBuilder(ProductStock, 'ps')
-        .select('ps.productId', 'productId')
-        .addSelect('SUM(ps.quantity)', 'totalQuantity')
-        .where('ps.productId IN (:...productIds)', { productIds })
-        .groupBy('ps.productId')
-        .setLock('pessimistic_write')
-        .getRawMany();
-    } catch (error) {
-      this.logger.error(
-        { err: error as Error, correlationId, productIds },
-        'Failed to load locked stock totals',
-      );
-
-      throw error;
-    }
+    const saved = await this.stockLevelRepository.save(partial);
 
     this.logger.debug(
-      { correlationId, productIds, balanceCount: rows.length },
-      'Locked stock totals loaded from DB',
+      { stockLevelId: saved.id, variantId: stockLevel.variantId },
+      'Stock level persisted',
     );
 
-    return new Map(
-      rows.map(({ productId, totalQuantity }) => [Number(productId), Number(totalQuantity)]),
-    );
-  }
-
-  public async appendDeltas(
-    payload: IStockAppendDeltasPayload,
-    scope?: ITransactionScope,
-  ): Promise<void> {
-    const { items, correlationId } = payload;
-    const itemCount = items.length;
-
-    this.logger.debug(
-      { correlationId, itemCount, withinTransaction: !!scope },
-      'Inserting product stock ledger rows',
-    );
-
-    try {
-      await this.repoFor(scope).insert(items);
-    } catch (error) {
-      this.logger.error(
-        { err: error as Error, correlationId, itemCount },
-        'Failed to insert product stock ledger rows',
+    // Re-read so the returned aggregate carries the concrete generated id, the
+    // TypeORM-managed version, and the DB timestamps. The row was just
+    // committed, so a miss here is an invariant breach rather than a not-found.
+    const reloaded = await this.stockLevelRepository.findOne({ where: { id: saved.id } });
+    if (!reloaded) {
+      throw new Error(
+        `StockTypeormRepository.saveStockLevel: stock_level ${saved.id} vanished after commit`,
       );
-
-      throw error;
     }
-
-    this.logger.info(
-      {
-        correlationId,
-        itemCount,
-        productIds: [...new Set(items.map((i) => i.productId))],
-      },
-      'Product stock ledger rows inserted',
-    );
-  }
-
-  public async save(stockItem: StockItem): Promise<StockItem> {
-    const partial = this.toEntity(stockItem);
-    const saved = await this.productStockRepository.save(partial);
-    return StockItemMapper.toDomain(saved as ProductStock);
+    return StockLevelMapper.toDomain(reloaded);
   }
 }

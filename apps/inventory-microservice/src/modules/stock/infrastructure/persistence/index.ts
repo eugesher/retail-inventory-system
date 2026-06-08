@@ -1,16 +1,15 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
-import { ProductStock } from './product-stock.entity';
-import { ProductStockAction } from './product-stock-action.entity';
-import { Storage } from './storage.entity';
+import { StockLevelEntity } from './stock-level.entity';
+import { StockLocationEntity } from './stock-location.entity';
 
 export const stockEntities: TypeOrmModuleOptions['entities'] = [
-  ProductStock,
-  ProductStockAction,
-  Storage,
+  StockLocationEntity,
+  StockLevelEntity,
 ];
 
-export { ProductStock, ProductStockAction, Storage };
-export * from './stock-item.mapper';
+export { StockLocationEntity, StockLevelEntity };
+export * from './stock-location.mapper';
+export * from './stock-level.mapper';
 export * from './stock-typeorm.repository';
 export * from './typeorm-transaction.adapter';
