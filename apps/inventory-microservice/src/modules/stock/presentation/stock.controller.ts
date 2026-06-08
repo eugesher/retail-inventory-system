@@ -3,25 +3,34 @@ import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 
 import {
   IProductStockOrderConfirmPayload,
+  IStockAdjustPayload,
   IStockLocationsListPayload,
+  IStockReceivePayload,
   IVariantStockGetPayload,
+  StockLevelView,
   StockLocationView,
   VariantStockView,
 } from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
-import { ListLocationsUseCase, QueryAvailabilityUseCase } from '../application/use-cases';
+import {
+  AdjustStockUseCase,
+  ListLocationsUseCase,
+  QueryAvailabilityUseCase,
+  ReceiveStockUseCase,
+} from '../application/use-cases';
 
 @Controller()
 export class StockController {
   constructor(
     private readonly queryAvailability: QueryAvailabilityUseCase,
     private readonly listLocations: ListLocationsUseCase,
+    private readonly receiveStock: ReceiveStockUseCase,
+    private readonly adjustStock: AdjustStockUseCase,
   ) {}
 
   // Read path on the new model (ADR-027): per-variant availability across the
-  // requested stock locations. No caller exists until the gateway endpoint lands
-  // — this handler is reachable directly over RMQ today.
+  // requested stock locations.
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_GET)
   public handleStockLevelGet(
     @Payload() payload: IVariantStockGetPayload,
@@ -35,6 +44,22 @@ export class StockController {
     @Payload() payload: IStockLocationsListPayload,
   ): Promise<StockLocationView[]> {
     return this.listLocations.execute(payload);
+  }
+
+  // Receive Stock write path (ADR-027): raises on-hand by a positive quantity.
+  // A domain rejection (e.g. an inactive/unknown location) is terminated by the
+  // `InventoryRpcExceptionFilter` into a `{ statusCode, ... }` the gateway maps.
+  @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_RECEIVE)
+  public handleStockReceive(@Payload() payload: IStockReceivePayload): Promise<StockLevelView> {
+    return this.receiveStock.execute(payload);
+  }
+
+  // Adjust Stock write path (ADR-027): applies a signed delta with a mandatory
+  // reasonCode. A result that would go below zero is rejected as a 409 (mapped by
+  // the `InventoryRpcExceptionFilter`).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST)
+  public handleStockAdjust(@Payload() payload: IStockAdjustPayload): Promise<StockLevelView> {
+    return this.adjustStock.execute(payload);
   }
 
   // The `inventory.order.confirm` seam is preserved as an explicit deprecation

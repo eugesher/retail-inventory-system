@@ -1,4 +1,15 @@
-import { Controller, Get, Param, ParseBoolPipe, ParseIntPipe, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseBoolPipe,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -9,32 +20,42 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
-import { Public, RequiresPermission } from '@retail-inventory-system/auth';
+import { CurrentUser, Public, RequiresPermission } from '@retail-inventory-system/auth';
 import {
+  ICurrentUser,
   PermissionCodeEnum,
+  StockLevelView,
   StockLocationView,
   VariantStockView,
 } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
-import { GetVariantStockUseCase, ListLocationsUseCase } from '../application/use-cases';
-import { VariantStockQueryDto } from './dto';
+import {
+  AdjustStockUseCase,
+  GetVariantStockUseCase,
+  ListLocationsUseCase,
+  ReceiveStockUseCase,
+} from '../application/use-cases';
+import { AdjustStockRequestDto, ReceiveStockRequestDto, VariantStockQueryDto } from './dto';
 
-// HTTP surface over the inventory microservice's two read RPCs (ADR-009). The
+// HTTP surface over the inventory microservice's read + write RPCs (ADR-009). The
 // gateway holds no inventory state of its own — each method is a thin port→adapter
 // pass to `inventory_queue`.
 //
-// The two routes are gated differently on purpose (ADR-024): the stock-location
-// list is operational data, so it requires the `inventory:read` permission (a
-// staff-only code — customer tokens carry no `permissions` claim); the per-variant
-// availability read is `@Public()`, because an unauthenticated shopper needs to
-// see whether an item is in stock before checking out.
+// The routes are gated by intent (ADR-024): the per-variant availability read is
+// `@Public()`, because an unauthenticated shopper needs to see whether an item is
+// in stock before checking out; the stock-location list is operational data, so it
+// requires `inventory:read`; the two write routes require `inventory:adjust`.
+// Both permission codes are staff-only — customer tokens carry no `permissions`
+// claim — so the location list and the writes are staff-only by construction.
 @ApiTags('Inventory')
 @Controller('inventory')
 export class InventoryController {
   constructor(
     private readonly getVariantStockUseCase: GetVariantStockUseCase,
     private readonly listLocationsUseCase: ListLocationsUseCase,
+    private readonly receiveStockUseCase: ReceiveStockUseCase,
+    private readonly adjustStockUseCase: AdjustStockUseCase,
   ) {}
 
   @Get('locations')
@@ -77,5 +98,50 @@ export class InventoryController {
       { variantId, stockLocationIds: query.locationIds },
       correlationId,
     );
+  }
+
+  @Post('variants/:variantId/stock/receive')
+  @RequiresPermission(PermissionCodeEnum.INVENTORY_ADJUST)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Receive stock — raise on-hand (staff, inventory:adjust)' })
+  @ApiParam({ name: 'variantId', type: Number, example: 1 })
+  @ApiOkResponse({
+    description: 'Updated stock level for the affected location',
+    type: StockLevelView,
+  })
+  @ApiProduces('application/json')
+  public async receiveStock(
+    @Param('variantId', ParseIntPipe) variantId: number,
+    @Body() dto: ReceiveStockRequestDto,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<StockLevelView> {
+    return this.receiveStockUseCase.execute(
+      { ...dto, variantId, actorId: actor.id },
+      correlationId,
+    );
+  }
+
+  @Post('variants/:variantId/stock/adjust')
+  @RequiresPermission(PermissionCodeEnum.INVENTORY_ADJUST)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Adjust stock — signed delta with a reason (staff, inventory:adjust)' })
+  @ApiParam({ name: 'variantId', type: Number, example: 1 })
+  // A signed adjustment that would drive on-hand below zero is a 409 (surfaced
+  // from the inventory domain via its RPC exception filter).
+  @ApiOkResponse({
+    description: 'Updated stock level for the affected location',
+    type: StockLevelView,
+  })
+  @ApiProduces('application/json')
+  public async adjustStock(
+    @Param('variantId', ParseIntPipe) variantId: number,
+    @Body() dto: AdjustStockRequestDto,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<StockLevelView> {
+    return this.adjustStockUseCase.execute({ ...dto, variantId, actorId: actor.id }, correlationId);
   }
 }

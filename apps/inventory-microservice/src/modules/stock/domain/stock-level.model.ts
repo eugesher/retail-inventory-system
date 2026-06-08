@@ -7,6 +7,8 @@
 // — the inventory domain MUST NOT import the catalog `ProductVariant`; the only
 // coupling is the FK in persistence (ADR-004 / ADR-017 / ADR-025).
 
+import { InventoryDomainException, InventoryErrorCodeEnum } from './inventory.exception';
+
 interface IStockLevelProps {
   id?: number | null;
   variantId: number;
@@ -88,7 +90,13 @@ export class StockLevel {
     }
     const next = this._quantityOnHand + delta;
     if (next < 0) {
-      throw new Error(
+      // The one domain rejection on the write path that surfaces to an HTTP
+      // caller — a signed Adjust that would drive on-hand below zero. Thrown as
+      // a typed `InventoryDomainException` so the presentation filter maps it to
+      // a 409 (the gateway's `throwRpcError` keys on the `statusCode`). The
+      // message keeps the word "negative" so it stays self-describing in logs.
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
         `StockLevel.changeOnHand: resulting quantityOnHand would be negative (${next})`,
       );
     }

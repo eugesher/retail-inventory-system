@@ -1,37 +1,15 @@
-import { PinoLogger } from 'nestjs-pino';
-
 import {
   ICatalogVariantCreatedEvent,
   INVENTORY_DEFAULT_STOCK_LOCATION,
 } from '@retail-inventory-system/contracts';
 
 import { StockLevel, StockLevelInitializedEvent } from '../../../domain';
-import { IStockEventsPublisherPort } from '../../ports';
 import { AutoInitStockLevelUseCase } from '../auto-init-stock-level.use-case';
-import { InMemoryStockRepository } from './test-doubles';
-
-// Records `publishStockLevelInitialized` calls so the spec can assert the event
-// fires exactly once (and never on the idempotent paths). The other two port
-// methods are no-ops — auto-init only emits the initialized event.
-class RecordingStockEventsPublisher implements IStockEventsPublisherPort {
-  public readonly initialized: { event: StockLevelInitializedEvent; correlationId?: string }[] = [];
-
-  public publishStockLow(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  public publishStockReserved(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  public publishStockLevelInitialized(
-    event: StockLevelInitializedEvent,
-    correlationId?: string,
-  ): Promise<void> {
-    this.initialized.push({ event, correlationId });
-    return Promise.resolve();
-  }
-}
+import {
+  InMemoryStockRepository,
+  RecordingStockEventsPublisher,
+  silentLogger,
+} from './test-doubles';
 
 const VARIANT_ID = 42;
 const CORRELATION_ID = 'corr-auto-init-1';
@@ -47,15 +25,6 @@ const variantCreatedEvent = (
   correlationId: CORRELATION_ID,
   ...overrides,
 });
-
-// A silent logger so the spec asserts behaviour, not log output.
-const silentLogger = (): PinoLogger =>
-  ({
-    info: jest.fn(),
-    debug: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-  }) as unknown as PinoLogger;
 
 describe('AutoInitStockLevelUseCase', () => {
   let repository: InMemoryStockRepository;

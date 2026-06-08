@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
 import {
@@ -13,11 +14,13 @@ import {
   TRANSACTION_PORT,
 } from '../application/ports';
 import {
+  AdjustStockUseCase,
   AutoInitStockLevelUseCase,
   ListLocationsUseCase,
   QueryAvailabilityUseCase,
+  ReceiveStockUseCase,
 } from '../application/use-cases';
-import { StockController } from '../presentation/stock.controller';
+import { InventoryRpcExceptionFilter, StockController } from '../presentation';
 import { StockCache } from './cache';
 import { CatalogEventsConsumer } from './consumers';
 import { StockRabbitmqPublisher } from './messaging';
@@ -63,6 +66,13 @@ import {
     AutoInitStockLevelUseCase,
     QueryAvailabilityUseCase,
     ListLocationsUseCase,
+    ReceiveStockUseCase,
+    AdjustStockUseCase,
+
+    // Terminates `InventoryDomainException` into the `{ statusCode, message, code }`
+    // wire shape the gateway maps (ADR-027). Registered via APP_FILTER so it
+    // applies to every `@MessagePattern` handler (the Receive/Adjust write path).
+    { provide: APP_FILTER, useClass: InventoryRpcExceptionFilter },
   ],
 })
 export class StockModule {}

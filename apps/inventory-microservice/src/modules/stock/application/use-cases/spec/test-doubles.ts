@@ -1,13 +1,24 @@
 import { VariantStockView } from '@retail-inventory-system/contracts';
 
-import { StockLevel, StockLocation } from '../../../domain';
+import {
+  StockAdjustedEvent,
+  StockLevel,
+  StockLevelInitializedEvent,
+  StockLocation,
+  StockLowEvent,
+  StockReceivedEvent,
+  StockReservedEvent,
+} from '../../../domain';
 import {
   IStockCacheGetPayload,
   IStockCacheGetResult,
   IStockCacheInvalidateItem,
   IStockCachePort,
   IStockCacheSetPayload,
+  IStockEventsPublisherPort,
   IStockRepositoryPort,
+  ITransactionPort,
+  ITransactionScope,
   IStockWithInvalidationOptions,
 } from '../../ports';
 
@@ -133,3 +144,69 @@ export class InMemoryStockCache implements IStockCachePort {
     return result;
   }
 }
+
+// Runs the transactional `work` immediately with an opaque sentinel scope — the
+// real adapter opens a MySQL transaction, but the use cases never touch the scope
+// directly (the repository owns persistence), so a pass-through double is faithful
+// to the contract the write use cases depend on.
+export class ImmediateTransactionPort implements ITransactionPort {
+  public calls = 0;
+
+  public runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
+    this.calls += 1;
+    return work({} as unknown as ITransactionScope);
+  }
+}
+
+// Records every publish so the write-use-case specs can assert which events fired
+// (and, for low-stock, that it fires only at/below the threshold). All methods
+// resolve — the post-commit emit is best-effort (ADR-020).
+export class RecordingStockEventsPublisher implements IStockEventsPublisherPort {
+  public readonly low: { event: StockLowEvent; correlationId?: string }[] = [];
+  public readonly received: { event: StockReceivedEvent; correlationId?: string }[] = [];
+  public readonly adjusted: { event: StockAdjustedEvent; correlationId?: string }[] = [];
+  public readonly reserved: { event: StockReservedEvent; correlationId?: string }[] = [];
+  public readonly initialized: { event: StockLevelInitializedEvent; correlationId?: string }[] = [];
+
+  public publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void> {
+    this.low.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void> {
+    this.reserved.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockReceived(event: StockReceivedEvent, correlationId?: string): Promise<void> {
+    this.received.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockAdjusted(event: StockAdjustedEvent, correlationId?: string): Promise<void> {
+    this.adjusted.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockLevelInitialized(
+    event: StockLevelInitializedEvent,
+    correlationId?: string,
+  ): Promise<void> {
+    this.initialized.push({ event, correlationId });
+    return Promise.resolve();
+  }
+}
+
+// A silent `PinoLogger` so specs assert behaviour, not log output. Uses plain
+// no-op functions (not `jest.fn()`) so this shared helper stays compilable by the
+// production webpack build, which includes non-`.spec.ts` files.
+export const silentLogger = (): import('nestjs-pino').PinoLogger => {
+  const noop = (): void => undefined;
+  return {
+    info: noop,
+    debug: noop,
+    warn: noop,
+    error: noop,
+    assign: noop,
+  } as unknown as import('nestjs-pino').PinoLogger;
+};

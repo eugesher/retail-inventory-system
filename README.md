@@ -62,9 +62,12 @@ The system handles order lifecycle management and product stock tracking across 
 │  PATCH /api/catalog/variants/:id/tax-category             │
 │                                                           │
 │  Inventory (locations: bearer + inventory:read,           │
-│             variant stock: public)                        │
+│             variant stock: public,                        │
+│             receive/adjust: bearer + inventory:adjust)    │
 │  GET   /api/inventory/locations                           │
 │  GET   /api/inventory/variants/:id/stock                  │
+│  POST  /api/inventory/variants/:id/stock/receive          │
+│  POST  /api/inventory/variants/:id/stock/adjust           │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -177,15 +180,15 @@ apps/api-gateway/src/
     │   │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id[/prices|/price|/tax-category], /tax-categories
     │   │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory request + ListProducts/PriceQuery query DTOs
     │   └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
-    └── inventory/                             # talks to inventory-microservice (read RPCs)
+    └── inventory/                             # talks to inventory-microservice (read + write RPCs)
         ├── application/
         │   ├── ports/inventory-gateway.port.ts # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
-        │   └── use-cases/                     # GetVariantStockUseCase, ListLocationsUseCase
+        │   └── use-cases/                     # GetVariantStock, ListLocations, ReceiveStock, AdjustStock
         ├── infrastructure/
-        │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read RPCs)
+        │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read + write RPCs)
         ├── presentation/
-        │   ├── inventory.controller.ts        # GET /api/inventory/locations, /variants/:id/stock
-        │   └── dto/variant-stock-query.dto.ts # comma-separated ?locationIds
+        │   ├── inventory.controller.ts        # GET .../locations, /variants/:id/stock; POST /variants/:id/stock/receive|adjust
+        │   └── dto/                           # variant-stock-query (?locationIds), receive-stock, adjust-stock request DTOs
         └── inventory.module.ts                # binds INVENTORY_GATEWAY_PORT -> InventoryRabbitmqAdapter
 ```
 
@@ -421,11 +424,15 @@ The publish route enforces an **active-price precondition**: it `409`s (`PRODUCT
 ### Inventory
 
 ```
-GET /api/inventory/locations                  # bearer + inventory:read  — list stock locations (?activeOnly)
-GET /api/inventory/variants/:variantId/stock  # public  — per-location availability + totals (?locationIds=a,b)
+GET  /api/inventory/locations                         # bearer + inventory:read   — list stock locations (?activeOnly)
+GET  /api/inventory/variants/:variantId/stock         # public  — per-location availability + totals (?locationIds=a,b)
+POST /api/inventory/variants/:variantId/stock/receive # bearer + inventory:adjust — raise on-hand { stockLocationId?, quantity }
+POST /api/inventory/variants/:variantId/stock/adjust  # bearer + inventory:adjust — signed delta { stockLocationId?, quantityDelta, reasonCode }
 ```
 
 The variant-stock read is **cache-aside** (Redis): the `VariantStockView` response (per-location `StockLevelView` rows + cross-location `totalOnHand` / `totalAvailable`) is cached under `ris:inventory:stock:v2:<variantId>:<facet>`. Omitting `?locationIds` aggregates across all stock locations (the comma-separated facet is `__all__`); passing a subset scopes the answer. A variant with no stock rows is a `200` zero-availability answer (`locations: []`), not a 404. The migration provisions a `default-warehouse` location and the seed (`scripts/seeds/stock-level.sql`) gives every seeded catalog variant 100 on hand there, so the public read returns a real figure out of the box.
+
+The two **write** routes are staff-only (`inventory:adjust`). **Receive** raises `quantityOnHand` by a positive `quantity`; **Adjust** applies a signed `quantityDelta` with a mandatory `reasonCode` and rejects a result below zero with a `409`. Both default `stockLocationId` to `default-warehouse` when omitted, return the updated single-location `StockLevelView`, invalidate the cached availability **post-commit** (ADR-023), lazy-init a missing `StockLevel`, and emit a reserved-surface event (`inventory.stock.received` / `inventory.stock.adjusted`); Adjust also re-fires `inventory.stock.low` (→ notification) when the post-commit on-hand falls at/below the threshold. **No `StockMovement`/audit row is written yet** — the `reasonCode` lives on the event + logs until the audit-log capability lands.
 
 ### Auth
 
