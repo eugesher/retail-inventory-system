@@ -141,9 +141,9 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | --------------------------- | ------------------------------- | ---------------------------------------------------- |
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
-| `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
+| `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
-| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, and emits `catalog.variant.created` / `catalog.product.published` / `catalog.product.archived`. Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
+| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
 
@@ -257,8 +257,11 @@ apps/inventory-microservice/src/
 > model. The inventory persistence foundation has been rewritten to per-location
 > `StockLevel` running totals + a location-aware `StockLocation` keyed on
 > `variantId` (see [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md));
-> the read/write operations, the cache rebuild, and the matching tree update land
-> with the inventory operations work.
+> the read RPCs, the cache rebuild, and an `infrastructure/consumers/catalog-events.consumer.ts`
+> that drives `AutoInitStockLevelUseCase` (auto-initializing a zeroed `StockLevel`
+> on `catalog.variant.created` and emitting the reserved
+> `inventory.stock-level.initialized`) have landed; the remaining write operations
+> and the matching tree update land with the inventory operations work.
 
 `ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts`; the events publisher and the `STOCK_EVENTS_PUBLISHER` symbol are retained for that later work. See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the new aggregate boundaries.
 

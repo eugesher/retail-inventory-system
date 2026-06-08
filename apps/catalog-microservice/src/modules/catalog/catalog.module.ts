@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
-import { MicroserviceClientCatalogModule } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientCatalogModule,
+  MicroserviceClientInventoryModule,
+} from '@retail-inventory-system/messaging';
 
 import {
   ACTIVE_PRICE_PROBE,
@@ -44,13 +47,17 @@ const DEFAULT_CURRENCY_PROVIDER = {
 // concrete class directly, while consumers depend on the port symbols
 // (`CATALOG_REPOSITORY`, `CATALOG_EVENTS_PUBLISHER`) — mirrors `stock.module.ts`
 // / `orders.module.ts`. `MicroserviceClientCatalogModule` provides the
-// `catalog_queue` `ClientProxy` the publisher injects; the `forFeature` array is
-// the entity-classes literal (the loose `catalogEntities` const type does not
-// satisfy `forFeature`).
+// `catalog_queue` `ClientProxy` for the reserved `catalog.product.*` events;
+// `MicroserviceClientInventoryModule` provides the `inventory_queue` `ClientProxy`
+// the publisher emits `catalog.variant.created` through (producer-targets-
+// consumer-queue — the inventory auto-init consumer listens there, ADR-008/020).
+// The `forFeature` array is the entity-classes literal (the loose
+// `catalogEntities` const type does not satisfy `forFeature`).
 @Module({
   imports: [
     DatabaseModule.forFeature([ProductEntity, ProductVariantEntity]),
     MicroserviceClientCatalogModule,
+    MicroserviceClientInventoryModule,
   ],
   controllers: [CatalogController],
   providers: [
