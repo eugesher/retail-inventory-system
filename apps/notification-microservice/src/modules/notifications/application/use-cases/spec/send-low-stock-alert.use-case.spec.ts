@@ -21,15 +21,16 @@ describe('SendLowStockAlertUseCase', () => {
     overrides: Partial<IInventoryStockLowEvent> = {},
   ): IInventoryStockLowEvent => ({
     correlationId: 'corr-2',
-    productId: 11,
-    storageId: 'head-warehouse',
+    variantId: 11,
+    stockLocationId: 'head-warehouse',
     quantity: 1,
     threshold: 5,
+    eventVersion: 'v1',
     occurredAt: '2026-05-13T12:35:00.000Z',
     ...overrides,
   });
 
-  it('dispatches a low-stock notification with product and threshold details', async () => {
+  it('dispatches a low-stock notification with variant and threshold details', async () => {
     await useCase.execute(buildEvent());
 
     expect(notifier.sent).toHaveLength(1);
@@ -37,13 +38,13 @@ describe('SendLowStockAlertUseCase', () => {
 
     expect(sent.recipient).toBe('ops:inventory');
     expect(sent.channel).toBe(NotificationChannelEnum.LOG);
-    expect(sent.subject).toContain('product 11');
+    expect(sent.subject).toContain('variant 11');
     expect(sent.subject).toContain('head-warehouse');
     expect(sent.body).toContain('1 units');
     expect(sent.body).toContain('threshold 5');
     expect(sent.metadata).toEqual({
-      productId: 11,
-      storageId: 'head-warehouse',
+      variantId: 11,
+      stockLocationId: 'head-warehouse',
       quantity: 1,
       threshold: 5,
       occurredAt: '2026-05-13T12:35:00.000Z',

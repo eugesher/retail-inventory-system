@@ -19,11 +19,11 @@ export class SendLowStockAlertUseCase {
     const notification = new Notification({
       recipient: 'ops:inventory',
       channel: NotificationChannelEnum.LOG,
-      subject: `Low stock: product ${event.productId} @ ${event.storageId}`,
-      body: `Product ${event.productId} in storage '${event.storageId}' has ${event.quantity} units left (threshold ${event.threshold}).`,
+      subject: `Low stock: variant ${event.variantId} @ ${event.stockLocationId}`,
+      body: `Variant ${event.variantId} at location '${event.stockLocationId}' has ${event.quantity} units left (threshold ${event.threshold}).`,
       metadata: {
-        productId: event.productId,
-        storageId: event.storageId,
+        variantId: event.variantId,
+        stockLocationId: event.stockLocationId,
         quantity: event.quantity,
         threshold: event.threshold,
         occurredAt: event.occurredAt,
@@ -33,8 +33,8 @@ export class SendLowStockAlertUseCase {
     this.logger.info(
       {
         correlationId: event.correlationId,
-        productId: event.productId,
-        storageId: event.storageId,
+        variantId: event.variantId,
+        stockLocationId: event.stockLocationId,
         quantity: event.quantity,
         threshold: event.threshold,
       },

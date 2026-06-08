@@ -30,8 +30,20 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_STOCK_LOW).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LOW,
     );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_RECEIVED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RECEIVED,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_ADJUSTED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_ADJUSTED,
+    );
     expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_GET).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_GET,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_RECEIVE).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_RECEIVE,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_ADJUST,
     );
     expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_INITIALIZED,
