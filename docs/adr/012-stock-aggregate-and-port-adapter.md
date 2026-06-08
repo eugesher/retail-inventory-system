@@ -1,7 +1,7 @@
 # ADR-012: Stock aggregate and the inventory port/adapter split
 
 - **Date**: 2026-05-13
-- **Status**: Accepted (cache port + adapter generalized by [ADR-016](016-cache-aside-generalized.md) → [ADR-021](021-cache-single-flight-and-ttl-jitter.md) → [ADR-022](022-cache-keys-tenant-and-schema-version.md) → [ADR-023](023-cache-invalidate-post-commit-by-type.md); fourth `ITransactionPort` added to ring-fence `ARCH-LINT-EX-01`; see References)
+- **Status**: Superseded by [ADR-027](027-stocklevel-running-totals-and-stocklocation.md) (the append-only `product_stock` ledger and the `StockItem` aggregate are replaced by per-location `StockLevel` running totals + a location-aware `StockLocation`, keyed on `variantId`). Historical context only; the cache port + adapter were generalized by [ADR-016](016-cache-aside-generalized.md) → [ADR-021](021-cache-single-flight-and-ttl-jitter.md) → [ADR-022](022-cache-keys-tenant-and-schema-version.md) → [ADR-023](023-cache-invalidate-post-commit-by-type.md); the fourth `ITransactionPort` was added to ring-fence `ARCH-LINT-EX-01`; see References.
 
 ---
 

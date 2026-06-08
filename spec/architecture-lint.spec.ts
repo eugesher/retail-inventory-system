@@ -283,7 +283,7 @@ describe('boundaries rules (ADR-017)', () => {
     // element; the *target* element is determined by the resolved file's
     // path, hence the real targets.
     it('domain may not import infrastructure', () => {
-      const code = `import { StockCache } from '../infrastructure/cache/stock.cache';\nexport const y = StockCache;\n`;
+      const code = `import { StockLevelEntity } from '../infrastructure/persistence/stock-level.entity';\nexport const y = StockLevelEntity;\n`;
       const messages = lint(
         code,
         'apps/inventory-microservice/src/modules/stock/domain/__fixture__.ts',
@@ -292,7 +292,7 @@ describe('boundaries rules (ADR-017)', () => {
     });
 
     it('application port may not import infrastructure', () => {
-      const code = `import { ProductStock } from '../../infrastructure/persistence/product-stock.entity';\nexport type Y = ProductStock;\n`;
+      const code = `import { StockLevelEntity } from '../../infrastructure/persistence/stock-level.entity';\nexport type Y = StockLevelEntity;\n`;
       const messages = lint(
         code,
         'apps/inventory-microservice/src/modules/stock/application/ports/__fixture__.ts',
@@ -312,7 +312,7 @@ describe('boundaries rules (ADR-017)', () => {
     });
 
     it('presentation may not import infrastructure', () => {
-      const code = `import { StockCache } from '../infrastructure/cache/stock.cache';\nexport const y = StockCache;\n`;
+      const code = `import { StockLevelEntity } from '../infrastructure/persistence/stock-level.entity';\nexport const y = StockLevelEntity;\n`;
       const messages = lint(
         code,
         'apps/inventory-microservice/src/modules/stock/presentation/__fixture__.ts',
@@ -567,7 +567,7 @@ describe('boundaries rules (ADR-017)', () => {
       const code = `import { CACHE_PORT } from '@retail-inventory-system/cache';\nexport const x = CACHE_PORT;\n`;
       const messages = lint(
         code,
-        'apps/inventory-microservice/src/modules/stock/infrastructure/cache/__fixture__.ts',
+        'apps/inventory-microservice/src/modules/stock/infrastructure/persistence/__fixture__.ts',
       );
       const boundariesMessages = messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'));
       expect(boundariesMessages).toEqual([]);
