@@ -1,10 +1,30 @@
-import { StockLowEvent, StockReservedEvent } from '../../domain';
+import {
+  StockAdjustedEvent,
+  StockLevelInitializedEvent,
+  StockLowEvent,
+  StockReceivedEvent,
+  StockReservedEvent,
+} from '../../domain';
 
 export const STOCK_EVENTS_PUBLISHER = Symbol('STOCK_EVENTS_PUBLISHER');
 
 export interface IStockEventsPublisherPort {
   // Application code awaits a plain Promise; the adapter materializes the
   // cold Observable from `ClientProxy.emit()` and waits for the broker ack.
+  // `inventory.stock.low` lands on `notification_events` (the notification
+  // service's queue); everything else here is a reserved surface on the
+  // inventory service's own `inventory_queue` (no cross-service consumer yet).
   publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void>;
   publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void>;
+  // Emitted by the Receive Stock operation onto `inventory_queue`.
+  publishStockReceived(event: StockReceivedEvent, correlationId?: string): Promise<void>;
+  // Emitted by the Adjust Stock operation onto `inventory_queue`.
+  publishStockAdjusted(event: StockAdjustedEvent, correlationId?: string): Promise<void>;
+  // Emitted onto `inventory_queue` when the auto-init consumer creates a
+  // brand-new `stock_level` row — a reserved surface, no cross-service consumer
+  // yet.
+  publishStockLevelInitialized(
+    event: StockLevelInitializedEvent,
+    correlationId?: string,
+  ): Promise<void>;
 }

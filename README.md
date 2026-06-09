@@ -45,7 +45,6 @@ The system handles order lifecycle management and product stock tracking across 
 │  Domain                                                   │
 │  POST  /api/order                                         │
 │  PUT   /api/order/:id/confirm                             │
-│  GET   /api/product/:productId/stock                      │
 │                                                           │
 │  Catalog (write: bearer + permission, read: public)       │
 │  POST  /api/catalog/products                              │
@@ -61,15 +60,23 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/catalog/tax-categories                        │
 │  GET   /api/catalog/tax-categories                        │
 │  PATCH /api/catalog/variants/:id/tax-category             │
+│                                                           │
+│  Inventory (locations: bearer + inventory:read,           │
+│             variant stock: public,                        │
+│             receive/adjust: bearer + inventory:adjust)    │
+│  GET   /api/inventory/locations                           │
+│  GET   /api/inventory/variants/:id/stock                  │
+│  POST  /api/inventory/variants/:id/stock/receive          │
+│  POST  /api/inventory/variants/:id/stock/adjust           │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
-│                        │  │                               │
-│  retail.order.create   │  │  inventory.product-stock.get  │
-│  retail.order.confirm ─┼──► inventory.order.confirm       │
-│  retail.order.get      │  │                               │
+│                        │  │  RPC: stock-level.get,        │
+│  retail.order.create   │  │  location.list,receive,adjust │
+│  retail.order.confirm ─┼──► inventory.order.confirm (stub)│
+│  retail.order.get      │  │  Consumes: variant.created    │
 │                        │  │  Emits:                       │
 │  Emits:                │  │  inventory.stock.low ─────────┼─┐
 │  retail.order.created ─┼──┐                               │ │
@@ -86,8 +93,8 @@ The system handles order lifecycle management and product stock tracking across 
 │                        Shared DB                          │ │
 │  staff_user / customer / role / permission                │ │
 │  role_permissions / staff_user_roles                      │ │
-│  order / order_product / product_stock                    │ │
-│  storage / order_status / order_product_status            │ │
+│  order / order_product / order_status                     │ │
+│  order_product_status / stock_location / stock_level      │ │
 │  product / product_variant                                │ │
 │  price / tax_category                                     │ │
 └───────────────────────────────────────────────────────────┘ │
@@ -100,10 +107,12 @@ The system handles order lifecycle management and product stock tracking across 
 
 ┌───────────────────────────────────────────────────────────────┐
 │                  Catalog Microservice (RMQ)                   │
-│  Binds: catalog_queue (product / variant context)             │
+│  Binds: catalog_queue (product / variant + pricing)           │
 │  Handles: product register/publish/archive, variant.create    │
-│  Emits: variant.created, product.published/archived           │
+│  Emits: variant.created -> inventory_queue (auto-init)        │
+│         product.published / archived (reserved)               │
 │  Reads: product.list, product.get, variant.get                │
+│  Pricing: price.set/list/select + tax-category RPCs           │
 └───────────────────────────────────────────────────────────────┘
 
 OpenTelemetry: every service exports OTLP/HTTP spans through the
@@ -111,7 +120,7 @@ otel-collector → Jaeger UI at http://localhost:16686 (see the
 "Distributed tracing" section below).
 ```
 
-The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. The `product_stock.product_id` / `order_product.product_id` columns survive today as plain integers with **no foreign key** (the standalone inventory `product` table was dropped); a later inventory/retail capability reshapes them onto a catalog `variantId`.
+The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. Inventory already keys on the variant: `stock_level.variant_id` is a real foreign key to `product_variant(id)` — the append-only `product_stock` ledger was dropped in the [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) rewrite. The retail `order_product.product_id` column still survives as a plain integer with **no foreign key**; a later retail capability reshapes it onto a catalog `variantId`.
 
 A sibling **`pricing`** module colocates inside the same microservice (it shares `catalog_queue` and keys on the same `variantId`). It owns two tables: `price` — an append-only-for-history, `(variantId, currency)`-scoped, time-bounded ledger where a price change is a new row plus a close of the predecessor's `[validFrom, validTo)` interval (at most one open row per scope, backstopped by a generated-column UNIQUE index) — and `tax_category`, a classification label that variants point at through the nullable `product_variant.tax_category_id` FK (`ON DELETE SET NULL`). See [ADR-026](docs/adr/026-price-append-only-ledger-and-tax-category.md). It exposes six RPCs on `catalog_queue` — three price (`catalog.price.set`, one command for both Set and Schedule distinguished by `validFrom`; `catalog.price.list`; and `catalog.price.select`, Select Applicable Price: the deterministic `(variantId, currency, asOf)` → single price, resolved priority-then-recency in the use case) and three tax-category (`catalog.tax-category.create`, `catalog.tax-category.list`, and `catalog.variant.set-tax-category`, which attaches a category to a variant by writing the `product_variant.tax_category_id` FK through a parameterized query rather than a cross-module entity import) — and emits `catalog.price.changed` / `catalog.price.scheduled`. Rates/jurisdictions and the gateway HTTP endpoints are later work.
 
@@ -137,9 +146,9 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | --------------------------- | ------------------------------- | ---------------------------------------------------- |
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
-| `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Stock queries and reservation                        |
+| `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
-| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, and emits `catalog.variant.created` / `catalog.product.published` / `catalog.product.archived`. Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
+| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
 
@@ -161,28 +170,28 @@ apps/api-gateway/src/
     │   └── presentation/
     │       ├── order.controller.ts            # POST/PUT /api/order…
     │       └── pipes/order-confirm.pipe.ts
-    ├── inventory/                             # talks to inventory-microservice
+    ├── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
     │   ├── application/
-    │   │   ├── ports/inventory-gateway.port.ts
-    │   │   └── use-cases/get-product-stock.use-case.ts
+    │   │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
+    │   │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
+    │   │                                      #   + SetPrice/ListPrices/GetApplicablePrice
+    │   │                                      #   + CreateTaxCategory/ListTaxCategories/AttachVariantTaxCategory
     │   ├── infrastructure/
-    │   │   ├── messaging/inventory-rabbitmq.adapter.ts
-    │   │   └── inventory.module.ts
-    │   └── presentation/
-    │       ├── product.controller.ts          # GET /api/product/:id/stock
-    │       └── dto/product-stock-get-query.dto.ts
-    └── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
+    │   │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder (catalog + pricing RPCs)
+    │   ├── presentation/
+    │   │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id[/prices|/price|/tax-category], /tax-categories
+    │   │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory request + ListProducts/PriceQuery query DTOs
+    │   └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
+    └── inventory/                             # talks to inventory-microservice (read + write RPCs)
         ├── application/
-        │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
-        │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
-        │                                      #   + SetPrice/ListPrices/GetApplicablePrice
-        │                                      #   + CreateTaxCategory/ListTaxCategories/AttachVariantTaxCategory
+        │   ├── ports/inventory-gateway.port.ts # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
+        │   └── use-cases/                     # GetVariantStock, ListLocations, ReceiveStock, AdjustStock
         ├── infrastructure/
-        │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder (catalog + pricing RPCs)
+        │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read + write RPCs)
         ├── presentation/
-        │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id[/prices|/price|/tax-category], /tax-categories
-        │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory request + ListProducts/PriceQuery query DTOs
-        └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
+        │   ├── inventory.controller.ts        # GET .../locations, /variants/:id/stock; POST /variants/:id/stock/receive|adjust
+        │   └── dto/                           # variant-stock-query (?locationIds), receive-stock, adjust-stock request DTOs
+        └── inventory.module.ts                # binds INVENTORY_GATEWAY_PORT -> InventoryRabbitmqAdapter
 ```
 
 The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, and `PermissionAggregate` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
@@ -227,29 +236,36 @@ apps/inventory-microservice/src/
 ├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 └── modules/stock/
     ├── domain/
-    │   ├── stock-item.model.ts                # aggregate (quantity / reservedQuantity invariants)
-    │   ├── storage.model.ts                   # ValueObject<Storage>
-    │   └── events/                             # StockReservedEvent, StockReleasedEvent, StockLowEvent
+    │   ├── stock-level.model.ts               # per-location running totals (changeOnHand; available getter; version)
+    │   ├── stock-location.model.ts            # StockLocation aggregate (string PK; StockLocationTypeEnum; active flag)
+    │   ├── inventory.exception.ts             # InventoryDomainException + InventoryErrorCodeEnum
+    │   └── events/                            # StockReceived/Adjusted/Low + StockLevelInitialized events
     ├── application/
     │   ├── ports/
     │   │   ├── stock.repository.port.ts       # IStockRepositoryPort + STOCK_REPOSITORY symbol
-    │   │   ├── stock-cache.port.ts            # IStockCachePort + STOCK_CACHE symbol
+    │   │   ├── stock-cache.port.ts            # IStockCachePort + STOCK_CACHE symbol (getOrLoad / withInvalidation)
     │   │   ├── stock-events.publisher.port.ts # IStockEventsPublisherPort + STOCK_EVENTS_PUBLISHER symbol
-    │   │   └── transaction.port.ts            # ITransactionPort + TRANSACTION_PORT symbol (opaque ITransactionScope; closes ARCH-LINT-EX-01)
+    │   │   └── transaction.port.ts            # ITransactionPort + TRANSACTION_PORT symbol (opaque ITransactionScope)
     │   └── use-cases/
-    │       ├── get-stock.use-case.ts          # cache-aside read
-    │       ├── reserve-stock-for-order.use-case.ts
-    │       └── add-stock.use-case.ts          # internal-only ledger append
+    │       ├── query-availability.use-case.ts # cache-aside per-variant availability read
+    │       ├── list-locations.use-case.ts     # stock-location list (uncached)
+    │       ├── receive-stock.use-case.ts      # quantityOnHand += n (post-commit invalidation)
+    │       ├── adjust-stock.use-case.ts       # signed delta + reasonCode (rejects below-zero → 409)
+    │       └── auto-init-stock-level.use-case.ts # zero a StockLevel on catalog.variant.created
     ├── infrastructure/
-    │   ├── persistence/                       # TypeORM entities + StockTypeormRepository + StockItemMapper
+    │   ├── persistence/                       # StockLevel/StockLocation entities + mappers + StockTypeormRepository + TypeormTransactionAdapter
     │   ├── cache/stock.cache.ts               # STOCK_CACHE adapter; preserves ADR-002 cache-aside contract
-    │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (emit → notification queue)
-    │   └── stock.module.ts                    # binds all four port symbols → adapters (TRANSACTION_PORT → TypeormTransactionAdapter)
+    │   ├── consumers/catalog-events.consumer.ts # @EventPattern catalog.variant.created → AutoInitStockLevelUseCase
+    │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (inventory_queue + notification_events)
+    │   └── stock.module.ts                    # binds the four port symbols → adapters; APP_FILTER → InventoryRpcExceptionFilter
     └── presentation/
-        └── stock.controller.ts                # @MessagePattern handlers for INVENTORY_PRODUCT_STOCK_GET / INVENTORY_ORDER_CONFIRM
+        ├── stock.controller.ts                # @MessagePattern: stock-level.get/receive/adjust, location.list, order.confirm (stub)
+        └── inventory-rpc-exception.filter.ts  # maps InventoryErrorCodeEnum → HTTP status
 ```
 
-`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts`; the use cases inject `STOCK_EVENTS_PUBLISHER` and await a plain Promise. See [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md) for the aggregate boundaries and the port-and-adapter split.
+The `stock` context keys everything on the catalog **`variantId`** (an opaque cross-service FK to `product_variant`), not a local product id. `StockLevel` persists running totals per `(variantId, stockLocationId)` and exposes only `changeOnHand(delta)` today (with `available = onHand − allocated − reserved` a pure getter); `StockLocation` is a first-class aggregate with a caller-assigned string PK (`default-warehouse` is auto-provisioned by the migration). Reservation, allocation, transfer, and a `StockMovement` audit ledger — together with the `version` optimistic-lock enforcement — are deferred to a later inventory-reservation capability.
+
+`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the four inventory events (`inventory.stock.{received,adjusted,low}` + `inventory.stock-level.initialized`); the `inventory.order.confirm` handler is a kept-but-deprecated `RpcException` stub (stock reservation moves to the later inventory-reservation capability). See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
 
 The retail microservice exposes a single `orders` bounded context laid out the same way:
 
@@ -378,12 +394,6 @@ POST /api/order
 PUT  /api/order/:id/confirm
 ```
 
-### Stock
-
-```
-GET /product/:productId/stock
-```
-
 ### Catalog
 
 ```
@@ -409,6 +419,19 @@ The publish route enforces an **active-price precondition**: it `409`s (`PRODUCT
 | Variable | Default | Notes |
 | -------- | ------- | ----- |
 | `DEFAULT_CURRENCY` | `USD` | ISO-4217 currency the catalog publish precondition resolves against (Joi-validated `length(3).uppercase()`). A product publishes only when each variant has a price in this currency. |
+
+### Inventory
+
+```
+GET  /api/inventory/locations                         # bearer + inventory:read   — list stock locations (?activeOnly)
+GET  /api/inventory/variants/:variantId/stock         # public  — per-location availability + totals (?locationIds=a,b)
+POST /api/inventory/variants/:variantId/stock/receive # bearer + inventory:adjust — raise on-hand { stockLocationId?, quantity }
+POST /api/inventory/variants/:variantId/stock/adjust  # bearer + inventory:adjust — signed delta { stockLocationId?, quantityDelta, reasonCode }
+```
+
+The variant-stock read is **cache-aside** (Redis): the `VariantStockView` response (per-location `StockLevelView` rows + cross-location `totalOnHand` / `totalAvailable`) is cached under `ris:inventory:stock:v2:<variantId>:<facet>`. Omitting `?locationIds` aggregates across all stock locations (the comma-separated facet is `__all__`); passing a subset scopes the answer. A variant with no stock rows is a `200` zero-availability answer (`locations: []`), not a 404. The migration provisions a `default-warehouse` location and the seed (`scripts/seeds/stock-level.sql`) gives every seeded catalog variant 100 on hand there, so the public read returns a real figure out of the box.
+
+The two **write** routes are staff-only (`inventory:adjust`). **Receive** raises `quantityOnHand` by a positive `quantity`; **Adjust** applies a signed `quantityDelta` with a mandatory `reasonCode` and rejects a result below zero with a `409`. Both default `stockLocationId` to `default-warehouse` when omitted, return the updated single-location `StockLevelView`, invalidate the cached availability **post-commit** (ADR-023), lazy-init a missing `StockLevel`, and emit a reserved-surface event (`inventory.stock.received` / `inventory.stock.adjusted`); Adjust also re-fires `inventory.stock.low` (→ notification) when the post-commit on-hand falls at/below the threshold. **No `StockMovement`/audit row is written yet** — the `reasonCode` lives on the event + logs until the audit-log capability lands.
 
 ### Auth
 
@@ -438,7 +461,7 @@ Interactive API reference is available at `http://localhost:3000/api/reference` 
 
 ## Authentication
 
-Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, and the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
+Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes, and the public `GET /api/inventory/variants/:variantId/stock` availability read). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
 
 Two subject kinds share the JWT pipeline:
 
@@ -565,7 +588,18 @@ Prices (`price` — one open `USD` row per variant, `valid_to IS NULL`):
 | 3 | `USD` | 19999 | $199.99 |
 | 4 | `USD` | 19999 | $199.99 |
 
-Every catalog/pricing seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
+Stock levels (`stock_level` — seeded so the public availability read returns a real figure from a cold start):
+
+| Variant id | Stock location | On hand | Allocated | Reserved |
+| --- | --- | --- | --- | --- |
+| 1 | `default-warehouse` | 100 | 0 | 0 |
+| 2 | `default-warehouse` | 100 | 0 | 0 |
+| 3 | `default-warehouse` | 100 | 0 | 0 |
+| 4 | `default-warehouse` | 100 | 0 | 0 |
+
+The migration ([ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md)) auto-provisions exactly one `StockLocation` — `default-warehouse` — idempotently (`INSERT ... ON DUPLICATE KEY UPDATE`), so there is always a location to read from and write to even before any seed runs. `scripts/seeds/stock-level.sql` then loads the rows above (`INSERT IGNORE`, registered after `catalog-product-variant.sql` because `stock_level.variant_id` is a foreign key to `product_variant.id`). On the live system the same zeroed row is created by the auto-init consumer when a catalog variant is first published; the seed is the cold-start stand-in that gives every seeded variant 100 on hand at `default-warehouse`.
+
+Every catalog / pricing / stock seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
 
 Auth events emit Pino log lines with `userId` and `correlationId`, and (when wired) flow through the `AUDIT_LOG_PUBLISHER` port; the default binding is the in-process `NoOpAuditLogPublisher` (logs the event at `debug` under the `AuditLog` context). They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.*` routing key plus a publisher binding are missing.
 
@@ -691,46 +725,49 @@ Every service's `main.ts` must `import '@retail-inventory-system/observability/t
 
 ## Caching
 
-The product stock query (`GET /product/:productId/stock`) reads from an append-only `product_stock` ledger. Each row records a delta (positive or negative) against a `(productId, storageId)` pair, so producing a current balance requires a `SUM(quantity) ... GROUP BY storageId` aggregation. Aggregation cost grows linearly with the row count, while the read pattern is heavy and the write pattern is comparatively light — a good fit for caching.
+The Inventory microservice caches **per-variant availability reads** in Redis using the **cache-aside (lazy loading)** pattern. The cached value is a `VariantStockView` — the per-location `StockLevelView` rows for a catalog **variant** plus the cross-location `totalOnHand` / `totalAvailable`. `QueryAvailabilityUseCase` orchestrates the cache-aside read; `StockCache` (the `STOCK_CACHE` adapter) is a thin domain-shaped wrapper over the generic `CACHE_PORT`; `StockTypeormRepository` materializes the answer with a **point lookup** of the variant's `stock_level` rows. The presentation-layer `StockController` and the API gateway are both unaware of the cache.
 
-The Inventory microservice caches stock query responses in Redis using the **cache-aside (lazy loading)** pattern. `GetStockUseCase` orchestrates the cache-aside read; `StockCache` (the `STOCK_CACHE` adapter) is a thin domain-shaped wrapper over the generic `CACHE_PORT`; `StockTypeormRepository` materializes the SUM/GROUP BY aggregate. The presentation-layer `StockController` is unaware of the cache.
+Under the previous inventory model the value was a `SUM(quantity) ... GROUP BY storageId` aggregate over an append-only `product_stock` ledger keyed on `productId`, whose cost grew linearly with movement history. The running-totals rewrite ([ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md)) keeps `quantityOnHand` / `quantityAllocated` / `quantityReserved` as maintained counters on one `stock_level` row per `(variantId, stockLocationId)`, so a read is now a constant-cost point lookup. The cache-aside **mechanism** is unchanged (ADR-002 → ADR-006 → ADR-016 → ADR-021 → ADR-022 → ADR-023); only the cached **value shape** and the **key axis** (`productId` → `variantId`) changed — which is what forced the [`v1 → v2` key-version bump](docs/implementation/04-inventory-stock-level-and-location/04-cache-key-bump-v1-to-v2.md). The full read path is documented in [the availability read path](docs/implementation/04-inventory-stock-level-and-location/07-availability-read-path.md).
 
 The cache layer follows the conventions formalized in [ADR-016](docs/adr/016-cache-aside-generalized.md): every cache key is built via `CACHE_KEYS.*` (no string literals in `apps/*/src`), and apps depend on `ICachePort` rather than `@nestjs/cache-manager` directly.
 
 ### What is not cached
 
-Only the stock query is cached today. The catalog browse/resolve reads and the **pricing** reads (`catalog.price.select` / `catalog.price.list` and their gateway routes) deliberately go straight to MySQL on every call — their read volume has not crossed the threshold where cache-aside complexity (key versioning plus post-commit invalidation on every price append/close) pays for itself. The key shape is already reserved for when it does: `CACHE_KEYS.catalogPrice(variantId, currency)` builds `ris:catalog:price:v1:<variantId>:<currency>` (mirroring the stock keys and the reserved `catalogProduct*` block), versioned and ready — but no catalog/pricing module imports `CacheModule` for it yet. Caching pricing reads is a later capability gated on measured read pressure, not a missing feature.
+Only the per-variant availability read is cached today. The location list (`GET /api/inventory/locations` → `ListLocationsUseCase`) is **not** cached — it is a small, slow-changing set, and the gateway adds no caching of its own. The catalog browse/resolve reads and the **pricing** reads (`catalog.price.select` / `catalog.price.list` and their gateway routes) deliberately go straight to MySQL on every call — their read volume has not crossed the threshold where cache-aside complexity (key versioning plus post-commit invalidation on every price append/close) pays for itself. The key shape is already reserved for when it does: `CACHE_KEYS.catalogPrice(variantId, currency)` builds `ris:catalog:price:v1:<variantId>:<currency>` (mirroring the stock keys and the reserved `catalogProduct*` block), versioned and ready — but no catalog/pricing module imports `CacheModule` for it yet. Caching pricing reads is a later capability gated on measured read pressure, not a missing feature.
 
 ### Read flow
 
 ```
-1. Client request                → GetStockUseCase.execute()
-2. STOCK_CACHE.get(key)          → hit?  return cached DTO, done
-                                 → miss? continue
-3. STOCK_REPOSITORY.aggregateForProduct(...)  → SUM/GROUP BY against product_stock
-4. STOCK_CACHE.set(key, data, TTL) → populate cache
-5. Return DTO                    → reply to client
+1. Client request                  → QueryAvailabilityUseCase.execute()
+2. STOCK_CACHE.getOrLoad(key, loader):
+     → hit?  return the cached VariantStockView, done
+     → miss? run the loader (single-flighted), write-back, return
+3. loader → STOCK_REPOSITORY.findStockLevelsByVariant(variantId, locationIds?)
+     → point lookup of the variant's stock_level rows (no SUM/GROUP BY)
+     → project each row to a StockLevelView, sort by stockLocationId, sum totals
+4. STOCK_CACHE.set(key, view, jittered TTL)  → populate cache
+5. Return VariantStockView                    → reply to client
 ```
 
-Reads inside a caller-owned `EntityManager` (i.e., inside an open transaction) bypass the cache to avoid persisting uncommitted state.
+A variant with no `stock_level` rows in scope is a valid, cached zero-availability answer (`totalOnHand: 0`, `locations: []`) rather than a 404. The read path holds no caller-owned transaction scope, so it has no skip-cache branch; the write operations that *do* mutate state (Receive / Adjust) invalidate post-commit (see Invalidation, below).
 
 ### Cache key
 
 ```
-ris:inventory:stock:v1:<productId>:__all__                       # no storageIds filter
-ris:inventory:stock:v1:<productId>:<storageIds-joined-by-comma>  # e.g. ris:inventory:stock:v1:42:storage-a,storage-b
+ris:inventory:stock:v2:<variantId>:__all__                         # no locationIds filter
+ris:inventory:stock:v2:<variantId>:<locationIds-joined-by-comma>   # e.g. ris:inventory:stock:v2:42:backup-store,default-warehouse
 ```
 
-Storage IDs are sorted with `localeCompare` so callers passing the same set in different orders generate identical keys. The `v1` segment is the per-aggregate schema-version constant (`INVENTORY_STOCK_KEY_VERSION` in `libs/cache/cache-keys.ts`); a breaking DTO shape change bumps it in one line and pre-bump entries become unreachable on the next deploy. Built by `CACHE_KEYS.inventoryStock(productId, storageIds, opts?)`; an optional `{ tenantId }` argument prefixes the key with `t:<tenantId>:` for future multi-tenant use (omitted entirely when absent — never defaulted). Two legacy prefixes are still wiped by the SCAN-based invalidate path so a rolling deploy can sweep entries written under the pre-v1 (`ris:inventory:stock:<productId>:`) and pre-ADR-016 (`stock:<productId>:`) conventions.
+Stock-location ids are sorted with `localeCompare` so callers passing the same set in different orders generate identical keys (`__all__` is the sentinel for an unscoped, aggregate-across-all-locations read). The `v2` segment is the per-aggregate schema-version constant (`INVENTORY_STOCK_KEY_VERSION` in `libs/cache/cache-keys.ts`); it was bumped from `v1` when the cached value reshaped from the per-product `SUM` aggregate to the per-variant `VariantStockView` projection **and** the key axis moved from `productId` to `variantId` ([ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md)) — pre-bump entries became unreachable and age out via TTL. Built by `CACHE_KEYS.inventoryStock(variantId, stockLocationIds?, opts?)`; an optional `{ tenantId }` argument prefixes the key with `t:<tenantId>:` for future multi-tenant use (omitted entirely when absent — never defaulted). Three legacy prefixes are still wiped by the SCAN-based invalidate path so a rolling deploy can sweep entries written under the pre-v2 (`ris:inventory:stock:v1:<id>:`), pre-v1 (`ris:inventory:stock:<id>:`), and pre-ADR-016 (`stock:<id>:`) conventions.
 
-The general key convention is `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]` (see [ADR-022](docs/adr/022-cache-keys-tenant-and-schema-version.md)). `CACHE_KEYS.retailOrder(orderId)` follows the same shape (no caller today; reserved for a future read path).
+The general key convention is `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]` (see [ADR-022](docs/adr/022-cache-keys-tenant-and-schema-version.md)). `CACHE_KEYS.retailOrder(orderId)` and `CACHE_KEYS.catalogProduct(...)` follow the same shape at `v1` (no caller today; reserved for future read paths).
 
 ### TTL
 
 | Env var                     | Default (ms) | Role                                                                 |
 | --------------------------- | ------------ | -------------------------------------------------------------------- |
 | `CACHE_TTL_MS_DEFAULT`      | `60000`      | Global default applied by the Cache module to any unscoped `set()`.  |
-| `CACHE_TTL_MS_PRODUCT_STOCK`| `60000`      | TTL applied explicitly when caching a stock query response.          |
+| `CACHE_TTL_MS_PRODUCT_STOCK`| `60000`      | TTL applied explicitly when caching a per-variant availability read (the env name predates the running-totals rewrite). |
 
 TTL is a safety net, not the primary freshness mechanism — explicit invalidation is.
 
@@ -738,13 +775,13 @@ Per [ADR-021](docs/adr/021-cache-single-flight-and-ttl-jitter.md), `StockCache.s
 
 ### Miss-path single-flight
 
-Per [ADR-021](docs/adr/021-cache-single-flight-and-ttl-jitter.md), concurrent cache misses on the same `(productId, storageIds)` key fan out to a single `repository.aggregateForProduct` call per process. The primitive lives on `ICachePort.singleFlight(key, fn)`; `StockCache.getOrLoad` composes it with the cache-aside read+write so `GetStockUseCase` never sees the dedupe machinery. A rejected loader propagates to every waiter (no silent retry-and-fan-out), and the in-flight slot is cleared on settlement so a failed leader does not poison the key for the next caller.
+Per [ADR-021](docs/adr/021-cache-single-flight-and-ttl-jitter.md), concurrent cache misses on the same `(variantId, stockLocationIds)` key fan out to a single `repository.findStockLevelsByVariant` call per process. The primitive lives on `ICachePort.singleFlight(key, fn)`; `StockCache.getOrLoad` composes it with the cache-aside read+write so `QueryAvailabilityUseCase` never sees the dedupe machinery. A rejected loader propagates to every waiter (no silent retry-and-fan-out), and the in-flight slot is cleared on settlement so a failed leader does not poison the key for the next caller.
 
 ### Invalidation
 
-When `ReserveStockForOrderUseCase` reserves stock for a confirmed order, it wraps the transaction in `stockCache.withInvalidation(work, resolveItems, { correlationId })` — a callback-based helper that awaits `work()` first and only then derives the invalidation items and fans out the prefix deletes. The post-commit ordering is enforced by the helper's type signature ([ADR-023](docs/adr/023-cache-invalidate-post-commit-by-type.md)): `IStockCachePort` has no public `invalidate(...)`, so a future contributor cannot accidentally call it from inside the transaction body, and a rejected `work` propagates without touching the cache.
+The write operations `ReceiveStockUseCase` and `AdjustStockUseCase` each wrap their read-modify-write in `stockCache.withInvalidation(work, resolveItems, { correlationId })` — a callback-based helper that awaits `work()` (so the commit is durable) and only then derives the invalidation items (`resolveItems(saved)` → `{ variantId, stockLocationId }[]`) and fans out the prefix deletes. The post-commit ordering is enforced by the helper's type signature ([ADR-023](docs/adr/023-cache-invalidate-post-commit-by-type.md)): `IStockCachePort` has no public `invalidate(...)`, so a future contributor cannot accidentally call it from inside the transaction body, and a rejected `work` propagates without touching the cache.
 
-Invalidation issues three `delByPrefix` calls per affected `productId` during the transition window (the current `v1` prefix, the pre-v1 `inventoryStockLegacyPrefix`, and the pre-ADR-016 `productStockPrefix` — see [ADR-022](docs/adr/022-cache-keys-tenant-and-schema-version.md) §4). Each `delByPrefix` does `SCAN MATCH <prefix>*` and `UNLINK`s every matching key. `UNLINK` (vs `DEL`) frees memory asynchronously on the Redis side, avoiding a blocking O(N) delete on Redis's main thread.
+Invalidation issues **four** `delByPrefix` calls per affected `variantId` during the transition window (the current `v2` prefix, the pre-v2 `inventoryStockLegacyPrefixV1` = `ris:inventory:stock:v1:<variantId>:`, the pre-v1 `inventoryStockLegacyPrefix`, and the pre-ADR-016 `productStockPrefix` — see [ADR-022](docs/adr/022-cache-keys-tenant-and-schema-version.md) §4). Each `delByPrefix` does `SCAN MATCH <prefix>*` and `UNLINK`s every matching key. `UNLINK` (vs `DEL`) frees memory asynchronously on the Redis side, avoiding a blocking O(N) delete on Redis's main thread.
 
 ### Tracing
 
@@ -763,17 +800,17 @@ A Redis outage degrades latency, never correctness — no path throws to the cli
 ### Inspecting the cache
 
 ```bash
-# List every cached stock entry across all products
-redis-cli --scan --pattern 'ris:inventory:stock:v1:*'
+# List every cached availability entry across all variants
+redis-cli --scan --pattern 'ris:inventory:stock:v2:*'
 
-# Read a specific entry
-redis-cli GET 'ris:inventory:stock:v1:42:__all__'
+# Read a specific entry (variant 1, aggregated across all locations)
+redis-cli GET 'ris:inventory:stock:v2:1:__all__'
 
 # Check remaining TTL (in ms) for a key
-redis-cli PTTL 'ris:inventory:stock:v1:42:__all__'
+redis-cli PTTL 'ris:inventory:stock:v2:1:__all__'
 
-# Manually invalidate every cached entry for a single product
-redis-cli --scan --pattern 'ris:inventory:stock:v1:42:*' | xargs -r redis-cli UNLINK
+# Manually invalidate every cached entry for a single variant
+redis-cli --scan --pattern 'ris:inventory:stock:v2:1:*' | xargs -r redis-cli UNLINK
 ```
 
-See [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md) for the original design and [ADR-016](docs/adr/016-cache-aside-generalized.md) for the generalized key convention + port-based invalidation.
+See [ADR-002](docs/adr/002-redis-cache-aside-product-stock.md) for the original design, [ADR-016](docs/adr/016-cache-aside-generalized.md) for the generalized key convention + port-based invalidation, and [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) for the `StockLevel` projection the `v2` value carries.

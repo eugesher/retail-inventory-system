@@ -1,208 +1,195 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepPartial, EntityManager, Repository } from 'typeorm';
+import { DeepPartial, EntityManager, FindOptionsWhere, In, Repository } from 'typeorm';
 
-import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
 import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
-import { StockItem } from '../../domain';
-import {
-  IStockAggregateForProductPayload,
-  IStockAppendDeltasPayload,
-  IStockLockedTotalsPayload,
-  IStockRepositoryPort,
-  ITransactionScope,
-} from '../../application/ports';
-import { ProductStock } from './product-stock.entity';
-import { StockItemMapper } from './stock-item.mapper';
+import { StockLevel, StockLocation } from '../../domain';
+import { IStockRepositoryPort, ITransactionScope } from '../../application/ports';
+import { StockWriteConflictError } from '../../application/use-cases/stock-write-conflict.error';
+import { StockLevelEntity } from './stock-level.entity';
+import { StockLevelMapper } from './stock-level.mapper';
+import { StockLocationEntity } from './stock-location.entity';
+import { StockLocationMapper } from './stock-location.mapper';
 
-interface IProductStockRawResult {
-  storageId: string;
-  quantity: `${number}`;
-  updatedAt: Date;
+// MySQL's "duplicate entry for key" error number / code. A first-touch INSERT
+// that loses the `UNIQUE (variant_id, stock_location_id)` race surfaces a driver
+// error carrying these — duck-typed (not `instanceof QueryFailedError`) to match
+// the auto-init consumer's check.
+const MYSQL_ER_DUP_ENTRY_ERRNO = 1062;
+const MYSQL_ER_DUP_ENTRY_CODE = 'ER_DUP_ENTRY';
+
+interface IMysqlDriverError {
+  errno?: number;
+  code?: string;
+  driverError?: { errno?: number; code?: string };
 }
 
+// The only `@InjectRepository` site for the inventory context. Extends
+// `BaseTypeormRepository` for the `toDomain`/`toEntity` seam over the primary
+// `StockLevel` aggregate; `StockLocation` is the secondary read model (its own
+// repository, like `TaxCategory` in pricing). Returns domain types only — no
+// TypeORM leak past this file (ADR-017).
 @Injectable()
 export class StockTypeormRepository
-  extends BaseTypeormRepository<ProductStock, StockItem>
+  extends BaseTypeormRepository<StockLevelEntity, StockLevel>
   implements IStockRepositoryPort
 {
   constructor(
-    @InjectRepository(ProductStock)
-    private readonly productStockRepository: Repository<ProductStock>,
+    @InjectRepository(StockLevelEntity)
+    private readonly stockLevelRepository: Repository<StockLevelEntity>,
+    @InjectRepository(StockLocationEntity)
+    private readonly stockLocationRepository: Repository<StockLocationEntity>,
     @InjectPinoLogger(StockTypeormRepository.name)
     private readonly logger: PinoLogger,
   ) {
-    super(productStockRepository);
+    super(stockLevelRepository);
   }
 
-  protected toDomain(entity: ProductStock): StockItem {
-    return StockItemMapper.toDomain(entity);
+  protected toDomain(entity: StockLevelEntity): StockLevel {
+    return StockLevelMapper.toDomain(entity);
   }
 
-  protected toEntity(domain: StockItem): DeepPartial<ProductStock> {
-    return {
-      productId: domain.productId,
-      storageId: domain.storageId,
-      quantity: domain.quantity,
-    };
+  protected toEntity(domain: StockLevel): DeepPartial<StockLevelEntity> {
+    return StockLevelMapper.toEntity(domain);
   }
 
-  private toEntityManager(scope: ITransactionScope | undefined): EntityManager | undefined {
-    return scope as unknown as EntityManager | undefined;
+  public async findLocation(id: string): Promise<StockLocation | null> {
+    const entity = await this.stockLocationRepository.findOne({ where: { id } });
+    return entity ? StockLocationMapper.toDomain(entity) : null;
   }
 
-  private repoFor(scope: ITransactionScope | undefined): Repository<ProductStock> {
-    const em = this.toEntityManager(scope);
-    return em ? em.getRepository(ProductStock) : this.productStockRepository;
+  public async listLocations(activeOnly = false): Promise<StockLocation[]> {
+    const where: FindOptionsWhere<StockLocationEntity> = activeOnly ? { active: true } : {};
+    const entities = await this.stockLocationRepository.find({ where, order: { id: 'ASC' } });
+    return entities.map((entity) => StockLocationMapper.toDomain(entity));
   }
 
-  public async findById(id: number): Promise<StockItem | null> {
-    const entity = await this.productStockRepository.findOne({ where: { id } });
-    return entity ? StockItemMapper.toDomain(entity) : null;
-  }
-
-  public findBySku(sku: string): Promise<StockItem | null> {
-    // Intentional null, not a "not implemented" stub — `product_stock` has
-    // no SKU column today; callers must tolerate the miss.
-    void sku;
-    return Promise.resolve(null);
-  }
-
-  public async aggregateForProduct(
-    payload: IStockAggregateForProductPayload,
+  public async findStockLevel(
+    variantId: number,
+    stockLocationId: string,
     scope?: ITransactionScope,
-  ): Promise<ProductStockGetResponseDto> {
-    const { productId, storageIds, correlationId } = payload;
-    const builder = this.repoFor(scope)
-      .createQueryBuilder('ProductStock')
-      .select([
-        'ProductStock.storageId      AS storageId',
-        'SUM(ProductStock.quantity)  AS quantity',
-        'MAX(ProductStock.createdAt) AS updatedAt',
-      ])
-      .where('ProductStock.productId = :productId', { productId })
-      .groupBy('storageId');
-
-    if (storageIds && storageIds.length > 0) {
-      builder.andWhere('ProductStock.storageId IN (:...storageIds)', { storageIds });
-    }
-
-    let stock: IProductStockRawResult[];
-
-    try {
-      stock = await builder.getRawMany<IProductStockRawResult>();
-    } catch (error) {
-      this.logger.error(
-        { err: error as Error, correlationId, productId, storageIds },
-        'Failed to aggregate product stock by storage',
-      );
-
-      throw error;
-    }
-
-    this.logger.debug(
-      { correlationId, productId, rowCount: stock.length },
-      'Stock rows retrieved from DB',
-    );
-
-    let quantity = 0;
-    let latestDate = new Date(0);
-
-    const items = stock.map((item) => {
-      const itemQuantity = Number(item.quantity);
-
-      quantity += itemQuantity;
-
-      if (item.updatedAt > latestDate) {
-        latestDate = item.updatedAt;
-      }
-
-      return { storageId: item.storageId, quantity: itemQuantity, updatedAt: item.updatedAt };
+  ): Promise<StockLevel | null> {
+    const entity = await this.levelRepo(scope).findOne({
+      where: { variantId, stockLocationId },
     });
-    const updatedAt = stock.length > 0 ? latestDate : null;
-
-    return { productId, quantity, updatedAt, items };
+    return entity ? StockLevelMapper.toDomain(entity) : null;
   }
 
-  public async lockedTotalsByProduct(
-    payload: IStockLockedTotalsPayload,
-    scope: ITransactionScope,
-  ): Promise<Map<number, number>> {
-    const { productIds, correlationId } = payload;
+  public async findStockLevelsByVariant(
+    variantId: number,
+    stockLocationIds?: string[],
+  ): Promise<StockLevel[]> {
+    const where: FindOptionsWhere<StockLevelEntity> =
+      stockLocationIds && stockLocationIds.length > 0
+        ? { variantId, stockLocationId: In(stockLocationIds) }
+        : { variantId };
+    const entities = await this.stockLevelRepository.find({ where });
+    return entities.map((entity) => StockLevelMapper.toDomain(entity));
+  }
 
-    if (productIds.length === 0) {
-      return new Map();
+  public async saveStockLevel(stockLevel: StockLevel): Promise<StockLevel> {
+    const partial = StockLevelMapper.toEntity(stockLevel);
+
+    // A detached level (id null) for an existing `(variant_id, stock_location_id)`
+    // pair must UPDATE that row, not collide with the UNIQUE constraint on
+    // INSERT — resolve to the live id first so `save` takes the update path.
+    if (partial.id === undefined) {
+      const existing = await this.stockLevelRepository.findOne({
+        where: { variantId: stockLevel.variantId, stockLocationId: stockLevel.stockLocationId },
+      });
+      if (existing) {
+        partial.id = existing.id;
+      }
     }
 
-    const entityManager = this.toEntityManager(scope)!;
-    let rows: { productId: string; totalQuantity: string }[];
-
-    try {
-      rows = await entityManager
-        .createQueryBuilder(ProductStock, 'ps')
-        .select('ps.productId', 'productId')
-        .addSelect('SUM(ps.quantity)', 'totalQuantity')
-        .where('ps.productId IN (:...productIds)', { productIds })
-        .groupBy('ps.productId')
-        .setLock('pessimistic_write')
-        .getRawMany();
-    } catch (error) {
-      this.logger.error(
-        { err: error as Error, correlationId, productIds },
-        'Failed to load locked stock totals',
-      );
-
-      throw error;
-    }
+    const saved = await this.stockLevelRepository.save(partial);
 
     this.logger.debug(
-      { correlationId, productIds, balanceCount: rows.length },
-      'Locked stock totals loaded from DB',
+      { stockLevelId: saved.id, variantId: stockLevel.variantId },
+      'Stock level persisted',
     );
 
-    return new Map(
-      rows.map(({ productId, totalQuantity }) => [Number(productId), Number(totalQuantity)]),
-    );
+    return this.reload(this.stockLevelRepository, saved.id);
   }
 
-  public async appendDeltas(
-    payload: IStockAppendDeltasPayload,
+  public async persistStockLevelChange(
+    stockLevel: StockLevel,
+    expectedVersion: number | null,
     scope?: ITransactionScope,
-  ): Promise<void> {
-    const { items, correlationId } = payload;
-    const itemCount = items.length;
+  ): Promise<StockLevel> {
+    const repo = this.levelRepo(scope);
 
-    this.logger.debug(
-      { correlationId, itemCount, withinTransaction: !!scope },
-      'Inserting product stock ledger rows',
-    );
-
-    try {
-      await this.repoFor(scope).insert(items);
-    } catch (error) {
-      this.logger.error(
-        { err: error as Error, correlationId, itemCount },
-        'Failed to insert product stock ledger rows',
-      );
-
-      throw error;
+    // First-touch: no row existed at read time. A plain INSERT lets the UNIQUE
+    // constraint arbitrate — a concurrent writer that created the row first turns
+    // ours into a retryable conflict (the loser re-reads on retry and takes the
+    // update path).
+    if (expectedVersion === null) {
+      const partial = StockLevelMapper.toEntity(stockLevel);
+      let savedId: number;
+      try {
+        const saved = await repo.save(partial);
+        savedId = saved.id;
+      } catch (error) {
+        if (StockTypeormRepository.isUniqueViolation(error)) {
+          throw new StockWriteConflictError(stockLevel.variantId, stockLevel.stockLocationId);
+        }
+        throw error;
+      }
+      return this.reload(repo, savedId);
     }
 
-    this.logger.info(
+    // Existing row: optimistic compare-and-swap. `version = version + 1` is the
+    // DB's authoritative increment; the `WHERE ... AND version = :expectedVersion`
+    // predicate makes a concurrent writer (who already bumped the version) match
+    // zero rows — a retryable conflict rather than a silent lost update.
+    const result = await repo.update(
+      { id: stockLevel.id!, version: expectedVersion },
       {
-        correlationId,
-        itemCount,
-        productIds: [...new Set(items.map((i) => i.productId))],
+        quantityOnHand: stockLevel.quantityOnHand,
+        quantityAllocated: stockLevel.quantityAllocated,
+        quantityReserved: stockLevel.quantityReserved,
+        version: () => 'version + 1',
       },
-      'Product stock ledger rows inserted',
     );
+
+    if (!result.affected) {
+      throw new StockWriteConflictError(stockLevel.variantId, stockLevel.stockLocationId);
+    }
+
+    return this.reload(repo, stockLevel.id!);
   }
 
-  public async save(stockItem: StockItem): Promise<StockItem> {
-    const partial = this.toEntity(stockItem);
-    const saved = await this.productStockRepository.save(partial);
-    return StockItemMapper.toDomain(saved as ProductStock);
+  // Resolves the repository bound to the caller's transaction when a `scope` is
+  // supplied (downcast back to the `EntityManager` the adapter brand-wraps — the
+  // one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // repository.
+  private levelRepo(scope?: ITransactionScope): Repository<StockLevelEntity> {
+    if (!scope) {
+      return this.stockLevelRepository;
+    }
+    const manager = scope as unknown as EntityManager;
+    return manager.getRepository(StockLevelEntity);
+  }
+
+  // Re-read so the returned aggregate carries the concrete generated id, the
+  // committed version, and the DB timestamps. The row was just written in this
+  // unit of work, so a miss here is an invariant breach rather than a not-found.
+  private async reload(repo: Repository<StockLevelEntity>, id: number): Promise<StockLevel> {
+    const reloaded = await repo.findOne({ where: { id } });
+    if (!reloaded) {
+      throw new Error(`StockTypeormRepository: stock_level ${id} vanished after commit`);
+    }
+    return StockLevelMapper.toDomain(reloaded);
+  }
+
+  private static isUniqueViolation(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) {
+      return false;
+    }
+    const candidate = error as IMysqlDriverError;
+    const driver = candidate.driverError ?? candidate;
+    return driver.errno === MYSQL_ER_DUP_ENTRY_ERRNO || driver.code === MYSQL_ER_DUP_ENTRY_CODE;
   }
 }

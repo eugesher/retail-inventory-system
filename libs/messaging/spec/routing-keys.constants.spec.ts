@@ -24,14 +24,32 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.RETAIL_ORDER_CANCELLED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCELLED,
     );
-    expect(ROUTING_KEYS.INVENTORY_PRODUCT_STOCK_GET).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_PRODUCT_STOCK_GET,
-    );
     expect(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
     );
     expect(ROUTING_KEYS.INVENTORY_STOCK_LOW).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LOW,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_RECEIVED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RECEIVED,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_ADJUSTED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_ADJUSTED,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_GET).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_GET,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_RECEIVE).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_RECEIVE,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_ADJUST,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_INITIALIZED,
+    );
+    expect(ROUTING_KEYS.INVENTORY_LOCATION_LIST).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_LOCATION_LIST,
     );
     expect(ROUTING_KEYS.CATALOG_PRODUCT_REGISTER).toBe(
       MicroserviceMessagePatternEnum.CATALOG_PRODUCT_REGISTER,

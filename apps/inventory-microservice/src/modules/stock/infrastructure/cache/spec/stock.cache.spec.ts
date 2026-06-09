@@ -4,7 +4,7 @@
 // Spec lives in a `spec/` sibling next to the production file; PinoLogger and
 // the `ICachePort` dependency are mocked as plain objects with jest fns.
 // Cache-key strings are part of the production contract and asserted exactly
-// — the spec is the place where `ris:inventory:stock:*` becomes a regression
+// — the spec is the place where `ris:inventory:stock:v2:*` becomes a regression
 // boundary.
 // =============================================================================
 
@@ -12,17 +12,27 @@ import { ConfigService } from '@nestjs/config';
 import { PinoLogger } from 'nestjs-pino';
 
 import { ICachePort } from '@retail-inventory-system/cache';
-import { ProductStockGetResponseDto } from '@retail-inventory-system/contracts';
+import { VariantStockView } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { StockCache } from '../stock.cache';
 
 const correlationId = 'corr-1';
-const sampleDto: ProductStockGetResponseDto = {
-  productId: 42,
-  quantity: 7,
-  updatedAt: null,
-  items: [],
+const sampleView: VariantStockView = {
+  variantId: 42,
+  totalOnHand: 7,
+  totalAvailable: 5,
+  locations: [
+    {
+      stockLocationId: 'default-warehouse',
+      quantityOnHand: 7,
+      quantityAllocated: 1,
+      quantityReserved: 1,
+      available: 5,
+      version: 3,
+      updatedAt: null,
+    },
+  ],
 };
 
 type CachePortMock = jest.Mocked<
@@ -54,18 +64,18 @@ describe('StockCache', () => {
   });
 
   describe('get', () => {
-    it('reads under the new ris:inventory:stock prefix with __all__ sentinel when no storageIds', async () => {
-      cache.get.mockResolvedValue(sampleDto);
+    it('reads under the v2 ris:inventory:stock prefix with __all__ sentinel when no stockLocationIds', async () => {
+      cache.get.mockResolvedValue(sampleView);
 
-      const result = await adapter.get({ productId: 42, correlationId });
+      const result = await adapter.get({ variantId: 42, correlationId });
 
-      expect(result).toEqual({ value: sampleDto, available: true });
-      expect(cache.get).toHaveBeenCalledWith('ris:inventory:stock:v1:42:__all__');
+      expect(result).toEqual({ value: sampleView, available: true });
+      expect(cache.get).toHaveBeenCalledWith('ris:inventory:stock:v2:42:__all__');
       expect(logger.debug).toHaveBeenCalledWith(
         {
           correlationId,
-          productId: 42,
-          cacheKey: 'ris:inventory:stock:v1:42:__all__',
+          variantId: 42,
+          cacheKey: 'ris:inventory:stock:v2:42:__all__',
           cacheHit: true,
         },
         'Cache hit for stock query',
@@ -75,7 +85,7 @@ describe('StockCache', () => {
     it('returns { value: undefined, available: true } and logs a miss on cache miss', async () => {
       cache.get.mockResolvedValue(undefined);
 
-      const result = await adapter.get({ productId: 42, correlationId });
+      const result = await adapter.get({ variantId: 42, correlationId });
 
       expect(result).toEqual({ value: undefined, available: true });
       expect(logger.debug).toHaveBeenCalledWith(
@@ -84,17 +94,17 @@ describe('StockCache', () => {
       );
     });
 
-    it('builds the per-storage key (sorted by localeCompare) when storageIds is provided', async () => {
+    it('builds the per-location key (sorted by localeCompare) when stockLocationIds is provided', async () => {
       cache.get.mockResolvedValue(undefined);
 
       await adapter.get({
-        productId: 42,
-        storageIds: ['west-warehouse', 'head-warehouse'],
+        variantId: 42,
+        stockLocationIds: ['west-warehouse', 'head-warehouse'],
         correlationId,
       });
 
       expect(cache.get).toHaveBeenCalledWith(
-        'ris:inventory:stock:v1:42:head-warehouse,west-warehouse',
+        'ris:inventory:stock:v2:42:head-warehouse,west-warehouse',
       );
     });
 
@@ -103,9 +113,9 @@ describe('StockCache', () => {
       // opt-in — a present tenantId must flow through every read.
       cache.get.mockResolvedValue(undefined);
 
-      await adapter.get({ productId: 42, tenantId: 'store-7', correlationId });
+      await adapter.get({ variantId: 42, tenantId: 'store-7', correlationId });
 
-      expect(cache.get).toHaveBeenCalledWith('ris:t:store-7:inventory:stock:v1:42:__all__');
+      expect(cache.get).toHaveBeenCalledWith('ris:t:store-7:inventory:stock:v2:42:__all__');
     });
 
     it('returns { value: undefined, available: false } and warn-logs when cache.get rejects', async () => {
@@ -115,18 +125,18 @@ describe('StockCache', () => {
       const err = new Error('cache-read-failed');
       cache.get.mockRejectedValue(err);
 
-      const result = await adapter.get({ productId: 42, correlationId });
+      const result = await adapter.get({ variantId: 42, correlationId });
 
       expect(result).toEqual({ value: undefined, available: false });
       expect(logger.warn).toHaveBeenCalledWith(
-        { err, correlationId, productId: 42, cacheKey: 'ris:inventory:stock:v1:42:__all__' },
+        { err, correlationId, variantId: 42, cacheKey: 'ris:inventory:stock:v2:42:__all__' },
         'Failed to read from cache',
       );
     });
   });
 
   describe('set', () => {
-    it('writes under the new prefix with a jittered TTL inside ±10% of configured', async () => {
+    it('writes under the v2 prefix with a jittered TTL inside ±10% of configured', async () => {
       // ADR-021: ±10% jitter was added to spread expiries of correlated
       // writes. The exact TTL is no longer asserted; instead the test
       // asserts the value lands inside the documented jitter band so a
@@ -134,19 +144,19 @@ describe('StockCache', () => {
       // the spec.
       cache.set.mockResolvedValue(undefined);
 
-      await adapter.set({ productId: 42, data: sampleDto, correlationId });
+      await adapter.set({ variantId: 42, data: sampleView, correlationId });
 
       expect(cache.set).toHaveBeenCalledTimes(1);
       const [calledKey, calledData, calledTtl] = cache.set.mock.calls[0];
-      expect(calledKey).toBe('ris:inventory:stock:v1:42:__all__');
-      expect(calledData).toBe(sampleDto);
+      expect(calledKey).toBe('ris:inventory:stock:v2:42:__all__');
+      expect(calledData).toBe(sampleView);
       expect(calledTtl).toBeGreaterThanOrEqual(60000 * 0.9 - 1);
       expect(calledTtl).toBeLessThanOrEqual(60000 * 1.1);
       expect(logger.debug).toHaveBeenCalledWith(
         {
           correlationId,
-          productId: 42,
-          cacheKey: 'ris:inventory:stock:v1:42:__all__',
+          variantId: 42,
+          cacheKey: 'ris:inventory:stock:v2:42:__all__',
           ttl: calledTtl,
         },
         'Cache write for stock query',
@@ -160,7 +170,7 @@ describe('StockCache', () => {
       cache.set.mockResolvedValue(undefined);
       const ttls: number[] = [];
       for (let i = 0; i < 200; i++) {
-        await adapter.set({ productId: i, data: sampleDto, correlationId });
+        await adapter.set({ variantId: i, data: sampleView, correlationId });
         const lastCall = cache.set.mock.calls[cache.set.mock.calls.length - 1];
         ttls.push(lastCall[2]!);
       }
@@ -186,11 +196,11 @@ describe('StockCache', () => {
       cache.set.mockRejectedValue(err);
 
       await expect(
-        adapter.set({ productId: 42, data: sampleDto, correlationId }),
+        adapter.set({ variantId: 42, data: sampleView, correlationId }),
       ).resolves.toBeUndefined();
 
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ err, productId: 42 }),
+        expect.objectContaining({ err, variantId: 42 }),
         'Failed to write to cache',
       );
     });
@@ -198,20 +208,20 @@ describe('StockCache', () => {
 
   describe('getOrLoad', () => {
     // ADR-021: getOrLoad is the cache-aside + single-flight + jitter
-    // entry point used by GetStockUseCase. These tests cover the contract
-    // at the StockCache level; the underlying single-flight primitive is
-    // separately verified in libs/cache/spec/redis-cache.adapter.spec.ts.
+    // entry point used by QueryAvailabilityUseCase. These tests cover the
+    // contract at the StockCache level; the underlying single-flight primitive
+    // is separately verified in libs/cache/spec/redis-cache.adapter.spec.ts.
 
-    const loader = (): jest.Mock<Promise<ProductStockGetResponseDto>, []> =>
-      jest.fn(() => Promise.resolve(sampleDto));
+    const loader = (): jest.Mock<Promise<VariantStockView>, []> =>
+      jest.fn(() => Promise.resolve(sampleView));
 
     it('returns the cached value without invoking the loader on a hit', async () => {
-      cache.get.mockResolvedValue(sampleDto);
+      cache.get.mockResolvedValue(sampleView);
       const load = loader();
 
-      const result = await adapter.getOrLoad({ productId: 42, correlationId }, load);
+      const result = await adapter.getOrLoad({ variantId: 42, correlationId }, load);
 
-      expect(result).toBe(sampleDto);
+      expect(result).toBe(sampleView);
       expect(load).not.toHaveBeenCalled();
       expect(cache.singleFlight).not.toHaveBeenCalled();
     });
@@ -222,11 +232,11 @@ describe('StockCache', () => {
       cache.singleFlight.mockImplementation(async (_key, fn) => fn() as Promise<never>);
       cache.set.mockResolvedValue(undefined);
 
-      const result = await adapter.getOrLoad({ productId: 42, correlationId }, load);
+      const result = await adapter.getOrLoad({ variantId: 42, correlationId }, load);
 
-      expect(result).toBe(sampleDto);
+      expect(result).toBe(sampleView);
       expect(cache.singleFlight).toHaveBeenCalledWith(
-        'ris:inventory:stock:v1:42:__all__',
+        'ris:inventory:stock:v2:42:__all__',
         expect.any(Function),
       );
       expect(load).toHaveBeenCalledTimes(1);
@@ -240,10 +250,10 @@ describe('StockCache', () => {
     it('propagates loader rejection without writing to cache', async () => {
       const err = new Error('db-fail');
       cache.get.mockResolvedValue(undefined);
-      const load = jest.fn<Promise<ProductStockGetResponseDto>, []>().mockRejectedValue(err);
+      const load = jest.fn<Promise<VariantStockView>, []>().mockRejectedValue(err);
       cache.singleFlight.mockImplementation(async (_key, fn) => fn() as Promise<never>);
 
-      await expect(adapter.getOrLoad({ productId: 42, correlationId }, load)).rejects.toBe(err);
+      await expect(adapter.getOrLoad({ variantId: 42, correlationId }, load)).rejects.toBe(err);
       expect(cache.set).not.toHaveBeenCalled();
     });
 
@@ -258,17 +268,17 @@ describe('StockCache', () => {
       const err = new Error('redis-down');
       cache.get.mockRejectedValue(err);
       cache.set.mockRejectedValue(err);
-      const load = jest.fn(() => Promise.resolve(sampleDto));
+      const load = jest.fn(() => Promise.resolve(sampleView));
 
-      const result = await adapter.getOrLoad({ productId: 42, correlationId }, load);
+      const result = await adapter.getOrLoad({ variantId: 42, correlationId }, load);
 
-      expect(result).toBe(sampleDto);
+      expect(result).toBe(sampleView);
       expect(load).toHaveBeenCalledTimes(1);
       expect(cache.set).not.toHaveBeenCalled();
       expect(cache.singleFlight).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledTimes(1);
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ err, productId: 42 }),
+        expect.objectContaining({ err, variantId: 42 }),
         'Failed to read from cache',
       );
     });
@@ -281,11 +291,11 @@ describe('StockCache', () => {
       const err = new Error('read-failed');
       cache.get.mockRejectedValue(err);
       cache.set.mockResolvedValue(undefined);
-      const load = jest.fn(() => Promise.resolve(sampleDto));
+      const load = jest.fn(() => Promise.resolve(sampleView));
 
-      const result = await adapter.getOrLoad({ productId: 42, correlationId }, load);
+      const result = await adapter.getOrLoad({ variantId: 42, correlationId }, load);
 
-      expect(result).toBe(sampleDto);
+      expect(result).toBe(sampleView);
       expect(load).toHaveBeenCalledTimes(1);
       expect(cache.set).not.toHaveBeenCalled();
       expect(cache.singleFlight).not.toHaveBeenCalled();
@@ -300,16 +310,16 @@ describe('StockCache', () => {
       cache.get.mockResolvedValue(undefined);
       cache.set.mockRejectedValue(writeErr);
       cache.singleFlight.mockImplementation(async (_key, fn) => fn() as Promise<never>);
-      const load = jest.fn(() => Promise.resolve(sampleDto));
+      const load = jest.fn(() => Promise.resolve(sampleView));
 
-      const result = await adapter.getOrLoad({ productId: 42, correlationId }, load);
+      const result = await adapter.getOrLoad({ variantId: 42, correlationId }, load);
 
-      expect(result).toBe(sampleDto);
+      expect(result).toBe(sampleView);
       expect(load).toHaveBeenCalledTimes(1);
       expect(cache.set).toHaveBeenCalledTimes(1);
       expect(logger.warn).toHaveBeenCalledTimes(1);
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ err: writeErr, productId: 42 }),
+        expect.objectContaining({ err: writeErr, variantId: 42 }),
         'Failed to write to cache',
       );
     });
@@ -320,7 +330,7 @@ describe('StockCache', () => {
     // internal prefix-delete. These tests cover the contract at the
     // StockCache level: work-then-invalidate ordering on success,
     // no-invalidate-on-rejection, no-invalidate-on-empty-items, the
-    // ADR-022 v1 + pre-v1 + pre-ADR-016 fan-out, and the tenant scoping.
+    // ADR-022/ADR-027 v2 + v1 + pre-v1 + pre-ADR-016 fan-out, and the tenant scoping.
 
     it('runs the prefix delete after work resolves, and returns the work result', async () => {
       cache.delByPrefix.mockResolvedValue(1);
@@ -332,7 +342,7 @@ describe('StockCache', () => {
       });
       const resolveItems = jest.fn(() => {
         order.push('resolveItems');
-        return [{ productId: 1, storageId: 'a' }];
+        return [{ variantId: 1, stockLocationId: 'a' }];
       });
 
       const result = await adapter.withInvalidation(work, resolveItems, { correlationId });
@@ -344,8 +354,8 @@ describe('StockCache', () => {
       expect(work).toHaveBeenCalledTimes(1);
       expect(resolveItems).toHaveBeenCalledWith('work-result');
       expect(order).toEqual(['work', 'resolveItems']);
-      // Three prefixes per productId (ADR-022 transition window).
-      expect(cache.delByPrefix).toHaveBeenCalledTimes(3);
+      // Four prefixes per variantId (ADR-022 / ADR-027 transition window).
+      expect(cache.delByPrefix).toHaveBeenCalledTimes(4);
       const workOrder = work.mock.invocationCallOrder[0];
       const delOrder = cache.delByPrefix.mock.invocationCallOrder[0];
       expect(workOrder).toBeLessThan(delOrder);
@@ -377,67 +387,70 @@ describe('StockCache', () => {
       expect(cache.delByPrefix).not.toHaveBeenCalled();
     });
 
-    it('wipes the v1 + pre-v1 + pre-ADR-016 prefixes per unique productId', async () => {
-      // ADR-022 transition window: every invalidation fans out to three
-      // prefixes per productId so in-flight entries from any of the three
+    it('wipes the v2 + v1 + pre-v1 + pre-ADR-016 prefixes per unique variantId', async () => {
+      // ADR-022 / ADR-027 transition window: every invalidation fans out to
+      // four prefixes per variantId so in-flight entries from any of the four
       // historical shapes are wiped on the first post-deploy invalidate.
       cache.delByPrefix.mockResolvedValue(1);
 
       await adapter.withInvalidation(
         () => Promise.resolve(),
         () => [
-          { productId: 1, storageId: 'a' },
-          { productId: 1, storageId: 'b' },
-          { productId: 2, storageId: 'a' },
+          { variantId: 1, stockLocationId: 'a' },
+          { variantId: 1, stockLocationId: 'b' },
+          { variantId: 2, stockLocationId: 'a' },
         ],
         { correlationId },
       );
 
-      // 2 productIds * 3 prefixes each
-      expect(cache.delByPrefix).toHaveBeenCalledTimes(6);
+      // 2 variantIds * 4 prefixes each
+      expect(cache.delByPrefix).toHaveBeenCalledTimes(8);
+      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v2:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v1:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('stock:1:');
+      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v2:2:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v1:2:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:2:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('stock:2:');
     });
 
-    it('scopes the v1 wipe to the supplied tenant but keeps the pre-v1 wipes tenant-agnostic', async () => {
-      // ADR-022: the pre-v1 and pre-ADR-016 shapes never carried a tenant
+    it('scopes the v2 wipe to the supplied tenant but keeps the legacy wipes tenant-agnostic', async () => {
+      // ADR-022: the v1, pre-v1, and pre-ADR-016 shapes never carried a tenant
       // segment, so the transition-window wipes are unconditionally
-      // single-tenant. Only the current v1 shape gets the `t:` prefix.
+      // single-tenant. Only the current v2 shape gets the `t:` prefix.
       cache.delByPrefix.mockResolvedValue(1);
 
       await adapter.withInvalidation(
         () => Promise.resolve(),
-        () => [{ productId: 1, storageId: 'a' }],
+        () => [{ variantId: 1, stockLocationId: 'a' }],
         { tenantId: 'store-7', correlationId },
       );
 
-      expect(cache.delByPrefix).toHaveBeenCalledTimes(3);
-      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:t:store-7:inventory:stock:v1:1:');
+      expect(cache.delByPrefix).toHaveBeenCalledTimes(4);
+      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:t:store-7:inventory:stock:v2:1:');
+      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v1:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('stock:1:');
     });
 
     it('debug-logs total unlinked count on success', async () => {
-      // Match only the v1 prefix; the pre-v1 and pre-ADR-016 transition
+      // Match only the v2 prefix; the v1, pre-v1, and pre-ADR-016 transition
       // prefixes return 0 (no in-flight stale entries in this test).
       cache.delByPrefix.mockImplementation((prefix) =>
-        Promise.resolve(prefix.startsWith('ris:inventory:stock:v1:') ? 3 : 0),
+        Promise.resolve(prefix.startsWith('ris:inventory:stock:v2:') ? 3 : 0),
       );
 
       await adapter.withInvalidation(
         () => Promise.resolve(),
-        () => [{ productId: 7, storageId: 'a' }],
+        () => [{ variantId: 7, stockLocationId: 'a' }],
         { correlationId },
       );
 
       expect(logger.debug).toHaveBeenCalledWith(
         {
           correlationId,
-          productIds: [7],
+          variantIds: [7],
           itemCount: 1,
           keyCount: 3,
         },
@@ -450,12 +463,12 @@ describe('StockCache', () => {
 
       await adapter.withInvalidation(
         () => Promise.resolve(),
-        () => [{ productId: 9, storageId: 'a' }],
+        () => [{ variantId: 9, stockLocationId: 'a' }],
         { correlationId },
       );
 
       expect(logger.debug).toHaveBeenCalledWith(
-        { correlationId, productIds: [9], itemCount: 1 },
+        { correlationId, variantIds: [9], itemCount: 1 },
         'No matching stock cache keys to invalidate',
       );
     });
@@ -469,13 +482,13 @@ describe('StockCache', () => {
       await expect(
         adapter.withInvalidation(
           () => Promise.resolve(),
-          () => [{ productId: 1, storageId: 'a' }],
+          () => [{ variantId: 1, stockLocationId: 'a' }],
           { correlationId },
         ),
       ).resolves.toBeUndefined();
 
       expect(logger.warn).toHaveBeenCalledWith(
-        { err, correlationId, productIds: [1] },
+        { err, correlationId, variantIds: [1] },
         'Failed to invalidate stock cache',
       );
     });

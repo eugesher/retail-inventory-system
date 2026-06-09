@@ -1,1 +1,1 @@
-export * from './product.controller';
+export * from './inventory.controller';

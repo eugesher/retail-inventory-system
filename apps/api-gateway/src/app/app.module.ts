@@ -30,8 +30,8 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
     AuthModule,
     IamModule,
     RetailModule,
-    InventoryModule,
     CatalogModule,
+    InventoryModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: DuplicateKeyExceptionFilter },
