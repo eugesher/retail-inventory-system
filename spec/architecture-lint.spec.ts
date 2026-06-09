@@ -302,8 +302,10 @@ describe('boundaries rules (ADR-017)', () => {
 
     it('use case may not reach another app', () => {
       // 6 levels up: use-cases → application → stock → modules → src →
-      // inventory-microservice → apps.
-      const code = `import { Order } from '../../../../../../retail-microservice/src/modules/orders/domain/order.model';\nexport type Y = Order;\n`;
+      // inventory-microservice → apps. The target is the catalog app's domain —
+      // any cross-app domain reach is forbidden (a use case allows only same-app
+      // domain/ports + a fixed lib set).
+      const code = `import { Product } from '../../../../../../catalog-microservice/src/modules/catalog/domain/product.model';\nexport type Y = Product;\n`;
       const messages = lint(
         code,
         'apps/inventory-microservice/src/modules/stock/application/use-cases/__fixture__.ts',

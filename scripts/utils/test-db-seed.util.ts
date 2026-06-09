@@ -2,8 +2,6 @@ import * as fs from 'fs';
 
 export class TestDbSeedUtil {
   public static seedFiles: string[] = [
-    'order.sql',
-    'order-product.sql',
     'catalog-product.sql',
     'catalog-product-variant.sql',
     // After the variants: tax_category has no FK dependency, and price.variant_id
