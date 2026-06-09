@@ -1,16 +1,30 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepPartial, FindOptionsWhere, In, Repository } from 'typeorm';
+import { DeepPartial, EntityManager, FindOptionsWhere, In, Repository } from 'typeorm';
 
 import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import { StockLevel, StockLocation } from '../../domain';
-import { IStockRepositoryPort } from '../../application/ports';
+import { IStockRepositoryPort, ITransactionScope } from '../../application/ports';
+import { StockWriteConflictError } from '../../application/use-cases/stock-write-conflict.error';
 import { StockLevelEntity } from './stock-level.entity';
 import { StockLevelMapper } from './stock-level.mapper';
 import { StockLocationEntity } from './stock-location.entity';
 import { StockLocationMapper } from './stock-location.mapper';
+
+// MySQL's "duplicate entry for key" error number / code. A first-touch INSERT
+// that loses the `UNIQUE (variant_id, stock_location_id)` race surfaces a driver
+// error carrying these — duck-typed (not `instanceof QueryFailedError`) to match
+// the auto-init consumer's check.
+const MYSQL_ER_DUP_ENTRY_ERRNO = 1062;
+const MYSQL_ER_DUP_ENTRY_CODE = 'ER_DUP_ENTRY';
+
+interface IMysqlDriverError {
+  errno?: number;
+  code?: string;
+  driverError?: { errno?: number; code?: string };
+}
 
 // The only `@InjectRepository` site for the inventory context. Extends
 // `BaseTypeormRepository` for the `toDomain`/`toEntity` seam over the primary
@@ -55,8 +69,9 @@ export class StockTypeormRepository
   public async findStockLevel(
     variantId: number,
     stockLocationId: string,
+    scope?: ITransactionScope,
   ): Promise<StockLevel | null> {
-    const entity = await this.stockLevelRepository.findOne({
+    const entity = await this.levelRepo(scope).findOne({
       where: { variantId, stockLocationId },
     });
     return entity ? StockLevelMapper.toDomain(entity) : null;
@@ -96,15 +111,85 @@ export class StockTypeormRepository
       'Stock level persisted',
     );
 
-    // Re-read so the returned aggregate carries the concrete generated id, the
-    // TypeORM-managed version, and the DB timestamps. The row was just
-    // committed, so a miss here is an invariant breach rather than a not-found.
-    const reloaded = await this.stockLevelRepository.findOne({ where: { id: saved.id } });
+    return this.reload(this.stockLevelRepository, saved.id);
+  }
+
+  public async persistStockLevelChange(
+    stockLevel: StockLevel,
+    expectedVersion: number | null,
+    scope?: ITransactionScope,
+  ): Promise<StockLevel> {
+    const repo = this.levelRepo(scope);
+
+    // First-touch: no row existed at read time. A plain INSERT lets the UNIQUE
+    // constraint arbitrate — a concurrent writer that created the row first turns
+    // ours into a retryable conflict (the loser re-reads on retry and takes the
+    // update path).
+    if (expectedVersion === null) {
+      const partial = StockLevelMapper.toEntity(stockLevel);
+      let savedId: number;
+      try {
+        const saved = await repo.save(partial);
+        savedId = saved.id;
+      } catch (error) {
+        if (StockTypeormRepository.isUniqueViolation(error)) {
+          throw new StockWriteConflictError(stockLevel.variantId, stockLevel.stockLocationId);
+        }
+        throw error;
+      }
+      return this.reload(repo, savedId);
+    }
+
+    // Existing row: optimistic compare-and-swap. `version = version + 1` is the
+    // DB's authoritative increment; the `WHERE ... AND version = :expectedVersion`
+    // predicate makes a concurrent writer (who already bumped the version) match
+    // zero rows — a retryable conflict rather than a silent lost update.
+    const result = await repo.update(
+      { id: stockLevel.id!, version: expectedVersion },
+      {
+        quantityOnHand: stockLevel.quantityOnHand,
+        quantityAllocated: stockLevel.quantityAllocated,
+        quantityReserved: stockLevel.quantityReserved,
+        version: () => 'version + 1',
+      },
+    );
+
+    if (!result.affected) {
+      throw new StockWriteConflictError(stockLevel.variantId, stockLevel.stockLocationId);
+    }
+
+    return this.reload(repo, stockLevel.id!);
+  }
+
+  // Resolves the repository bound to the caller's transaction when a `scope` is
+  // supplied (downcast back to the `EntityManager` the adapter brand-wraps — the
+  // one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // repository.
+  private levelRepo(scope?: ITransactionScope): Repository<StockLevelEntity> {
+    if (!scope) {
+      return this.stockLevelRepository;
+    }
+    const manager = scope as unknown as EntityManager;
+    return manager.getRepository(StockLevelEntity);
+  }
+
+  // Re-read so the returned aggregate carries the concrete generated id, the
+  // committed version, and the DB timestamps. The row was just written in this
+  // unit of work, so a miss here is an invariant breach rather than a not-found.
+  private async reload(repo: Repository<StockLevelEntity>, id: number): Promise<StockLevel> {
+    const reloaded = await repo.findOne({ where: { id } });
     if (!reloaded) {
-      throw new Error(
-        `StockTypeormRepository.saveStockLevel: stock_level ${saved.id} vanished after commit`,
-      );
+      throw new Error(`StockTypeormRepository: stock_level ${id} vanished after commit`);
     }
     return StockLevelMapper.toDomain(reloaded);
+  }
+
+  private static isUniqueViolation(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) {
+      return false;
+    }
+    const candidate = error as IMysqlDriverError;
+    const driver = candidate.driverError ?? candidate;
+    return driver.errno === MYSQL_ER_DUP_ENTRY_ERRNO || driver.code === MYSQL_ER_DUP_ENTRY_CODE;
   }
 }

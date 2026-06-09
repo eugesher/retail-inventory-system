@@ -117,9 +117,11 @@ export class StockCache implements IStockCachePort {
 
   private jitterTtl(ttl: number): number {
     // Symmetric ±JITTER_FRACTION; floor()ed for the integer-ms contract of
-    // `ICachePort.set`.
+    // `ICachePort.set`. Clamped to ≥1ms so a very small configured TTL cannot
+    // floor to 0/negative — keyv treats a non-positive TTL as "no expiry", which
+    // would defeat the TTL-as-safety-net role this jitter is meant to preserve.
     const offset = (Math.random() * 2 - 1) * StockCache.JITTER_FRACTION * ttl;
-    return Math.floor(ttl + offset);
+    return Math.max(1, Math.floor(ttl + offset));
   }
 
   // ADR-023: the prefix delete is intentionally private. The post-commit

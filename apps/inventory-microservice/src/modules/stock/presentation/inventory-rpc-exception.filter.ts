@@ -21,9 +21,11 @@ const INVENTORY_ERROR_STATUS: Record<InventoryErrorCodeEnum, HttpStatus> = {
 
   // Conflicts with current state → 409: the request is well-formed but clashes
   // with what is persisted (the location is deactivated, or the adjustment would
-  // drive on-hand below zero — the e2e asserts this 409 on `Adjust -100`).
+  // drive on-hand below zero — the e2e asserts this 409 on `Adjust -100`), or the
+  // optimistic write lost its retry budget to a concurrent writer.
   [InventoryErrorCodeEnum.STOCK_LOCATION_INACTIVE]: HttpStatus.CONFLICT,
   [InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE]: HttpStatus.CONFLICT,
+  [InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT]: HttpStatus.CONFLICT,
 };
 
 // Terminates an `InventoryDomainException` into the wire error shape the gateway's

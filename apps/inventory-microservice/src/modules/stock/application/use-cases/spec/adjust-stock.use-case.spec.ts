@@ -1,7 +1,10 @@
+import { PinoLogger } from 'nestjs-pino';
+
 import {
   INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD,
   INVENTORY_DEFAULT_STOCK_LOCATION,
 } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import {
   InventoryDomainException,
@@ -16,7 +19,6 @@ import {
   InMemoryStockCache,
   InMemoryStockRepository,
   RecordingStockEventsPublisher,
-  silentLogger,
 } from './test-doubles';
 
 const VARIANT_ID = 42;
@@ -56,7 +58,13 @@ describe('AdjustStockUseCase', () => {
     publisher = new RecordingStockEventsPublisher();
     transaction = new ImmediateTransactionPort();
     repository.seedLocation(activeLocation());
-    useCase = new AdjustStockUseCase(transaction, repository, cache, publisher, silentLogger());
+    useCase = new AdjustStockUseCase(
+      transaction,
+      repository,
+      cache,
+      publisher,
+      makePinoLoggerMock() as unknown as PinoLogger,
+    );
   });
 
   it('applies a positive signed delta and returns the updated view', async () => {

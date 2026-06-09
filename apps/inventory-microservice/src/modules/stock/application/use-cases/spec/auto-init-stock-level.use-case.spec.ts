@@ -1,15 +1,14 @@
+import { PinoLogger } from 'nestjs-pino';
+
 import {
   ICatalogVariantCreatedEvent,
   INVENTORY_DEFAULT_STOCK_LOCATION,
 } from '@retail-inventory-system/contracts';
+import { makePinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { StockLevel, StockLevelInitializedEvent } from '../../../domain';
 import { AutoInitStockLevelUseCase } from '../auto-init-stock-level.use-case';
-import {
-  InMemoryStockRepository,
-  RecordingStockEventsPublisher,
-  silentLogger,
-} from './test-doubles';
+import { InMemoryStockRepository, RecordingStockEventsPublisher } from './test-doubles';
 
 const VARIANT_ID = 42;
 const CORRELATION_ID = 'corr-auto-init-1';
@@ -34,7 +33,11 @@ describe('AutoInitStockLevelUseCase', () => {
   beforeEach(() => {
     repository = new InMemoryStockRepository();
     publisher = new RecordingStockEventsPublisher();
-    useCase = new AutoInitStockLevelUseCase(repository, publisher, silentLogger());
+    useCase = new AutoInitStockLevelUseCase(
+      repository,
+      publisher,
+      makePinoLoggerMock() as unknown as PinoLogger,
+    );
   });
 
   it('creates a zeroed default-warehouse stock level and emits the event once for a new variant', async () => {
