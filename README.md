@@ -42,10 +42,6 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/iam/staff/:id/roles                           │
 │  DELETE /api/iam/staff/:id/roles/:roleName                │
 │                                                           │
-│  Domain                                                   │
-│  POST  /api/order                                         │
-│  PUT   /api/order/:id/confirm                             │
-│                                                           │
 │  Catalog (write: bearer + permission, read: public)       │
 │  POST  /api/catalog/products                              │
 │  POST  /api/catalog/products/:id/variants                 │
@@ -74,17 +70,15 @@ The system handles order lifecycle management and product stock tracking across 
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
 │                        │  │  RPC: stock-level.get,        │
-│  retail.order.create   │  │  location.list,receive,adjust │
-│  retail.order.confirm ─┼──► inventory.order.confirm (stub)│
-│  retail.order.get      │  │  Consumes: variant.created    │
-│                        │  │  Emits:                       │
-│  Emits:                │  │  inventory.stock.low ─────────┼─┐
-│  retail.order.created ─┼──┐                               │ │
-│  retail.order.confirmed│  │  ┌────────────┐               │ │
-└──────────────┬─────────┘  │  │   Redis    │◄──cache-aside─┤ │
-               │            │  │ stock keys │               │ │
+│  Order model torn down │  │  location.list, receive,      │
+│  — no RPC/event        │  │  adjust; order.confirm (stub) │
+│  handlers yet; the     │  │  Consumes: variant.created    │
+│  checkout model is     │  │  Emits: inventory.stock.low ──┼─┐
+│  rebuilt later. Boots  │  │                               │ │
+│  on retail_queue.      │  │  ┌────────────┐               │ │
+│                        │  │  │   Redis    │◄──cache-aside─┤ │
+└──────────────┬─────────┘  │  │ stock keys │               │ │
                │            │  └────────────┘               │ │
-               │            │                               │ │
                │            └─────────────────┬─────────────┘ │
                │            MySQL             │               │
                └──────────────┬───────────────┘               │
@@ -93,15 +87,14 @@ The system handles order lifecycle management and product stock tracking across 
 │                        Shared DB                          │ │
 │  staff_user / customer / role / permission                │ │
 │  role_permissions / staff_user_roles                      │ │
-│  order / order_product / order_status                     │ │
-│  order_product_status / stock_location / stock_level      │ │
+│  stock_location / stock_level                              │ │
 │  product / product_variant                                │ │
 │  price / tax_category                                     │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
 │              Notification Microservice (RMQ)                  │
-│  Listens: retail.order.created, inventory.stock.low           │
+│  Listens: inventory.stock.low                                 │
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
@@ -120,7 +113,7 @@ otel-collector → Jaeger UI at http://localhost:16686 (see the
 "Distributed tracing" section below).
 ```
 
-The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. Inventory already keys on the variant: `stock_level.variant_id` is a real foreign key to `product_variant(id)` — the append-only `product_stock` ledger was dropped in the [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) rewrite. The retail `order_product.product_id` column still survives as a plain integer with **no foreign key**; a later retail capability reshapes it onto a catalog `variantId`.
+The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. Inventory already keys on the variant: `stock_level.variant_id` is a real foreign key to `product_variant(id)` — the append-only `product_stock` ledger was dropped in the [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) rewrite. The legacy retail order tables (`order` / `order_product` / the two `*_status` lookups) have been torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild; the order/cart lines that replace them key on the catalog `variantId` from the start.
 
 A sibling **`pricing`** module colocates inside the same microservice (it shares `catalog_queue` and keys on the same `variantId`). It owns two tables: `price` — an append-only-for-history, `(variantId, currency)`-scoped, time-bounded ledger where a price change is a new row plus a close of the predecessor's `[validFrom, validTo)` interval (at most one open row per scope, backstopped by a generated-column UNIQUE index) — and `tax_category`, a classification label that variants point at through the nullable `product_variant.tax_category_id` FK (`ON DELETE SET NULL`). See [ADR-026](docs/adr/026-price-append-only-ledger-and-tax-category.md). It exposes six RPCs on `catalog_queue` — three price (`catalog.price.set`, one command for both Set and Schedule distinguished by `validFrom`; `catalog.price.list`; and `catalog.price.select`, Select Applicable Price: the deterministic `(variantId, currency, asOf)` → single price, resolved priority-then-recency in the use case) and three tax-category (`catalog.tax-category.create`, `catalog.tax-category.list`, and `catalog.variant.set-tax-category`, which attaches a category to a variant by writing the `product_variant.tax_category_id` FK through a parameterized query rather than a cross-module entity import) — and emits `catalog.price.changed` / `catalog.price.scheduled`. Rates/jurisdictions and the gateway HTTP endpoints are later work.
 
@@ -145,9 +138,9 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | Service                     | Transport                       | Responsibility                                       |
 | --------------------------- | ------------------------------- | ---------------------------------------------------- |
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
-| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
+| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — boots order-free after the legacy order teardown; the rebuilt cart/order/payment model lands later |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
-| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
+| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low` to a notifier port |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
@@ -160,16 +153,6 @@ apps/api-gateway/src/
 ├── common/utils/                              # throwRpcError, etc.
 ├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 └── modules/
-    ├── retail/                                # talks to retail-microservice
-    │   ├── application/
-    │   │   ├── ports/retail-gateway.port.ts   # IRetailGatewayPort + RETAIL_GATEWAY_PORT
-    │   │   └── use-cases/                     # CreateOrderUseCase, ConfirmOrderUseCase
-    │   ├── infrastructure/
-    │   │   ├── messaging/retail-rabbitmq.adapter.ts
-    │   │   └── retail.module.ts
-    │   └── presentation/
-    │       ├── order.controller.ts            # POST/PUT /api/order…
-    │       └── pipes/order-confirm.pipe.ts
     ├── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
     │   ├── application/
     │   │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
@@ -211,11 +194,9 @@ apps/notification-microservice/src/
     ├── application/
     │   ├── ports/notifier.port.ts             # INotifierPort + NOTIFIER symbol
     │   └── use-cases/
-    │       ├── send-order-notification.use-case.ts
     │       └── send-low-stock-alert.use-case.ts
     ├── infrastructure/
     │   ├── consumers/                          # RMQ @EventPattern subscribers
-    │   │   ├── order-events.consumer.ts        # retail.order.created
     │   │   └── inventory-events.consumer.ts    # inventory.stock.low
     │   ├── delivery/                           # NOTIFIER implementations
     │   │   ├── log.notifier.adapter.ts         # default
@@ -267,39 +248,15 @@ The `stock` context keys everything on the catalog **`variantId`** (an opaque cr
 
 `ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the four inventory events (`inventory.stock.{received,adjusted,low}` + `inventory.stock-level.initialized`); the `inventory.order.confirm` handler is a kept-but-deprecated `RpcException` stub (stock reservation moves to the later inventory-reservation capability). See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
 
-The retail microservice exposes a single `orders` bounded context laid out the same way:
+The retail microservice currently has **no bounded-context module**. Its first-generation `orders` model — a single `Order` aggregate that expanded each line into one `order_product` row per unit, a two-value status, and a cross-service `inventory.order.confirm` reserve call — was torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild. The service still boots: `app.module.ts` wires only `ConfigModule`, `LoggerModule`, and `DatabaseModule.forRoot([])`, so it listens on `retail_queue` with no `@MessagePattern` / `@EventPattern` handlers — the same "bootable, operation-free" shape the inventory service had between its own model rebuilds.
 
 ```
 apps/retail-microservice/src/
-├── app/app.module.ts                          # imports OrdersModule + LoggerModule + DatabaseModule
-├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
-└── modules/orders/
-    ├── domain/
-    │   ├── order.model.ts                     # aggregate (non-empty lines, status transitions)
-    │   ├── order-product.model.ts             # child entity inside the Order aggregate
-    │   ├── customer.model.ts                  # CustomerRef VO
-    │   ├── order-status.value-object.ts       # OrderStatusVO (PENDING / CONFIRMED)
-    │   ├── order-product-status.value-object.ts
-    │   └── events/                            # OrderCreatedEvent, OrderConfirmedEvent, OrderCancelledEvent
-    ├── application/
-    │   ├── ports/
-    │   │   ├── order.repository.port.ts       # IOrderRepositoryPort + ORDER_REPOSITORY symbol
-    │   │   ├── order-events.publisher.port.ts # IOrderEventsPublisherPort + ORDER_EVENTS_PUBLISHER symbol
-    │   │   └── inventory-confirm.gateway.port.ts # IInventoryConfirmGatewayPort + INVENTORY_CONFIRM_GATEWAY symbol
-    │   └── use-cases/
-    │       ├── create-order.use-case.ts       # persists then publishes retail.order.created
-    │       ├── confirm-order.use-case.ts      # cross-service: calls INVENTORY_CONFIRM_GATEWAY then updates
-    │       └── get-order.use-case.ts          # header status lookup (consumed by gateway pipe)
-    ├── infrastructure/
-    │   ├── persistence/                       # Order/OrderProduct/Customer/OrderStatus/OrderProductStatus entities + mappers + OrderTypeormRepository
-    │   ├── messaging/                          # OrderRabbitmqPublisher + InventoryConfirmRabbitmqAdapter
-    │   └── orders.module.ts                   # binds all three port symbols → adapters
-    └── presentation/
-        ├── orders.controller.ts               # @MessagePattern handlers for RETAIL_ORDER_CREATE / CONFIRM / GET
-        └── pipes/                              # OrderConfirmPipe (pre-RPC order line-item load)
+├── app/app.module.ts                          # ConfigModule + LoggerModule + DatabaseModule.forRoot([])
+└── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 ```
 
-`ClientProxy` is confined to the two adapters under `infrastructure/messaging/`; the use cases inject `INVENTORY_CONFIRM_GATEWAY` (for the cross-service reserve call) and `ORDER_EVENTS_PUBLISHER` (for `retail.order.created` / `retail.order.confirmed`). See [ADR-013](docs/adr/013-order-aggregate-and-cross-service-confirm.md) for the aggregate boundaries and the cross-service confirm flow.
+The rebuilt context — a mutable `Cart` (`CartLine`), an immutable `Order` (`OrderLine`) with three orthogonal status axes, a `Payment` aggregate behind a `PAYMENT_GATEWAY` port, and snapshotted `Address` rows — lands in subsequent work and follows the same per-module hexagonal shape. See [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) for the target aggregate boundaries.
 
 ## Getting Started
 
@@ -386,13 +343,6 @@ What the boundaries rules cover today:
 The rules are regression-tested in `spec/architecture-lint.spec.ts` — every rule has a fixture that intentionally violates it and asserts the expected `boundaries/*` ruleId fires, so silent weakening of a rule fails the unit suite. The suite covers the inventory `stock` module, the gateway `auth`/`iam` modules, and the catalog microservice's `catalog` module.
 
 ## API
-
-### Orders
-
-```
-POST /api/order
-PUT  /api/order/:id/confirm
-```
 
 ### Catalog
 
@@ -657,20 +607,17 @@ Available values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`.
 
 ### Sample: correlated request across services
 
-The following shows the full log output for a `PUT /api/order/1/confirm` request. Every line shares the same `correlationId` regardless of which process emitted it:
+The following shows the full log output for a `POST /api/inventory/variants/1/stock/adjust` request whose signed delta drops on-hand to at/below the low-stock threshold, fanning a `inventory.stock.low` event out to the notification service. Every line shares the same `correlationId` regardless of which process emitted it:
 
 ```json lines
-{"level":30,"time":1748000000010,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","req":{"method":"PUT","url":"/api/order/1/confirm"},"msg":"incoming request"}
-{"level":30,"time":1748000000015,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"msg":"Order confirmation in progress"}
-{"level":30,"time":1748000000016,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"retail.order.confirm","msg":"Sending RPC to retail service"}
-{"level":30,"time":1748000000020,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"productCount":2,"msg":"Received RPC: confirm order"}
-{"level":30,"time":1748000000021,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"inventory.order.confirm","msg":"Sending RPC to inventory service"}
-{"level":30,"time":1748000000025,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ReserveStockForOrderUseCase","totalProducts":2,"pendingCount":2,"msg":"Received RPC: reserve order product stock"}
-{"level":30,"time":1748000000040,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ReserveStockForOrderUseCase","confirmedCount":2,"skippedCount":0,"msg":"Stock reserved for order products"}
-{"level":30,"time":1748000000045,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"confirmedCount":2,"msg":"Inventory stock confirmation received"}
-{"level":30,"time":1748000000048,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"msg":"Order fully confirmed"}
-{"level":30,"time":1748000000060,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"statusId":"confirmed","msg":"Order successfully confirmed"}
-{"level":30,"time":1748000000070,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","res":{"statusCode":200},"responseTime":60,"msg":"request completed"}
+{"level":30,"time":1748000000010,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","req":{"method":"POST","url":"/api/inventory/variants/1/stock/adjust"},"msg":"incoming request"}
+{"level":30,"time":1748000000015,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","pattern":"inventory.stock-level.adjust","msg":"Sending RPC to inventory service"}
+{"level":30,"time":1748000000020,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","variantId":1,"quantityDelta":-8,"reasonCode":"damage","msg":"Received RPC: adjust stock"}
+{"level":30,"time":1748000000035,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","variantId":1,"stockLocationId":"default-warehouse","quantityOnHand":2,"msg":"Stock adjusted"}
+{"level":30,"time":1748000000037,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","pattern":"inventory.stock.low","quantity":2,"threshold":5,"msg":"Emitting low-stock event"}
+{"level":30,"time":1748000000045,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"SendLowStockAlertUseCase","variantId":1,"quantity":2,"threshold":5,"msg":"Received event: stock low"}
+{"level":30,"time":1748000000050,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"SendLowStockAlertUseCase","channel":"log","msg":"Low-stock alert dispatched"}
+{"level":30,"time":1748000000060,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","res":{"statusCode":200},"responseTime":50,"msg":"request completed"}
 ```
 
 See [ADR-001](docs/adr/001-structured-logging-with-pino.md) for the rationale behind this design.
@@ -715,8 +662,8 @@ The collector config lives at [`infrastructure/otel-collector-config.yaml`](infr
 #### Finding a trace
 
 1. Open Jaeger at <http://localhost:16686>.
-2. Pick a service (e.g. `api-gateway`) and an operation (e.g. `PUT /api/order/:id/confirm`).
-3. The matching trace shows spans from all four services, including the AMQP `publish` / `process` pairs that connect the gateway → retail → inventory → notification flow.
+2. Pick a service (e.g. `api-gateway`) and an operation (e.g. `POST /api/inventory/variants/:id/stock/adjust`).
+3. The matching trace shows spans from every service the request touches, including the AMQP `publish` / `process` pairs that connect the gateway → inventory → notification flow.
 4. To go from a log line back to the trace, copy `traceId` from any service's log and paste it into Jaeger's "Lookup by Trace ID" box.
 
 #### The "first import in `main.ts`" rule

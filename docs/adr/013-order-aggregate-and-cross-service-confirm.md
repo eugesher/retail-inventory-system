@@ -1,7 +1,7 @@
 # ADR-013: Order aggregate and the cross-service confirm flow
 
 - **Date**: 2026-05-14
-- **Status**: Accepted (pipe-loader methods added to `IOrderRepositoryPort` post-ADR; see References)
+- **Status**: Superseded by [ADR-028](028-cart-order-payment-and-address-chain.md) — the single `Order` aggregate, the one-row-per-unit `order_product` model, the two-value status, and the `INVENTORY_CONFIRM_GATEWAY` cross-service confirm flow are replaced by a mutable `Cart` + immutable `Order` chain with three orthogonal statuses, money-minor line snapshots, Payment, and Address. (Originally Accepted 2026-05-14; pipe-loader methods added to `IOrderRepositoryPort` post-ADR; see References.)
 
 ---
 

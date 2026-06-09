@@ -99,10 +99,10 @@ describe('Auth flow (e2e)', () => {
   });
 
   describe('protection of pre-existing routes', () => {
-    it('returns 401 on POST /api/order without an Authorization header', async () => {
-      const { status } = await supertest(apiGatewayApp.getHttpServer())
-        .post('/api/order')
-        .send({ customerId: 1, products: [{ productId: 1, quantity: 1 }] });
+    it('returns 401 on GET /api/inventory/locations without an Authorization header', async () => {
+      const { status } = await supertest(apiGatewayApp.getHttpServer()).get(
+        '/api/inventory/locations',
+      );
       expect(status).toBe(HttpStatus.UNAUTHORIZED);
     });
 
