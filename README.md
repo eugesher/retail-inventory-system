@@ -70,7 +70,7 @@ The system handles order lifecycle management and product stock tracking across 
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
 │                        │  │  RPC: stock-level.get,        │
-│  Order model torn down │  │  location.list, receive,      │
+│  Cart/CartLine module. │  │  location.list, receive,      │
 │  — no RPC/event        │  │  adjust; order.confirm (stub) │
 │  handlers yet; the     │  │  Consumes: variant.created    │
 │  checkout model is     │  │  Emits: inventory.stock.low ──┼─┐
@@ -90,6 +90,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  stock_location / stock_level                              │ │
 │  product / product_variant                                │ │
 │  price / tax_category                                     │ │
+│  cart / cart_line                                         │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
@@ -138,7 +139,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | Service                     | Transport                       | Responsibility                                       |
 | --------------------------- | ------------------------------- | ---------------------------------------------------- |
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
-| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — boots order-free after the legacy order teardown; the rebuilt cart/order/payment model lands later |
+| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — the mutable `Cart`/`CartLine` aggregate (`modules/cart/`) is registered; cart operations, gateway, and the immutable Order/Payment model land later |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low` to a notifier port |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
@@ -248,15 +249,23 @@ The `stock` context keys everything on the catalog **`variantId`** (an opaque cr
 
 `ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the four inventory events (`inventory.stock.{received,adjusted,low}` + `inventory.stock-level.initialized`); the `inventory.order.confirm` handler is a kept-but-deprecated `RpcException` stub (stock reservation moves to the later inventory-reservation capability). See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
 
-The retail microservice currently has **no bounded-context module**. Its first-generation `orders` model — a single `Order` aggregate that expanded each line into one `order_product` row per unit, a two-value status, and a cross-service `inventory.order.confirm` reserve call — was torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild. The service still boots: `app.module.ts` wires only `ConfigModule`, `LoggerModule`, and `DatabaseModule.forRoot([])`, so it listens on `retail_queue` with no `@MessagePattern` / `@EventPattern` handlers — the same "bootable, operation-free" shape the inventory service had between its own model rebuilds.
+The retail microservice hosts the **mutable side of the rebuilt checkout**: the `cart` bounded-context module. Its first-generation `orders` model — a single `Order` aggregate that expanded each line into one `order_product` row per unit, a two-value status, and a cross-service `inventory.order.confirm` reserve call — was torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild. The `Cart` aggregate root (a caller-assigned `CHAR(36)` UUID id, generated in-app) owns its `CartLine` children; the status machine is `active → converted` (placement) / `active → abandoned` (purge), both terminal. Each mutator (`addLine` increments an existing line rather than duplicating it; `changeLineQuantity` rejects `0`; `removeLine`; `markConverted`; `markAbandoned`) advances a `version` optimistic-concurrency token — shipped now though its guard is a later capability — and records a framework-free domain event. A `CartLine` snapshots its unit price (in minor units) and currency at add-time, so a sibling line's change never re-prices it; `variantId` is the opaque catalog backbone key. The `cart` / `cart_line` tables FK onto the gateway `customer` and the catalog `product_variant` in the one shared database.
+
+This is **foundation only**: the module registers its `Cart` aggregate + `CART_REPOSITORY` over the two tables, but there are no use cases, no message handlers, and no gateway routes yet — the service boots with the `cart` module wired and still listens on `retail_queue` with no `@MessagePattern` / `@EventPattern` handlers. The cart operations, their HTTP gateway, and guest-cart promotion land in subsequent work.
 
 ```
 apps/retail-microservice/src/
-├── app/app.module.ts                          # ConfigModule + LoggerModule + DatabaseModule.forRoot([])
+├── app/app.module.ts                          # ConfigModule + LoggerModule + DatabaseModule.forRoot(cartEntities) + CartModule
+├── modules/cart/
+│   ├── domain/                                # Cart + CartLine aggregate, events, CartDomainException
+│   ├── application/ports/                     # ICartRepositoryPort (CART_REPOSITORY)
+│   └── infrastructure/
+│       ├── persistence/                       # cart/cart_line entities, mappers, CartTypeormRepository
+│       └── cart.module.ts                     # DatabaseModule.forFeature + repository binding
 └── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 ```
 
-The rebuilt context — a mutable `Cart` (`CartLine`), an immutable `Order` (`OrderLine`) with three orthogonal status axes, a `Payment` aggregate behind a `PAYMENT_GATEWAY` port, and snapshotted `Address` rows — lands in subsequent work and follows the same per-module hexagonal shape. See [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) for the target aggregate boundaries.
+The **immutable** counterpart — an `Order` (`OrderLine`) with three orthogonal status axes, a `Payment` aggregate behind a `PAYMENT_GATEWAY` port, and snapshotted polymorphic `Address` rows — lands in subsequent work and follows the same per-module hexagonal shape. See [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) for the target aggregate boundaries.
 
 ## Getting Started
 

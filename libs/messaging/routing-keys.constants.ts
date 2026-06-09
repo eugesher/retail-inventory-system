@@ -26,6 +26,14 @@ export const ROUTING_KEYS = {
   CATALOG_TAX_CATEGORY_CREATE: 'catalog.tax-category.create',
   CATALOG_TAX_CATEGORY_LIST: 'catalog.tax-category.list',
   CATALOG_VARIANT_SET_TAX_CATEGORY: 'catalog.variant.set-tax-category',
+  // Reserved-surface cart events (no consumer bound yet) — emitted onto
+  // `retail_queue` by the cart operations. The cart RPC command keys
+  // (`retail.cart.create` / `.get` / line ops) arrive with the handlers that
+  // serve them (ADR-028 §9).
+  RETAIL_CART_CREATED: 'retail.cart.created',
+  RETAIL_CART_LINE_ADDED: 'retail.cart.line-added',
+  RETAIL_CART_LINE_REMOVED: 'retail.cart.line-removed',
+  RETAIL_CART_LINE_QUANTITY_CHANGED: 'retail.cart.line-quantity-changed',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 
