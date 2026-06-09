@@ -70,7 +70,7 @@ The system handles order lifecycle management and product stock tracking across 
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
 │                        │  │  RPC: stock-level.get,        │
-│  Cart/CartLine module. │  │  location.list, receive,      │
+│  Cart + Orders modules │  │  location.list, receive,      │
 │  — no RPC/event        │  │  adjust; order.confirm (stub) │
 │  handlers yet; the     │  │  Consumes: variant.created    │
 │  checkout model is     │  │  Emits: inventory.stock.low ──┼─┐
@@ -91,6 +91,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  product / product_variant                                │ │
 │  price / tax_category                                     │ │
 │  cart / cart_line                                         │ │
+│  order / order_line / address                             │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
@@ -139,7 +140,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | Service                     | Transport                       | Responsibility                                       |
 | --------------------------- | ------------------------------- | ---------------------------------------------------- |
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
-| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — the mutable `Cart`/`CartLine` aggregate (`modules/cart/`) is registered; cart operations, gateway, and the immutable Order/Payment model land later |
+| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — the mutable `Cart`/`CartLine` (`modules/cart/`) and the immutable `Order`/`OrderLine` + polymorphic `Address` (`modules/orders/`) aggregates are registered; all operations, the gateway, and the `Payment` model land later |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low` to a notifier port |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
@@ -251,21 +252,29 @@ The `stock` context keys everything on the catalog **`variantId`** (an opaque cr
 
 The retail microservice hosts the **mutable side of the rebuilt checkout**: the `cart` bounded-context module. Its first-generation `orders` model — a single `Order` aggregate that expanded each line into one `order_product` row per unit, a two-value status, and a cross-service `inventory.order.confirm` reserve call — was torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild. The `Cart` aggregate root (a caller-assigned `CHAR(36)` UUID id, generated in-app) owns its `CartLine` children; the status machine is `active → converted` (placement) / `active → abandoned` (purge), both terminal. Each mutator (`addLine` increments an existing line rather than duplicating it; `changeLineQuantity` rejects `0`; `removeLine`; `markConverted`; `markAbandoned`) advances a `version` optimistic-concurrency token — shipped now though its guard is a later capability — and records a framework-free domain event. A `CartLine` snapshots its unit price (in minor units) and currency at add-time, so a sibling line's change never re-prices it; `variantId` is the opaque catalog backbone key. The `cart` / `cart_line` tables FK onto the gateway `customer` and the catalog `product_variant` in the one shared database.
 
-This is **foundation only**: the module registers its `Cart` aggregate + `CART_REPOSITORY` over the two tables, but there are no use cases, no message handlers, and no gateway routes yet — the service boots with the `cart` module wired and still listens on `retail_queue` with no `@MessagePattern` / `@EventPattern` handlers. The cart operations, their HTTP gateway, and guest-cart promotion land in subsequent work.
+It also hosts the **immutable side**: the `orders` module's `Order` aggregate (a DB-assigned `BIGINT` id) owning its `OrderLine` children, plus the polymorphic `Address` aggregate (a caller-assigned `CHAR(36)` UUID) in the same module. An `Order` carries **three orthogonal status axes** — `status`, `paymentStatus`, `fulfillmentStatus` — that evolve independently (a `captured` payment can coexist with `unfulfilled` fulfillment), rather than one combined enum. `Order.place(...)` snapshots the cart's lines into immutable `OrderLine`s (each `Object.freeze`-d, carrying a `sku`/`nameSnapshot`/`unitPriceMinor` snapshot in minor units) and derives the five money totals (`grandTotal = subtotal = Σ line totals`; tax/discount/shipping are `0` this capability); payment-axis mutators walk `none → authorized → captured`. `order.order_number` is a human-facing `ORD-<year>-<8-digit>` label finalized from the generated id (UNIQUE-backed); `order.source_cart_id` links the converted cart for repeat-place idempotency; `order.customer_id` is nullable (a deleted customer leaves a tombstone). An `Address` is **polymorphic** over `ownerType ∈ {customer, order}`; an order's billing/shipping addresses are immutable `ownerType=order` **snapshot copies**, never references into a future customer address book.
+
+This is **foundation only**: the two modules register their aggregates + the `CART_REPOSITORY` / `ORDER_REPOSITORY` / `ADDRESS_REPOSITORY` ports over the five tables, but there are no use cases, no message handlers, and no gateway routes yet — the service boots with both modules wired and still listens on `retail_queue` with no `@MessagePattern` / `@EventPattern` handlers. The cart/order operations, their HTTP gateway, guest-cart promotion, and the `Payment` aggregate (behind a `PAYMENT_GATEWAY` port, inside the `orders` module) land in subsequent work.
 
 ```
 apps/retail-microservice/src/
-├── app/app.module.ts                          # ConfigModule + LoggerModule + DatabaseModule.forRoot(cartEntities) + CartModule
+├── app/app.module.ts                          # ConfigModule + LoggerModule + DatabaseModule.forRoot([...cartEntities, ...orderEntities]) + CartModule + OrdersModule
 ├── modules/cart/
 │   ├── domain/                                # Cart + CartLine aggregate, events, CartDomainException
 │   ├── application/ports/                     # ICartRepositoryPort (CART_REPOSITORY)
 │   └── infrastructure/
 │       ├── persistence/                       # cart/cart_line entities, mappers, CartTypeormRepository
 │       └── cart.module.ts                     # DatabaseModule.forFeature + repository binding
+├── modules/orders/
+│   ├── domain/                                # Order + OrderLine + polymorphic Address aggregates, OrderDomainException
+│   ├── application/ports/                     # IOrderRepositoryPort (ORDER_REPOSITORY) + IAddressRepositoryPort (ADDRESS_REPOSITORY)
+│   └── infrastructure/
+│       ├── persistence/                       # order/order_line/address entities, mappers, Order/Address TypeormRepository
+│       └── orders.module.ts                   # DatabaseModule.forFeature + the two repository bindings
 └── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 ```
 
-The **immutable** counterpart — an `Order` (`OrderLine`) with three orthogonal status axes, a `Payment` aggregate behind a `PAYMENT_GATEWAY` port, and snapshotted polymorphic `Address` rows — lands in subsequent work and follows the same per-module hexagonal shape. See [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) for the target aggregate boundaries.
+See [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) for the full target aggregate boundaries (the cart, order, payment, and address chain).
 
 ## Getting Started
 
