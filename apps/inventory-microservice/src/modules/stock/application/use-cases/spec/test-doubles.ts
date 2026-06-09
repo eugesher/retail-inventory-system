@@ -21,6 +21,7 @@ import {
   ITransactionScope,
   IStockWithInvalidationOptions,
 } from '../../ports';
+import { StockWriteConflictError } from '../stock-write-conflict.error';
 
 // In-memory `IStockRepositoryPort` over two maps — stock levels keyed on
 // `(variantId, stockLocationId)` and locations keyed on the string id. Domain
@@ -28,9 +29,28 @@ import {
 export class InMemoryStockRepository implements IStockRepositoryPort {
   public readonly levels = new Map<string, StockLevel>();
   public readonly locations = new Map<string, StockLocation>();
+  // Test hook: reject the next N `persistStockLevelChange` calls with a
+  // `StockWriteConflictError`, to drive the optimistic-retry loop.
+  public conflictsBeforeSuccess = 0;
 
   private key(variantId: number, stockLocationId: string): string {
     return `${variantId}:${stockLocationId}`;
+  }
+
+  // A fresh aggregate per read, mirroring the real repository (which maps a new
+  // object out of each DB row). Essential for the retry path: a failed attempt's
+  // in-place `changeOnHand` must not mutate the stored row the next read returns.
+  private clone(level: StockLevel): StockLevel {
+    return new StockLevel({
+      id: level.id,
+      variantId: level.variantId,
+      stockLocationId: level.stockLocationId,
+      quantityOnHand: level.quantityOnHand,
+      quantityAllocated: level.quantityAllocated,
+      quantityReserved: level.quantityReserved,
+      version: level.version,
+      updatedAt: level.updatedAt,
+    });
   }
 
   public seedLevel(level: StockLevel): void {
@@ -51,7 +71,8 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
   }
 
   public findStockLevel(variantId: number, stockLocationId: string): Promise<StockLevel | null> {
-    return Promise.resolve(this.levels.get(this.key(variantId, stockLocationId)) ?? null);
+    const stored = this.levels.get(this.key(variantId, stockLocationId));
+    return Promise.resolve(stored ? this.clone(stored) : null);
   }
 
   public findStockLevelsByVariant(
@@ -71,6 +92,31 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
   public saveStockLevel(stockLevel: StockLevel): Promise<StockLevel> {
     this.seedLevel(stockLevel);
     return Promise.resolve(stockLevel);
+  }
+
+  public persistStockLevelChange(
+    stockLevel: StockLevel,
+    expectedVersion: number | null,
+  ): Promise<StockLevel> {
+    if (this.conflictsBeforeSuccess > 0) {
+      this.conflictsBeforeSuccess -= 1;
+      return Promise.reject(
+        new StockWriteConflictError(stockLevel.variantId, stockLevel.stockLocationId),
+      );
+    }
+
+    // Mirror the real compare-and-swap: a stale `expectedVersion` (a concurrent
+    // writer bumped the stored row first) loses. `null` is a first-touch insert.
+    const stored = this.levels.get(this.key(stockLevel.variantId, stockLevel.stockLocationId));
+    if (expectedVersion !== null && stored && stored.version !== expectedVersion) {
+      return Promise.reject(
+        new StockWriteConflictError(stockLevel.variantId, stockLevel.stockLocationId),
+      );
+    }
+
+    const persisted = this.clone(stockLevel);
+    this.seedLevel(persisted);
+    return Promise.resolve(this.clone(persisted));
   }
 }
 
@@ -145,10 +191,11 @@ export class InMemoryStockCache implements IStockCachePort {
   }
 }
 
-// Runs the transactional `work` immediately with an opaque sentinel scope — the
-// real adapter opens a MySQL transaction, but the use cases never touch the scope
-// directly (the repository owns persistence), so a pass-through double is faithful
-// to the contract the write use cases depend on.
+// Runs the transactional `work` immediately with an opaque sentinel scope. The
+// real adapter opens a MySQL transaction and the mutator now threads the scope
+// into the repository read + persist; the in-memory repository ignores it (a
+// single map, no isolation to model), so a pass-through double still faithfully
+// exercises the find → changeOnHand → persist call path the write use cases take.
 export class ImmediateTransactionPort implements ITransactionPort {
   public calls = 0;
 

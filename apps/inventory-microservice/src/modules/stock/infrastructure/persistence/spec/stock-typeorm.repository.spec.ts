@@ -1,8 +1,9 @@
 import { PinoLogger } from 'nestjs-pino';
-import { FindOperator, Repository } from 'typeorm';
+import { FindOperator, Repository, UpdateResult } from 'typeorm';
 
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
+import { StockWriteConflictError } from '../../../application/use-cases/stock-write-conflict.error';
 import { StockLevel } from '../../../domain';
 import { StockLevelEntity } from '../stock-level.entity';
 import { StockLocationEntity } from '../stock-location.entity';
@@ -39,14 +40,21 @@ const makeLocationEntity = (overrides: Partial<StockLocationEntity> = {}): Stock
   }) as StockLocationEntity;
 
 describe('StockTypeormRepository', () => {
-  let levelRepo: jest.Mocked<Pick<Repository<StockLevelEntity>, 'findOne' | 'find' | 'save'>>;
+  let levelRepo: jest.Mocked<
+    Pick<Repository<StockLevelEntity>, 'findOne' | 'find' | 'save' | 'update'>
+  >;
   let locationRepo: jest.Mocked<Pick<Repository<StockLocationEntity>, 'findOne' | 'find'>>;
   let logger: PinoLoggerMock;
   let repository: StockTypeormRepository;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    levelRepo = { findOne: jest.fn(), find: jest.fn(), save: jest.fn() } as never;
+    levelRepo = {
+      findOne: jest.fn(),
+      find: jest.fn(),
+      save: jest.fn(),
+      update: jest.fn(),
+    } as never;
     locationRepo = { findOne: jest.fn(), find: jest.fn() } as never;
     logger = makePinoLoggerMock();
     repository = new StockTypeormRepository(
@@ -95,6 +103,80 @@ describe('StockTypeormRepository', () => {
       levelRepo.save.mockResolvedValue(makeLevelEntity({ id: 9 }));
 
       await expect(repository.saveStockLevel(level)).rejects.toThrow('vanished after commit');
+    });
+  });
+
+  describe('persistStockLevelChange', () => {
+    it('inserts a first-touch level (expectedVersion null) and re-reads it', async () => {
+      const level = StockLevel.initialAt(1, 'default-warehouse');
+      level.changeOnHand(7);
+      levelRepo.save.mockResolvedValue(makeLevelEntity({ id: 11, quantityOnHand: 7, version: 1 }));
+      levelRepo.findOne.mockResolvedValue(
+        makeLevelEntity({ id: 11, quantityOnHand: 7, version: 1 }),
+      );
+
+      const result = await repository.persistStockLevelChange(level, null);
+
+      const savedArg = levelRepo.save.mock.calls[0][0] as Partial<StockLevelEntity>;
+      expect(savedArg.id).toBeUndefined();
+      expect(levelRepo.update).not.toHaveBeenCalled();
+      expect(result.id).toBe(11);
+      expect(result.quantityOnHand).toBe(7);
+    });
+
+    it('maps a first-touch UNIQUE collision to a StockWriteConflictError', async () => {
+      const level = StockLevel.initialAt(1, 'default-warehouse');
+      level.changeOnHand(1);
+      const duplicate = Object.assign(new Error('Duplicate entry'), {
+        driverError: { code: 'ER_DUP_ENTRY', errno: 1062 },
+      });
+      levelRepo.save.mockRejectedValue(duplicate);
+
+      await expect(repository.persistStockLevelChange(level, null)).rejects.toBeInstanceOf(
+        StockWriteConflictError,
+      );
+    });
+
+    it('version-checks the UPDATE and re-reads on a winning compare-and-swap', async () => {
+      // Loaded version was 2; `changeOnHand` bumped the in-memory token to 3.
+      const level = new StockLevel({
+        id: 7,
+        variantId: 1,
+        stockLocationId: 'default-warehouse',
+        quantityOnHand: 12,
+        quantityAllocated: 0,
+        quantityReserved: 0,
+        version: 3,
+      });
+      levelRepo.update.mockResolvedValue({ affected: 1 } as unknown as UpdateResult);
+      levelRepo.findOne.mockResolvedValue(
+        makeLevelEntity({ id: 7, quantityOnHand: 12, version: 3 }),
+      );
+
+      const result = await repository.persistStockLevelChange(level, 2);
+
+      const [criteria] = levelRepo.update.mock.calls[0];
+      expect(criteria).toEqual({ id: 7, version: 2 });
+      expect(levelRepo.save).not.toHaveBeenCalled();
+      expect(result.quantityOnHand).toBe(12);
+    });
+
+    it('maps a lost compare-and-swap (zero rows affected) to a StockWriteConflictError', async () => {
+      const level = new StockLevel({
+        id: 7,
+        variantId: 1,
+        stockLocationId: 'default-warehouse',
+        quantityOnHand: 12,
+        quantityAllocated: 0,
+        quantityReserved: 0,
+        version: 3,
+      });
+      levelRepo.update.mockResolvedValue({ affected: 0 } as unknown as UpdateResult);
+
+      await expect(repository.persistStockLevelChange(level, 2)).rejects.toBeInstanceOf(
+        StockWriteConflictError,
+      );
+      expect(levelRepo.findOne).not.toHaveBeenCalled();
     });
   });
 

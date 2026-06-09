@@ -20,6 +20,11 @@ export enum InventoryErrorCodeEnum {
   // would drive on-hand below zero.
   STOCK_LOCATION_INACTIVE = 'INVENTORY_STOCK_LOCATION_INACTIVE',
   STOCK_RESULT_NEGATIVE = 'INVENTORY_STOCK_RESULT_NEGATIVE',
+
+  // Optimistic-concurrency exhaustion → 409: the write retried the version-checked
+  // update the bounded number of times and still lost the race to a concurrent
+  // writer on the same `(variantId, stockLocationId)`. The caller may simply retry.
+  STOCK_WRITE_CONFLICT = 'INVENTORY_STOCK_WRITE_CONFLICT',
 }
 
 // The inventory bounded context's concrete `DomainException` (the third in the

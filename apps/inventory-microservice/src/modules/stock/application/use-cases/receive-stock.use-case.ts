@@ -23,6 +23,7 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { applyOnHandChange } from './stock-mutation';
 import { requireActiveLocation } from './stock-location.guard';
 import { toStockLevelView } from './stock-view.factory';
 
@@ -70,20 +71,17 @@ export class ReceiveStockUseCase {
 
     await requireActiveLocation(this.repository, stockLocationId);
 
-    // Transactional read-modify-write wrapped so the cache wipe runs post-commit
-    // (ADR-023). `work` resolves only after the save has committed, so
-    // `resolveItems` → the prefix delete is genuinely after the write is durable.
-    const saved = await this.stockCache.withInvalidation(
-      () =>
-        this.transactionPort.runInTransaction(async () => {
-          const level =
-            (await this.repository.findStockLevel(variantId, stockLocationId)) ??
-            StockLevel.initialAt(variantId, stockLocationId);
-          level.changeOnHand(quantity);
-          return this.repository.saveStockLevel(level);
-        }),
-      (result) => [{ variantId: result.variantId, stockLocationId: result.stockLocationId }],
-      { correlationId },
+    // The shared mutator owns the write protocol (ADR-027): post-commit cache
+    // invalidation (ADR-023) around a bounded optimistic retry around the
+    // transactional find-or-init → changeOnHand → version-checked persist.
+    const saved = await applyOnHandChange(
+      {
+        transactionPort: this.transactionPort,
+        repository: this.repository,
+        stockCache: this.stockCache,
+        logger: this.logger,
+      },
+      { variantId, stockLocationId, delta: quantity, correlationId },
     );
 
     this.logger.info(
