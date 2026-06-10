@@ -1,4 +1,12 @@
-import { PriceView, VariantWithProductView } from '@retail-inventory-system/contracts';
+import {
+  OrderFulfillmentStatusEnum,
+  OrderLineStatusEnum,
+  OrderPaymentStatusEnum,
+  OrderStatusEnum,
+  PaymentStatusEnum,
+  PriceView,
+  VariantWithProductView,
+} from '@retail-inventory-system/contracts';
 
 import { Address, Order, OrderLine, Payment } from '../../../domain';
 import {
@@ -127,8 +135,17 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
   }
 
   public listByCustomer(customerId: string, page: IOrderPageRequest): Promise<IOrderPage> {
-    const items = [...this.byId.values()].filter((order) => order.customerId === customerId);
-    return Promise.resolve({ items, total: items.length, page: page.page, size: page.size });
+    // Mirror the real repository's newest-first ordering (`placed_at DESC, id DESC`)
+    // so the use-case spec can assert it, then apply the page window.
+    const all = [...this.byId.values()]
+      .filter((order) => order.customerId === customerId)
+      .sort((a, b) => {
+        const byPlaced = (b.placedAt?.getTime() ?? 0) - (a.placedAt?.getTime() ?? 0);
+        return byPlaced !== 0 ? byPlaced : (b.id ?? 0) - (a.id ?? 0);
+      });
+    const start = (page.page - 1) * page.size;
+    const items = all.slice(start, start + page.size);
+    return Promise.resolve({ items, total: all.length, page: page.page, size: page.size });
   }
 
   public nextOrderNumber(): Promise<string> {
@@ -241,9 +258,13 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
 // `gatewayReference` per authorize (the UNIQUE column relies on it).
 export class FakePaymentGateway implements IPaymentGatewayPort {
   public authorizeCount = 0;
+  public captureCount = 0;
   private seq = 0;
 
-  constructor(private readonly approve = true) {}
+  constructor(
+    private readonly approve = true,
+    private readonly captureOk = true,
+  ) {}
 
   public authorize(req: IPaymentAuthorizeRequest): Promise<IPaymentAuthorizeResult> {
     this.authorizeCount += 1;
@@ -256,18 +277,20 @@ export class FakePaymentGateway implements IPaymentGatewayPort {
   }
 
   public capture(gatewayReference: string): Promise<IPaymentCaptureResult> {
+    this.captureCount += 1;
     return Promise.resolve({
-      captured: true,
+      captured: this.captureOk,
       gatewayReference,
       capturedAt: new Date('2026-06-10T00:00:00.000Z'),
     });
   }
 }
 
-// Records the published wire events so a spec can assert both fired.
+// Records the published wire events so a spec can assert each fired.
 export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public readonly placed: unknown[] = [];
   public readonly authorized: unknown[] = [];
+  public readonly captured: unknown[] = [];
 
   public publishOrderPlaced(event: unknown): Promise<void> {
     this.placed.push(event);
@@ -276,6 +299,11 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
 
   public publishPaymentAuthorized(event: unknown): Promise<void> {
     this.authorized.push(event);
+    return Promise.resolve();
+  }
+
+  public publishPaymentCaptured(event: unknown): Promise<void> {
+    this.captured.push(event);
     return Promise.resolve();
   }
 }
@@ -318,3 +346,65 @@ export const buildPrice = (
   validTo: null,
   priority: 0,
 });
+
+// A persisted-order fixture (via `Order.reconstitute`, the load path) for the
+// read/capture specs — a one-line order at any `paymentStatus` keyed to a concrete
+// id, so a fake repo can serve it directly without replaying the place flow.
+export const buildOrderFixture = (
+  id: number,
+  customerId: string | null,
+  paymentStatus: OrderPaymentStatusEnum = OrderPaymentStatusEnum.AUTHORIZED,
+  unitPriceMinor = 1000,
+  placedAt: Date = new Date('2026-06-10T00:00:00.000Z'),
+): Order =>
+  Order.reconstitute({
+    id,
+    orderNumber: `ORD-2026-${String(id).padStart(8, '0')}`,
+    customerId,
+    currency: 'USD',
+    status: OrderStatusEnum.PENDING,
+    paymentStatus,
+    fulfillmentStatus: OrderFulfillmentStatusEnum.UNFULFILLED,
+    lines: [
+      new OrderLine({
+        id: id * 1000,
+        variantId: 1,
+        sku: 'SKU-1',
+        nameSnapshot: 'Item One',
+        quantity: 1,
+        unitPriceMinor,
+        taxAmountMinor: 0,
+        discountAmountMinor: 0,
+        status: OrderLineStatusEnum.ALLOCATED,
+      }),
+    ],
+    subtotalMinor: unitPriceMinor,
+    taxTotalMinor: 0,
+    discountTotalMinor: 0,
+    shippingTotalMinor: 0,
+    grandTotalMinor: unitPriceMinor,
+    billingAddressId: null,
+    shippingAddressId: null,
+    sourceCartId: `cart-${id}`,
+    placedAt,
+    version: 2,
+  });
+
+// A persisted-payment fixture (via `Payment.reconstitute`) for the read/capture specs.
+export const buildPaymentFixture = (
+  id: number,
+  orderId: number,
+  status: PaymentStatusEnum = PaymentStatusEnum.AUTHORIZED,
+  amountMinor = 1000,
+): Payment =>
+  Payment.reconstitute({
+    id,
+    orderId,
+    amountMinor,
+    currency: 'USD',
+    method: 'fake-card',
+    status,
+    gatewayReference: `fake_ref_${id}`,
+    authorizedAt: new Date('2026-06-10T00:00:00.000Z'),
+    capturedAt: status === PaymentStatusEnum.CAPTURED ? new Date('2026-06-10T00:00:00.000Z') : null,
+  });

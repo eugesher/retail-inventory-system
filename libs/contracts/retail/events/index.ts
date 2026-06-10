@@ -4,3 +4,4 @@ export * from './cart-line-removed.event';
 export * from './cart-line-quantity-changed.event';
 export * from './order-placed.event';
 export * from './payment-authorized.event';
+export * from './payment-captured.event';

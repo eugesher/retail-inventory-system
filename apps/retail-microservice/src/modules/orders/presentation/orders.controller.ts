@@ -1,23 +1,56 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 
-import { IPlaceOrderPayload, OrderView } from '@retail-inventory-system/contracts';
+import {
+  IPage,
+  IPlaceOrderPayload,
+  IRetailOrderGetPayload,
+  IRetailOrderListPayload,
+  IRetailPaymentCapturePayload,
+  OrderView,
+} from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
-import { PlaceOrderUseCase } from '../application/use-cases';
+import {
+  CapturePaymentUseCase,
+  GetOrderUseCase,
+  ListMyOrdersUseCase,
+  PlaceOrderUseCase,
+} from '../application/use-cases';
 
 // RPC surface for the order operations (API Gateway → Retail over `retail_queue`).
 // `retail.cart.place` is a cart-shaped key (it acts on a cart) served here in the
 // orders controller, because the operation produces an immutable `Order` (ADR-028
-// §1). The handler is a thin delegate; an `OrderDomainException` is terminated by the
-// `OrdersRpcExceptionFilter` into the `{ statusCode, ... }` wire shape the gateway
-// maps. Get / List / Capture handlers arrive with the read/capture capability.
+// §1). `retail.order.get` / `retail.order.list` / `retail.payment.capture` are the
+// read + capture keys (ADR-028 §3/§7). Each handler is a thin delegate; an
+// `OrderDomainException` is terminated by the `OrdersRpcExceptionFilter` into the
+// `{ statusCode, ... }` wire shape the gateway maps.
 @Controller()
 export class OrdersController {
-  constructor(private readonly placeOrder: PlaceOrderUseCase) {}
+  constructor(
+    private readonly placeOrder: PlaceOrderUseCase,
+    private readonly getOrder: GetOrderUseCase,
+    private readonly listMyOrders: ListMyOrdersUseCase,
+    private readonly capturePayment: CapturePaymentUseCase,
+  ) {}
 
   @MessagePattern(ROUTING_KEYS.RETAIL_CART_PLACE)
   public handlePlace(@Payload() payload: IPlaceOrderPayload): Promise<OrderView> {
     return this.placeOrder.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_GET)
+  public handleGet(@Payload() payload: IRetailOrderGetPayload): Promise<OrderView> {
+    return this.getOrder.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_LIST)
+  public handleList(@Payload() payload: IRetailOrderListPayload): Promise<IPage<OrderView>> {
+    return this.listMyOrders.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURE)
+  public handleCapture(@Payload() payload: IRetailPaymentCapturePayload): Promise<OrderView> {
+    return this.capturePayment.execute(payload);
   }
 }

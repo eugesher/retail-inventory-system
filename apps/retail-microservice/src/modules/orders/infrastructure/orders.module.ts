@@ -18,7 +18,13 @@ import {
   PAYMENT_REPOSITORY,
   TRANSACTION_PORT,
 } from '../application/ports';
-import { AuthorizePaymentUseCase, PlaceOrderUseCase } from '../application/use-cases';
+import {
+  AuthorizePaymentUseCase,
+  CapturePaymentUseCase,
+  GetOrderUseCase,
+  ListMyOrdersUseCase,
+  PlaceOrderUseCase,
+} from '../application/use-cases';
 import { OrderCatalogRabbitmqAdapter, OrderRabbitmqPublisher } from './messaging';
 import {
   AddressEntity,
@@ -38,7 +44,9 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 // repositories, the `PAYMENT_GATEWAY` seam (default `FakePaymentGatewayAdapter`,
 // ADR-028 §4), the transactional unit-of-work (`TRANSACTION_PORT`), the two outbound
 // seams (catalog snapshot reads + the order/payment event emits), the Place Order +
-// Authorize Payment use cases, and the `retail.cart.place` RPC controller.
+// Authorize Payment + Capture Payment + Get Order + List My Orders use cases, and the
+// `retail.cart.place` / `retail.order.get` / `retail.order.list` /
+// `retail.payment.capture` RPC controller.
 //
 // Three messaging clients are imported: `MicroserviceClientCatalogModule` so Place
 // Order can snapshot from `catalog.variant.get` / `catalog.price.select` on
@@ -84,6 +92,9 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 
     AuthorizePaymentUseCase,
     PlaceOrderUseCase,
+    GetOrderUseCase,
+    ListMyOrdersUseCase,
+    CapturePaymentUseCase,
 
     { provide: APP_FILTER, useClass: OrdersRpcExceptionFilter },
   ],

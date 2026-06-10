@@ -1,6 +1,7 @@
 import {
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
+  IRetailPaymentCapturedEvent,
 } from '@retail-inventory-system/contracts';
 
 export const ORDER_EVENTS_PUBLISHER = Symbol('ORDER_EVENTS_PUBLISHER');
@@ -12,11 +13,13 @@ export const ORDER_EVENTS_PUBLISHER = Symbol('ORDER_EVENTS_PUBLISHER');
 //
 // `publishOrderPlaced` emits `retail.order.placed` onto `notification_events` (the
 // consumer's queue — the producer-targets-consumer-queue pattern of ADR-008/020);
-// `publishPaymentAuthorized` emits `retail.payment.authorized` onto `retail_queue`
-// (a reserved surface, like the `retail.cart.*` events). Both are best-effort
-// post-commit emits — the place write has already committed, so a publish failure
-// is warn-logged and swallowed by the caller (ADR-020).
+// `publishPaymentAuthorized` / `publishPaymentCaptured` emit `retail.payment.authorized`
+// / `retail.payment.captured` onto `retail_queue` (reserved surfaces, like the
+// `retail.cart.*` events). Each is a best-effort post-commit emit — the write has
+// already committed, so a publish failure is warn-logged and swallowed by the caller
+// (ADR-020).
 export interface IOrderEventsPublisherPort {
   publishOrderPlaced(event: IRetailOrderPlacedEvent): Promise<void>;
   publishPaymentAuthorized(event: IRetailPaymentAuthorizedEvent): Promise<void>;
+  publishPaymentCaptured(event: IRetailPaymentCapturedEvent): Promise<void>;
 }

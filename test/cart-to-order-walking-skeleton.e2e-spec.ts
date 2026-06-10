@@ -77,6 +77,7 @@ describe('Cart → Order walking skeleton (e2e)', () => {
 
   let orderPlacedSpy: jest.SpyInstance;
   let paymentAuthorizedSpy: jest.SpyInstance;
+  let paymentCapturedSpy: jest.SpyInstance;
 
   const login = async (): Promise<string> => {
     const { body } = await supertest(apiGatewayApp.getHttpServer())
@@ -140,11 +141,13 @@ describe('Cart → Order walking skeleton (e2e)', () => {
     const publisher = retailMicroservice.get(OrderRabbitmqPublisher, { strict: false });
     orderPlacedSpy = jest.spyOn(publisher, 'publishOrderPlaced');
     paymentAuthorizedSpy = jest.spyOn(publisher, 'publishPaymentAuthorized');
+    paymentCapturedSpy = jest.spyOn(publisher, 'publishPaymentCaptured');
   }, timeout);
 
   afterAll(async () => {
     orderPlacedSpy?.mockRestore();
     paymentAuthorizedSpy?.mockRestore();
+    paymentCapturedSpy?.mockRestore();
     await apiGatewayApp?.close();
     await retailMicroservice?.close();
     await catalogMicroservice?.close();
@@ -219,7 +222,48 @@ describe('Cart → Order walking skeleton (e2e)', () => {
       expect(paymentAuthorizedSpy).toHaveBeenCalled();
     });
 
-    it('is repeat-safe: re-placing the now-converted cart returns the same order', async () => {
+    // Step 6 — read the placed order back through the gateway orders module and assert
+    // the populated place-time snapshots survive the round trip.
+    it('GET /api/orders/:orderId returns the populated line snapshots (owner read)', async () => {
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        .get(`/api/orders/${placed.id}`)
+        .set('Authorization', `Bearer ${accessToken}`);
+
+      expect(status).toBe(HttpStatus.OK);
+      const fetched = body as IOrderBody;
+      expect(fetched.id).toBe(placed.id);
+      expect(fetched.orderNumber).toBe(placed.orderNumber);
+      expect(fetched.lines).toHaveLength(2);
+
+      const lineOne = fetched.lines.find((line) => line.variantId === VARIANT_ONE.id)!;
+      expect(lineOne.sku).toBe(VARIANT_ONE.sku);
+      expect(lineOne.nameSnapshot).toContain(VARIANT_ONE.name);
+      expect(lineOne.unitPriceMinor).toBe(VARIANT_ONE.priceMinor);
+      expect(fetched.payment?.status).toBe('authorized');
+    });
+
+    // Step 7 — the owning customer captures its own payment. Payment + order payment
+    // axis both advance to `captured`, and `retail.payment.captured` is published.
+    it('POST /api/orders/:orderId/payments/capture captures (owner) and publishes the event', async () => {
+      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+        .post(`/api/orders/${placed.id}/payments/capture`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Idempotency-Key', '4b1f8a2e-0003-4a00-8a00-000000000003')
+        .send({});
+
+      expect(status).toBe(HttpStatus.OK);
+      const captured = body as IOrderBody;
+      expect(captured.paymentStatus).toBe('captured');
+      expect(captured.payment?.status).toBe('captured');
+      expect(captured.payment?.id).toBe(placed.payment?.id);
+      expect(paymentCapturedSpy).toHaveBeenCalled();
+    });
+
+    // Step 8 — re-placing the now-converted cart returns the SAME order + payment.
+    // Repeat-safety is cart-state-driven (the cart is `converted`), not header dedupe:
+    // a brand-new Idempotency-Key still resolves to the existing order. Key-based
+    // dedupe is a later capability.
+    it('is repeat-safe: re-placing the now-converted cart returns the same order + payment', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .post(`/api/cart/${cartId}/place`)
         .set('Authorization', `Bearer ${accessToken}`)
@@ -230,6 +274,7 @@ describe('Cart → Order walking skeleton (e2e)', () => {
       const repeat = body as IOrderBody;
       expect(repeat.id).toBe(placed.id);
       expect(repeat.orderNumber).toBe(placed.orderNumber);
+      expect(repeat.payment?.id).toBe(placed.payment?.id);
     });
   });
 });
