@@ -1,0 +1,173 @@
+# Cart endpoints
+# (apps/api-gateway/src/modules/cart/presentation/cart.controller.ts)
+#
+# The API gateway fronts the retail microservice's six cart RPCs over HTTP at
+# /api/cart. Every route is bearer-protected (a registered OR guest customer
+# token passes). There is NO permission code on these routes — a customer carries
+# no permissions; authorization is an OWNER-CHECK enforced retail-side
+# (cart.customerId === the authenticated subject), so a customer can only touch
+# its own cart. A non-owner gets 403; an unauthenticated caller 401.
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures the seeded customer's bearer
+#      token into @accessToken, which every cart request below substitutes into
+#      its Authorization header.
+#   3. Then run `createCart` — it captures @cartId from the response. The
+#      add/change/remove blocks target that captured cart, so the file runs
+#      straight through. Add-to-Cart snapshots the seeded USD price of variant 1.
+#
+# The guest flow (bottom of the file) is independent: `guestSession` mints a
+# guest token + @guestCustomerId, and `claimCart` documents promoting a guest
+# cart to a registered customer with the fromCustomerId ownership proof.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name login
+# POST /api/auth/customer/login
+# Seeded customer login (customer@example.com / customer1234). Response is
+# TokenResponseDto { accessToken, refreshToken, expiresIn }.
+POST {{baseUrl}}/auth/customer/login
+Content-Type: application/json
+
+{
+  "email": "customer@example.com",
+  "password": "customer1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name createCart
+# POST /api/cart  (Bearer — owner is the authenticated customer)
+# Opens a new active cart for the caller. Body (CreateCartRequestDto):
+#   currency?: 3-letter code (defaults to USD)
+# Response is CartView { id, customerId, currency, status, lines: [], subtotalMinor }.
+POST {{baseUrl}}/cart
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartId = {{createCart.response.body.$.id}}
+
+###
+
+# @name getCart
+# GET /api/cart/:cartId  (Bearer + owner-check)
+# Reads the cart by id. A non-owner gets 403; an unknown cart 404. Response is
+# CartView.
+GET {{baseUrl}}/cart/{{cartId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name addLine
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds a variant line. The price is NEVER sent — it is snapshotted retail-side
+# from catalog.price.select in the cart's currency. An unknown/unpriced variant
+# is rejected 409. Body (AddLineRequestDto):
+#   variantId: positive int (the catalog variant id; seeded variant 1 has a USD price)
+#   quantity:  positive int
+# Response is the updated CartView; the new line carries unitPriceSnapshotMinor.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 2
+}
+
+###
+@lineId = {{addLine.response.body.$.lines[0].id}}
+
+###
+
+# @name changeLineQuantity
+# PATCH /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
+# Sets a line's quantity to a new positive value (a 0 is rejected — removal is
+# the explicit DELETE). Body (ChangeLineQuantityRequestDto):
+#   quantity: positive int
+# Response is the updated CartView.
+PATCH {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "quantity": 1
+}
+
+###
+
+# @name removeLine
+# DELETE /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
+# Drops the line from the cart. An unknown line id is 404. Response is the
+# updated CartView (now with an empty lines array).
+DELETE {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name guestSession
+# POST /api/auth/customer/guest-session  (@Public — no token)
+# Mints a guest-tier session: a real, logged-in-able guest Customer row
+# (status='guest', null password). The guest-tier token replaces a session
+# cookie — a guest builds a cart through the SAME bearer-protected cart routes.
+# Response is GuestSessionResponseDto { accessToken, refreshToken, expiresIn,
+# customerId }. Keep `customerId` — it is the fromCustomerId proof for claim.
+POST {{baseUrl}}/auth/customer/guest-session
+
+###
+@guestAccessToken = {{guestSession.response.body.$.accessToken}}
+@guestCustomerId = {{guestSession.response.body.$.customerId}}
+
+###
+
+# @name guestCreateCart
+# POST /api/cart  (Bearer — the guest token)
+# The guest opens its own cart through the normal route; the cart's customerId
+# is the guest id.
+POST {{baseUrl}}/cart
+Authorization: Bearer {{guestAccessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@guestCartId = {{guestCreateCart.response.body.$.id}}
+
+###
+
+# @name claimCart
+# POST /api/cart/:cartId/claim  (Bearer — the REGISTERED customer's token)
+# Promotes the guest cart to the registered customer. Body (ClaimCartRequestDto):
+#   fromCustomerId: the guest id from the guest-session response (the ownership
+#                   proof — knowing it proves the caller owned the guest session)
+# The new owner (newCustomerId) is taken from @CurrentUser().id, never sent. The
+# re-point succeeds only if the cart currently belongs to fromCustomerId, else
+# 403. Response is the reassigned CartView (customerId is now the registered id).
+POST {{baseUrl}}/cart/{{guestCartId}}/claim
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCustomerId": "{{guestCustomerId}}"
+}

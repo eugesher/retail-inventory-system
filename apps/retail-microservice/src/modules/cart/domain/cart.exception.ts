@@ -33,6 +33,19 @@ export enum CartErrorCodeEnum {
   CART_LINE_PRICE_INVALID = 'CART_LINE_PRICE_INVALID',
   // A line's `currencySnapshot` must be a non-empty string — 400.
   CART_LINE_CURRENCY_REQUIRED = 'CART_LINE_CURRENCY_REQUIRED',
+  // A cart operation named a cartId that does not exist — 404. Raised by the
+  // Get/Add/Change/Remove/Claim use cases when the repository returns null.
+  CART_NOT_FOUND = 'CART_NOT_FOUND',
+  // The caller is not the cart's owner (`cart.customerId !== caller`) — 403. The
+  // owner-check is enforced both at the gateway (it holds `@CurrentUser()`) and
+  // here as defense-in-depth so the retail service never blindly trusts the edge
+  // (ADR-028 §7). Claim raises it when the `fromCustomerId` ownership proof fails.
+  CART_ACCESS_FORBIDDEN = 'CART_ACCESS_FORBIDDEN',
+  // Add-to-Cart could not resolve an applicable price for the variant in the
+  // cart's currency (unknown or unpriced variant) — a 409: the variant cannot be
+  // added in its current pricing state. A cart line must carry a real price
+  // snapshot, so the operation is rejected rather than persisting a zero price.
+  CART_VARIANT_NOT_PRICED = 'CART_VARIANT_NOT_PRICED',
 }
 
 // One concrete throwable for the cart bounded context, carrying a typed `code`

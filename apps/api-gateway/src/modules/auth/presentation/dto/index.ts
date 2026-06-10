@@ -1,5 +1,6 @@
 export * from './current-customer.response.dto';
 export * from './current-user.response.dto';
+export * from './guest-session.response.dto';
 export * from './login-customer.request.dto';
 export * from './login.request.dto';
 export * from './refresh.request.dto';

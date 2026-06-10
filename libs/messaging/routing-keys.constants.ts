@@ -26,10 +26,18 @@ export const ROUTING_KEYS = {
   CATALOG_TAX_CATEGORY_CREATE: 'catalog.tax-category.create',
   CATALOG_TAX_CATEGORY_LIST: 'catalog.tax-category.list',
   CATALOG_VARIANT_SET_TAX_CATEGORY: 'catalog.variant.set-tax-category',
+  // Cart RPC command keys (API Gateway → Retail). Each is served by a
+  // `@MessagePattern` handler on the retail cart controller and resolves to a
+  // `CartView`; `retail.cart.claim` is the guest-promotion re-point (ADR-028 §9).
+  RETAIL_CART_CREATE: 'retail.cart.create',
+  RETAIL_CART_GET: 'retail.cart.get',
+  RETAIL_CART_ADD_LINE: 'retail.cart.add-line',
+  RETAIL_CART_CHANGE_LINE_QUANTITY: 'retail.cart.change-line-quantity',
+  RETAIL_CART_REMOVE_LINE: 'retail.cart.remove-line',
+  RETAIL_CART_CLAIM: 'retail.cart.claim',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
-  // `retail_queue` by the cart operations. The cart RPC command keys
-  // (`retail.cart.create` / `.get` / line ops) arrive with the handlers that
-  // serve them (ADR-028 §9).
+  // `retail_queue` by the cart operations. These are past-tense notifications,
+  // distinct from the imperative command keys above.
   RETAIL_CART_CREATED: 'retail.cart.created',
   RETAIL_CART_LINE_ADDED: 'retail.cart.line-added',
   RETAIL_CART_LINE_REMOVED: 'retail.cart.line-removed',

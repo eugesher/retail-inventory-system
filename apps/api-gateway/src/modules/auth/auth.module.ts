@@ -13,6 +13,7 @@ import {
   TOKEN_SERVICE,
 } from './application/ports';
 import {
+  CreateGuestSessionUseCase,
   GetCurrentCustomerUseCase,
   LoginCustomerUseCase,
   LoginUseCase,
@@ -99,6 +100,7 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     RegisterStaffUserUseCase,
     RegisterCustomerUseCase,
     LoginCustomerUseCase,
+    CreateGuestSessionUseCase,
     GetCurrentCustomerUseCase,
   ],
   exports: [

@@ -104,6 +104,21 @@ describe('ValidateJwtSubjectUseCase', () => {
     await expect(useCase.validate(customerPayload)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('accepts a guest customer (a guest-tier token is authenticatable)', async () => {
+    const guest = Customer.register('cust-1', {
+      email: 'guest-cust-1@guest.local',
+      passwordHash: null,
+      status: 'guest',
+    });
+    customers.seed(guest);
+
+    const current = await useCase.validate(customerPayload);
+
+    expect(current.id).toBe('cust-1');
+    expect(current.roles).toEqual([]);
+    expect(current.permissions).toEqual([]);
+  });
+
   it('defaults permissions to [] when the payload predates this deploy', async () => {
     await seedStaff();
 
