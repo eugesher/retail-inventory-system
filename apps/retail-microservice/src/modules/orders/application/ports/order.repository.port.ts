@@ -1,4 +1,5 @@
 import { Order } from '../../domain';
+import { ITransactionScope } from './transaction.port';
 
 export const ORDER_REPOSITORY = Symbol('ORDER_REPOSITORY');
 
@@ -24,12 +25,21 @@ export interface IOrderPage {
 // forbids `typeorm` in `application/ports`). The TypeORM details live entirely in
 // `OrderTypeormRepository`.
 //
-// The order operations + their gateway land in later capabilities; this foundation
-// only fixes the contract:
+// The contract the place + read/capture operations depend on:
 // - `save` upserts the root together with its lines and re-reads the saved graph
 //   so the generated BIGINT id + `order_line.id`s come back concrete, and finalizes
 //   the human-facing `order_number` from the generated id on first insert (the
-//   "re-read the saved graph, then finalize a derived field" idiom).
+//   "re-read the saved graph, then finalize a derived field" idiom). It accepts an
+//   optional `scope` so Place Order's order + address + cart-conversion writes share
+//   one transaction (ADR-017 §6); without a scope it opens its own transaction.
+// - `attachAddresses` finalizes the two snapshot-address FK columns from a
+//   targeted UPDATE once both `address` rows exist (the same "finalize a derived
+//   column after the row is written" idiom `order_number` uses) — the order is
+//   inserted with NULL address ids, the addresses are written owning the order id,
+//   then the order's `billing/shipping_address_id` are patched, all in one
+//   transaction (ADR-028 §5).
+// - `findById` is the by-id load path (optionally scoped, so the authorize follow-up
+//   transaction reads the just-placed order within its own unit of work).
 // - `findBySourceCartId` backs repeat-place idempotency — re-placing a cart that
 //   already converted returns the order it converted into rather than a second one.
 // - `listByCustomer` backs the customer's order history (owner-checked at the use
@@ -37,9 +47,15 @@ export interface IOrderPage {
 // - `nextOrderNumber` formats the next human-facing number; the binding value is
 //   finalized inside `save` from the order's real id, so the two always agree.
 export interface IOrderRepositoryPort {
-  findById(id: number): Promise<Order | null>;
+  findById(id: number, scope?: ITransactionScope): Promise<Order | null>;
   findBySourceCartId(cartId: string): Promise<Order | null>;
-  save(order: Order): Promise<Order>;
+  save(order: Order, scope?: ITransactionScope): Promise<Order>;
+  attachAddresses(
+    orderId: number,
+    billingAddressId: string,
+    shippingAddressId: string,
+    scope?: ITransactionScope,
+  ): Promise<void>;
   listByCustomer(customerId: string, page: IOrderPageRequest): Promise<IOrderPage>;
   nextOrderNumber(): Promise<string>;
 }

@@ -97,6 +97,13 @@ describe('ROUTING_KEYS', () => {
       MicroserviceMessagePatternEnum.RETAIL_CART_REMOVE_LINE,
     );
     expect(ROUTING_KEYS.RETAIL_CART_CLAIM).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_CLAIM);
+    expect(ROUTING_KEYS.RETAIL_CART_PLACE).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_PLACE);
+    expect(ROUTING_KEYS.RETAIL_ORDER_PLACED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_PLACED,
+    );
+    expect(ROUTING_KEYS.RETAIL_PAYMENT_AUTHORIZED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_PAYMENT_AUTHORIZED,
+    );
     expect(ROUTING_KEYS.RETAIL_CART_CREATED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_CART_CREATED,
     );

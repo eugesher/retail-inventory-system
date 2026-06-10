@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -13,6 +14,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -21,7 +23,7 @@ import {
 } from '@nestjs/swagger';
 
 import { CurrentUser } from '@retail-inventory-system/auth';
-import { CartView, ICurrentUser } from '@retail-inventory-system/contracts';
+import { CartView, ICurrentUser, OrderView } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
 import {
@@ -30,6 +32,7 @@ import {
   ClaimCartUseCase,
   CreateCartUseCase,
   GetCartUseCase,
+  PlaceCartOrderUseCase,
   RemoveFromCartUseCase,
 } from '../application/use-cases';
 import {
@@ -37,6 +40,7 @@ import {
   ChangeLineQuantityRequestDto,
   ClaimCartRequestDto,
   CreateCartRequestDto,
+  PlaceOrderRequestDto,
 } from './dto';
 
 // HTTP surface over the retail microservice's six cart RPCs (ADR-009). Every
@@ -61,6 +65,7 @@ export class CartController {
     private readonly changeCartLineQuantityUseCase: ChangeCartLineQuantityUseCase,
     private readonly removeFromCartUseCase: RemoveFromCartUseCase,
     private readonly claimCartUseCase: ClaimCartUseCase,
+    private readonly placeCartOrderUseCase: PlaceCartOrderUseCase,
   ) {}
 
   @Post()
@@ -160,6 +165,41 @@ export class CartController {
   ): Promise<CartView> {
     return this.claimCartUseCase.execute(
       { cartId, fromCustomerId: dto.fromCustomerId, newCustomerId: user.id },
+      correlationId,
+    );
+  }
+
+  @Post(':cartId/place')
+  @ApiOperation({
+    summary: 'Place the cart as an order (owner-checked, authorize-on-place)',
+  })
+  @ApiParam({ name: 'cartId', type: String, example: '11111111-1111-4111-8111-111111111111' })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description: 'Accepted + logged but not deduped (repeat-safety is via cart state)',
+  })
+  @ApiCreatedResponse({
+    description: 'The placed order (with the authorized payment)',
+    type: OrderView,
+  })
+  @ApiProduces('application/json')
+  public async placeOrder(
+    @Param('cartId') cartId: string,
+    @Body() dto: PlaceOrderRequestDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @CurrentUser() user: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<OrderView> {
+    return this.placeCartOrderUseCase.execute(
+      {
+        cartId,
+        customerId: user.id,
+        shippingAddress: dto.shippingAddress,
+        billingAddress: dto.billingAddress,
+        paymentMethod: dto.paymentMethod,
+        idempotencyKey,
+      },
       correlationId,
     );
   }

@@ -28,6 +28,29 @@ export enum OrderErrorCodeEnum {
   // (`markPaymentAuthorized` off non-`none`, `markPaymentCaptured` off
   // non-`authorized`) — a well-formed request the resource state forbids, 409.
   ORDER_INVALID_PAYMENT_TRANSITION = 'ORDER_INVALID_PAYMENT_TRANSITION',
+  // The order being read/operated on does not exist — 404. (Place reads a placed
+  // order back for the idempotent repeat; the read/capture operations resolve an
+  // order by id.)
+  ORDER_NOT_FOUND = 'ORDER_NOT_FOUND',
+
+  // --- Place Order flow (cart→order conversion) ---
+  // The cart referenced by a place request does not exist — 404.
+  ORDER_CART_NOT_FOUND = 'ORDER_CART_NOT_FOUND',
+  // The authenticated caller is not the cart's owner — the retail-side half of the
+  // owner-check (ADR-028 §7), 403.
+  ORDER_CART_ACCESS_FORBIDDEN = 'ORDER_CART_ACCESS_FORBIDDEN',
+  // The cart cannot be placed in its current state — it is `abandoned` (a purged
+  // cart is terminal) — 409.
+  ORDER_CART_NOT_PLACEABLE = 'ORDER_CART_NOT_PLACEABLE',
+  // The cart has no lines, so there is nothing to place — 409.
+  ORDER_CART_EMPTY = 'ORDER_CART_EMPTY',
+  // A cart line's variant has no applicable price in the cart's currency at
+  // place-time, so the line cannot be snapshotted at a real price — 409.
+  ORDER_LINE_NO_PRICE = 'ORDER_LINE_NO_PRICE',
+  // The payment gateway declined the authorize (unreachable with the always-approve
+  // fake, but modeled) — the order stays placed-but-unpaid and the place surfaces a
+  // 409.
+  ORDER_PAYMENT_NOT_APPROVED = 'ORDER_PAYMENT_NOT_APPROVED',
 
   // A line's opaque `variantId` must be a positive integer — 400.
   ORDER_LINE_VARIANT_INVALID = 'ORDER_LINE_VARIANT_INVALID',

@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, Repository } from 'typeorm';
+import { DeepPartial, EntityManager, Repository } from 'typeorm';
 
 import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import { Payment } from '../../domain';
-import { IPaymentRepositoryPort } from '../../application/ports';
+import { IPaymentRepositoryPort, ITransactionScope } from '../../application/ports';
 import { PaymentEntity } from './payment.entity';
 import { PaymentMapper } from './payment.mapper';
 
@@ -34,16 +34,27 @@ export class PaymentTypeormRepository
     return PaymentMapper.toEntity(domain);
   }
 
-  public async save(payment: Payment): Promise<Payment> {
-    const saved = await this.paymentRepository.save(PaymentMapper.toEntity(payment));
-    // Re-read so the returned aggregate carries the concrete generated id + the
-    // committed DB timestamps. The row was just written, so a miss is an invariant
-    // breach.
-    const reloaded = await this.findById(Number(saved.id));
+  public async save(payment: Payment, scope?: ITransactionScope): Promise<Payment> {
+    const repo = this.paymentRepo(scope);
+    const saved = await repo.save(PaymentMapper.toEntity(payment));
+    // Re-read (within the same scope when transactional) so the returned aggregate
+    // carries the concrete generated id + the committed DB timestamps. The row was
+    // just written, so a miss is an invariant breach.
+    const reloaded = await repo.findOne({ where: { id: Number(saved.id) } });
     if (!reloaded) {
       throw new Error(`PaymentTypeormRepository.save: payment ${saved.id} vanished after commit`);
     }
-    return reloaded;
+    return PaymentMapper.toDomain(reloaded);
+  }
+
+  // Resolves the repository bound to the caller's transaction when a `scope` is
+  // supplied (the `EntityManager` downcast ADR-017 §6 permits here), else the
+  // default-manager repository.
+  private paymentRepo(scope?: ITransactionScope): Repository<PaymentEntity> {
+    if (!scope) {
+      return this.paymentRepository;
+    }
+    return (scope as unknown as EntityManager).getRepository(PaymentEntity);
   }
 
   public async findById(id: number): Promise<Payment | null> {

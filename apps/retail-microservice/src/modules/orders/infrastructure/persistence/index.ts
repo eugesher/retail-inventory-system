@@ -12,8 +12,10 @@ export const orderEntities = [OrderEntity, OrderLineEntity, AddressEntity, Payme
 export { AddressEntity, OrderEntity, OrderLineEntity, PaymentEntity };
 export * from './address.mapper';
 export * from './address-typeorm.repository';
+export * from './cart-reader-typeorm.adapter';
 export * from './order.mapper';
 export * from './order-line.mapper';
 export * from './order-typeorm.repository';
 export * from './payment.mapper';
 export * from './payment-typeorm.repository';
+export * from './typeorm-transaction.adapter';
