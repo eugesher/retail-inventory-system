@@ -291,6 +291,15 @@ async function seed(): Promise<void> {
   const connection = await mysql.createConnection(url);
 
   try {
+    // Identity first: the SQL fixtures below include the example cart, whose
+    // `customer_id` FK references the customer this pass seeds. None of the
+    // catalog/pricing/stock SQL files depend on identity rows, so seeding
+    // identity ahead of them is safe and satisfies the cart FK.
+    await seedPermissions(connection);
+    await seedRoles(connection);
+    await seedStaffUsers(connection);
+    await seedCustomers(connection);
+
     for (const filename of TestDbSeedUtil.seedFiles) {
       const filePath = path.join(__dirname, 'seeds', filename);
 
@@ -298,11 +307,6 @@ async function seed(): Promise<void> {
         await connection.execute(statement);
       }
     }
-
-    await seedPermissions(connection);
-    await seedRoles(connection);
-    await seedStaffUsers(connection);
-    await seedCustomers(connection);
 
     console.log('✓ Database seeded successfully');
   } finally {
