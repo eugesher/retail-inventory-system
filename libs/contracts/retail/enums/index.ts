@@ -4,3 +4,4 @@ export * from './order-fulfillment-status.enum';
 export * from './order-line-status.enum';
 export * from './order-payment-status.enum';
 export * from './order-status.enum';
+export * from './payment-status.enum';
