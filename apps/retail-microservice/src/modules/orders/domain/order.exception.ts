@@ -1,10 +1,11 @@
 import { DomainException } from '@retail-inventory-system/common';
 
 // Stable, greppable codes for every orders-context invariant violation — covering
-// the `Order` root, its `OrderLine` children, and the polymorphic `Address`
-// aggregate (all three live in this one bounded-context module, so they share one
-// throwable, the same one-class-per-module convention `CartDomainException` /
-// `CatalogDomainException` / `PricingDomainException` follow). The code is the part
+// the `Order` root, its `OrderLine` children, the polymorphic `Address` aggregate,
+// and the `Payment` aggregate (all four live in this one bounded-context module, so
+// they share one throwable, the same one-class-per-module convention
+// `CartDomainException` / `CatalogDomainException` / `PricingDomainException`
+// follow). The code is the part
 // a presentation-layer exception filter maps onto an HTTP status + wire error
 // shape (`{ statusCode, message, code }`); the domain itself stays transport-free.
 // The HTTP filter that maps these arrives with the order operations, not this
@@ -58,6 +59,20 @@ export enum OrderErrorCodeEnum {
   ADDRESS_POSTAL_CODE_REQUIRED = 'ADDRESS_POSTAL_CODE_REQUIRED',
   // `country` must be a 2-letter ISO code (upper-cased) — 400.
   ADDRESS_COUNTRY_INVALID = 'ADDRESS_COUNTRY_INVALID',
+
+  // A payment's `orderId` must be a positive integer (the order it pays) — 400.
+  PAYMENT_ORDER_ID_INVALID = 'PAYMENT_ORDER_ID_INVALID',
+  // `amountMinor` must be a non-negative integer (minor units) — 400.
+  PAYMENT_AMOUNT_INVALID = 'PAYMENT_AMOUNT_INVALID',
+  // `currency` must be a non-empty string — 400.
+  PAYMENT_CURRENCY_REQUIRED = 'PAYMENT_CURRENCY_REQUIRED',
+  // The opaque gateway `method` token must be a non-empty string — 400.
+  PAYMENT_METHOD_REQUIRED = 'PAYMENT_METHOD_REQUIRED',
+  // The opaque `gatewayReference` must be a non-empty string — 400.
+  PAYMENT_GATEWAY_REFERENCE_REQUIRED = 'PAYMENT_GATEWAY_REFERENCE_REQUIRED',
+  // `capture()` was called on a payment that is not `authorized` — a well-formed
+  // request the resource state forbids, 409.
+  PAYMENT_INVALID_STATUS_TRANSITION = 'PAYMENT_INVALID_STATUS_TRANSITION',
 }
 
 // One concrete throwable for the orders bounded context, carrying a typed `code`

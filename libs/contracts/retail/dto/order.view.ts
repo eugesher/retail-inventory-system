@@ -6,6 +6,7 @@ import {
   OrderPaymentStatusEnum,
   OrderStatusEnum,
 } from '../enums';
+import { PaymentView } from './payment.view';
 
 // RPC/HTTP response shape for one order line. A **class** carrying
 // `@ApiResponseProperty` (not a plain interface) so the gateway can declare it as
@@ -63,7 +64,9 @@ export class OrderLineView {
 // discount, and shipping are later/excluded capabilities). `billingAddressId` /
 // `shippingAddressId` are CHAR(36) pointers to snapshotted `address` rows.
 // `version` is the optimistic-concurrency token (shipped now though enforcement is
-// a later capability, ADR-028 §6). `payment` is added by the payment capability.
+// a later capability, ADR-028 §6). `payment` is the optional payment row for the
+// order — absent (`undefined`) until an order is placed-and-authorized, present
+// once a `payment` row exists (authorize-on-place / capture capabilities).
 export class OrderView {
   @ApiResponseProperty()
   public id: number;
@@ -115,4 +118,7 @@ export class OrderView {
 
   @ApiResponseProperty({ type: [OrderLineView] })
   public lines: OrderLineView[];
+
+  @ApiResponseProperty({ type: PaymentView })
+  public payment?: PaymentView;
 }
