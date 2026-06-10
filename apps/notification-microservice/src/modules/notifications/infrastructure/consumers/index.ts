@@ -1,1 +1,2 @@
 export * from './inventory-events.consumer';
+export * from './order-events.consumer';
