@@ -47,11 +47,11 @@ export class CartEntity extends CartBaseEntity {
   @VersionColumn()
   public version: number;
 
-  // `cascade: ['insert','update']` is declared per the aggregate's owned-children
-  // relation, but the repository drives line persistence explicitly (root save →
-  // orphan reconciliation → line save) so a removed line is deleted, not left
-  // behind — TypeORM cascade does not include `remove`. `onDelete: 'CASCADE'`
-  // (the DB-level FK) means deleting a cart drops its lines.
-  @OneToMany(() => CartLineEntity, (line) => line.cart, { cascade: ['insert', 'update'] })
+  // No TypeORM `cascade`: the repository drives line persistence explicitly (root
+  // save → orphan reconciliation → line save), so a removed line is deleted, not
+  // left behind (TypeORM cascade does not include `remove`) and a cascade option
+  // would never fire. `onDelete: 'CASCADE'` (the DB-level FK) means deleting a cart
+  // drops its lines.
+  @OneToMany(() => CartLineEntity, (line) => line.cart)
   public lines: CartLineEntity[];
 }

@@ -1,6 +1,7 @@
 import { PinoLogger } from 'nestjs-pino';
 
 import {
+  CartStatusEnum,
   IAddressInput,
   IPlaceOrderPayload,
   OrderFulfillmentStatusEnum,
@@ -44,7 +45,7 @@ const activeCart = (overrides: Partial<IOrderCartSnapshot> = {}): IOrderCartSnap
   cartId: 'cart-1',
   customerId: CUSTOMER_ID,
   currency: 'USD',
-  status: 'active',
+  status: CartStatusEnum.ACTIVE,
   lines: [
     { variantId: 1, quantity: 2 },
     { variantId: 3, quantity: 1 },
@@ -211,7 +212,7 @@ describe('PlaceOrderUseCase', () => {
     });
 
     it('rejects an abandoned cart with ORDER_CART_NOT_PLACEABLE (409)', async () => {
-      const h = makeHarness(activeCart({ status: 'abandoned' }));
+      const h = makeHarness(activeCart({ status: CartStatusEnum.ABANDONED }));
       await expect(h.useCase.execute(placePayload())).rejects.toMatchObject({
         code: OrderErrorCodeEnum.ORDER_CART_NOT_PLACEABLE,
       });

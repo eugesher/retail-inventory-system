@@ -44,8 +44,6 @@ export interface IOrderPage {
 //   already converted returns the order it converted into rather than a second one.
 // - `listByCustomer` backs the customer's order history (owner-checked at the use
 //   case, ADR-028 §7).
-// - `nextOrderNumber` formats the next human-facing number; the binding value is
-//   finalized inside `save` from the order's real id, so the two always agree.
 export interface IOrderRepositoryPort {
   findById(id: number, scope?: ITransactionScope): Promise<Order | null>;
   findBySourceCartId(cartId: string): Promise<Order | null>;
@@ -57,5 +55,4 @@ export interface IOrderRepositoryPort {
     scope?: ITransactionScope,
   ): Promise<void>;
   listByCustomer(customerId: string, page: IOrderPageRequest): Promise<IOrderPage>;
-  nextOrderNumber(): Promise<string>;
 }

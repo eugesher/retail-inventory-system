@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectEntityManager } from '@nestjs/typeorm';
 import { EntityManager } from 'typeorm';
 
+import { CartStatusEnum } from '@retail-inventory-system/contracts';
+
 import {
   IOrderCartReaderPort,
   IOrderCartSnapshot,
@@ -15,7 +17,7 @@ interface ICartHeaderRow {
   id: string;
   customerId: string | null;
   currency: string;
-  status: string;
+  status: CartStatusEnum;
 }
 interface ICartLineRow {
   variantId: string;

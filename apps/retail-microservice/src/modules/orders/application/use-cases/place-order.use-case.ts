@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import {
+  CartStatusEnum,
   IPlaceOrderPayload,
   OrderView,
   VariantWithProductView,
@@ -33,9 +34,6 @@ import {
 } from '../ports';
 import { AuthorizePaymentUseCase } from './authorize-payment.use-case';
 import { toOrderView } from './order-view.factory';
-
-const CART_STATUS_CONVERTED = 'converted';
-const CART_STATUS_ABANDONED = 'abandoned';
 
 // The repository overwrites `order_number` with the id-derived binding value on the
 // first insert (`ORD-<year>-<pad8(id)>`), so the value passed to `Order.place` is a
@@ -101,12 +99,12 @@ export class PlaceOrderUseCase {
         `Cart ${cartId} is not owned by customer ${customerId}`,
       );
     }
-    if (cart.status === CART_STATUS_CONVERTED) {
+    if (cart.status === CartStatusEnum.CONVERTED) {
       // Repeat-place idempotency: the cart already converted, so return the order it
       // converted into (plus its payment) instead of placing a second one.
       return this.resolveExistingOrder(cartId, correlationId);
     }
-    if (cart.status === CART_STATUS_ABANDONED) {
+    if (cart.status === CartStatusEnum.ABANDONED) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.ORDER_CART_NOT_PLACEABLE,
         `Cart ${cartId} is abandoned and cannot be placed`,
@@ -208,20 +206,24 @@ export class PlaceOrderUseCase {
     currency: string,
     correlationId: string,
   ): Promise<OrderLine[]> {
-    const lines: OrderLine[] = [];
-    for (const cartLine of cartLines) {
-      const [variant, price] = await Promise.all([
-        this.catalog.getVariant(cartLine.variantId, correlationId),
-        this.catalog.selectApplicablePrice(cartLine.variantId, currency, correlationId),
-      ]);
-      if (price === null) {
-        throw new OrderDomainException(
-          OrderErrorCodeEnum.ORDER_LINE_NO_PRICE,
-          `Variant ${cartLine.variantId} has no applicable ${currency} price; cannot place`,
-        );
-      }
-      lines.push(
-        new OrderLine({
+    // The per-line snapshots are independent, read-only catalog lookups that run
+    // before the place transaction, so fan them out concurrently rather than walking
+    // the cart serially — an N-line cart costs one round-trip's latency, not N.
+    // `Promise.all` preserves cart-line order, and the unpriced-variant rejection
+    // still propagates (as the first rejected promise).
+    return Promise.all(
+      cartLines.map(async (cartLine) => {
+        const [variant, price] = await Promise.all([
+          this.catalog.getVariant(cartLine.variantId, correlationId),
+          this.catalog.selectApplicablePrice(cartLine.variantId, currency, correlationId),
+        ]);
+        if (price === null) {
+          throw new OrderDomainException(
+            OrderErrorCodeEnum.ORDER_LINE_NO_PRICE,
+            `Variant ${cartLine.variantId} has no applicable ${currency} price; cannot place`,
+          );
+        }
+        return new OrderLine({
           id: null,
           variantId: cartLine.variantId,
           sku: variant.sku,
@@ -230,10 +232,9 @@ export class PlaceOrderUseCase {
           unitPriceMinor: price.amountMinor,
           taxAmountMinor: 0,
           discountAmountMinor: 0,
-        }),
-      );
-    }
-    return lines;
+        });
+      }),
+    );
   }
 
   // Composes the line's frozen display name from the product name + the variant's

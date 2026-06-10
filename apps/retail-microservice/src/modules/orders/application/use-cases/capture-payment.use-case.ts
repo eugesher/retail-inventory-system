@@ -20,6 +20,7 @@ import {
   PAYMENT_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { loadAuthorizedOrder } from './order-access';
 import { toOrderView } from './order-view.factory';
 
 // Capture Payment is the explicit, second half of the authorize-then-capture policy
@@ -72,22 +73,10 @@ export class CapturePaymentUseCase {
       'Capturing payment',
     );
 
-    const order = await this.orderRepository.findById(orderId);
-    if (!order) {
-      throw new OrderDomainException(
-        OrderErrorCodeEnum.ORDER_NOT_FOUND,
-        `Order ${orderId} not found`,
-      );
-    }
-
-    // Owner-or-staff authorization (ADR-028 §7). A non-staff caller may capture only
-    // its own order; staff with `order:capture` may capture any.
-    if (!isStaffCapture && order.customerId !== actorId) {
-      throw new OrderDomainException(
-        OrderErrorCodeEnum.ORDER_ACCESS_FORBIDDEN,
-        `Order ${orderId} is not accessible to actor ${actorId}`,
-      );
-    }
+    // Owner-or-staff authorization (ADR-028 §7): a customer may capture only its own
+    // order; staff with `order:capture` (folded into `isStaffCapture`) may capture
+    // any. A missing order is a 404, a non-owner-non-staff caller a 403.
+    const order = await loadAuthorizedOrder(this.orderRepository, orderId, actorId, isStaffCapture);
 
     const payment = await this.paymentRepository.findByOrderId(orderId);
     if (!payment) {
@@ -150,8 +139,12 @@ export class CapturePaymentUseCase {
     });
 
     // Re-read so the view carries the advanced `paymentStatus` + the captured payment.
-    const finalOrder = await this.orderRepository.findById(orderId);
-    const finalPayment = await this.paymentRepository.findByOrderId(orderId);
+    // The two reads hit different tables with no data dependency, so run them
+    // concurrently rather than paying both round-trips serially.
+    const [finalOrder, finalPayment] = await Promise.all([
+      this.orderRepository.findById(orderId),
+      this.paymentRepository.findByOrderId(orderId),
+    ]);
     if (!finalOrder || !finalPayment) {
       throw new Error(`CapturePaymentUseCase: order ${orderId} vanished after capture`);
     }

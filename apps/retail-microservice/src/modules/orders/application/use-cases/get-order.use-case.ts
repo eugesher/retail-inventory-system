@@ -3,13 +3,13 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import { IRetailOrderGetPayload, OrderView } from '@retail-inventory-system/contracts';
 
-import { OrderDomainException, OrderErrorCodeEnum } from '../../domain';
 import {
   IOrderRepositoryPort,
   IPaymentRepositoryPort,
   ORDER_REPOSITORY,
   PAYMENT_REPOSITORY,
 } from '../ports';
+import { loadAuthorizedOrder } from './order-access';
 import { toOrderView } from './order-view.factory';
 
 // Get Order: resolves one order (header + lines + payment) by id for the read path
@@ -40,22 +40,10 @@ export class GetOrderUseCase {
 
     this.logger.info({ correlationId, orderId, actorId, canReadAny }, 'Fetching order');
 
-    const order = await this.orderRepository.findById(orderId);
-    if (!order) {
-      throw new OrderDomainException(
-        OrderErrorCodeEnum.ORDER_NOT_FOUND,
-        `Order ${orderId} not found`,
-      );
-    }
-
-    // Owner-or-staff authorization (ADR-028 §7). A non-staff caller may read only its
-    // own order; staff with `order:read` may read any.
-    if (!canReadAny && order.customerId !== actorId) {
-      throw new OrderDomainException(
-        OrderErrorCodeEnum.ORDER_ACCESS_FORBIDDEN,
-        `Order ${orderId} is not accessible to actor ${actorId}`,
-      );
-    }
+    // Owner-or-staff authorization (ADR-028 §7): a customer may read only its own
+    // order; staff with `order:read` (folded into `canReadAny`) may read any. A
+    // missing order is a 404, a non-owner-non-staff caller a 403.
+    const order = await loadAuthorizedOrder(this.orderRepository, orderId, actorId, canReadAny);
 
     const payment = await this.paymentRepository.findByOrderId(orderId);
     return toOrderView(order, payment);
