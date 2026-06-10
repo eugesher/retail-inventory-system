@@ -1,24 +1,63 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
+import {
+  MicroserviceClientCatalogModule,
+  MicroserviceClientRetailModule,
+} from '@retail-inventory-system/messaging';
 
-import { CART_REPOSITORY } from '../application/ports';
+import { CART_CATALOG_GATEWAY, CART_EVENTS_PUBLISHER, CART_REPOSITORY } from '../application/ports';
+import {
+  AddToCartUseCase,
+  ChangeCartLineQuantityUseCase,
+  ClaimCartUseCase,
+  CreateCartUseCase,
+  GetCartUseCase,
+  RemoveFromCartUseCase,
+} from '../application/use-cases';
+import { CartCatalogRabbitmqAdapter, CartRabbitmqPublisher } from './messaging';
 import { CartEntity, CartLineEntity, CartTypeormRepository } from './persistence';
+import { CartController, CartRpcExceptionFilter } from '../presentation';
 
-// Foundation wiring only: the `Cart` aggregate's repository over its two tables.
-// No publisher, use cases, or controller yet — the cart operations + their
-// gateway land in a later capability, so the retail microservice boots with the
-// `cart` module registered but no `@MessagePattern` / `@EventPattern` handlers.
-//
+// The cart bounded-context module: the `Cart` aggregate's two-table repository,
+// the six cart operations, their RPC controller, and the two outbound seams.
 // `useExisting` shares the single adapter instance with code that injects the
-// concrete class directly, while consumers depend on the `CART_REPOSITORY` port
-// symbol (mirrors `stock.module.ts` / `catalog.module.ts`). `DatabaseModule.forFeature`
-// registers the two entities' repositories for `@InjectRepository`.
+// concrete class directly, while use cases depend on the port symbols (the
+// `stock.module.ts` / `catalog.module.ts` pattern).
+//
+// Two messaging clients are imported: `MicroserviceClientCatalogModule` so the
+// Add-to-Cart price snapshot can call `catalog.price.select` on `catalog_queue`,
+// and `MicroserviceClientRetailModule` so the publisher can emit the four
+// reserved `retail.cart.*` events onto the service's own `retail_queue`. The
+// `CartRpcExceptionFilter` is registered via `APP_FILTER` so it maps every
+// `@MessagePattern` handler's `CartDomainException` onto the wire status the
+// gateway resolves.
 @Module({
-  imports: [DatabaseModule.forFeature([CartEntity, CartLineEntity])],
+  imports: [
+    DatabaseModule.forFeature([CartEntity, CartLineEntity]),
+    MicroserviceClientCatalogModule,
+    MicroserviceClientRetailModule,
+  ],
+  controllers: [CartController],
   providers: [
     CartTypeormRepository,
     { provide: CART_REPOSITORY, useExisting: CartTypeormRepository },
+
+    CartCatalogRabbitmqAdapter,
+    { provide: CART_CATALOG_GATEWAY, useExisting: CartCatalogRabbitmqAdapter },
+
+    CartRabbitmqPublisher,
+    { provide: CART_EVENTS_PUBLISHER, useExisting: CartRabbitmqPublisher },
+
+    CreateCartUseCase,
+    GetCartUseCase,
+    AddToCartUseCase,
+    ChangeCartLineQuantityUseCase,
+    RemoveFromCartUseCase,
+    ClaimCartUseCase,
+
+    { provide: APP_FILTER, useClass: CartRpcExceptionFilter },
   ],
   exports: [CART_REPOSITORY],
 })

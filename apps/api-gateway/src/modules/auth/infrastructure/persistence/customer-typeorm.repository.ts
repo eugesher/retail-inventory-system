@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { ICustomerRepositoryPort } from '../../application/ports';
 import { Customer } from '../../domain';
@@ -26,8 +26,10 @@ export class CustomerTypeormRepository implements ICustomerRepositoryPort {
     return entity ? CustomerMapper.toDomain(entity) : null;
   }
 
-  public existsActiveById(id: string): Promise<boolean> {
-    return this.repository.existsBy({ id, status: 'active' });
+  public existsAuthenticatableById(id: string): Promise<boolean> {
+    // A guest is authenticatable alongside an active customer; suspended/deleted
+    // are barred (Q1/Q7).
+    return this.repository.existsBy({ id, status: In(['active', 'guest']) });
   }
 
   public async save(customer: Customer): Promise<Customer> {

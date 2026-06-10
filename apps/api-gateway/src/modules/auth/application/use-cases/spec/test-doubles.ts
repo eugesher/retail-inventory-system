@@ -68,8 +68,10 @@ export class InMemoryCustomerRepository implements ICustomerRepositoryPort {
     return Promise.resolve(this.byId.get(id) ?? null);
   }
 
-  public existsActiveById(id: string): Promise<boolean> {
-    return Promise.resolve(this.byId.get(id)?.isActive ?? false);
+  public existsAuthenticatableById(id: string): Promise<boolean> {
+    const customer = this.byId.get(id);
+    // A guest is authenticatable alongside an active customer (Q1/Q7).
+    return Promise.resolve(customer?.status === 'active' || customer?.status === 'guest');
   }
 
   public save(customer: Customer): Promise<Customer> {

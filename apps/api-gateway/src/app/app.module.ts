@@ -16,6 +16,7 @@ import {
   StaffUserEntity,
 } from '../modules/auth/infrastructure/persistence';
 import { AuthModule } from '../modules/auth';
+import { CartModule } from '../modules/cart';
 import { CatalogModule } from '../modules/catalog';
 import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
@@ -30,6 +31,7 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
     IamModule,
     CatalogModule,
     InventoryModule,
+    CartModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: DuplicateKeyExceptionFilter },

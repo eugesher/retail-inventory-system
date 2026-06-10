@@ -13,6 +13,7 @@ import { ICurrentUser } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
 import {
+  CreateGuestSessionUseCase,
   GetCurrentCustomerUseCase,
   LoginCustomerUseCase,
   RegisterCustomerUseCase,
@@ -20,6 +21,7 @@ import {
 import { Customer } from '../domain';
 import {
   CurrentCustomerResponseDto,
+  GuestSessionResponseDto,
   LoginCustomerRequestDto,
   RegisterCustomerRequestDto,
   TokenResponseDto,
@@ -31,6 +33,7 @@ export class CustomerAuthController {
   constructor(
     private readonly registerUseCase: RegisterCustomerUseCase,
     private readonly loginUseCase: LoginCustomerUseCase,
+    private readonly createGuestSessionUseCase: CreateGuestSessionUseCase,
     private readonly getCurrentUseCase: GetCurrentCustomerUseCase,
   ) {}
 
@@ -74,6 +77,23 @@ export class CustomerAuthController {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
       expiresIn: result.expiresIn,
+    };
+  }
+
+  @Public()
+  @Post('guest-session')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Mint a guest-tier session (a logged-in-able guest customer)' })
+  @ApiCreatedResponse({ type: GuestSessionResponseDto })
+  public async guestSession(
+    @CorrelationId() correlationId: string,
+  ): Promise<GuestSessionResponseDto> {
+    const result = await this.createGuestSessionUseCase.execute(correlationId);
+    return {
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresIn: result.expiresIn,
+      customerId: result.customerId,
     };
   }
 
