@@ -70,14 +70,14 @@ The system handles order lifecycle management and product stock tracking across 
       RPC      │                              │     RPC
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
-│                        │  │  RPC: stock-level.get,        │
-│  Cart: 6 cart RPCs     │  │  location.list, receive,      │
-│  served on             │  │  adjust; order.confirm (stub) │
-│  retail_queue + 4      │  │  Consumes: variant.created    │
-│  reserved events.      │  │  Emits: inventory.stock.low ──┼─┐
-│  Orders module is      │  │                               │ │
-│  foundation only.      │  │  ┌────────────┐               │ │
-│                        │  │  │   Redis    │◄──cache-aside─┤ │
+│  Cart: 6 RPCs + place  │  │  RPC: stock-level.get,        │
+│  + 4 events (cart).    │  │  location.list, receive,      │
+│  Orders: get / list /  │  │  adjust; order.confirm (stub) │
+│  capture (orders).     │  │  Consumes: variant.created    │
+│  PAYMENT_GATEWAY ->    │  │  Emits: inventory.stock.low ──┼─┐
+│  FakePaymentGateway.   │  │                               │ │
+│  Emits retail.order.   │  │  ┌────────────┐               │ │
+│  placed -> notification│  │  │   Redis    │◄──cache-aside─┤ │
 └──────────────┬─────────┘  │  │ stock keys │               │ │
                │            │  └────────────┘               │ │
                │            └─────────────────┬─────────────┘ │
@@ -97,7 +97,7 @@ The system handles order lifecycle management and product stock tracking across 
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
 │              Notification Microservice (RMQ)                  │
-│  Listens: inventory.stock.low                                 │
+│  Listens: inventory.stock.low + retail.order.placed           │
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
@@ -454,6 +454,14 @@ DELETE /api/iam/staff/:id/roles/:roleName # bearer + iam:assign
 
 Interactive API reference is available at `http://localhost:3000/api/reference` when the gateway is running.
 
+### Payment gateway
+
+Payment authorization (on `POST /api/cart/:cartId/place`) and capture (on `POST /api/orders/:orderId/payments/capture`) run behind a **port and adapter**, never a transport call inline in a use case. The port is `IPaymentGatewayPort` (DI symbol `PAYMENT_GATEWAY`), declared in the retail `orders` module's `application/ports/`; it exposes `authorize(req)` and `capture(gatewayReference)` over plain request/result interfaces and imports **no** transport or HTTP package — the seam keeps `PlaceOrderUseCase` / `CapturePaymentUseCase` gateway-agnostic and unit-testable, the same `NotifierPort` shape as the notification microservice ([ADR-011](docs/adr/011-notifier-port-and-adapters.md)).
+
+The default binding is `FakePaymentGatewayAdapter` (`infrastructure/payment-gateway/`): an in-process stand-in that **always approves**, mints deterministic `fake_<uuid>` gateway references (each authorize a distinct one, so the unique `payment.gateway_reference` column is satisfied), and makes no external call or persistence of its own. It exists so the whole checkout walking skeleton runs end to end without a real processor.
+
+Swapping in a real gateway (Stripe, Adyen, …) is a **single provider rebind** in `orders.module.ts` (`{ provide: PAYMENT_GATEWAY, useClass: StripePaymentGatewayAdapter }`) plus a new HTTP-doing sibling adapter under `infrastructure/payment-gateway/` that implements the same port. No use case, controller, domain model, or contract changes — the `ClientProxy`/HTTP client stays confined to the new adapter, exactly as the boundaries rules ([ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)) require. A real processor, partial captures, and void/refund/fail are deliberately excluded from this capability.
+
 ## Authentication
 
 Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, `/auth/customer/guest-session` (the single guest-bootstrap exception), the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes, and the public `GET /api/inventory/variants/:variantId/stock` availability read). The `/api/cart/...` routes are bearer-protected but carry **no permission code** — authorization is an owner-check (`cart.customerId === @CurrentUser().id`), enforced retail-side, since customer tokens hold no permissions ([ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) / [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md)). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
@@ -595,7 +603,17 @@ Stock levels (`stock_level` — seeded so the public availability read returns a
 
 The migration ([ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md)) auto-provisions exactly one `StockLocation` — `default-warehouse` — idempotently (`INSERT ... ON DUPLICATE KEY UPDATE`), so there is always a location to read from and write to even before any seed runs. `scripts/seeds/stock-level.sql` then loads the rows above (`INSERT IGNORE`, registered after `catalog-product-variant.sql` because `stock_level.variant_id` is a foreign key to `product_variant.id`). On the live system the same zeroed row is created by the auto-init consumer when a catalog variant is first published; the seed is the cold-start stand-in that gives every seeded variant 100 on hand at `default-warehouse`.
 
-Every catalog / pricing / stock seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
+The seed also loads one **example cart** for the seeded customer so `GET /api/cart/:cartId` returns a populated cart on a cold start (the `http/cart.http` and e2e flows build their own carts, so this row is purely a development convenience):
+
+| Cart id | Customer | Currency | Status | Line |
+| --- | --- | --- | --- | --- |
+| `00000000-0000-4000-d000-000000000001` | `customer@example.com` | `USD` | `active` | variant 1 ×2 @ `4999` (snapshot) |
+
+`scripts/seeds/cart.sql` runs last (idempotently — the cart row is `INSERT IGNORE` on its UUID, the line is a `WHERE NOT EXISTS` guarded insert on the `(cart_id, variant_id)` pair so it never collides with an e2e-built line's auto-increment id): the cart FKs the seeded `customer` (loaded by the identity pass, which the seed runs **before** the SQL fixtures), and the line FKs `product_variant` and snapshots variant 1's seeded USD price. The cart id uses the `...-d000-...` (carts) namespace, alongside the `a000` (users) / `b000` (permissions) / `c000` (roles) prefixes.
+
+The `order:capture` permission is seeded (id `...-b000-00000000000e`) and bound to the `order-support` and `admin` roles — it is the staff override on `POST /api/orders/:orderId/payments/capture` (the owning customer needs no permission, only ownership).
+
+Every catalog / pricing / stock / cart seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
 
 Auth events emit Pino log lines with `userId` and `correlationId`, and (when wired) flow through the `AUDIT_LOG_PUBLISHER` port; the default binding is the in-process `NoOpAuditLogPublisher` (logs the event at `debug` under the `AuditLog` context). They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.*` routing key plus a publisher binding are missing.
 

@@ -302,10 +302,11 @@ describe('boundaries rules (ADR-017)', () => {
 
     it('use case may not reach another app', () => {
       // 6 levels up: use-cases → application → stock → modules → src →
-      // inventory-microservice → apps. The target is the catalog app's domain —
-      // any cross-app domain reach is forbidden (a use case allows only same-app
-      // domain/ports + a fixed lib set).
-      const code = `import { Product } from '../../../../../../catalog-microservice/src/modules/catalog/domain/product.model';\nexport type Y = Product;\n`;
+      // inventory-microservice → apps. The target is the retail app's orders
+      // domain (Order) — any cross-app domain reach is forbidden (a use case
+      // allows only same-app domain/ports + a fixed lib set). `order.model.ts`
+      // exists again after the checkout rebuild (ADR-028), so this resolves.
+      const code = `import { Order } from '../../../../../../retail-microservice/src/modules/orders/domain/order.model';\nexport type Y = Order;\n`;
       const messages = lint(
         code,
         'apps/inventory-microservice/src/modules/stock/application/use-cases/__fixture__.ts',
@@ -566,6 +567,163 @@ describe('boundaries rules (ADR-017)', () => {
       const messages = lint(
         code,
         'apps/catalog-microservice/src/modules/pricing/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+  });
+
+  // The retail microservice's rebuilt checkout splits into two bounded contexts:
+  // the mutable `cart` and the immutable `orders` (the latter also home to the
+  // `Payment` aggregate + the `PAYMENT_GATEWAY` port and its
+  // `infrastructure/payment-gateway/` adapter). Both obey the same generic
+  // per-layer rules with no `eslint.config.mjs` change — the
+  // `apps/*/src/modules/*/...` element patterns classify their layers
+  // automatically. These fixtures repeat the bumpers there, pointed at the real
+  // retail paths.
+  describe('boundaries/dependencies — retail cart module', () => {
+    it('cart domain (Cart, CartLine, events, CartDomainException) may not import @nestjs/common', () => {
+      const code = `import { Injectable } from '@nestjs/common';\nexport const x = Injectable;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('cart domain may not import typeorm', () => {
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('cart application use-case may not import typeorm', () => {
+      // Create/Get/AddToCart/Change/Remove/Claim reach the DB via
+      // ICartRepositoryPort — never via EntityManager.
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('cart application use-case may not import @nestjs/typeorm', () => {
+      const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('cart application port may not import typeorm', () => {
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/application/ports/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('cart presentation may not import @retail-inventory-system/database', () => {
+      const code = `import { DatabaseModule } from '@retail-inventory-system/database';\nexport const y = DatabaseModule;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/presentation/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('cart domain may not import the orders module domain (cross-module)', () => {
+      // Resolves to a real orders file, so the boundaries resolver types the
+      // target as the orders `domain`. `sameModule('domain')` requires the same
+      // app *and* module, so a cart→orders domain edge is cross-module and
+      // disallowed — locking in the cart↔orders isolation (a cart converts into
+      // an order through the place use case + the raw-SQL cart reader, never a
+      // cross-module domain import).
+      const code = `import { Order } from '../../orders/domain/order.model';\nexport type Y = Order;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+  });
+
+  describe('boundaries/dependencies — retail orders module', () => {
+    it('orders domain (Order, OrderLine, Address, Payment, OrderDomainException) may not import @nestjs/common', () => {
+      const code = `import { Injectable } from '@nestjs/common';\nexport const x = Injectable;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/orders/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('orders domain may not import typeorm', () => {
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/orders/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('orders application use-case may not import typeorm', () => {
+      // PlaceOrder/AuthorizePayment/CapturePayment/GetOrder/ListMyOrders reach
+      // the DB via the repository ports + ITransactionPort — never EntityManager.
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/orders/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('orders application use-case may not import @nestjs/typeorm', () => {
+      const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/orders/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('orders application port may not import typeorm', () => {
+      // The repository + gateway ports (including IPaymentGatewayPort) return
+      // domain/contract types only — no TypeORM Repository leak.
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/orders/application/ports/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('orders presentation may not import @retail-inventory-system/database', () => {
+      const code = `import { DatabaseModule } from '@retail-inventory-system/database';\nexport const y = DatabaseModule;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/orders/presentation/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('orders presentation may not import the payment-gateway infrastructure adapter (cross-element)', () => {
+      // Proves `infrastructure/payment-gateway/` is classified as `infrastructure`
+      // (the generic pattern matches any subfolder of `infrastructure/`, not just
+      // `persistence/` or `messaging/`). Presentation allows only same-module
+      // application layers + a fixed lib set, so importing the FakePaymentGateway-
+      // Adapter directly from a controller is a cross-element denial — the gateway
+      // is reached through the PAYMENT_GATEWAY port, never the adapter class.
+      // 1 level up: presentation → orders, then infrastructure/payment-gateway/.
+      const code = `import { FakePaymentGatewayAdapter } from '../infrastructure/payment-gateway/fake-payment-gateway.adapter';\nexport const y = FakePaymentGatewayAdapter;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/orders/presentation/__fixture__.ts',
       );
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });

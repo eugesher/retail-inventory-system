@@ -12,6 +12,10 @@ export class TestDbSeedUtil {
     // catalog-product-variant.sql; stock_location ('default-warehouse') comes from
     // the migration, not a seed.
     'stock-level.sql',
+    // The example cart FKs the seeded customer (seeded by the JS identity pass,
+    // which runs before these SQL files), product_variant (catalog-product-variant.sql),
+    // and snapshots the variant's price (price.sql) — so it must come last.
+    'cart.sql',
   ];
 
   public static readStatements(filePath: string): string[] {
