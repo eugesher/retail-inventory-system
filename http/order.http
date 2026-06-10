@@ -1,0 +1,137 @@
+# Order endpoints
+# (apps/api-gateway/src/modules/cart/presentation/cart.controller.ts — place route)
+#
+# Place Order converts an active cart into an immutable Order one-shot: it
+# snapshots each line from the catalog (sku / nameSnapshot / unitPriceMinor at
+# write-time), snapshots the billing + shipping addresses from the request body,
+# authorizes payment inline through the PAYMENT_GATEWAY (the always-approve fake),
+# and resolves to an OrderView (the placed order + its lines + the authorized
+# payment). The route is bearer-protected with an OWNER-CHECK enforced retail-side
+# (cart.customerId === the authenticated subject) — no permission code (a customer
+# carries none). A non-owner gets 403; an unauthenticated caller 401.
+#
+# The `Idempotency-Key` header is ACCEPTED + LOGGED but NOT deduped in this
+# capability. Repeat-place safety comes from cart state: a placed cart is
+# `converted`, and re-placing it returns the order it already converted into (via
+# source_cart_id) rather than creating a second order.
+#
+# All routes sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With
+# the default .env.local that resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run `login` FIRST — it captures the seeded customer's bearer token into
+#      @accessToken (customer@example.com / customer1234).
+#   3. Run `createCart` (captures @cartId), then `addLineOne` + `addLineTwo` to put
+#      two seeded variants in the cart (variant 1 @ 4999, variant 3 @ 19999).
+#   4. Run `placeOrder`. It converts the cart, authorizes payment, and returns the
+#      OrderView (status=pending, paymentStatus=authorized, fulfillment=unfulfilled).
+#      Re-running it returns the SAME order (cart-state idempotency).
+#
+# The GET-order / capture requests land with the order read/capture capability.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name login
+# POST /api/auth/customer/login
+# Seeded customer login. Response is TokenResponseDto { accessToken, ... }.
+POST {{baseUrl}}/auth/customer/login
+Content-Type: application/json
+
+{
+  "email": "customer@example.com",
+  "password": "customer1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name createCart
+# POST /api/cart  (Bearer — owner is the authenticated customer)
+# Opens a new active cart. Response is CartView; capture @cartId.
+POST {{baseUrl}}/cart
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartId = {{createCart.response.body.$.id}}
+
+###
+
+# @name addLineOne
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 1 (USD price 4999 minor units), quantity 2.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 2
+}
+
+###
+
+# @name addLineTwo
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 3 (USD price 19999 minor units), quantity 1.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "variantId": 3,
+  "quantity": 1
+}
+
+###
+
+# @name placeOrder
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Converts the cart one-shot into an Order, snapshots the addresses, authorizes
+# payment inline, and returns the OrderView. The `Idempotency-Key` header is
+# accepted + logged but NOT deduped. Body (PlaceOrderRequestDto):
+#   shippingAddress, billingAddress: { recipientName, line1, line2?, city, region,
+#                                      postalCode, country (2-char), phone? }
+#   paymentMethod?: opaque method token forwarded to the gateway
+# Response (201) is OrderView { orderNumber, status, paymentStatus, fulfillmentStatus,
+#   lines[ sku, nameSnapshot, unitPriceMinor, lineTotalMinor ], grandTotalMinor,
+#   billingAddressId, shippingAddressId, payment{ status='authorized', ... } }.
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "line2": "Suite 400",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US",
+    "phone": "+1-415-555-0100"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "paymentMethod": "tok_visa"
+}

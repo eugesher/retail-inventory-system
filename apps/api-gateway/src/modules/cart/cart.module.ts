@@ -9,6 +9,7 @@ import {
   ClaimCartUseCase,
   CreateCartUseCase,
   GetCartUseCase,
+  PlaceCartOrderUseCase,
   RemoveFromCartUseCase,
 } from './application/use-cases';
 import { CartRabbitmqAdapter } from './infrastructure/messaging';
@@ -30,6 +31,7 @@ import { CartController } from './presentation';
     ChangeCartLineQuantityUseCase,
     RemoveFromCartUseCase,
     ClaimCartUseCase,
+    PlaceCartOrderUseCase,
     { provide: CART_GATEWAY_PORT, useClass: CartRabbitmqAdapter },
   ],
 })

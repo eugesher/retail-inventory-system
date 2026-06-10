@@ -35,9 +35,12 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_CART_CHANGE_LINE_QUANTITY = 'retail.cart.change-line-quantity',
   RETAIL_CART_REMOVE_LINE = 'retail.cart.remove-line',
   RETAIL_CART_CLAIM = 'retail.cart.claim',
+  RETAIL_CART_PLACE = 'retail.cart.place',
   RETAIL_CART_CREATED = 'retail.cart.created',
   RETAIL_CART_LINE_ADDED = 'retail.cart.line-added',
   RETAIL_CART_LINE_REMOVED = 'retail.cart.line-removed',
   RETAIL_CART_LINE_QUANTITY_CHANGED = 'retail.cart.line-quantity-changed',
+  RETAIL_ORDER_PLACED = 'retail.order.placed',
+  RETAIL_PAYMENT_AUTHORIZED = 'retail.payment.authorized',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
 }

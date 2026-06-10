@@ -35,6 +35,12 @@ export const ROUTING_KEYS = {
   RETAIL_CART_CHANGE_LINE_QUANTITY: 'retail.cart.change-line-quantity',
   RETAIL_CART_REMOVE_LINE: 'retail.cart.remove-line',
   RETAIL_CART_CLAIM: 'retail.cart.claim',
+  // `retail.cart.place` — the Place Order RPC (API Gateway → Retail). It converts
+  // the active cart into an immutable `Order` one-shot, snapshots the lines and
+  // addresses, authorizes payment inline, and resolves to an `OrderView`. It is a
+  // cart key (it acts on the cart) but is served by the orders controller, since
+  // the placement produces an `Order` (ADR-028 §1).
+  RETAIL_CART_PLACE: 'retail.cart.place',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -42,6 +48,15 @@ export const ROUTING_KEYS = {
   RETAIL_CART_LINE_ADDED: 'retail.cart.line-added',
   RETAIL_CART_LINE_REMOVED: 'retail.cart.line-removed',
   RETAIL_CART_LINE_QUANTITY_CHANGED: 'retail.cart.line-quantity-changed',
+  // `retail.order.placed` — emitted onto `notification_events` after a successful
+  // place so the notification service can fan out an order confirmation. An active
+  // consumer arrives with the notification re-point capability; for now it is a
+  // best-effort post-commit emit (ADR-020).
+  RETAIL_ORDER_PLACED: 'retail.order.placed',
+  // `retail.payment.authorized` — emitted onto `retail_queue` (the producer's own
+  // queue) after authorize-on-place succeeds. A reserved surface today, like the
+  // four `retail.cart.*` events.
+  RETAIL_PAYMENT_AUTHORIZED: 'retail.payment.authorized',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

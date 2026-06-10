@@ -1,4 +1,4 @@
-import { CartView } from '@retail-inventory-system/contracts';
+import { CartView, IAddressInput, OrderView } from '@retail-inventory-system/contracts';
 
 export const CART_GATEWAY_PORT = Symbol('CART_GATEWAY_PORT');
 
@@ -51,6 +51,20 @@ export interface ICartClaimCommand {
   newCustomerId: string;
 }
 
+// Place Order carries the two snapshot address bundles + the optional opaque
+// payment method, plus the `idempotencyKey` read from the `Idempotency-Key` header
+// (accepted + forwarded, NOT deduped — Q10). `customerId` is the folded
+// `@CurrentUser().id`; the retail use case re-asserts `cart.customerId ===
+// customerId` (the owner-check).
+export interface ICartPlaceCommand {
+  cartId: string;
+  customerId: string;
+  shippingAddress: IAddressInput;
+  billingAddress: IAddressInput;
+  paymentMethod?: string;
+  idempotencyKey?: string;
+}
+
 // The gateway-side seam onto the retail microservice's six cart RPCs. The
 // concrete implementation (`CartRabbitmqAdapter`) is the only holder of a
 // `ClientProxy`; use cases and the controller depend on this interface (ADR-009).
@@ -65,4 +79,7 @@ export interface ICartGatewayPort {
   ): Promise<CartView>;
   removeLine(command: ICartRemoveLineCommand, correlationId: string): Promise<CartView>;
   claim(command: ICartClaimCommand, correlationId: string): Promise<CartView>;
+  // Place resolves to the retail `OrderView` (the placed order + its lines + the
+  // authorized payment), surfaced over HTTP unchanged.
+  placeOrder(command: ICartPlaceCommand, correlationId: string): Promise<OrderView>;
 }

@@ -4,12 +4,14 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   CartView,
+  IPlaceOrderPayload,
   IRetailCartAddLinePayload,
   IRetailCartChangeLineQuantityPayload,
   IRetailCartClaimPayload,
   IRetailCartCreatePayload,
   IRetailCartGetPayload,
   IRetailCartRemoveLinePayload,
+  OrderView,
 } from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
@@ -20,6 +22,7 @@ import {
   ICartCreateCommand,
   ICartGatewayPort,
   ICartGetQuery,
+  ICartPlaceCommand,
   ICartRemoveLineCommand,
 } from '../../application/ports';
 
@@ -89,6 +92,15 @@ export class CartRabbitmqAdapter implements ICartGatewayPort {
   public async claim(command: ICartClaimCommand, correlationId: string): Promise<CartView> {
     return firstValueFrom(
       this.client.send<CartView, IRetailCartClaimPayload>(ROUTING_KEYS.RETAIL_CART_CLAIM, {
+        ...command,
+        correlationId,
+      }),
+    );
+  }
+
+  public async placeOrder(command: ICartPlaceCommand, correlationId: string): Promise<OrderView> {
+    return firstValueFrom(
+      this.client.send<OrderView, IPlaceOrderPayload>(ROUTING_KEYS.RETAIL_CART_PLACE, {
         ...command,
         correlationId,
       }),
