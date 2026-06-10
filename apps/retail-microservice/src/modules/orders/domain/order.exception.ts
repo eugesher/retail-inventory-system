@@ -32,6 +32,10 @@ export enum OrderErrorCodeEnum {
   // order back for the idempotent repeat; the read/capture operations resolve an
   // order by id.)
   ORDER_NOT_FOUND = 'ORDER_NOT_FOUND',
+  // The authenticated caller is neither the order's owner nor a staff override
+  // (`order:read` for a read, `order:capture` for a capture) — the retail-side half
+  // of the owner-or-staff check on the order read/capture paths (ADR-028 §7), 403.
+  ORDER_ACCESS_FORBIDDEN = 'ORDER_ACCESS_FORBIDDEN',
 
   // --- Place Order flow (cart→order conversion) ---
   // The cart referenced by a place request does not exist — 404.
@@ -51,6 +55,10 @@ export enum OrderErrorCodeEnum {
   // fake, but modeled) — the order stays placed-but-unpaid and the place surfaces a
   // 409.
   ORDER_PAYMENT_NOT_APPROVED = 'ORDER_PAYMENT_NOT_APPROVED',
+  // The payment gateway declined the capture (unreachable with the always-capture
+  // fake, but modeled, symmetric to `ORDER_PAYMENT_NOT_APPROVED`) — the payment stays
+  // `authorized` and the capture surfaces a 409.
+  ORDER_PAYMENT_NOT_CAPTURED = 'ORDER_PAYMENT_NOT_CAPTURED',
 
   // A line's opaque `variantId` must be a positive integer — 400.
   ORDER_LINE_VARIANT_INVALID = 'ORDER_LINE_VARIANT_INVALID',

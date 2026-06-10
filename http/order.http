@@ -1,19 +1,25 @@
 # Order endpoints
-# (apps/api-gateway/src/modules/cart/presentation/cart.controller.ts — place route)
 #
-# Place Order converts an active cart into an immutable Order one-shot: it
-# snapshots each line from the catalog (sku / nameSnapshot / unitPriceMinor at
-# write-time), snapshots the billing + shipping addresses from the request body,
-# authorizes payment inline through the PAYMENT_GATEWAY (the always-approve fake),
-# and resolves to an OrderView (the placed order + its lines + the authorized
-# payment). The route is bearer-protected with an OWNER-CHECK enforced retail-side
-# (cart.customerId === the authenticated subject) — no permission code (a customer
-# carries none). A non-owner gets 403; an unauthenticated caller 401.
+# The order lifecycle spans two gateway controllers:
+#   - Place Order is a cart action — apps/api-gateway/src/modules/cart/presentation/
+#     cart.controller.ts (POST /api/cart/:cartId/place). It converts an active cart
+#     into an immutable Order, snapshots the lines + addresses, and authorizes payment
+#     inline through the PAYMENT_GATEWAY (the always-approve fake).
+#   - Read + capture are order actions — apps/api-gateway/src/modules/orders/
+#     presentation/orders.controller.ts (GET /api/orders, GET /api/orders/:orderId,
+#     POST /api/orders/:orderId/payments/capture).
 #
-# The `Idempotency-Key` header is ACCEPTED + LOGGED but NOT deduped in this
-# capability. Repeat-place safety comes from cart state: a placed cart is
-# `converted`, and re-placing it returns the order it already converted into (via
-# source_cart_id) rather than creating a second order.
+# AUTHORIZATION is bearer + owner-check, never a customer permission code. The route
+# folds the authenticated subject into the command and the retail service enforces
+# `order.customerId === the subject`. A staff `order:read` / `order:capture`
+# permission is an OVERRIDE layered on top (it lets staff read/capture any order), not
+# a gate on the owning customer. A non-owner non-staff caller gets 403; an
+# unauthenticated caller 401.
+#
+# The `Idempotency-Key` header is ACCEPTED + LOGGED but NOT deduped. Repeat-place
+# safety comes from cart state (a placed cart is `converted`, and re-placing it
+# returns the order it already converted into); re-capture safety comes from payment
+# state (capturing an already-captured payment returns the current captured state).
 #
 # All routes sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With
 # the default .env.local that resolves to http://localhost:3000/api.
@@ -28,11 +34,8 @@
 #      @accessToken (customer@example.com / customer1234).
 #   3. Run `createCart` (captures @cartId), then `addLineOne` + `addLineTwo` to put
 #      two seeded variants in the cart (variant 1 @ 4999, variant 3 @ 19999).
-#   4. Run `placeOrder`. It converts the cart, authorizes payment, and returns the
-#      OrderView (status=pending, paymentStatus=authorized, fulfillment=unfulfilled).
-#      Re-running it returns the SAME order (cart-state idempotency).
-#
-# The GET-order / capture requests land with the order read/capture capability.
+#   4. Run `placeOrder` (captures @orderId). Then exercise `getOrder`, `listMyOrders`,
+#      `capturePayment`, and `placeOrderAgain`.
 
 @baseUrl = {{ENV_BASE_URL}}
 
@@ -101,14 +104,13 @@ Content-Type: application/json
 # @name placeOrder
 # POST /api/cart/:cartId/place  (Bearer + owner-check)
 # Converts the cart one-shot into an Order, snapshots the addresses, authorizes
-# payment inline, and returns the OrderView. The `Idempotency-Key` header is
-# accepted + logged but NOT deduped. Body (PlaceOrderRequestDto):
+# payment inline, and returns the OrderView. The `Idempotency-Key` header is accepted
+# + logged but NOT deduped. Body (PlaceOrderRequestDto):
 #   shippingAddress, billingAddress: { recipientName, line1, line2?, city, region,
 #                                      postalCode, country (2-char), phone? }
 #   paymentMethod?: opaque method token forwarded to the gateway
-# Response (201) is OrderView { orderNumber, status, paymentStatus, fulfillmentStatus,
-#   lines[ sku, nameSnapshot, unitPriceMinor, lineTotalMinor ], grandTotalMinor,
-#   billingAddressId, shippingAddressId, payment{ status='authorized', ... } }.
+# Response (201) is OrderView { orderNumber, status='pending', paymentStatus='authorized',
+#   fulfillmentStatus='unfulfilled', lines[...], grandTotalMinor, payment{ status='authorized' } }.
 POST {{baseUrl}}/cart/{{cartId}}/place
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{$guid}}
@@ -134,4 +136,73 @@ Content-Type: application/json
     "country": "US"
   },
   "paymentMethod": "tok_visa"
+}
+
+###
+@orderId = {{placeOrder.response.body.$.id}}
+
+###
+
+# @name getOrder
+# GET /api/orders/:orderId  (Bearer; owner OR staff order:read)
+# Reads the placed order with its lines + payment. The owning customer reads its own;
+# staff with order:read may read any. Response (200) is OrderView.
+GET {{baseUrl}}/orders/{{orderId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name listMyOrders
+# GET /api/orders?page=1&pageSize=10  (Bearer; own only)
+# Lists the authenticated caller's own orders, newest-first, paginated. Response (200)
+# is an IPage envelope { items: OrderView[], total, page, size }.
+GET {{baseUrl}}/orders?page=1&pageSize=10
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name capturePayment
+# POST /api/orders/:orderId/payments/capture  (Bearer; owner OR staff order:capture)
+# Captures the order's authorized payment (authorized -> captured). The owning
+# customer captures its own; staff with order:capture may capture any. The optional
+# body { amountMinor } defaults to the order grand total (partial capture is a later
+# capability); the `Idempotency-Key` header is accepted + logged but NOT deduped.
+# Response (200) is OrderView with paymentStatus='captured' and payment.status='captured'.
+POST {{baseUrl}}/orders/{{orderId}}/payments/capture
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{}
+
+###
+
+# @name placeOrderAgain
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Repeats the place on the now-converted cart with a NEW Idempotency-Key. The header
+# is not what makes this safe — the cart is already `converted`, so the retail service
+# returns the SAME order (same id + orderNumber, the existing payment) instead of
+# creating a second one. Key-based dedupe is a later capability.
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  }
 }

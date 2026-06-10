@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import {
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
+  IRetailPaymentCapturedEvent,
 } from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
@@ -45,6 +46,15 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
     await firstValueFrom(
       this.retailClient.emit<void, IRetailPaymentAuthorizedEvent>(
         ROUTING_KEYS.RETAIL_PAYMENT_AUTHORIZED,
+        event,
+      ),
+    );
+  }
+
+  public async publishPaymentCaptured(event: IRetailPaymentCapturedEvent): Promise<void> {
+    await firstValueFrom(
+      this.retailClient.emit<void, IRetailPaymentCapturedEvent>(
+        ROUTING_KEYS.RETAIL_PAYMENT_CAPTURED,
         event,
       ),
     );

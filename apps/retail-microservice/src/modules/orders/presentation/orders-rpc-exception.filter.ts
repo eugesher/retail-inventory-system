@@ -41,9 +41,11 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [OrderErrorCodeEnum.ORDER_CART_NOT_FOUND]: HttpStatus.NOT_FOUND,
 
-  // Ownership failure → 403: the caller is not the cart's owner (the retail-side
-  // half of the owner-check, ADR-028 §7).
+  // Ownership failure → 403: the caller is not the cart's owner (place), nor the
+  // order's owner / a staff override (read + capture) — the retail-side half of the
+  // owner(-or-staff) check, ADR-028 §7.
   [OrderErrorCodeEnum.ORDER_CART_ACCESS_FORBIDDEN]: HttpStatus.FORBIDDEN,
+  [OrderErrorCodeEnum.ORDER_ACCESS_FORBIDDEN]: HttpStatus.FORBIDDEN,
 
   // Conflicts with current state → 409: an illegal payment-status transition, a cart
   // that cannot be placed (abandoned / empty), a line that cannot be priced, or a
@@ -54,6 +56,7 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_CART_EMPTY]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_LINE_NO_PRICE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED]: HttpStatus.CONFLICT,
 };
 
 // Terminates an `OrderDomainException` into the wire error shape the gateway's

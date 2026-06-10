@@ -41,6 +41,15 @@ export const ROUTING_KEYS = {
   // cart key (it acts on the cart) but is served by the orders controller, since
   // the placement produces an `Order` (ADR-028 §1).
   RETAIL_CART_PLACE: 'retail.cart.place',
+  // Order read + capture RPC keys (API Gateway → Retail, served by the orders
+  // controller). `retail.order.get` resolves one `OrderView` (owner-checked, or a
+  // staff `order:read` override); `retail.order.list` resolves an `IPage<OrderView>`
+  // of the caller's own orders; `retail.payment.capture` walks the order's authorized
+  // payment to `captured` (owner-checked, or a staff `order:capture` override) and
+  // resolves the updated `OrderView` (ADR-028 §3/§7).
+  RETAIL_ORDER_GET: 'retail.order.get',
+  RETAIL_ORDER_LIST: 'retail.order.list',
+  RETAIL_PAYMENT_CAPTURE: 'retail.payment.capture',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -57,6 +66,9 @@ export const ROUTING_KEYS = {
   // queue) after authorize-on-place succeeds. A reserved surface today, like the
   // four `retail.cart.*` events.
   RETAIL_PAYMENT_AUTHORIZED: 'retail.payment.authorized',
+  // `retail.payment.captured` — emitted onto `retail_queue` after an explicit
+  // capture succeeds. A reserved surface today, like `retail.payment.authorized`.
+  RETAIL_PAYMENT_CAPTURED: 'retail.payment.captured',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

@@ -20,6 +20,7 @@ import { CartModule } from '../modules/cart';
 import { CatalogModule } from '../modules/catalog';
 import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
+import { OrdersModule } from '../modules/orders';
 import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.filter';
 
 @Module({
@@ -32,6 +33,7 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
     CatalogModule,
     InventoryModule,
     CartModule,
+    OrdersModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: DuplicateKeyExceptionFilter },
