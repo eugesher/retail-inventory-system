@@ -17,6 +17,13 @@ interface IMaxSortOrderRaw {
   max: string | number | null;
 }
 
+// The existence-probe row shape (`SELECT 1 AS present`). Typing the `query<...>`
+// generic with this row keeps the result off `any` (no cast, no `no-unsafe-*`
+// leak) — the `ActivePriceProbeTypeormAdapter` precedent.
+interface IExistsRow {
+  present: number;
+}
+
 // The single `InjectRepository` site for the MediaAsset aggregate. Extends
 // `BaseTypeormRepository` for the `toDomain`/`toEntity` seam; `save` re-reads for
 // the concrete id, and `reorder` runs its own `manager.transaction` (the
@@ -125,5 +132,36 @@ export class MediaAssetTypeormRepository
 
     // Return the refreshed ACTIVE list (now a dense 0..N-1 permutation), sorted.
     return this.listByOwner(ownerType, ownerId, { activeOnly: true });
+  }
+
+  public async hasActiveForOwners(
+    owners: { ownerType: MediaOwnerTypeEnum; ownerId: number }[],
+  ): Promise<boolean> {
+    // No owners → vacuously no media (the publish probe never builds an empty
+    // list — the product owner is always present — but guarding here keeps the
+    // method total and avoids emitting `IN ()`, which MySQL rejects).
+    if (owners.length === 0) {
+      return false;
+    }
+
+    // ONE query: an owner-pair tuple IN-list scoped to active rows, short-circuited
+    // by `LIMIT 1` (we only need existence). Each pair contributes a `(?, ?)`
+    // placeholder and binds its two values positionally; the placeholder STRING is
+    // generated from `owners.length` (a count, never user input), and every VALUE
+    // is bound by the driver — nothing is string-interpolated (the parameterized-
+    // SQL stance of `reorder` / ADR-029).
+    const placeholders = owners.map(() => '(?, ?)').join(', ');
+    const params: (string | number)[] = [];
+    for (const owner of owners) {
+      params.push(owner.ownerType, owner.ownerId);
+    }
+    params.push(MediaAssetStatusEnum.ACTIVE);
+
+    const rows = await this.mediaRepository.query<IExistsRow[]>(
+      `SELECT 1 AS present FROM media_asset WHERE (owner_type, owner_id) IN (${placeholders}) AND status = ? LIMIT 1`,
+      params,
+    );
+
+    return rows.length > 0;
   }
 }

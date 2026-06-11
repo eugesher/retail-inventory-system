@@ -436,4 +436,22 @@ export class InMemoryMediaAssetRepository implements IMediaAssetRepositoryPort {
     });
     return this.listByOwner(ownerType, ownerId, { activeOnly: true });
   }
+
+  // Mirrors the real adapter's owner-pair tuple IN-list existence probe: true
+  // when ANY of the pairs has an active asset. Used by the publish soft-warning
+  // spec — empty store / archived-only owners report `false`, an active asset on
+  // the product OR any variant reports `true`.
+  public hasActiveForOwners(
+    owners: { ownerType: MediaOwnerTypeEnum; ownerId: number }[],
+  ): Promise<boolean> {
+    const has = owners.some((owner) =>
+      [...this.store.values()].some(
+        (media) =>
+          media.ownerType === owner.ownerType &&
+          media.ownerId === owner.ownerId &&
+          media.isActive(),
+      ),
+    );
+    return Promise.resolve(has);
+  }
 }

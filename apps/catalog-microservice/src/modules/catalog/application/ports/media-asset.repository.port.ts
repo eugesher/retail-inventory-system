@@ -46,4 +46,13 @@ export interface IMediaAssetRepositoryPort {
     ownerId: number,
     orderedIds: number[],
   ): Promise<MediaAsset[]>;
+  // True when ANY of the `(ownerType, ownerId)` pairs has at least one ACTIVE
+  // media asset. ONE query — an owner-pair tuple IN-list filtered to
+  // `status = 'active'` with `LIMIT 1` — not a fan-out of per-owner `listByOwner`
+  // calls. Backs the publish soft-warning probe, which asks "does the product OR
+  // any of its variants have a picture?" across the whole owner set at once. An
+  // empty `owners` list is `false` (vacuously no media).
+  hasActiveForOwners(
+    owners: { ownerType: MediaOwnerTypeEnum; ownerId: number }[],
+  ): Promise<boolean>;
 }
