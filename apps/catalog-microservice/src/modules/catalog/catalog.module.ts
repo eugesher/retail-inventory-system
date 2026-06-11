@@ -19,10 +19,14 @@ import {
   AddVariantUseCase,
   ArchiveProductUseCase,
   CreateCategoryUseCase,
+  GetCategoryTreeUseCase,
   GetProductBySlugUseCase,
   GetVariantUseCase,
+  ListCategoriesUseCase,
+  ListCategoryProductsUseCase,
   ListProductsUseCase,
   PublishProductUseCase,
+  ReclassifyProductUseCase,
   RegisterProductUseCase,
   ReparentCategoryUseCase,
 } from './application/use-cases';
@@ -100,9 +104,16 @@ const DEFAULT_CURRENCY_PROVIDER = {
     GetProductBySlugUseCase,
     GetVariantUseCase,
 
-    // Category write use cases — served by `CategoryController` on `catalog_queue`.
+    // Category write + read use cases + the product reclassify — all served by
+    // `CategoryController` on `catalog_queue`. Reclassify spans both repository
+    // seams (product existence + the `product_categories` membership), and the
+    // category-scoped browse reuses `CATALOG_REPOSITORY` for the product read.
     CreateCategoryUseCase,
     ReparentCategoryUseCase,
+    ListCategoriesUseCase,
+    GetCategoryTreeUseCase,
+    ListCategoryProductsUseCase,
+    ReclassifyProductUseCase,
   ],
 })
 export class CatalogModule {}

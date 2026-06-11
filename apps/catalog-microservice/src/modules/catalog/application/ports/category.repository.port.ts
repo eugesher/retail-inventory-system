@@ -47,4 +47,26 @@ export interface ICategoryRepositoryPort {
   // the moved category's path BEFORE the recompute. Returns the number of
   // descendant rows rewritten (the reparent response surfaces it).
   reparentSubtree(category: Category, oldPath: string): Promise<number>;
+
+  // --- product_categories N↔M membership (ADR-029 §3) -----------------------
+  //
+  // The membership lives in a BARE join table (`product_categories`, composite PK
+  // `(product_id, category_id)`, no surrogate id, NO TypeORM entity). Neither
+  // `Product` nor `Category` holds it in memory — it is a browse concern, so the
+  // repository maintains it directly with parameterized SQL through the injected
+  // manager (the `product_variant.tax_category_id` precedent, ADR-026 §5). Both
+  // writes are IDEMPOTENT: `attach` is an `INSERT IGNORE` (re-attaching an
+  // existing membership is a silent success) and `detach` a `DELETE` (detaching a
+  // non-membership is a silent no-op), so a retried reclassify RPC is safe.
+
+  // Attaches the product to every given category, ignoring already-present pairs.
+  // A no-op when `categoryIds` is empty.
+  attachProductCategories(productId: number, categoryIds: number[]): Promise<void>;
+  // Detaches the product from every given category, ignoring absent pairs. A
+  // no-op when `categoryIds` is empty.
+  detachProductCategories(productId: number, categoryIds: number[]): Promise<void>;
+  // Every category the product currently belongs to — the full post-operation
+  // membership the reclassify response surfaces. Returns domain `Category`
+  // aggregates (the join is resolved to the `category` rows), any status.
+  listCategoriesForProduct(productId: number): Promise<Category[]>;
 }

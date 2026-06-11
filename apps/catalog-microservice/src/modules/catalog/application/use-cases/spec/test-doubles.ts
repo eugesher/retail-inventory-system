@@ -9,6 +9,7 @@ import {
   IActivePriceProbePort,
   ICatalogEventsPublisherPort,
   ICatalogListActiveQuery,
+  ICatalogListByCategoryQuery,
   ICatalogRepositoryPort,
   ICategoryListAllOptions,
   ICategoryRepositoryPort,
@@ -28,6 +29,13 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
   public readonly saved: Product[] = [];
   public slugTaken = false;
   public skuTaken = false;
+  // Stands in for the shared `product_categories` table the real adapter reads
+  // via the membership subselect — `categoryId → product ids`. The browse spec
+  // seeds it with `attachProductToCategory`. `listByCategoryCalls` records each
+  // resolved id set the use case asked for (so a spec can assert
+  // `includeDescendants` expanded the scope to the subtree ids).
+  public readonly categoryMembership = new Map<number, Set<number>>();
+  public readonly listByCategoryCalls: number[][] = [];
 
   private readonly store = new Map<number, Product>();
   private nextProductId = 100;
@@ -123,6 +131,40 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
     const items = matched.slice(start, start + size);
     return Promise.resolve({ items, total, page, size });
   }
+
+  // Test seam: associate a (seeded) product with a category id, mirroring a
+  // `product_categories` row.
+  public attachProductToCategory(productId: number, categoryId: number): void {
+    const members = this.categoryMembership.get(categoryId) ?? new Set<number>();
+    members.add(productId);
+    this.categoryMembership.set(categoryId, members);
+  }
+
+  public listActiveByCategoryIds(query: ICatalogListByCategoryQuery): Promise<IProductPage> {
+    const { categoryIds, page, size } = query;
+    this.listByCategoryCalls.push([...categoryIds]);
+
+    // Union the members of every requested category, dedup (a product in two of
+    // the ids appears once — the real adapter's implicit DISTINCT), keep only
+    // active products, newest-first by id.
+    const productIds = new Set<number>();
+    for (const categoryId of categoryIds) {
+      for (const productId of this.categoryMembership.get(categoryId) ?? []) {
+        productIds.add(productId);
+      }
+    }
+
+    const matched = [...productIds]
+      .map((id) => this.store.get(id))
+      .filter((product): product is Product => product !== undefined)
+      .filter((product) => product.isActive())
+      .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+
+    const total = matched.length;
+    const start = (page - 1) * size;
+    const items = matched.slice(start, start + size);
+    return Promise.resolve({ items, total, page, size });
+  }
 }
 
 // In-memory active-price probe. By default every variant is treated as priced
@@ -192,6 +234,11 @@ export class InMemoryCategoryRepository implements ICategoryRepositoryPort {
   public reparentReturnCount = 0;
   public readonly saved: Category[] = [];
   public readonly reparentCalls: { category: Category; oldPath: string }[] = [];
+  // Stands in for the `product_categories` join table — `productId → category
+  // ids`. The Set makes `attach` naturally idempotent (re-adding a member is a
+  // no-op, the `INSERT IGNORE` semantics) and `detach` of an absent member a
+  // silent no-op (the `DELETE` semantics).
+  public readonly productCategories = new Map<number, Set<number>>();
 
   private readonly store = new Map<number, Category>();
   private nextCategoryId = 100;
@@ -246,7 +293,9 @@ export class InMemoryCategoryRepository implements ICategoryRepositoryPort {
     if (opts.activeOnly) {
       matched = matched.filter((category) => category.isActive());
     }
-    matched.sort((a, b) => a.path.localeCompare(b.path));
+    // `sortOrder ASC, name ASC` — mirrors the real adapter's ORDER BY for the flat
+    // list read (the store-front navigation order).
+    matched.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
     return Promise.resolve(matched);
   }
 
@@ -267,5 +316,33 @@ export class InMemoryCategoryRepository implements ICategoryRepositoryPort {
       this.store.set(category.id, category);
     }
     return Promise.resolve(this.reparentReturnCount);
+  }
+
+  public attachProductCategories(productId: number, categoryIds: number[]): Promise<void> {
+    const members = this.productCategories.get(productId) ?? new Set<number>();
+    for (const categoryId of categoryIds) {
+      members.add(categoryId);
+    }
+    this.productCategories.set(productId, members);
+    return Promise.resolve();
+  }
+
+  public detachProductCategories(productId: number, categoryIds: number[]): Promise<void> {
+    const members = this.productCategories.get(productId);
+    if (members) {
+      for (const categoryId of categoryIds) {
+        members.delete(categoryId);
+      }
+    }
+    return Promise.resolve();
+  }
+
+  public listCategoriesForProduct(productId: number): Promise<Category[]> {
+    const members = this.productCategories.get(productId) ?? new Set<number>();
+    const categories = [...members]
+      .map((id) => this.store.get(id))
+      .filter((category): category is Category => category !== undefined)
+      .sort((a, b) => a.path.localeCompare(b.path));
+    return Promise.resolve(categories);
   }
 }

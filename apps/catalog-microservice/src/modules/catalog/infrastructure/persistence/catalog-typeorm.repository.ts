@@ -8,6 +8,7 @@ import { BaseTypeormRepository } from '@retail-inventory-system/database';
 import { Product, ProductStatusEnum, ProductVariant } from '../../domain';
 import {
   ICatalogListActiveQuery,
+  ICatalogListByCategoryQuery,
   ICatalogRepositoryPort,
   IProductPage,
 } from '../../application/ports';
@@ -125,6 +126,43 @@ export class CatalogTypeormRepository
     }
 
     const [entities, total] = await builder
+      .orderBy('Product.id', 'DESC')
+      .skip((page - 1) * size)
+      .take(size)
+      .getManyAndCount();
+
+    return {
+      items: entities.map((entity) => ProductMapper.toDomain(entity)),
+      total,
+      page,
+      size,
+    };
+  }
+
+  public async listActiveByCategoryIds(query: ICatalogListByCategoryQuery): Promise<IProductPage> {
+    const { categoryIds, page, size } = query;
+
+    // No ids → an empty page. The use case always passes at least the named
+    // category's own id, but an `IN ()` with no values is invalid SQL, so guard.
+    if (categoryIds.length === 0) {
+      return { items: [], total: 0, page, size };
+    }
+
+    // Mirrors `listActive` (active products, newest first, variants eager-loaded)
+    // and adds a category-membership filter as a parameterized id-subselect
+    // against the bare `product_categories` table. `IN (subselect)` is implicitly
+    // DISTINCT — a product attached to two of the ids appears once — so no
+    // `.distinct()` is needed, and the to-many `variants` join still paginates
+    // correctly because TypeORM resolves the root ids first when `take`/`skip` meet
+    // a to-many join (the same shape `listActive` relies on).
+    const [entities, total] = await this.productRepository
+      .createQueryBuilder('Product')
+      .leftJoinAndSelect('Product.variants', 'ProductVariant')
+      .where('Product.status = :status', { status: ProductStatusEnum.ACTIVE })
+      .andWhere(
+        'Product.id IN (SELECT pc.product_id FROM product_categories pc WHERE pc.category_id IN (:...categoryIds))',
+        { categoryIds },
+      )
       .orderBy('Product.id', 'DESC')
       .skip((page - 1) * size)
       .take(size)

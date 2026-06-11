@@ -85,11 +85,14 @@ export class CategoryTypeormRepository
       where.status = CategoryStatusEnum.ACTIVE;
     }
 
-    // Order by `path` so parents sort before their descendants (a parent's path
-    // is a strict prefix, and '/' sorts low) — the natural pre-order for tree
-    // assembly. Sibling ordering by `sortOrder` is layered by the (later) browse
-    // read in memory if it needs it; this foundation read stays deterministic.
-    const entities = await this.categoryRepository.find({ where, order: { path: 'ASC' } });
+    // `sortOrder ASC, name ASC` — the store-front navigation order for the flat
+    // list read (`catalog.category.list`): an explicit merchandising sort first,
+    // then name as the stable tiebreaker. (The tree read assembles its own
+    // ordering from `listSubtree`; this ordering is the flat-list contract.)
+    const entities = await this.categoryRepository.find({
+      where,
+      order: { sortOrder: 'ASC', name: 'ASC' },
+    });
     return entities.map((entity) => CategoryMapper.toDomain(entity));
   }
 
@@ -156,5 +159,63 @@ export class CategoryTypeormRepository
     );
 
     return descendantsRewritten;
+  }
+
+  // --- product_categories N↔M membership (ADR-029 §3) -----------------------
+  //
+  // The join table is bare (composite PK `(product_id, category_id)`, no
+  // surrogate id, NO entity), so it is maintained with PARAMETERIZED SQL through
+  // the injected manager — never string-interpolated ids (the
+  // `product_variant.tax_category_id` precedent, ADR-026 §5). Both writes are
+  // idempotent so a retried reclassify RPC is safe.
+
+  public async attachProductCategories(productId: number, categoryIds: number[]): Promise<void> {
+    // An empty list is a no-op — and a guard against generating `VALUES ` with no
+    // tuples, which is a SQL syntax error.
+    if (categoryIds.length === 0) {
+      return;
+    }
+
+    // One multi-row `INSERT IGNORE`: a `(?, ?)` tuple per id. `IGNORE` swallows a
+    // duplicate-key collision on the composite PK, so re-attaching an existing
+    // membership is a silent success (idempotent).
+    const valuesClause = categoryIds.map(() => '(?, ?)').join(', ');
+    const params = categoryIds.flatMap((categoryId) => [productId, categoryId]);
+    await this.categoryRepository.manager.query(
+      `INSERT IGNORE INTO product_categories (product_id, category_id) VALUES ${valuesClause}`,
+      params,
+    );
+  }
+
+  public async detachProductCategories(productId: number, categoryIds: number[]): Promise<void> {
+    if (categoryIds.length === 0) {
+      return;
+    }
+
+    // DELETE the named pairs; a pair that is not a membership matches no row
+    // (idempotent silent no-op). A `?` placeholder per id in the IN list.
+    const placeholders = categoryIds.map(() => '?').join(', ');
+    await this.categoryRepository.manager.query(
+      `DELETE FROM product_categories WHERE product_id = ? AND category_id IN (${placeholders})`,
+      [productId, ...categoryIds],
+    );
+  }
+
+  public async listCategoriesForProduct(productId: number): Promise<Category[]> {
+    // Resolve the join to the `category` rows via a parameterized id-subselect
+    // against the bare table — no need to join a non-entity table into the
+    // builder. Hydrates `CategoryEntity` instances so the mapper coerces the
+    // BIGINT `parent_id` as on every other read. Any status (the reclassify
+    // response surfaces the full current membership, archived included).
+    const entities = await this.categoryRepository
+      .createQueryBuilder('Category')
+      .where(
+        'Category.id IN (SELECT pc.category_id FROM product_categories pc WHERE pc.product_id = :productId)',
+        { productId },
+      )
+      .orderBy('Category.path', 'ASC')
+      .getMany();
+
+    return entities.map((entity) => CategoryMapper.toDomain(entity));
   }
 }

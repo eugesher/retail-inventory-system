@@ -60,8 +60,14 @@ describe('CategoryMapper', () => {
 describe('CategoryTypeormRepository', () => {
   let queryMock: jest.Mock;
   let transactionMock: jest.Mock;
-  let categoryRepo: jest.Mocked<Pick<Repository<CategoryEntity>, 'existsBy' | 'findOne'>> & {
-    manager: { transaction: jest.Mock };
+  // `manager.query` is the membership-write path (INSERT IGNORE / DELETE),
+  // distinct from the transaction's inner `query` the reparent uses.
+  let managerQueryMock: jest.Mock;
+  let createQueryBuilderMock: jest.Mock;
+  let categoryRepo: jest.Mocked<
+    Pick<Repository<CategoryEntity>, 'existsBy' | 'findOne' | 'createQueryBuilder'>
+  > & {
+    manager: { transaction: jest.Mock; query: jest.Mock };
   };
   let logger: PinoLoggerMock;
   let repository: CategoryTypeormRepository;
@@ -69,6 +75,8 @@ describe('CategoryTypeormRepository', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     queryMock = jest.fn();
+    managerQueryMock = jest.fn();
+    createQueryBuilderMock = jest.fn();
     // `manager.transaction(cb)` invokes the callback with a manager exposing the
     // same `query` mock, so the spec drives both UPDATEs through one stub.
     transactionMock = jest.fn(async (cb: (manager: EntityManager) => Promise<number>) =>
@@ -77,7 +85,8 @@ describe('CategoryTypeormRepository', () => {
     categoryRepo = {
       existsBy: jest.fn(),
       findOne: jest.fn(),
-      manager: { transaction: transactionMock },
+      createQueryBuilder: createQueryBuilderMock,
+      manager: { transaction: transactionMock, query: managerQueryMock },
     } as never;
     logger = makePinoLoggerMock();
     repository = new CategoryTypeormRepository(
@@ -143,6 +152,71 @@ describe('CategoryTypeormRepository', () => {
     it('throws when the category has no id', async () => {
       const unsaved = Category.create({ name: 'Phones', slug: 'phones' });
       await expect(repository.reparentSubtree(unsaved, '/phones')).rejects.toThrow(/has no id/);
+    });
+  });
+
+  describe('attachProductCategories', () => {
+    it('issues a parameterized multi-row INSERT IGNORE — one (?, ?) tuple per id, ids bound never interpolated', async () => {
+      await repository.attachProductCategories(7, [3, 5]);
+
+      expect(managerQueryMock).toHaveBeenCalledWith(
+        'INSERT IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?), (?, ?)',
+        [7, 3, 7, 5],
+      );
+    });
+
+    it('is a no-op for an empty id list (no SQL issued)', async () => {
+      await repository.attachProductCategories(7, []);
+      expect(managerQueryMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('detachProductCategories', () => {
+    it('issues a parameterized DELETE with one ? per id in the IN list', async () => {
+      await repository.detachProductCategories(7, [3, 5]);
+
+      expect(managerQueryMock).toHaveBeenCalledWith(
+        'DELETE FROM product_categories WHERE product_id = ? AND category_id IN (?, ?)',
+        [7, 3, 5],
+      );
+    });
+
+    it('is a no-op for an empty id list (no SQL issued)', async () => {
+      await repository.detachProductCategories(7, []);
+      expect(managerQueryMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listCategoriesForProduct', () => {
+    it('resolves the join via a parameterized id-subselect and maps the rows to domain', async () => {
+      const builder = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 3,
+            name: 'Phones',
+            slug: 'phones',
+            parentId: 1,
+            path: '/electronics/phones',
+            sortOrder: 0,
+            status: CategoryStatusEnum.ACTIVE,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            deletedAt: null,
+          } as CategoryEntity,
+        ]),
+      };
+      createQueryBuilderMock.mockReturnValue(builder);
+
+      const categories = await repository.listCategoriesForProduct(7);
+
+      expect(createQueryBuilderMock).toHaveBeenCalledWith('Category');
+      expect(builder.where).toHaveBeenCalledWith(
+        'Category.id IN (SELECT pc.category_id FROM product_categories pc WHERE pc.product_id = :productId)',
+        { productId: 7 },
+      );
+      expect(categories.map((category) => category.slug)).toEqual(['phones']);
     });
   });
 });

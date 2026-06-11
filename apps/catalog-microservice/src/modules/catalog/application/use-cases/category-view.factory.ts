@@ -1,4 +1,4 @@
-import { CategoryView } from '@retail-inventory-system/contracts';
+import { CategoryTreeNodeView, CategoryView } from '@retail-inventory-system/contracts';
 
 import { Category } from '../../domain';
 
@@ -20,4 +20,16 @@ export const toCategoryView = (category: Category): CategoryView => ({
   path: category.path,
   sortOrder: category.sortOrder,
   status: category.status,
+});
+
+// A tree node is the flat `CategoryView` header plus its already-assembled
+// children. The caller (the tree use case) builds the `children` recursively and
+// passes them in, so this stays a pure leaf projection over `toCategoryView` —
+// the field mapping lives in exactly one place.
+export const toCategoryTreeNode = (
+  category: Category,
+  children: CategoryTreeNodeView[],
+): CategoryTreeNodeView => ({
+  ...toCategoryView(category),
+  children,
 });

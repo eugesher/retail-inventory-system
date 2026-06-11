@@ -12,6 +12,16 @@ export interface ICatalogListActiveQuery {
   search?: string;
 }
 
+// Query shape for the category-scoped browse. `categoryIds` is the resolved set
+// of category ids to match (the named category, plus its active subtree's ids
+// when `includeDescendants` was requested — the expansion happens in the use
+// case, so the repository sees a flat id list).
+export interface ICatalogListByCategoryQuery {
+  categoryIds: number[];
+  page: number;
+  size: number;
+}
+
 export interface IProductPage {
   items: Product[];
   total: number;
@@ -42,4 +52,10 @@ export interface ICatalogRepositoryPort {
   // Paginated list of active products (the published catalogue), newest first,
   // optionally filtered by a name/slug substring search.
   listActive(query: ICatalogListActiveQuery): Promise<IProductPage>;
+  // Paginated list of ACTIVE products attached to ANY of the given category ids,
+  // DISTINCT (a product in two of the ids appears once), newest first — the
+  // category-scoped sibling of `listActive`. The membership lives in
+  // `product_categories`; the products belong with the product repository, so the
+  // browse read lives here rather than on the category port (ADR-029 §3 / §8).
+  listActiveByCategoryIds(query: ICatalogListByCategoryQuery): Promise<IProductPage>;
 }
