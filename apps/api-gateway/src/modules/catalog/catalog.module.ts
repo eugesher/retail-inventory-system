@@ -6,24 +6,35 @@ import { CATALOG_GATEWAY_PORT } from './application/ports';
 import {
   AddVariantUseCase,
   ArchiveProductUseCase,
+  AttachMediaUseCase,
+  AttachProductCategoriesUseCase,
   AttachVariantTaxCategoryUseCase,
+  CreateCategoryUseCase,
   CreateTaxCategoryUseCase,
+  DetachMediaUseCase,
+  DetachProductCategoryUseCase,
   GetApplicablePriceUseCase,
+  GetCategoryTreeUseCase,
   GetProductUseCase,
   GetVariantUseCase,
+  ListCategoriesUseCase,
+  ListCategoryProductsUseCase,
+  ListMediaUseCase,
   ListPricesUseCase,
   ListProductsUseCase,
   ListTaxCategoriesUseCase,
   PublishProductUseCase,
   RegisterProductUseCase,
+  ReorderMediaUseCase,
+  ReparentCategoryUseCase,
   SetPriceUseCase,
 } from './application/use-cases';
 import { CatalogRabbitmqAdapter } from './infrastructure/messaging';
-import { CatalogController } from './presentation';
+import { CatalogController, CategoryController, MediaController } from './presentation';
 
 @Module({
   imports: [MicroserviceClientCatalogModule],
-  controllers: [CatalogController],
+  controllers: [CatalogController, CategoryController, MediaController],
   providers: [
     RegisterProductUseCase,
     AddVariantUseCase,
@@ -38,6 +49,17 @@ import { CatalogController } from './presentation';
     CreateTaxCategoryUseCase,
     ListTaxCategoriesUseCase,
     AttachVariantTaxCategoryUseCase,
+    CreateCategoryUseCase,
+    ReparentCategoryUseCase,
+    ListCategoriesUseCase,
+    GetCategoryTreeUseCase,
+    ListCategoryProductsUseCase,
+    AttachProductCategoriesUseCase,
+    DetachProductCategoryUseCase,
+    AttachMediaUseCase,
+    ReorderMediaUseCase,
+    DetachMediaUseCase,
+    ListMediaUseCase,
     { provide: CATALOG_GATEWAY_PORT, useClass: CatalogRabbitmqAdapter },
   ],
 })
