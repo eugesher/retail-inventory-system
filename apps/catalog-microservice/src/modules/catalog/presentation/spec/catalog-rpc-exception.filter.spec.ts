@@ -27,9 +27,16 @@ describe('CatalogRpcExceptionFilter', () => {
       code: CatalogErrorCodeEnum.PRODUCT_NOT_FOUND,
       message: `message for ${CatalogErrorCodeEnum.PRODUCT_NOT_FOUND}`,
     });
-    await expect(statusFor(CatalogErrorCodeEnum.VARIANT_NOT_FOUND)).resolves.toMatchObject({
-      statusCode: HttpStatus.NOT_FOUND,
-    });
+    for (const code of [
+      CatalogErrorCodeEnum.VARIANT_NOT_FOUND,
+      CatalogErrorCodeEnum.CATEGORY_NOT_FOUND,
+      CatalogErrorCodeEnum.CATEGORY_PARENT_NOT_FOUND,
+    ]) {
+      await expect(statusFor(code)).resolves.toMatchObject({
+        statusCode: HttpStatus.NOT_FOUND,
+        code,
+      });
+    }
   });
 
   it('maps uniqueness collisions and illegal transitions to 409', async () => {
@@ -39,6 +46,10 @@ describe('CatalogRpcExceptionFilter', () => {
       CatalogErrorCodeEnum.PRODUCT_INVALID_STATE_TRANSITION,
       CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_VARIANT,
       CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_PRICE,
+      CatalogErrorCodeEnum.CATEGORY_SLUG_TAKEN,
+      CatalogErrorCodeEnum.CATEGORY_CYCLE,
+      CatalogErrorCodeEnum.CATEGORY_INVALID_STATE_TRANSITION,
+      CatalogErrorCodeEnum.CATEGORY_ARCHIVED,
     ]) {
       await expect(statusFor(code)).resolves.toMatchObject({
         statusCode: HttpStatus.CONFLICT,
@@ -55,6 +66,9 @@ describe('CatalogRpcExceptionFilter', () => {
       CatalogErrorCodeEnum.VARIANT_OPTION_VALUES_REQUIRED,
       CatalogErrorCodeEnum.VARIANT_WEIGHT_INVALID,
       CatalogErrorCodeEnum.VARIANT_DIMENSIONS_INVALID,
+      CatalogErrorCodeEnum.CATEGORY_NAME_REQUIRED,
+      CatalogErrorCodeEnum.CATEGORY_SLUG_INVALID,
+      CatalogErrorCodeEnum.CATEGORY_SORT_ORDER_INVALID,
     ]) {
       await expect(statusFor(code)).resolves.toMatchObject({
         statusCode: HttpStatus.BAD_REQUEST,

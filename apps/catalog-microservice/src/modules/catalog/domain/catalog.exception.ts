@@ -33,6 +33,27 @@ export enum CatalogErrorCodeEnum {
   // distinct code from `PRODUCT_NOT_FOUND` so the presentation layer can map the
   // variant lookup to its own 404 without conflating it with a product miss.
   VARIANT_NOT_FOUND = 'CATALOG_VARIANT_NOT_FOUND',
+
+  // Category invariants enforced in the `Category` aggregate. The slug rule is
+  // STRICTER than `Product.slug` (kebab-case, not merely non-empty) because the
+  // category slug is a materialized-path segment — a malformed slug would
+  // corrupt every descendant's `path` (ADR-029). The state-transition and cycle
+  // codes are 409s (a well-formed request the resource state forbids).
+  CATEGORY_NAME_REQUIRED = 'CATALOG_CATEGORY_NAME_REQUIRED',
+  CATEGORY_SLUG_INVALID = 'CATALOG_CATEGORY_SLUG_INVALID',
+  CATEGORY_SORT_ORDER_INVALID = 'CATALOG_CATEGORY_SORT_ORDER_INVALID',
+  CATEGORY_INVALID_STATE_TRANSITION = 'CATALOG_CATEGORY_INVALID_STATE_TRANSITION',
+  CATEGORY_CYCLE = 'CATALOG_CATEGORY_CYCLE',
+  // Repository-level rejections surfaced by the category use cases (which arrive
+  // in the create/reparent work). The aggregate cannot see other aggregates, so
+  // global slug uniqueness, parent existence, and target-category lookup are
+  // pre-checked through the repository port and raised with these codes (the
+  // UNIQUE constraint remains the hard guard). Landing the codes + the filter
+  // mappings now keeps the filter total and the next session contract-only.
+  CATEGORY_NOT_FOUND = 'CATALOG_CATEGORY_NOT_FOUND',
+  CATEGORY_PARENT_NOT_FOUND = 'CATALOG_CATEGORY_PARENT_NOT_FOUND',
+  CATEGORY_SLUG_TAKEN = 'CATALOG_CATEGORY_SLUG_TAKEN',
+  CATEGORY_ARCHIVED = 'CATALOG_CATEGORY_ARCHIVED',
 }
 
 // The catalog bounded context is the first concrete consumer of the

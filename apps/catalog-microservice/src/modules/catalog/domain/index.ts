@@ -1,4 +1,6 @@
 export * from './catalog.exception';
+export * from './category.model';
+export * from './category-status.enum';
 export * from './dimensions.vo';
 export * from './events';
 export * from './option-values.vo';

@@ -13,6 +13,7 @@ import {
   CATALOG_DEFAULT_CURRENCY,
   CATALOG_EVENTS_PUBLISHER,
   CATALOG_REPOSITORY,
+  CATEGORY_REPOSITORY,
 } from './application/ports';
 import {
   AddVariantUseCase,
@@ -27,6 +28,8 @@ import { CatalogRabbitmqPublisher } from './infrastructure/messaging';
 import {
   ActivePriceProbeTypeormAdapter,
   CatalogTypeormRepository,
+  CategoryEntity,
+  CategoryTypeormRepository,
   ProductEntity,
   ProductVariantEntity,
 } from './infrastructure/persistence';
@@ -55,7 +58,7 @@ const DEFAULT_CURRENCY_PROVIDER = {
 // `catalogEntities` const type does not satisfy `forFeature`).
 @Module({
   imports: [
-    DatabaseModule.forFeature([ProductEntity, ProductVariantEntity]),
+    DatabaseModule.forFeature([ProductEntity, ProductVariantEntity, CategoryEntity]),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
   ],
@@ -70,6 +73,12 @@ const DEFAULT_CURRENCY_PROVIDER = {
 
     CatalogTypeormRepository,
     { provide: CATALOG_REPOSITORY, useExisting: CatalogTypeormRepository },
+
+    // The Category aggregate's own repository seam (a separate port from
+    // `CATALOG_REPOSITORY` — one port per aggregate, ADR-029 §8). No category
+    // use cases yet; the binding lands here so the next session is contract-only.
+    CategoryTypeormRepository,
+    { provide: CATEGORY_REPOSITORY, useExisting: CategoryTypeormRepository },
 
     CatalogRabbitmqPublisher,
     { provide: CATALOG_EVENTS_PUBLISHER, useExisting: CatalogRabbitmqPublisher },
