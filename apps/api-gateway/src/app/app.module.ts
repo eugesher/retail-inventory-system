@@ -16,10 +16,11 @@ import {
   StaffUserEntity,
 } from '../modules/auth/infrastructure/persistence';
 import { AuthModule } from '../modules/auth';
+import { CartModule } from '../modules/cart';
 import { CatalogModule } from '../modules/catalog';
 import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
-import { RetailModule } from '../modules/retail';
+import { OrdersModule } from '../modules/orders';
 import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.filter';
 
 @Module({
@@ -29,9 +30,10 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
     DatabaseModule.forRoot([StaffUserEntity, RoleEntity, PermissionEntity, CustomerEntity]),
     AuthModule,
     IamModule,
-    RetailModule,
     CatalogModule,
     InventoryModule,
+    CartModule,
+    OrdersModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: DuplicateKeyExceptionFilter },

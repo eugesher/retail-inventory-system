@@ -70,6 +70,11 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     description: 'Read orders',
   },
   {
+    id: '00000000-0000-4000-b000-00000000000e',
+    code: PermissionCodeEnum.ORDER_CAPTURE,
+    description: 'Capture authorized payments on orders',
+  },
+  {
     id: '00000000-0000-4000-b000-000000000008',
     code: PermissionCodeEnum.ORDER_CANCEL,
     description: 'Cancel orders',
@@ -140,6 +145,7 @@ const ROLE_SEEDS: {
     description: 'Handle order support workflows',
     permissions: [
       PermissionCodeEnum.ORDER_READ,
+      PermissionCodeEnum.ORDER_CAPTURE,
       PermissionCodeEnum.ORDER_CANCEL,
       PermissionCodeEnum.ORDER_REFUND,
     ],
@@ -285,6 +291,15 @@ async function seed(): Promise<void> {
   const connection = await mysql.createConnection(url);
 
   try {
+    // Identity first: the SQL fixtures below include the example cart, whose
+    // `customer_id` FK references the customer this pass seeds. None of the
+    // catalog/pricing/stock SQL files depend on identity rows, so seeding
+    // identity ahead of them is safe and satisfies the cart FK.
+    await seedPermissions(connection);
+    await seedRoles(connection);
+    await seedStaffUsers(connection);
+    await seedCustomers(connection);
+
     for (const filename of TestDbSeedUtil.seedFiles) {
       const filePath = path.join(__dirname, 'seeds', filename);
 
@@ -292,11 +307,6 @@ async function seed(): Promise<void> {
         await connection.execute(statement);
       }
     }
-
-    await seedPermissions(connection);
-    await seedRoles(connection);
-    await seedStaffUsers(connection);
-    await seedCustomers(connection);
 
     console.log('✓ Database seeded successfully');
   } finally {

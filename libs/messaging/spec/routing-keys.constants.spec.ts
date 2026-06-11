@@ -8,22 +8,6 @@ import { ROUTING_KEYS } from '../routing-keys.constants';
 // would silently route messages to the wrong queue.
 describe('ROUTING_KEYS', () => {
   it('matches MicroserviceMessagePatternEnum values', () => {
-    expect(ROUTING_KEYS.RETAIL_ORDER_CREATE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATE,
-    );
-    expect(ROUTING_KEYS.RETAIL_ORDER_CONFIRM).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRM,
-    );
-    expect(ROUTING_KEYS.RETAIL_ORDER_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_ORDER_GET);
-    expect(ROUTING_KEYS.RETAIL_ORDER_CREATED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_CREATED,
-    );
-    expect(ROUTING_KEYS.RETAIL_ORDER_CONFIRMED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_CONFIRMED,
-    );
-    expect(ROUTING_KEYS.RETAIL_ORDER_CANCELLED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCELLED,
-    );
     expect(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
     );
@@ -100,6 +84,45 @@ describe('ROUTING_KEYS', () => {
     );
     expect(ROUTING_KEYS.CATALOG_VARIANT_SET_TAX_CATEGORY).toBe(
       MicroserviceMessagePatternEnum.CATALOG_VARIANT_SET_TAX_CATEGORY,
+    );
+    expect(ROUTING_KEYS.RETAIL_CART_CREATE).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_CREATE);
+    expect(ROUTING_KEYS.RETAIL_CART_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_GET);
+    expect(ROUTING_KEYS.RETAIL_CART_ADD_LINE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_CART_ADD_LINE,
+    );
+    expect(ROUTING_KEYS.RETAIL_CART_CHANGE_LINE_QUANTITY).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_CART_CHANGE_LINE_QUANTITY,
+    );
+    expect(ROUTING_KEYS.RETAIL_CART_REMOVE_LINE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_CART_REMOVE_LINE,
+    );
+    expect(ROUTING_KEYS.RETAIL_CART_CLAIM).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_CLAIM);
+    expect(ROUTING_KEYS.RETAIL_CART_PLACE).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_PLACE);
+    expect(ROUTING_KEYS.RETAIL_ORDER_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_ORDER_GET);
+    expect(ROUTING_KEYS.RETAIL_ORDER_LIST).toBe(MicroserviceMessagePatternEnum.RETAIL_ORDER_LIST);
+    expect(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_PAYMENT_CAPTURE,
+    );
+    expect(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_PAYMENT_CAPTURED,
+    );
+    expect(ROUTING_KEYS.RETAIL_ORDER_PLACED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_PLACED,
+    );
+    expect(ROUTING_KEYS.RETAIL_PAYMENT_AUTHORIZED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_PAYMENT_AUTHORIZED,
+    );
+    expect(ROUTING_KEYS.RETAIL_CART_CREATED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_CART_CREATED,
+    );
+    expect(ROUTING_KEYS.RETAIL_CART_LINE_ADDED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_CART_LINE_ADDED,
+    );
+    expect(ROUTING_KEYS.RETAIL_CART_LINE_REMOVED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_CART_LINE_REMOVED,
+    );
+    expect(ROUTING_KEYS.RETAIL_CART_LINE_QUANTITY_CHANGED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_CART_LINE_QUANTITY_CHANGED,
     );
     expect(ROUTING_KEYS.NOTIFICATION_HEALTH_PING).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATION_HEALTH_PING,

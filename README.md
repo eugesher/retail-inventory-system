@@ -33,6 +33,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  Customer auth                                            │
 │  POST  /api/auth/customer/register                        │
 │  POST  /api/auth/customer/login                           │
+│  POST  /api/auth/customer/guest-session                       │
 │  GET   /api/auth/customer/me                              │
 │                                                           │
 │  IAM admin                                                │
@@ -41,10 +42,6 @@ The system handles order lifecycle management and product stock tracking across 
 │  PATCH /api/iam/roles/:id                                 │
 │  POST  /api/iam/staff/:id/roles                           │
 │  DELETE /api/iam/staff/:id/roles/:roleName                │
-│                                                           │
-│  Domain                                                   │
-│  POST  /api/order                                         │
-│  PUT   /api/order/:id/confirm                             │
 │                                                           │
 │  Catalog (write: bearer + permission, read: public)       │
 │  POST  /api/catalog/products                              │
@@ -73,18 +70,16 @@ The system handles order lifecycle management and product stock tracking across 
       RPC      │                              │     RPC
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
-│                        │  │  RPC: stock-level.get,        │
-│  retail.order.create   │  │  location.list,receive,adjust │
-│  retail.order.confirm ─┼──► inventory.order.confirm (stub)│
-│  retail.order.get      │  │  Consumes: variant.created    │
-│                        │  │  Emits:                       │
-│  Emits:                │  │  inventory.stock.low ─────────┼─┐
-│  retail.order.created ─┼──┐                               │ │
-│  retail.order.confirmed│  │  ┌────────────┐               │ │
-└──────────────┬─────────┘  │  │   Redis    │◄──cache-aside─┤ │
-               │            │  │ stock keys │               │ │
+│  Cart: 6 RPCs + place  │  │  RPC: stock-level.get,        │
+│  + 4 events (cart).    │  │  location.list, receive,      │
+│  Orders: get / list /  │  │  adjust; order.confirm (stub) │
+│  capture (orders).     │  │  Consumes: variant.created    │
+│  PAYMENT_GATEWAY ->    │  │  Emits: inventory.stock.low ──┼─┐
+│  FakePaymentGateway.   │  │                               │ │
+│  Emits retail.order.   │  │  ┌────────────┐               │ │
+│  placed -> notification│  │  │   Redis    │◄──cache-aside─┤ │
+└──────────────┬─────────┘  │  │ stock keys │               │ │
                │            │  └────────────┘               │ │
-               │            │                               │ │
                │            └─────────────────┬─────────────┘ │
                │            MySQL             │               │
                └──────────────┬───────────────┘               │
@@ -93,15 +88,16 @@ The system handles order lifecycle management and product stock tracking across 
 │                        Shared DB                          │ │
 │  staff_user / customer / role / permission                │ │
 │  role_permissions / staff_user_roles                      │ │
-│  order / order_product / order_status                     │ │
-│  order_product_status / stock_location / stock_level      │ │
+│  stock_location / stock_level                              │ │
 │  product / product_variant                                │ │
 │  price / tax_category                                     │ │
+│  cart / cart_line                                         │ │
+│  order / order_line / address / payment                   │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
 │              Notification Microservice (RMQ)                  │
-│  Listens: retail.order.created, inventory.stock.low           │
+│  Listens: inventory.stock.low + retail.order.placed           │
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
@@ -120,7 +116,7 @@ otel-collector → Jaeger UI at http://localhost:16686 (see the
 "Distributed tracing" section below).
 ```
 
-The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. Inventory already keys on the variant: `stock_level.variant_id` is a real foreign key to `product_variant(id)` — the append-only `product_stock` ledger was dropped in the [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) rewrite. The retail `order_product.product_id` column still survives as a plain integer with **no foreign key**; a later retail capability reshapes it onto a catalog `variantId`.
+The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. Inventory already keys on the variant: `stock_level.variant_id` is a real foreign key to `product_variant(id)` — the append-only `product_stock` ledger was dropped in the [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) rewrite. The legacy retail order tables (`order` / `order_product` / the two `*_status` lookups) have been torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild; the order/cart lines that replace them key on the catalog `variantId` from the start.
 
 A sibling **`pricing`** module colocates inside the same microservice (it shares `catalog_queue` and keys on the same `variantId`). It owns two tables: `price` — an append-only-for-history, `(variantId, currency)`-scoped, time-bounded ledger where a price change is a new row plus a close of the predecessor's `[validFrom, validTo)` interval (at most one open row per scope, backstopped by a generated-column UNIQUE index) — and `tax_category`, a classification label that variants point at through the nullable `product_variant.tax_category_id` FK (`ON DELETE SET NULL`). See [ADR-026](docs/adr/026-price-append-only-ledger-and-tax-category.md). It exposes six RPCs on `catalog_queue` — three price (`catalog.price.set`, one command for both Set and Schedule distinguished by `validFrom`; `catalog.price.list`; and `catalog.price.select`, Select Applicable Price: the deterministic `(variantId, currency, asOf)` → single price, resolved priority-then-recency in the use case) and three tax-category (`catalog.tax-category.create`, `catalog.tax-category.list`, and `catalog.variant.set-tax-category`, which attaches a category to a variant by writing the `product_variant.tax_category_id` FK through a parameterized query rather than a cross-module entity import) — and emits `catalog.price.changed` / `catalog.price.scheduled`. Rates/jurisdictions and the gateway HTTP endpoints are later work.
 
@@ -145,9 +141,9 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | Service                     | Transport                       | Responsibility                                       |
 | --------------------------- | ------------------------------- | ---------------------------------------------------- |
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
-| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Order creation and confirmation                      |
+| `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — the mutable `Cart`/`CartLine` (`modules/cart/`) with **full cart operations** (create/get/add/change/remove/claim over six RPCs, fronted at `/api/cart`) and the immutable `Order`/`OrderLine` + polymorphic `Address` + `Payment` (`modules/orders/`) with **Place Order** (authorize-on-place), **Capture Payment** (explicit), **Get Order**, and **List My Orders** live (`PAYMENT_GATEWAY` → `FakePaymentGatewayAdapter`) |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
-| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `retail.order.created` / `inventory.stock.low` to a notifier port |
+| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low` and `retail.order.placed` to a notifier port |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
@@ -160,16 +156,6 @@ apps/api-gateway/src/
 ├── common/utils/                              # throwRpcError, etc.
 ├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 └── modules/
-    ├── retail/                                # talks to retail-microservice
-    │   ├── application/
-    │   │   ├── ports/retail-gateway.port.ts   # IRetailGatewayPort + RETAIL_GATEWAY_PORT
-    │   │   └── use-cases/                     # CreateOrderUseCase, ConfirmOrderUseCase
-    │   ├── infrastructure/
-    │   │   ├── messaging/retail-rabbitmq.adapter.ts
-    │   │   └── retail.module.ts
-    │   └── presentation/
-    │       ├── order.controller.ts            # POST/PUT /api/order…
-    │       └── pipes/order-confirm.pipe.ts
     ├── catalog/                               # talks to catalog-microservice (catalog + pricing RPCs)
     │   ├── application/
     │   │   ├── ports/catalog-gateway.port.ts  # ICatalogGatewayPort + CATALOG_GATEWAY_PORT
@@ -211,12 +197,12 @@ apps/notification-microservice/src/
     ├── application/
     │   ├── ports/notifier.port.ts             # INotifierPort + NOTIFIER symbol
     │   └── use-cases/
-    │       ├── send-order-notification.use-case.ts
-    │       └── send-low-stock-alert.use-case.ts
+    │       ├── send-low-stock-alert.use-case.ts
+    │       └── send-order-notification.use-case.ts
     ├── infrastructure/
     │   ├── consumers/                          # RMQ @EventPattern subscribers
-    │   │   ├── order-events.consumer.ts        # retail.order.created
-    │   │   └── inventory-events.consumer.ts    # inventory.stock.low
+    │   │   ├── inventory-events.consumer.ts    # inventory.stock.low
+    │   │   └── order-events.consumer.ts        # retail.order.placed
     │   ├── delivery/                           # NOTIFIER implementations
     │   │   ├── log.notifier.adapter.ts         # default
     │   │   ├── email.notifier.adapter.ts       # scaffold (TODO)
@@ -226,7 +212,7 @@ apps/notification-microservice/src/
         └── health.controller.ts                # @MessagePattern('notification.health.ping')
 ```
 
-`LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
+The service fans out two cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`) and `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), both arriving on `notification_events`. `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
 
 The inventory microservice exposes a single `stock` bounded context laid out the same way:
 
@@ -267,39 +253,40 @@ The `stock` context keys everything on the catalog **`variantId`** (an opaque cr
 
 `ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the four inventory events (`inventory.stock.{received,adjusted,low}` + `inventory.stock-level.initialized`); the `inventory.order.confirm` handler is a kept-but-deprecated `RpcException` stub (stock reservation moves to the later inventory-reservation capability). See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
 
-The retail microservice exposes a single `orders` bounded context laid out the same way:
+The retail microservice hosts the **mutable side of the rebuilt checkout**: the `cart` bounded-context module. Its first-generation `orders` model — a single `Order` aggregate that expanded each line into one `order_product` row per unit, a two-value status, and a cross-service `inventory.order.confirm` reserve call — was torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild. The `Cart` aggregate root (a caller-assigned `CHAR(36)` UUID id, generated in-app) owns its `CartLine` children; the status machine is `active → converted` (placement) / `active → abandoned` (purge), both terminal. Each mutator (`addLine` increments an existing line rather than duplicating it; `changeLineQuantity` rejects `0`; `removeLine`; `markConverted`; `markAbandoned`) advances a `version` optimistic-concurrency token — shipped now though its guard is a later capability — and records a framework-free domain event. A `CartLine` snapshots its unit price (in minor units) and currency at add-time, so a sibling line's change never re-prices it; `variantId` is the opaque catalog backbone key. The `cart` / `cart_line` tables FK onto the gateway `customer` and the catalog `product_variant` in the one shared database.
+
+The cart's **six operations** run end to end: `CreateCart` / `GetCart` / `AddToCart` / `ChangeCartLineQuantity` / `RemoveFromCart` / `ClaimCart`, served by the retail `cart.controller.ts` (`@MessagePattern` handlers on `retail_queue`) and fronted by the gateway `modules/cart/` over HTTP at `/api/cart`. **Add-to-Cart snapshots the applicable price**: it calls the catalog `catalog.price.select` RPC (through `ICartCatalogGatewayPort`) in the cart's currency and rejects an unknown/unpriced variant with a `409`, so a line always carries a real price. Authorization is **bearer plus an owner-check, not a permission code** ([ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) / ADR-028): the gateway folds the authenticated `@CurrentUser().id` into every command and the retail use case enforces `cart.customerId === customerId`, so a customer can only touch its own cart — a non-owner gets `403`, an unauthenticated caller `401`. Each mutation emits its reserved-surface `retail.cart.*` event onto `retail_queue` (best-effort, no consumer bound yet). **Guest carts** (Q1/Q7): `POST /auth/customer/guest-session` mints a real `status='guest'` Customer with a null password and a customer-tier token — the guest-tier token replaces a session cookie, so a guest builds a cart through the same bearer-protected routes; `POST /api/cart/:cartId/claim` then promotes a guest cart to a registered customer, re-pointing it only if the supplied `fromCustomerId` (the guest id, the ownership proof) matches the cart's current owner.
+
+It also hosts the **immutable side**: the `orders` module's `Order` aggregate (a DB-assigned `BIGINT` id) owning its `OrderLine` children, plus the polymorphic `Address` aggregate (a caller-assigned `CHAR(36)` UUID) in the same module. An `Order` carries **three orthogonal status axes** — `status`, `paymentStatus`, `fulfillmentStatus` — that evolve independently (a `captured` payment can coexist with `unfulfilled` fulfillment), rather than one combined enum. `Order.place(...)` snapshots the cart's lines into immutable `OrderLine`s (each `Object.freeze`-d, carrying a `sku`/`nameSnapshot`/`unitPriceMinor` snapshot in minor units) and derives the five money totals (`grandTotal = subtotal = Σ line totals`; tax/discount/shipping are `0` this capability); payment-axis mutators walk `none → authorized → captured`. `order.order_number` is a human-facing `ORD-<year>-<8-digit>` label finalized from the generated id (UNIQUE-backed); `order.source_cart_id` links the converted cart for repeat-place idempotency; `order.customer_id` is nullable (a deleted customer leaves a tombstone). An `Address` is **polymorphic** over `ownerType ∈ {customer, order}`; an order's billing/shipping addresses are immutable `ownerType=order` **snapshot copies**, never references into a future customer address book. A `Payment` aggregate is a **sibling in the same module** (it lives there because its operations touch `Order`): `Payment.authorized(...)` opens a row `AUTHORIZED` from a successful gateway authorize, and its single `capture(at)` mutation walks `AUTHORIZED → CAPTURED`. Payment authorization runs behind a `PAYMENT_GATEWAY` port whose default binding is a `FakePaymentGatewayAdapter` — an in-process stand-in that **always approves** with deterministic `fake_<uuid>` tokens (a real processor is an excluded capability; the port keeps the later place/capture use cases gateway-agnostic, the `NotifierPort` pattern of [ADR-011](docs/adr/011-notifier-port-and-adapters.md)).
+
+**Place Order is live.** `POST /api/cart/:cartId/place` converts an `active` cart into an immutable `Order` one-shot: `PlaceOrderUseCase` snapshots each line from the catalog at write-time (`sku`/`nameSnapshot` via `catalog.variant.get`, `unitPriceMinor` via `catalog.price.select` — a line with no applicable price is rejected `409`), snapshots the billing + shipping addresses from the request body as immutable `ownerType=order` copies, marks the cart `converted`, and authorizes payment inline through the `PAYMENT_GATEWAY` (`AuthorizePaymentUseCase` — authorize-on-place). The order, its lines, both addresses, and the cart conversion commit in one transaction (an `orders` `TRANSACTION_PORT`, mirroring the inventory `modules/stock` adapter); the out-of-process gateway authorize and the `Payment` persist run in a short follow-up transaction. The route is bearer-protected with the same retail-side owner-check as the cart routes, and the `Idempotency-Key` header is **accepted + logged but not deduped** — repeat-place safety comes from cart state (a placed cart is `converted`; re-placing returns the order it converted into via `source_cart_id`). On success it returns the `OrderView` (`status=pending`, `paymentStatus=authorized`, `fulfillmentStatus=unfulfilled`, the line snapshots, and the authorized `payment`) and emits `retail.order.placed` (→ `notification_events`) + `retail.payment.authorized` (→ `retail_queue`) best-effort post-commit.
+
+**Capture, Get Order, and List My Orders are live** behind the gateway `modules/orders/` (over HTTP at `/api/orders`). **Capture** (`POST /api/orders/:orderId/payments/capture`) is the explicit second half of the authorize-then-capture policy ([Q5](docs/implementation/05-cart-order-payment-walking-skeleton/07-authorize-on-place-capture-explicit-q5.md)): `CapturePaymentUseCase` calls `PAYMENT_GATEWAY.capture` out of transaction, then advances the `Payment` (`authorized → captured`) and the order's payment axis (`Order.markPaymentCaptured()`) in a short follow-up transaction, and emits `retail.payment.captured`. Re-capturing an already-captured payment returns the current state (idempotent by payment state). **Get Order** (`GET /api/orders/:orderId`) and **List My Orders** (`GET /api/orders`, own-only, paginated, newest-first) are the read paths. **Authorization on all three is bearer + owner-check with a staff override** ([ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) / [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md)): a customer reaches only its own order, while a staff `order:read` / `order:capture` permission is an *override* that reaches any order — a permission code is never a gate on the owning customer (who carries no permissions). A non-owner non-staff caller gets `403`; an unauthenticated caller `401`.
 
 ```
 apps/retail-microservice/src/
-├── app/app.module.ts                          # imports OrdersModule + LoggerModule + DatabaseModule
-├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
-└── modules/orders/
-    ├── domain/
-    │   ├── order.model.ts                     # aggregate (non-empty lines, status transitions)
-    │   ├── order-product.model.ts             # child entity inside the Order aggregate
-    │   ├── customer.model.ts                  # CustomerRef VO
-    │   ├── order-status.value-object.ts       # OrderStatusVO (PENDING / CONFIRMED)
-    │   ├── order-product-status.value-object.ts
-    │   └── events/                            # OrderCreatedEvent, OrderConfirmedEvent, OrderCancelledEvent
-    ├── application/
-    │   ├── ports/
-    │   │   ├── order.repository.port.ts       # IOrderRepositoryPort + ORDER_REPOSITORY symbol
-    │   │   ├── order-events.publisher.port.ts # IOrderEventsPublisherPort + ORDER_EVENTS_PUBLISHER symbol
-    │   │   └── inventory-confirm.gateway.port.ts # IInventoryConfirmGatewayPort + INVENTORY_CONFIRM_GATEWAY symbol
-    │   └── use-cases/
-    │       ├── create-order.use-case.ts       # persists then publishes retail.order.created
-    │       ├── confirm-order.use-case.ts      # cross-service: calls INVENTORY_CONFIRM_GATEWAY then updates
-    │       └── get-order.use-case.ts          # header status lookup (consumed by gateway pipe)
-    ├── infrastructure/
-    │   ├── persistence/                       # Order/OrderProduct/Customer/OrderStatus/OrderProductStatus entities + mappers + OrderTypeormRepository
-    │   ├── messaging/                          # OrderRabbitmqPublisher + InventoryConfirmRabbitmqAdapter
-    │   └── orders.module.ts                   # binds all three port symbols → adapters
-    └── presentation/
-        ├── orders.controller.ts               # @MessagePattern handlers for RETAIL_ORDER_CREATE / CONFIRM / GET
-        └── pipes/                              # OrderConfirmPipe (pre-RPC order line-item load)
+├── app/app.module.ts                          # ConfigModule + LoggerModule + DatabaseModule.forRoot([...cartEntities, ...orderEntities]) + CartModule + OrdersModule
+├── modules/cart/
+│   ├── domain/                                # Cart + CartLine aggregate, events, CartDomainException
+│   ├── application/
+│   │   ├── ports/                             # CART_REPOSITORY / CART_CATALOG_GATEWAY / CART_EVENTS_PUBLISHER
+│   │   └── use-cases/                         # CreateCart/GetCart/AddToCart/Change/Remove/ClaimCart (+ loadOwnedCart owner-check)
+│   ├── infrastructure/
+│   │   ├── persistence/                       # cart/cart_line entities, mappers, CartTypeormRepository
+│   │   ├── messaging/                         # cart-catalog.rabbitmq.adapter (price.select) + cart-rabbitmq.publisher (4 events)
+│   │   └── cart.module.ts                     # forFeature + catalog/retail clients + repository/adapter/publisher/controller + APP_FILTER
+│   └── presentation/                          # cart.controller (6 @MessagePattern) + cart-rpc-exception.filter
+├── modules/orders/
+│   ├── domain/                                # Order + OrderLine + polymorphic Address + Payment aggregates, OrderDomainException
+│   ├── application/ports/                     # IOrderRepositoryPort / IAddressRepositoryPort / IPaymentRepositoryPort + IPaymentGatewayPort (PAYMENT_GATEWAY)
+│   └── infrastructure/
+│       ├── persistence/                       # order/order_line/address/payment entities, mappers, Order/Address/Payment TypeormRepository
+│       ├── payment-gateway/                   # FakePaymentGatewayAdapter (default PAYMENT_GATEWAY — always approves, fake tokens)
+│       └── orders.module.ts                   # DatabaseModule.forFeature + the three repository bindings + PAYMENT_GATEWAY → FakePaymentGatewayAdapter
+└── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 ```
 
-`ClientProxy` is confined to the two adapters under `infrastructure/messaging/`; the use cases inject `INVENTORY_CONFIRM_GATEWAY` (for the cross-service reserve call) and `ORDER_EVENTS_PUBLISHER` (for `retail.order.created` / `retail.order.confirmed`). See [ADR-013](docs/adr/013-order-aggregate-and-cross-service-confirm.md) for the aggregate boundaries and the cross-service confirm flow.
+See [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) for the full target aggregate boundaries (the cart, order, payment, and address chain).
 
 ## Getting Started
 
@@ -387,13 +374,6 @@ The rules are regression-tested in `spec/architecture-lint.spec.ts` — every ru
 
 ## API
 
-### Orders
-
-```
-POST /api/order
-PUT  /api/order/:id/confirm
-```
-
 ### Catalog
 
 ```
@@ -447,7 +427,22 @@ GET  /api/auth/admin/ping               # bearer + audit:read permission (smoke 
 # Customer
 POST /api/auth/customer/register        # public
 POST /api/auth/customer/login           # public
+POST /api/auth/customer/guest-session   # public — mints a guest-tier token + customerId
 GET  /api/auth/customer/me              # bearer
+
+# Cart  (bearer + owner-check; no permission code — a customer touches only its own cart)
+POST   /api/cart                        # bearer — open a cart
+GET    /api/cart/:cartId                # bearer + owner-check
+POST   /api/cart/:cartId/lines          # bearer + owner-check — add a priced line
+PATCH  /api/cart/:cartId/lines/:lineId  # bearer + owner-check — change quantity
+DELETE /api/cart/:cartId/lines/:lineId  # bearer + owner-check — remove a line
+POST   /api/cart/:cartId/claim          # bearer — promote a guest cart (fromCustomerId proof)
+POST   /api/cart/:cartId/place          # bearer + owner-check — place order (authorize-on-place; Idempotency-Key header)
+
+# Orders (read + capture)
+GET    /api/orders                       # bearer — own orders, paginated, newest-first
+GET    /api/orders/:orderId              # bearer — owner OR staff order:read
+POST   /api/orders/:orderId/payments/capture  # bearer — owner OR staff order:capture (Idempotency-Key header)
 
 # IAM admin
 GET   /api/iam/roles                    # bearer + iam:role-edit
@@ -459,9 +454,17 @@ DELETE /api/iam/staff/:id/roles/:roleName # bearer + iam:assign
 
 Interactive API reference is available at `http://localhost:3000/api/reference` when the gateway is running.
 
+### Payment gateway
+
+Payment authorization (on `POST /api/cart/:cartId/place`) and capture (on `POST /api/orders/:orderId/payments/capture`) run behind a **port and adapter**, never a transport call inline in a use case. The port is `IPaymentGatewayPort` (DI symbol `PAYMENT_GATEWAY`), declared in the retail `orders` module's `application/ports/`; it exposes `authorize(req)` and `capture(gatewayReference)` over plain request/result interfaces and imports **no** transport or HTTP package — the seam keeps `PlaceOrderUseCase` / `CapturePaymentUseCase` gateway-agnostic and unit-testable, the same `NotifierPort` shape as the notification microservice ([ADR-011](docs/adr/011-notifier-port-and-adapters.md)).
+
+The default binding is `FakePaymentGatewayAdapter` (`infrastructure/payment-gateway/`): an in-process stand-in that **always approves**, mints deterministic `fake_<uuid>` gateway references (each authorize a distinct one, so the unique `payment.gateway_reference` column is satisfied), and makes no external call or persistence of its own. It exists so the whole checkout walking skeleton runs end to end without a real processor.
+
+Swapping in a real gateway (Stripe, Adyen, …) is a **single provider rebind** in `orders.module.ts` (`{ provide: PAYMENT_GATEWAY, useClass: StripePaymentGatewayAdapter }`) plus a new HTTP-doing sibling adapter under `infrastructure/payment-gateway/` that implements the same port. No use case, controller, domain model, or contract changes — the `ClientProxy`/HTTP client stays confined to the new adapter, exactly as the boundaries rules ([ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)) require. A real processor, partial captures, and void/refund/fail are deliberately excluded from this capability.
+
 ## Authentication
 
-Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes, and the public `GET /api/inventory/variants/:variantId/stock` availability read). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
+Every gateway route is **protected by default** by a global guard pipeline: `JwtAuthGuard` (presence + signature), `RolesGuard` (role-bundle gating via `@Roles(...)`), and `PermissionsGuard` (precise per-code gating via `@RequiresPermission(...)`). Routes opt out of the first guard with `@Public()` (today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`, `/auth/customer/register`, `/auth/customer/login`, `/auth/customer/guest-session` (the single guest-bootstrap exception), the public `GET /api/catalog/...` browse/resolve and price/tax-category read routes, and the public `GET /api/inventory/variants/:variantId/stock` availability read). The `/api/cart/...` routes are bearer-protected but carry **no permission code** — authorization is an owner-check (`cart.customerId === @CurrentUser().id`), enforced retail-side, since customer tokens hold no permissions ([ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) / [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md)). See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) for the original two-guard design and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) for the StaffUser/Customer split and the third guard.
 
 Two subject kinds share the JWT pipeline:
 
@@ -504,7 +507,7 @@ Roles are stored relationally in the `role` table and bound to permission codes 
 | `admin` | every code |
 | `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish`, `pricing:write` |
 | `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer` |
-| `order-support` | `order:read`, `order:cancel`, `order:refund` |
+| `order-support` | `order:read`, `order:capture`, `order:cancel`, `order:refund` |
 
 Guard a controller method on a precise code with `@RequiresPermission()` from `@retail-inventory-system/auth`:
 
@@ -529,6 +532,7 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `inventory:adjust` | `admin`, `warehouse-staff` |
 | `inventory:transfer` | `admin`, `warehouse-staff` |
 | `order:read` | `admin`, `order-support` |
+| `order:capture` | `admin`, `order-support` |
 | `order:cancel` | `admin`, `order-support` |
 | `order:refund` | `admin`, `order-support` |
 | `iam:assign` | `admin` |
@@ -599,7 +603,17 @@ Stock levels (`stock_level` — seeded so the public availability read returns a
 
 The migration ([ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md)) auto-provisions exactly one `StockLocation` — `default-warehouse` — idempotently (`INSERT ... ON DUPLICATE KEY UPDATE`), so there is always a location to read from and write to even before any seed runs. `scripts/seeds/stock-level.sql` then loads the rows above (`INSERT IGNORE`, registered after `catalog-product-variant.sql` because `stock_level.variant_id` is a foreign key to `product_variant.id`). On the live system the same zeroed row is created by the auto-init consumer when a catalog variant is first published; the seed is the cold-start stand-in that gives every seeded variant 100 on hand at `default-warehouse`.
 
-Every catalog / pricing / stock seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
+The seed also loads one **example cart** for the seeded customer so `GET /api/cart/:cartId` returns a populated cart on a cold start (the `http/cart.http` and e2e flows build their own carts, so this row is purely a development convenience):
+
+| Cart id | Customer | Currency | Status | Line |
+| --- | --- | --- | --- | --- |
+| `00000000-0000-4000-d000-000000000001` | `customer@example.com` | `USD` | `active` | variant 1 ×2 @ `4999` (snapshot) |
+
+`scripts/seeds/cart.sql` runs last (idempotently — the cart row is `INSERT IGNORE` on its UUID, the line is a `WHERE NOT EXISTS` guarded insert on the `(cart_id, variant_id)` pair so it never collides with an e2e-built line's auto-increment id): the cart FKs the seeded `customer` (loaded by the identity pass, which the seed runs **before** the SQL fixtures), and the line FKs `product_variant` and snapshots variant 1's seeded USD price. The cart id uses the `...-d000-...` (carts) namespace, alongside the `a000` (users) / `b000` (permissions) / `c000` (roles) prefixes.
+
+The `order:capture` permission is seeded (id `...-b000-00000000000e`) and bound to the `order-support` and `admin` roles — it is the staff override on `POST /api/orders/:orderId/payments/capture` (the owning customer needs no permission, only ownership).
+
+Every catalog / pricing / stock / cart seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
 
 Auth events emit Pino log lines with `userId` and `correlationId`, and (when wired) flow through the `AUDIT_LOG_PUBLISHER` port; the default binding is the in-process `NoOpAuditLogPublisher` (logs the event at `debug` under the `AuditLog` context). They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.*` routing key plus a publisher binding are missing.
 
@@ -657,20 +671,17 @@ Available values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`.
 
 ### Sample: correlated request across services
 
-The following shows the full log output for a `PUT /api/order/1/confirm` request. Every line shares the same `correlationId` regardless of which process emitted it:
+The following shows the full log output for a `POST /api/inventory/variants/1/stock/adjust` request whose signed delta drops on-hand to at/below the low-stock threshold, fanning a `inventory.stock.low` event out to the notification service. Every line shares the same `correlationId` regardless of which process emitted it:
 
 ```json lines
-{"level":30,"time":1748000000010,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","req":{"method":"PUT","url":"/api/order/1/confirm"},"msg":"incoming request"}
-{"level":30,"time":1748000000015,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"msg":"Order confirmation in progress"}
-{"level":30,"time":1748000000016,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"retail.order.confirm","msg":"Sending RPC to retail service"}
-{"level":30,"time":1748000000020,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"productCount":2,"msg":"Received RPC: confirm order"}
-{"level":30,"time":1748000000021,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","pattern":"inventory.order.confirm","msg":"Sending RPC to inventory service"}
-{"level":30,"time":1748000000025,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ReserveStockForOrderUseCase","totalProducts":2,"pendingCount":2,"msg":"Received RPC: reserve order product stock"}
-{"level":30,"time":1748000000040,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"ReserveStockForOrderUseCase","confirmedCount":2,"skippedCount":0,"msg":"Stock reserved for order products"}
-{"level":30,"time":1748000000045,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"confirmedCount":2,"msg":"Inventory stock confirmation received"}
-{"level":30,"time":1748000000048,"app":"retail-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"msg":"Order fully confirmed"}
-{"level":30,"time":1748000000060,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"OrderConfirmService","orderId":1,"statusId":"confirmed","msg":"Order successfully confirmed"}
-{"level":30,"time":1748000000070,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","res":{"statusCode":200},"responseTime":60,"msg":"request completed"}
+{"level":30,"time":1748000000010,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","req":{"method":"POST","url":"/api/inventory/variants/1/stock/adjust"},"msg":"incoming request"}
+{"level":30,"time":1748000000015,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","pattern":"inventory.stock-level.adjust","msg":"Sending RPC to inventory service"}
+{"level":30,"time":1748000000020,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","variantId":1,"quantityDelta":-8,"reasonCode":"damage","msg":"Received RPC: adjust stock"}
+{"level":30,"time":1748000000035,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","variantId":1,"stockLocationId":"default-warehouse","quantityOnHand":2,"msg":"Stock adjusted"}
+{"level":30,"time":1748000000037,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","pattern":"inventory.stock.low","quantity":2,"threshold":5,"msg":"Emitting low-stock event"}
+{"level":30,"time":1748000000045,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"SendLowStockAlertUseCase","variantId":1,"quantity":2,"threshold":5,"msg":"Received event: stock low"}
+{"level":30,"time":1748000000050,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"SendLowStockAlertUseCase","channel":"log","msg":"Low-stock alert dispatched"}
+{"level":30,"time":1748000000060,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","res":{"statusCode":200},"responseTime":50,"msg":"request completed"}
 ```
 
 See [ADR-001](docs/adr/001-structured-logging-with-pino.md) for the rationale behind this design.
@@ -715,8 +726,8 @@ The collector config lives at [`infrastructure/otel-collector-config.yaml`](infr
 #### Finding a trace
 
 1. Open Jaeger at <http://localhost:16686>.
-2. Pick a service (e.g. `api-gateway`) and an operation (e.g. `PUT /api/order/:id/confirm`).
-3. The matching trace shows spans from all four services, including the AMQP `publish` / `process` pairs that connect the gateway → retail → inventory → notification flow.
+2. Pick a service (e.g. `api-gateway`) and an operation (e.g. `POST /api/inventory/variants/:id/stock/adjust`).
+3. The matching trace shows spans from every service the request touches, including the AMQP `publish` / `process` pairs that connect the gateway → inventory → notification flow.
 4. To go from a log line back to the trace, copy `traceId` from any service's log and paste it into Jaeger's "Lookup by Trace ID" box.
 
 #### The "first import in `main.ts`" rule

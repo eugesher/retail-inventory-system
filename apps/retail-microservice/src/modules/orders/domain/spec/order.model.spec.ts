@@ -1,166 +1,234 @@
-import { OrderProductStatusEnum, OrderStatusEnum } from '@retail-inventory-system/contracts';
+import {
+  OrderFulfillmentStatusEnum,
+  OrderLineStatusEnum,
+  OrderPaymentStatusEnum,
+  OrderStatusEnum,
+} from '@retail-inventory-system/contracts';
 
-import { Order, OrderConfirmedEvent, OrderProduct, OrderProductStatusVO, OrderStatusVO } from '..';
+import { Order, OrderDomainException, OrderLine } from '..';
 
-const makeProduct = (id: number, statusId = OrderProductStatusEnum.PENDING): OrderProduct =>
-  new OrderProduct({
+const makeLine = (
+  id: number | null,
+  variantId: number,
+  unitPriceMinor = 1000,
+  quantity = 1,
+): OrderLine =>
+  new OrderLine({
     id,
-    productId: id * 10,
-    status:
-      statusId === OrderProductStatusEnum.CONFIRMED
-        ? OrderProductStatusVO.CONFIRMED
-        : OrderProductStatusVO.PENDING,
+    variantId,
+    sku: `SKU-${variantId}`,
+    nameSnapshot: `Variant ${variantId}`,
+    quantity,
+    unitPriceMinor,
   });
 
-const makeOrder = (products: OrderProduct[], statusId = OrderStatusEnum.PENDING): Order =>
-  Order.reconstitute({
-    id: 1,
-    products,
-    status:
-      statusId === OrderStatusEnum.CONFIRMED ? OrderStatusVO.CONFIRMED : OrderStatusVO.PENDING,
+const placeOrder = (lines: OrderLine[] = [makeLine(null, 7, 1500, 2)]): Order =>
+  Order.place({
+    orderNumber: 'ORD-2026-PROVISIONAL',
+    customerId: 'cust-1',
+    currency: 'USD',
+    lines,
+    billingAddressId: 'addr-bill',
+    shippingAddressId: 'addr-ship',
+    sourceCartId: 'cart-1',
+    placedAt: new Date('2026-06-10T00:00:00Z'),
   });
 
-describe('Order.applyInventoryConfirmation', () => {
-  describe('someProductsConfirmed', () => {
-    it('is false when confirmedOrderProductIds is empty', () => {
-      const order = makeOrder([makeProduct(1)]);
+describe('Order', () => {
+  describe('place', () => {
+    it('opens a PENDING / NONE / UNFULFILLED order at version 0 and derives the totals', () => {
+      const order = placeOrder([makeLine(null, 7, 1500, 2), makeLine(null, 8, 999, 3)]);
 
-      const result = order.applyInventoryConfirmation([]);
-
-      expect(result.someProductsConfirmed).toBe(false);
+      expect(order.status).toBe(OrderStatusEnum.PENDING);
+      expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.NONE);
+      expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.UNFULFILLED);
+      expect(order.version).toBe(0);
+      expect(order.id).toBeNull();
+      // 1500×2 + 999×3 = 3000 + 2997 = 5997
+      expect(order.subtotalMinor).toBe(5997);
+      expect(order.grandTotalMinor).toBe(5997);
+      expect(order.taxTotalMinor).toBe(0);
+      expect(order.discountTotalMinor).toBe(0);
+      expect(order.shippingTotalMinor).toBe(0);
     });
 
-    it('is true when confirmedOrderProductIds has at least one entry', () => {
-      const order = makeOrder([makeProduct(1)]);
-
-      const result = order.applyInventoryConfirmation([1]);
-
-      expect(result.someProductsConfirmed).toBe(true);
-    });
-  });
-
-  describe('allProductsConfirmed', () => {
-    it('is false when no products are confirmed and none have CONFIRMED status', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2)]);
-
-      const result = order.applyInventoryConfirmation([]);
-
-      expect(result.allProductsConfirmed).toBe(false);
+    it('rejects placing an order with zero lines', () => {
+      expect(() => placeOrder([])).toThrow(OrderDomainException);
     });
 
-    it('is true when all products appear in confirmedOrderProductIds', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2)]);
-
-      const result = order.applyInventoryConfirmation([1, 2]);
-
-      expect(result.allProductsConfirmed).toBe(true);
-    });
-
-    it('is true when all products already have CONFIRMED status', () => {
-      const order = makeOrder([
-        makeProduct(1, OrderProductStatusEnum.CONFIRMED),
-        makeProduct(2, OrderProductStatusEnum.CONFIRMED),
-      ]);
-
-      const result = order.applyInventoryConfirmation([]);
-
-      expect(result.allProductsConfirmed).toBe(true);
-    });
-
-    it('is true when products are confirmed via a mix of new IDs and pre-existing CONFIRMED status', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2, OrderProductStatusEnum.CONFIRMED)]);
-
-      const result = order.applyInventoryConfirmation([1]);
-
-      expect(result.allProductsConfirmed).toBe(true);
-    });
-
-    it('is false when only some products are confirmed', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2)]);
-
-      const result = order.applyInventoryConfirmation([1]);
-
-      expect(result.allProductsConfirmed).toBe(false);
+    it.each([
+      ['empty', ''],
+      ['too long', 'USDD'],
+      ['too short', 'US'],
+    ])('rejects a %s currency', (_label, currency) => {
+      expect(() =>
+        Order.place({
+          orderNumber: 'ORD-2026-PROVISIONAL',
+          customerId: null,
+          currency,
+          lines: [makeLine(null, 7)],
+          billingAddressId: null,
+          shippingAddressId: null,
+          sourceCartId: null,
+          placedAt: new Date(),
+        }),
+      ).toThrow(OrderDomainException);
     });
   });
 
-  describe('skipUpdate', () => {
-    it('is true when no products were newly confirmed and not all are confirmed', () => {
-      const order = makeOrder([makeProduct(1)]);
+  describe('three orthogonal status axes', () => {
+    it('lets paymentStatus=captured coexist with fulfillmentStatus=unfulfilled and status=pending', () => {
+      // The three axes evolve independently (ADR-028 §2): a captured payment does
+      // not imply the order has shipped or moved off the pending lifecycle.
+      const order = Order.reconstitute({
+        id: 1,
+        orderNumber: 'ORD-2026-00000001',
+        customerId: 'cust-1',
+        currency: 'USD',
+        status: OrderStatusEnum.PENDING,
+        paymentStatus: OrderPaymentStatusEnum.CAPTURED,
+        fulfillmentStatus: OrderFulfillmentStatusEnum.UNFULFILLED,
+        lines: [makeLine(10, 7, 1000, 2)],
+        subtotalMinor: 2000,
+        grandTotalMinor: 2000,
+        billingAddressId: null,
+        shippingAddressId: null,
+        sourceCartId: null,
+        placedAt: new Date('2026-06-10T00:00:00Z'),
+        version: 3,
+      });
 
-      const result = order.applyInventoryConfirmation([]);
-
-      expect(result.skipUpdate).toBe(true);
+      expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.CAPTURED);
+      expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.UNFULFILLED);
+      expect(order.status).toBe(OrderStatusEnum.PENDING);
     });
 
-    it('is false when some products were newly confirmed', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2)]);
+    it('advancing payment does not move the lifecycle or fulfillment axes', () => {
+      const order = placeOrder();
 
-      const result = order.applyInventoryConfirmation([1]);
+      order.markPaymentAuthorized();
+      order.markPaymentCaptured();
 
-      expect(result.skipUpdate).toBe(false);
-    });
-
-    it('is false when all products are already confirmed with no new confirmations', () => {
-      const order = makeOrder([makeProduct(1, OrderProductStatusEnum.CONFIRMED)]);
-
-      const result = order.applyInventoryConfirmation([]);
-
-      expect(result.skipUpdate).toBe(false);
+      expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.CAPTURED);
+      // Untouched — orthogonality.
+      expect(order.status).toBe(OrderStatusEnum.PENDING);
+      expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.UNFULFILLED);
     });
   });
 
-  describe('side effects', () => {
-    it('transitions newly-confirmed lines to CONFIRMED on the aggregate', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2)]);
+  describe('currency immutability', () => {
+    it('keeps currency fixed after place (getter-only, no setter)', () => {
+      const order = placeOrder();
 
-      order.applyInventoryConfirmation([1]);
+      expect(() => {
+        (order as unknown as { currency: string }).currency = 'EUR';
+      }).toThrow();
+      expect(order.currency).toBe('USD');
+    });
+  });
 
-      expect(order.products[0].isConfirmed()).toBe(true);
-      expect(order.products[1].isConfirmed()).toBe(false);
+  describe('total invariant', () => {
+    it('rejects a reconstituted order whose subtotal disagrees with Σ line totals', () => {
+      expect(() =>
+        Order.reconstitute({
+          id: 1,
+          orderNumber: 'ORD-2026-00000001',
+          customerId: null,
+          currency: 'USD',
+          lines: [makeLine(10, 7, 1000, 2)], // Σ lineTotal = 2000
+          subtotalMinor: 1999, // disagrees
+          grandTotalMinor: 1999,
+          billingAddressId: null,
+          shippingAddressId: null,
+          sourceCartId: null,
+          placedAt: new Date(),
+        }),
+      ).toThrow(OrderDomainException);
     });
 
-    it('flips the order header to CONFIRMED and records OrderConfirmed when every line is confirmed', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2)]);
-
-      order.applyInventoryConfirmation([1, 2]);
-
-      expect(order.statusId).toBe(OrderStatusEnum.CONFIRMED);
-      const events = order.pullDomainEvents();
-      expect(events).toHaveLength(1);
-      expect(events[0]).toBeInstanceOf(OrderConfirmedEvent);
-      const event = events[0] as OrderConfirmedEvent;
-      expect(event.aggregateId).toBe(1);
-      expect(event.lines).toEqual([
-        { orderProductId: 1, productId: 10 },
-        { orderProductId: 2, productId: 20 },
-      ]);
+    it('rejects a grand total that does not reconcile subtotal + tax + shipping − discount', () => {
+      expect(() =>
+        Order.reconstitute({
+          id: 1,
+          orderNumber: 'ORD-2026-00000001',
+          customerId: null,
+          currency: 'USD',
+          lines: [makeLine(10, 7, 1000, 2)], // Σ lineTotal = 2000
+          subtotalMinor: 2000,
+          taxTotalMinor: 100,
+          shippingTotalMinor: 50,
+          discountTotalMinor: 30,
+          grandTotalMinor: 2000, // should be 2000 + 100 + 50 − 30 = 2120
+          billingAddressId: null,
+          shippingAddressId: null,
+          sourceCartId: null,
+          placedAt: new Date(),
+        }),
+      ).toThrow(OrderDomainException);
     });
 
-    it('does not flip the header or record an event when only some lines are confirmed', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2)]);
+    it('accepts a reconstituted order whose totals reconcile with tax/shipping/discount', () => {
+      const order = Order.reconstitute({
+        id: 1,
+        orderNumber: 'ORD-2026-00000001',
+        customerId: null,
+        currency: 'USD',
+        lines: [makeLine(10, 7, 1000, 2)], // Σ lineTotal = 2000
+        subtotalMinor: 2000,
+        taxTotalMinor: 100,
+        shippingTotalMinor: 50,
+        discountTotalMinor: 30,
+        grandTotalMinor: 2120,
+        billingAddressId: null,
+        shippingAddressId: null,
+        sourceCartId: null,
+        placedAt: new Date(),
+      });
 
-      order.applyInventoryConfirmation([1]);
+      expect(order.grandTotalMinor).toBe(2120);
+    });
+  });
 
-      expect(order.statusId).toBe(OrderStatusEnum.PENDING);
-      expect(order.pullDomainEvents()).toHaveLength(0);
+  describe('payment-status transitions', () => {
+    it('markPaymentAuthorized moves none → authorized and bumps the version', () => {
+      const order = placeOrder();
+
+      order.markPaymentAuthorized();
+
+      expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.AUTHORIZED);
+      expect(order.version).toBe(1);
     });
 
-    it('throws when the order is already CONFIRMED', () => {
-      const order = makeOrder(
-        [makeProduct(1, OrderProductStatusEnum.CONFIRMED)],
-        OrderStatusEnum.CONFIRMED,
-      );
+    it('markPaymentCaptured moves authorized → captured and bumps the version', () => {
+      const order = placeOrder();
+      order.markPaymentAuthorized();
 
-      expect(() => order.applyInventoryConfirmation([])).toThrow(/already confirmed/);
+      order.markPaymentCaptured();
+
+      expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.CAPTURED);
+      expect(order.version).toBe(2);
     });
 
-    it('returns newlyConfirmedProductIds in iteration order', () => {
-      const order = makeOrder([makeProduct(1), makeProduct(2), makeProduct(3)]);
+    it('rejects authorizing a payment that is not none', () => {
+      const order = placeOrder();
+      order.markPaymentAuthorized();
 
-      const result = order.applyInventoryConfirmation([3, 1]);
+      expect(() => order.markPaymentAuthorized()).toThrow(OrderDomainException);
+    });
 
-      expect(result.newlyConfirmedProductIds).toEqual([1, 3]);
+    it('rejects capturing a payment that is not authorized', () => {
+      const order = placeOrder();
+
+      expect(() => order.markPaymentCaptured()).toThrow(OrderDomainException);
+    });
+  });
+
+  describe('lines', () => {
+    it('exposes its lines, defaulting them to the ALLOCATED sentinel at place-time', () => {
+      const order = placeOrder([makeLine(null, 7, 1000, 1)]);
+
+      expect(order.lines).toHaveLength(1);
+      expect(order.lines[0].status).toBe(OrderLineStatusEnum.ALLOCATED);
     });
   });
 });

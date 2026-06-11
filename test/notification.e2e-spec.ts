@@ -6,22 +6,21 @@ import {
   MicroserviceOptions,
   Transport,
 } from '@nestjs/microservices';
+import { firstValueFrom } from 'rxjs';
 
 import { AppModule as NotificationMicroserviceAppModule } from '@retail-inventory-system/apps/notification-microservice';
-import {
-  IRetailOrderCreatedEvent,
-  MicroserviceQueueEnum,
-  OrderStatusEnum,
-} from '@retail-inventory-system/contracts';
+import { IRetailOrderPlacedEvent, MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
-import { firstValueFrom } from 'rxjs';
 
 import { Notification } from '../apps/notification-microservice/src/modules/notifications/domain';
 import { LogNotifierAdapter } from '../apps/notification-microservice/src/modules/notifications/infrastructure/delivery/log.notifier.adapter';
 
-// Exercises the consumer + use-case + notifier wiring in isolation by
-// publishing a synthetic `retail.order.created` directly to the queue,
-// bypassing the API gateway → retail path.
+// Exercises the order-placed notification re-point in isolation: the consumer +
+// use-case + notifier wiring is driven by publishing a synthetic
+// `retail.order.placed` directly onto `notification_events`, bypassing the API
+// gateway → retail path (which the cart-to-order walking skeleton covers). This
+// proves the notification chain is whole again after the order-model rebuild —
+// the same event the retail Place Order use case emits lands here and fans out.
 describe('Notification flow (e2e)', () => {
   const timeout = 60_000;
 
@@ -81,23 +80,34 @@ describe('Notification flow (e2e)', () => {
     }
   };
 
-  it('dispatches a notification when a synthetic retail.order.created lands on the queue', async () => {
-    const event: IRetailOrderCreatedEvent = {
-      correlationId: 'e2e-corr-1',
+  it('dispatches a notification when a synthetic retail.order.placed lands on the queue', async () => {
+    const event: IRetailOrderPlacedEvent = {
+      correlationId: 'e2e-corr-order-1',
       orderId: 4242,
-      status: OrderStatusEnum.PENDING,
-      products: [{ productId: 1, quantity: 2 }],
-      occurredAt: '2026-05-13T14:00:00.000Z',
+      orderNumber: 'ORD-2026-00004242',
+      customerId: '11111111-1111-4111-8111-111111111111',
+      grandTotalMinor: 29997,
+      currency: 'USD',
+      lineCount: 2,
+      eventVersion: 'v1',
+      occurredAt: '2026-06-10T14:00:00.000Z',
     };
 
     // `firstValueFrom` triggers the cold emit and awaits broker ack.
-    await firstValueFrom(publisher.emit(ROUTING_KEYS.RETAIL_ORDER_CREATED, event));
+    await firstValueFrom(publisher.emit(ROUTING_KEYS.RETAIL_ORDER_PLACED, event));
 
     await waitForCall(() => sendSpy.mock.calls.length > 0);
 
     const sent = sendSpy.mock.calls[0][0];
-    expect(sent.metadata).toMatchObject({ orderId: 4242 });
-    expect(sent.subject).toContain('4242');
-    expect(sent.body).toContain('4242');
+    expect(sent.recipient).toBe('order:4242');
+    expect(sent.subject).toContain('ORD-2026-00004242');
+    expect(sent.body).toContain('ORD-2026-00004242');
+    expect(sent.metadata).toMatchObject({
+      orderId: 4242,
+      orderNumber: 'ORD-2026-00004242',
+      grandTotalMinor: 29997,
+      currency: 'USD',
+      lineCount: 2,
+    });
   });
 });

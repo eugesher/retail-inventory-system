@@ -63,11 +63,13 @@ export class StockController {
   }
 
   // The `inventory.order.confirm` seam is preserved as an explicit deprecation
-  // error rather than removed outright, so the retail confirm flow resolves to
-  // a typed error instead of an RPC timeout. Stock reservation now belongs to
-  // the inventory-reservation capability; the whole seam is removed when that
-  // capability lands. The `@Payload()` signature keeps the retail adapter's
-  // compile-time contract intact (ADR-013 §7).
+  // error rather than removed outright, so any lingering caller resolves to a
+  // typed error instead of an RPC timeout. Stock reservation now belongs to the
+  // inventory-reservation capability; the whole seam (this handler + the
+  // `IProductStockOrderConfirmPayload` contract) is removed when that capability
+  // lands. The legacy retail-side caller has already been torn down; the
+  // `@Payload()` signature is kept only so the reserved contract still
+  // type-checks (ADR-027).
   @MessagePattern(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM)
   public handleOrderConfirm(@Payload() payload: IProductStockOrderConfirmPayload): never {
     void payload;

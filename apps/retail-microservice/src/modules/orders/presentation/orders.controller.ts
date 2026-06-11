@@ -2,39 +2,55 @@ import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 
 import {
-  IOrderConfirm,
-  IOrderCreatePayload,
-  OrderConfirmResponseDto,
-  OrderCreateResponseDto,
-  OrderStatusEnum,
+  IPage,
+  IPlaceOrderPayload,
+  IRetailOrderGetPayload,
+  IRetailOrderListPayload,
+  IRetailPaymentCapturePayload,
+  OrderView,
 } from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
-import { ConfirmOrderUseCase, CreateOrderUseCase, GetOrderUseCase } from '../application/use-cases';
-import { OrderConfirmPipe } from './pipes';
+import {
+  CapturePaymentUseCase,
+  GetOrderUseCase,
+  ListMyOrdersUseCase,
+  PlaceOrderUseCase,
+} from '../application/use-cases';
 
+// RPC surface for the order operations (API Gateway → Retail over `retail_queue`).
+// `retail.cart.place` is a cart-shaped key (it acts on a cart) served here in the
+// orders controller, because the operation produces an immutable `Order` (ADR-028
+// §1). `retail.order.get` / `retail.order.list` / `retail.payment.capture` are the
+// read + capture keys (ADR-028 §3/§7). Each handler is a thin delegate; an
+// `OrderDomainException` is terminated by the `OrdersRpcExceptionFilter` into the
+// `{ statusCode, ... }` wire shape the gateway maps.
 @Controller()
-export class OrderController {
+export class OrdersController {
   constructor(
-    private readonly createOrderUseCase: CreateOrderUseCase,
-    private readonly confirmOrderUseCase: ConfirmOrderUseCase,
-    private readonly getOrderUseCase: GetOrderUseCase,
+    private readonly placeOrder: PlaceOrderUseCase,
+    private readonly getOrder: GetOrderUseCase,
+    private readonly listMyOrders: ListMyOrdersUseCase,
+    private readonly capturePayment: CapturePaymentUseCase,
   ) {}
 
-  @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_CREATE)
-  public async create(@Payload() payload: IOrderCreatePayload): Promise<OrderCreateResponseDto> {
-    return this.createOrderUseCase.execute(payload);
-  }
-
-  @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_CONFIRM)
-  public async confirm(
-    @Payload(OrderConfirmPipe) order: IOrderConfirm,
-  ): Promise<OrderConfirmResponseDto> {
-    return this.confirmOrderUseCase.execute(order);
+  @MessagePattern(ROUTING_KEYS.RETAIL_CART_PLACE)
+  public handlePlace(@Payload() payload: IPlaceOrderPayload): Promise<OrderView> {
+    return this.placeOrder.execute(payload);
   }
 
   @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_GET)
-  public async getById(@Payload() id: number): Promise<{ statusId: OrderStatusEnum } | null> {
-    return this.getOrderUseCase.findHeaderById(id);
+  public handleGet(@Payload() payload: IRetailOrderGetPayload): Promise<OrderView> {
+    return this.getOrder.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_LIST)
+  public handleList(@Payload() payload: IRetailOrderListPayload): Promise<IPage<OrderView>> {
+    return this.listMyOrders.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURE)
+  public handleCapture(@Payload() payload: IRetailPaymentCapturePayload): Promise<OrderView> {
+    return this.capturePayment.execute(payload);
   }
 }

@@ -1,45 +1,208 @@
-# Order endpoints (apps/api-gateway/src/app/api/order/order.controller.ts)
+# Order endpoints
 #
-# Routes here cover the lifecycle of an order as exposed by the API Gateway:
-#   1. Create a draft order (POST)
-#   2. Confirm a created order, triggering stock reservation (PUT)
+# The order lifecycle spans two gateway controllers:
+#   - Place Order is a cart action — apps/api-gateway/src/modules/cart/presentation/
+#     cart.controller.ts (POST /api/cart/:cartId/place). It converts an active cart
+#     into an immutable Order, snapshots the lines + addresses, and authorizes payment
+#     inline through the PAYMENT_GATEWAY (the always-approve fake).
+#   - Read + capture are order actions — apps/api-gateway/src/modules/orders/
+#     presentation/orders.controller.ts (GET /api/orders, GET /api/orders/:orderId,
+#     POST /api/orders/:orderId/payments/capture).
 #
-# Both endpoints sit behind the global "api" prefix configured in main.ts via
-# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
-# resolves to http://localhost:3000/api.
+# AUTHORIZATION is bearer + owner-check, never a customer permission code. The route
+# folds the authenticated subject into the command and the retail service enforces
+# `order.customerId === the subject`. A staff `order:read` / `order:capture`
+# permission is an OVERRIDE layered on top (it lets staff read/capture any order), not
+# a gate on the owning customer. A non-owner non-staff caller gets 403; an
+# unauthenticated caller 401.
+#
+# The `Idempotency-Key` header is ACCEPTED + LOGGED but NOT deduped. Repeat-place
+# safety comes from cart state (a placed cart is `converted`, and re-placing it
+# returns the order it already converted into); re-capture safety comes from payment
+# state (capturing an already-captured payment returns the current captured state).
+#
+# All routes sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With
+# the default .env.local that resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run `login` FIRST — it captures the seeded customer's bearer token into
+#      @accessToken (customer@example.com / customer1234).
+#   3. Run `createCart` (captures @cartId), then `addLineOne` + `addLineTwo` to put
+#      two seeded variants in the cart (variant 1 @ 4999, variant 3 @ 19999).
+#   4. Run `placeOrder` (captures @orderId). Then exercise `getOrder`, `listMyOrders`,
+#      `capturePayment`, and `placeOrderAgain`.
 
 @baseUrl = {{ENV_BASE_URL}}
 
 ###
 
-# @name createOrder
-# POST /api/order
-# Creates a new order with at least one product line.
-# Body shape (OrderCreateDto, libs/retail/dto/order-create.dto.ts):
-#   customerId: positive int
-#   products:   non-empty array of { productId: positive int, quantity: positive int }
-# Expected response: OrderCreateResponseDto with the persisted order's id
-# and product lines (status defaults to PENDING in the retail microservice).
-POST {{baseUrl}}/order
+# @name login
+# POST /api/auth/customer/login
+# Seeded customer login. Response is TokenResponseDto { accessToken, ... }.
+POST {{baseUrl}}/auth/customer/login
 Content-Type: application/json
 
 {
-  "customerId": 1,
-  "products": [
-    { "productId": 1, "quantity": 2 },
-    { "productId": 2, "quantity": 1 }
-  ]
+  "email": "customer@example.com",
+  "password": "customer1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name createCart
+# POST /api/cart  (Bearer — owner is the authenticated customer)
+# Opens a new active cart. Response is CartView; capture @cartId.
+POST {{baseUrl}}/cart
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartId = {{createCart.response.body.$.id}}
+
+###
+
+# @name addLineOne
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 1 (USD price 4999 minor units), quantity 2.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 2
 }
 
 ###
 
-# @name confirmOrder
-# PUT /api/order/:id/confirm
-# Confirms a previously created order. The retail microservice publishes an
-# INVENTORY_ORDER_CONFIRM message to the inventory microservice to reserve
-# stock for each product line.
-# Path params:
-#   id: positive int — the order id returned by createOrder
-# Expected response: OrderConfirmResponseDto with order status, product
-# statuses (e.g. RESERVED / OUT_OF_STOCK), and per-line ids.
-PUT {{baseUrl}}/order/1/confirm
+# @name addLineTwo
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 3 (USD price 19999 minor units), quantity 1.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "variantId": 3,
+  "quantity": 1
+}
+
+###
+
+# @name placeOrder
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Converts the cart one-shot into an Order, snapshots the addresses, authorizes
+# payment inline, and returns the OrderView. The `Idempotency-Key` header is accepted
+# + logged but NOT deduped. Body (PlaceOrderRequestDto):
+#   shippingAddress, billingAddress: { recipientName, line1, line2?, city, region,
+#                                      postalCode, country (2-char), phone? }
+#   paymentMethod?: opaque method token forwarded to the gateway
+# Response (201) is OrderView { orderNumber, status='pending', paymentStatus='authorized',
+#   fulfillmentStatus='unfulfilled', lines[...], grandTotalMinor, payment{ status='authorized' } }.
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "line2": "Suite 400",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US",
+    "phone": "+1-415-555-0100"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "paymentMethod": "tok_visa"
+}
+
+###
+@orderId = {{placeOrder.response.body.$.id}}
+
+###
+
+# @name getOrder
+# GET /api/orders/:orderId  (Bearer; owner OR staff order:read)
+# Reads the placed order with its lines + payment. The owning customer reads its own;
+# staff with order:read may read any. Response (200) is OrderView.
+GET {{baseUrl}}/orders/{{orderId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name listMyOrders
+# GET /api/orders?page=1&pageSize=10  (Bearer; own only)
+# Lists the authenticated caller's own orders, newest-first, paginated. Response (200)
+# is an IPage envelope { items: OrderView[], total, page, size }.
+GET {{baseUrl}}/orders?page=1&pageSize=10
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name capturePayment
+# POST /api/orders/:orderId/payments/capture  (Bearer; owner OR staff order:capture)
+# Captures the order's authorized payment (authorized -> captured). The owning
+# customer captures its own; staff with order:capture may capture any. The optional
+# body { amountMinor } defaults to the order grand total (partial capture is a later
+# capability); the `Idempotency-Key` header is accepted + logged but NOT deduped.
+# Response (200) is OrderView with paymentStatus='captured' and payment.status='captured'.
+POST {{baseUrl}}/orders/{{orderId}}/payments/capture
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{}
+
+###
+
+# @name placeOrderAgain
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Repeats the place on the now-converted cart with a NEW Idempotency-Key. The header
+# is not what makes this safe — the cart is already `converted`, so the retail service
+# returns the SAME order (same id + orderNumber, the existing payment) instead of
+# creating a second one. Key-based dedupe is a later capability.
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  }
+}

@@ -1,10 +1,4 @@
 export const ROUTING_KEYS = {
-  RETAIL_ORDER_CREATE: 'retail.order.create',
-  RETAIL_ORDER_CONFIRM: 'retail.order.confirm',
-  RETAIL_ORDER_GET: 'retail.order.get',
-  RETAIL_ORDER_CREATED: 'retail.order.created',
-  RETAIL_ORDER_CONFIRMED: 'retail.order.confirmed',
-  RETAIL_ORDER_CANCELLED: 'retail.order.cancelled',
   INVENTORY_ORDER_CONFIRM: 'inventory.order.confirm',
   INVENTORY_STOCK_LOW: 'inventory.stock.low',
   INVENTORY_STOCK_RECEIVED: 'inventory.stock.received',
@@ -32,6 +26,49 @@ export const ROUTING_KEYS = {
   CATALOG_TAX_CATEGORY_CREATE: 'catalog.tax-category.create',
   CATALOG_TAX_CATEGORY_LIST: 'catalog.tax-category.list',
   CATALOG_VARIANT_SET_TAX_CATEGORY: 'catalog.variant.set-tax-category',
+  // Cart RPC command keys (API Gateway → Retail). Each is served by a
+  // `@MessagePattern` handler on the retail cart controller and resolves to a
+  // `CartView`; `retail.cart.claim` is the guest-promotion re-point (ADR-028 §9).
+  RETAIL_CART_CREATE: 'retail.cart.create',
+  RETAIL_CART_GET: 'retail.cart.get',
+  RETAIL_CART_ADD_LINE: 'retail.cart.add-line',
+  RETAIL_CART_CHANGE_LINE_QUANTITY: 'retail.cart.change-line-quantity',
+  RETAIL_CART_REMOVE_LINE: 'retail.cart.remove-line',
+  RETAIL_CART_CLAIM: 'retail.cart.claim',
+  // `retail.cart.place` — the Place Order RPC (API Gateway → Retail). It converts
+  // the active cart into an immutable `Order` one-shot, snapshots the lines and
+  // addresses, authorizes payment inline, and resolves to an `OrderView`. It is a
+  // cart key (it acts on the cart) but is served by the orders controller, since
+  // the placement produces an `Order` (ADR-028 §1).
+  RETAIL_CART_PLACE: 'retail.cart.place',
+  // Order read + capture RPC keys (API Gateway → Retail, served by the orders
+  // controller). `retail.order.get` resolves one `OrderView` (owner-checked, or a
+  // staff `order:read` override); `retail.order.list` resolves an `IPage<OrderView>`
+  // of the caller's own orders; `retail.payment.capture` walks the order's authorized
+  // payment to `captured` (owner-checked, or a staff `order:capture` override) and
+  // resolves the updated `OrderView` (ADR-028 §3/§7).
+  RETAIL_ORDER_GET: 'retail.order.get',
+  RETAIL_ORDER_LIST: 'retail.order.list',
+  RETAIL_PAYMENT_CAPTURE: 'retail.payment.capture',
+  // Reserved-surface cart events (no consumer bound yet) — emitted onto
+  // `retail_queue` by the cart operations. These are past-tense notifications,
+  // distinct from the imperative command keys above.
+  RETAIL_CART_CREATED: 'retail.cart.created',
+  RETAIL_CART_LINE_ADDED: 'retail.cart.line-added',
+  RETAIL_CART_LINE_REMOVED: 'retail.cart.line-removed',
+  RETAIL_CART_LINE_QUANTITY_CHANGED: 'retail.cart.line-quantity-changed',
+  // `retail.order.placed` — emitted onto `notification_events` after a successful
+  // place so the notification service can fan out an order confirmation. An active
+  // consumer arrives with the notification re-point capability; for now it is a
+  // best-effort post-commit emit (ADR-020).
+  RETAIL_ORDER_PLACED: 'retail.order.placed',
+  // `retail.payment.authorized` — emitted onto `retail_queue` (the producer's own
+  // queue) after authorize-on-place succeeds. A reserved surface today, like the
+  // four `retail.cart.*` events.
+  RETAIL_PAYMENT_AUTHORIZED: 'retail.payment.authorized',
+  // `retail.payment.captured` — emitted onto `retail_queue` after an explicit
+  // capture succeeds. A reserved surface today, like `retail.payment.authorized`.
+  RETAIL_PAYMENT_CAPTURED: 'retail.payment.captured',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

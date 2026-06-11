@@ -30,7 +30,7 @@ export class ValidateJwtSubjectUseCase implements IAuthUserValidator {
     // authenticated request.
     const active =
       (await this.staff.existsActiveById(payload.sub)) ||
-      (await this.customers.existsActiveById(payload.sub));
+      (await this.customers.existsAuthenticatableById(payload.sub));
 
     if (!active) {
       throw new UnauthorizedException('Account is no longer active');

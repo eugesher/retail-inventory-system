@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { IRetailOrderCreatedEvent } from '@retail-inventory-system/contracts';
+import { IRetailOrderPlacedEvent } from '@retail-inventory-system/contracts';
 
 import { Notification, NotificationChannelEnum } from '../../domain';
 import { INotifierPort, NOTIFIER } from '../ports';
@@ -15,16 +15,23 @@ export class SendOrderNotificationUseCase {
     private readonly logger: PinoLogger,
   ) {}
 
-  public async execute(event: IRetailOrderCreatedEvent): Promise<void> {
+  public async execute(event: IRetailOrderPlacedEvent): Promise<void> {
+    const lineWord = event.lineCount === 1 ? 'line' : 'lines';
+
     const notification = new Notification({
       recipient: `order:${event.orderId}`,
       channel: NotificationChannelEnum.LOG,
-      subject: `Order ${event.orderId} received`,
-      body: `Order ${event.orderId} is now ${event.status}. Items: ${event.products.length}.`,
+      subject: `Order ${event.orderNumber} placed`,
+      body:
+        `Order ${event.orderNumber} (${event.lineCount} ${lineWord}) was placed ` +
+        `for ${event.grandTotalMinor} ${event.currency} minor units.`,
       metadata: {
         orderId: event.orderId,
-        status: event.status,
-        productCount: event.products.length,
+        orderNumber: event.orderNumber,
+        customerId: event.customerId,
+        grandTotalMinor: event.grandTotalMinor,
+        currency: event.currency,
+        lineCount: event.lineCount,
         occurredAt: event.occurredAt,
       },
     });
@@ -33,8 +40,12 @@ export class SendOrderNotificationUseCase {
       {
         correlationId: event.correlationId,
         orderId: event.orderId,
+        orderNumber: event.orderNumber,
+        grandTotalMinor: event.grandTotalMinor,
+        currency: event.currency,
+        lineCount: event.lineCount,
       },
-      'Dispatching order-created notification',
+      'Dispatching order-placed notification',
     );
 
     await this.notifier.send(notification);

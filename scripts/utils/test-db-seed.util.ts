@@ -2,8 +2,6 @@ import * as fs from 'fs';
 
 export class TestDbSeedUtil {
   public static seedFiles: string[] = [
-    'order.sql',
-    'order-product.sql',
     'catalog-product.sql',
     'catalog-product-variant.sql',
     // After the variants: tax_category has no FK dependency, and price.variant_id
@@ -14,6 +12,10 @@ export class TestDbSeedUtil {
     // catalog-product-variant.sql; stock_location ('default-warehouse') comes from
     // the migration, not a seed.
     'stock-level.sql',
+    // The example cart FKs the seeded customer (seeded by the JS identity pass,
+    // which runs before these SQL files), product_variant (catalog-product-variant.sql),
+    // and snapshots the variant's price (price.sql) — so it must come last.
+    'cart.sql',
   ];
 
   public static readStatements(filePath: string): string[] {

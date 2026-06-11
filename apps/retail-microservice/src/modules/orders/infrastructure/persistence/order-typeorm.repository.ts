@@ -1,127 +1,201 @@
+import { randomUUID } from 'crypto';
+
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepPartial, In, Repository } from 'typeorm';
+import { DeepPartial, EntityManager, Repository } from 'typeorm';
 
+import { BaseTypeormRepository } from '@retail-inventory-system/database';
+
+import { Order } from '../../domain';
 import {
-  IOrderConfirm,
-  OrderConfirmResponseDto,
-  OrderProductStatusEnum,
-  OrderStatusEnum,
-} from '@retail-inventory-system/contracts';
-
-import { Order as OrderDomain } from '../../domain';
-import { IOrderRepositoryPort } from '../../application/ports';
-import { Order as OrderEntity } from './order.entity';
-import { OrderProduct as OrderProductEntity } from './order-product.entity';
+  IOrderPage,
+  IOrderPageRequest,
+  IOrderRepositoryPort,
+  ITransactionScope,
+} from '../../application/ports';
+import { OrderEntity } from './order.entity';
+import { OrderLineEntity } from './order-line.entity';
+import { OrderLineMapper } from './order-line.mapper';
 import { OrderMapper } from './order.mapper';
 
+// The single `@InjectRepository` site for the order context. Extends
+// `BaseTypeormRepository` for the `toDomain`/`toEntity` seam over the `Order`
+// aggregate; `save` is overridden because the root + its lines persist explicitly
+// inside one transaction and the human-facing `order_number` is finalized from the
+// generated id (the "re-read the saved graph, then finalize a derived field"
+// idiom). Returns domain types only — no TypeORM leak past this file (ADR-017).
+//
+// `save` / `findById` / `attachAddresses` accept an optional `ITransactionScope`:
+// Place Order hands the same scope to the order, address, and cart-conversion writes
+// so they commit as one unit of work (ADR-017 §6 / ADR-028 §5). The
+// `EntityManager` downcast that unwraps the brand lives only in `scopedManager`
+// (the place ADR-017 §6 permits it).
 @Injectable()
-export class OrderTypeormRepository implements IOrderRepositoryPort {
+export class OrderTypeormRepository
+  extends BaseTypeormRepository<OrderEntity, Order>
+  implements IOrderRepositoryPort
+{
   constructor(
     @InjectRepository(OrderEntity)
     private readonly orderRepository: Repository<OrderEntity>,
+    @InjectRepository(OrderLineEntity)
+    private readonly orderLineRepository: Repository<OrderLineEntity>,
     @InjectPinoLogger(OrderTypeormRepository.name)
     private readonly logger: PinoLogger,
-  ) {}
+  ) {
+    super(orderRepository);
+  }
 
-  public async findById(id: number): Promise<OrderDomain | null> {
-    const entity = await this.orderRepository.findOne({
+  protected toDomain(entity: OrderEntity): Order {
+    return OrderMapper.toDomain(entity);
+  }
+
+  protected toEntity(domain: Order): DeepPartial<OrderEntity> {
+    return OrderMapper.toEntity(domain);
+  }
+
+  public async findById(id: number, scope?: ITransactionScope): Promise<Order | null> {
+    const entity = await this.orderRepo(scope).findOne({
       where: { id },
-      relations: { products: true },
+      relations: { lines: true },
+      // Deterministic line order so the view is stable across reads.
+      order: { lines: { id: 'ASC' } },
     });
     return entity ? OrderMapper.toDomain(entity) : null;
   }
 
-  public async findHeaderById(id: number): Promise<{ statusId: OrderStatusEnum } | null> {
-    const row = await this.orderRepository
-      .createQueryBuilder('Order')
-      .select(['Order.id', 'Order.statusId'])
-      .where('Order.id = :id', { id })
-      .getOne();
-    return row ? { statusId: row.statusId } : null;
-  }
-
-  public async findConfirmableOrder(
-    id: number,
-  ): Promise<Omit<IOrderConfirm, 'correlationId'> | null> {
-    const order = await this.orderRepository
-      .createQueryBuilder('Order')
-      .leftJoin('Order.products', 'OrderProduct')
-      .select(['Order.id', 'OrderProduct.id', 'OrderProduct.productId', 'OrderProduct.statusId'])
-      .where('Order.id = :id', { id })
-      .getOne();
-    if (!order) return null;
-    return {
-      id: order.id,
-      products: (order.products ?? []).map((line) => ({
-        id: line.id,
-        productId: line.productId,
-        statusId: line.statusId,
-      })),
-    };
-  }
-
-  public async findOrderResponse(id: number): Promise<OrderConfirmResponseDto | null> {
-    return this.orderRepository
-      .createQueryBuilder('Order')
-      .leftJoin('Order.status', 'OrderStatus')
-      .leftJoin('Order.products', 'OrderProduct')
-      .leftJoin('OrderProduct.status', 'OrderProductStatus')
-      .select([
-        'Order.id',
-        'OrderStatus.id',
-        'OrderStatus.name',
-        'OrderStatus.color',
-        'OrderProduct.id',
-        'OrderProduct.productId',
-        'OrderProductStatus.id',
-        'OrderProductStatus.name',
-        'OrderProductStatus.color',
-      ])
-      .where('Order.id = :id', { id })
-      .getOne()
-      .then((order) => order as OrderConfirmResponseDto | null);
-  }
-
-  public async save(order: OrderDomain): Promise<OrderDomain> {
-    const partial: DeepPartial<OrderEntity> = {
-      statusId: order.statusId,
-      products: order.products.map((line) => ({
-        productId: line.productId,
-        statusId: line.statusId,
-      })),
-    };
-
-    const saved = await this.orderRepository.save(partial);
-    return OrderMapper.toDomain(saved as OrderEntity);
-  }
-
-  public async confirmLines(payload: {
-    orderId: number;
-    newlyConfirmedProductIds: number[];
-    shouldFlipHeaderToConfirmed: boolean;
-    correlationId?: string;
-  }): Promise<void> {
-    const { orderId, newlyConfirmedProductIds, shouldFlipHeaderToConfirmed, correlationId } =
-      payload;
-
-    await this.orderRepository.manager.transaction(async (em) => {
-      if (newlyConfirmedProductIds.length > 0) {
-        await em.update(
-          OrderProductEntity,
-          { id: In(newlyConfirmedProductIds) },
-          { statusId: OrderProductStatusEnum.CONFIRMED },
-        );
-        this.logger.debug(
-          { correlationId, orderId, confirmedIds: newlyConfirmedProductIds },
-          'Order products updated to confirmed',
-        );
-      }
-
-      if (shouldFlipHeaderToConfirmed) {
-        await em.update(OrderEntity, { id: orderId }, { statusId: OrderStatusEnum.CONFIRMED });
-      }
+  // Repeat-place idempotency seam (the place capability): a cart that already
+  // converted resolves to the order it converted into. Returns the most recent
+  // match defensively, though a converted cart maps to exactly one order.
+  public async findBySourceCartId(cartId: string): Promise<Order | null> {
+    const entity = await this.orderRepository.findOne({
+      where: { sourceCartId: cartId },
+      relations: { lines: true },
+      order: { id: 'DESC', lines: { id: 'ASC' } },
     });
+    return entity ? OrderMapper.toDomain(entity) : null;
+  }
+
+  // The customer's order history (owner-checked at the use case, ADR-028 §7).
+  // Newest first; one page of orders with their lines.
+  public async listByCustomer(customerId: string, page: IOrderPageRequest): Promise<IOrderPage> {
+    const [entities, total] = await this.orderRepository.findAndCount({
+      where: { customerId },
+      relations: { lines: true },
+      order: { placedAt: 'DESC', id: 'DESC', lines: { id: 'ASC' } },
+      skip: (page.page - 1) * page.size,
+      take: page.size,
+    });
+    return {
+      items: entities.map((entity) => OrderMapper.toDomain(entity)),
+      total,
+      page: page.page,
+      size: page.size,
+    };
+  }
+
+  public async save(order: Order, scope?: ITransactionScope): Promise<Order> {
+    // One transaction for the root + its lines: a half-written graph (the header
+    // committed but a line missing) would corrupt the totals the order view reports.
+    // When the caller already owns a transaction (`scope`), join it — the place flow
+    // commits the order, addresses, and cart conversion atomically — else open one.
+    let orderId: number;
+    if (scope) {
+      orderId = await this.persistGraph(scope as unknown as EntityManager, order);
+    } else {
+      orderId = await this.orderRepository.manager.transaction((manager) =>
+        this.persistGraph(manager, order),
+      );
+    }
+
+    // Re-read the full graph (within the same scope when transactional) so the
+    // returned aggregate carries the concrete generated `order_line.id`s, the
+    // finalized `order_number`, the committed version, and the DB timestamps. The
+    // row was just written, so a miss is an invariant breach.
+    const reloaded = await this.findById(orderId, scope);
+    if (!reloaded) {
+      throw new Error(`OrderTypeormRepository.save: order ${orderId} vanished after commit`);
+    }
+    return reloaded;
+  }
+
+  // Finalizes the two snapshot-address FK columns once both `address` rows exist
+  // (the order was inserted with NULL address ids — they FK onto `address`, so the
+  // rows must precede the pointer). A targeted UPDATE, the same "finalize a derived
+  // column after the row is written" idiom `order_number` uses; it does not advance
+  // `@VersionColumn` (a persistence-finalization detail, not a domain mutation).
+  public async attachAddresses(
+    orderId: number,
+    billingAddressId: string,
+    shippingAddressId: string,
+    scope?: ITransactionScope,
+  ): Promise<void> {
+    await this.orderRepo(scope).update({ id: orderId }, { billingAddressId, shippingAddressId });
+  }
+
+  // Persists the root + its lines on the given manager and returns the order id.
+  // On a NEW order (`id===null`) the first insert needs a non-null UNIQUE
+  // `order_number`, but the binding value derives from the not-yet-assigned id — so
+  // insert with a guaranteed-unique provisional token, read the generated id, then
+  // finalize the real number and UPDATE. The provisional never commits (it is
+  // overwritten before the transaction closes). On a re-save (a payment-status /
+  // version bump) `order_number` is immutable and the lines never change, so update
+  // the root without touching `order_number`.
+  private async persistGraph(manager: EntityManager, order: Order): Promise<number> {
+    const orderRepo = manager.getRepository(OrderEntity);
+    const lineRepo = manager.getRepository(OrderLineEntity);
+
+    if (order.id === null) {
+      const rootPartial = OrderMapper.toEntity(order);
+      rootPartial.orderNumber = `TMP-${randomUUID().replace(/-/g, '').slice(0, 16)}`;
+      const inserted = await orderRepo.save(rootPartial);
+      const newId = Number(inserted.id);
+
+      const year = (order.placedAt ?? new Date()).getUTCFullYear();
+      const orderNumber = OrderTypeormRepository.formatOrderNumber(year, newId);
+      await orderRepo.update({ id: newId }, { orderNumber });
+
+      await this.persistLines(lineRepo, order, newId);
+      this.logger.debug({ orderId: newId, orderNumber }, 'Order placed');
+      return newId;
+    }
+
+    const existingId = order.id;
+    const rootPartial = OrderMapper.toEntity(order);
+    delete rootPartial.orderNumber;
+    await orderRepo.save({ ...rootPartial, id: existingId });
+
+    // The lines are immutable place-time snapshots (no domain mutator touches
+    // them), so a re-save — a payment-status / version bump — updates the root
+    // only; rewriting N unchanged line rows would be pure waste.
+    this.logger.debug({ orderId: existingId }, 'Order updated');
+    return existingId;
+  }
+
+  private async persistLines(
+    lineRepo: Repository<OrderLineEntity>,
+    order: Order,
+    orderId: number,
+  ): Promise<void> {
+    const lineEntities = order.lines.map((line) => OrderLineMapper.toEntity(line, orderId));
+    if (lineEntities.length > 0) {
+      await lineRepo.save(lineEntities);
+    }
+  }
+
+  // Resolves the order repository bound to the caller's transaction when a `scope`
+  // is supplied (downcast back to the `EntityManager` the adapter brand-wraps — the
+  // one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // repository.
+  private orderRepo(scope?: ITransactionScope): Repository<OrderEntity> {
+    if (!scope) {
+      return this.orderRepository;
+    }
+    return (scope as unknown as EntityManager).getRepository(OrderEntity);
+  }
+
+  private static formatOrderNumber(year: number, id: number): string {
+    return `ORD-${year}-${String(id).padStart(8, '0')}`;
   }
 }

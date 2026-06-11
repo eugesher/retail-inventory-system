@@ -1,6 +1,6 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { IRetailOrderCreatedEvent, OrderStatusEnum } from '@retail-inventory-system/contracts';
+import { IRetailOrderPlacedEvent } from '@retail-inventory-system/contracts';
 
 import { NotificationChannelEnum } from '../../../domain';
 import { SendOrderNotificationUseCase } from '../send-order-notification.use-case';
@@ -18,52 +18,60 @@ describe('SendOrderNotificationUseCase', () => {
   });
 
   const buildEvent = (
-    overrides: Partial<IRetailOrderCreatedEvent> = {},
-  ): IRetailOrderCreatedEvent => ({
-    correlationId: 'corr-1',
-    orderId: 42,
-    status: OrderStatusEnum.PENDING,
-    products: [{ productId: 1, quantity: 2 }],
-    occurredAt: '2026-05-13T12:34:56.000Z',
+    overrides: Partial<IRetailOrderPlacedEvent> = {},
+  ): IRetailOrderPlacedEvent => ({
+    correlationId: 'corr-order-1',
+    orderId: 4242,
+    orderNumber: 'ORD-2026-00004242',
+    customerId: '11111111-1111-4111-8111-111111111111',
+    grandTotalMinor: 29997,
+    currency: 'USD',
+    lineCount: 2,
+    eventVersion: 'v1',
+    occurredAt: '2026-06-10T12:00:00.000Z',
     ...overrides,
   });
 
-  it('dispatches a notification with the order details', async () => {
+  it('dispatches an order-placed notification carrying the order number, id, and totals', async () => {
     await useCase.execute(buildEvent());
 
     expect(notifier.sent).toHaveLength(1);
     const sent = notifier.sent[0];
 
-    expect(sent.recipient).toBe('order:42');
+    expect(sent.recipient).toBe('order:4242');
     expect(sent.channel).toBe(NotificationChannelEnum.LOG);
-    expect(sent.subject).toBe('Order 42 received');
-    expect(sent.body).toContain('Order 42');
-    expect(sent.body).toContain('pending');
+    expect(sent.subject).toContain('ORD-2026-00004242');
+    expect(sent.body).toContain('ORD-2026-00004242');
+    expect(sent.body).toContain('29997');
+    expect(sent.body).toContain('USD');
+    expect(sent.body).toContain('2 lines');
     expect(sent.metadata).toEqual({
-      orderId: 42,
-      status: OrderStatusEnum.PENDING,
-      productCount: 1,
-      occurredAt: '2026-05-13T12:34:56.000Z',
+      orderId: 4242,
+      orderNumber: 'ORD-2026-00004242',
+      customerId: '11111111-1111-4111-8111-111111111111',
+      grandTotalMinor: 29997,
+      currency: 'USD',
+      lineCount: 2,
+      occurredAt: '2026-06-10T12:00:00.000Z',
     });
   });
 
-  it('logs the correlationId on the dispatch line', async () => {
-    await useCase.execute(buildEvent({ correlationId: 'corr-xyz' }));
+  it('singularizes the line word for a one-line order', async () => {
+    await useCase.execute(buildEvent({ lineCount: 1 }));
 
-    expect(logger.logs[0].context).toMatchObject({ correlationId: 'corr-xyz' });
+    expect(notifier.sent[0].body).toContain('1 line');
+    expect(notifier.sent[0].body).not.toContain('1 lines');
   });
 
-  it('counts every product line into the metadata', async () => {
-    await useCase.execute(
-      buildEvent({
-        products: [
-          { productId: 1, quantity: 2 },
-          { productId: 5, quantity: 1 },
-          { productId: 9, quantity: 3 },
-        ],
-      }),
-    );
+  it('carries a null customerId straight through to the metadata (a tombstoned order)', async () => {
+    await useCase.execute(buildEvent({ customerId: null }));
 
-    expect(notifier.sent[0].metadata.productCount).toBe(3);
+    expect(notifier.sent[0].metadata).toMatchObject({ customerId: null });
+  });
+
+  it('logs the correlationId on the dispatch line', async () => {
+    await useCase.execute(buildEvent({ correlationId: 'corr-order-9' }));
+
+    expect(logger.logs[0].context).toMatchObject({ correlationId: 'corr-order-9' });
   });
 });
