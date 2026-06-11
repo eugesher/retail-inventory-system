@@ -3,6 +3,8 @@ export * from './category.model';
 export * from './category-status.enum';
 export * from './dimensions.vo';
 export * from './events';
+export * from './media-asset.model';
+export * from './media-asset-status.enum';
 export * from './option-values.vo';
 export * from './product.model';
 export * from './product-status.enum';

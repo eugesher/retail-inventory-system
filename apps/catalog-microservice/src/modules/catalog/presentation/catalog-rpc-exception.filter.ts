@@ -14,6 +14,10 @@ const CATALOG_ERROR_STATUS: Record<CatalogErrorCodeEnum, HttpStatus> = {
   [CatalogErrorCodeEnum.VARIANT_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [CatalogErrorCodeEnum.CATEGORY_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [CatalogErrorCodeEnum.CATEGORY_PARENT_NOT_FOUND]: HttpStatus.NOT_FOUND,
+  // Media lookup misses → 404: the detach target, or the attach owner whose
+  // existence the use case probes by hand (no FK on the polymorphic owner).
+  [CatalogErrorCodeEnum.MEDIA_NOT_FOUND]: HttpStatus.NOT_FOUND,
+  [CatalogErrorCodeEnum.MEDIA_OWNER_NOT_FOUND]: HttpStatus.NOT_FOUND,
 
   // Uniqueness collisions and lifecycle conflicts → 409: the request is
   // well-formed but conflicts with the current state of the resource (a slug/sku
@@ -35,6 +39,13 @@ const CATALOG_ERROR_STATUS: Record<CatalogErrorCodeEnum, HttpStatus> = {
   [CatalogErrorCodeEnum.CATEGORY_INVALID_STATE_TRANSITION]: HttpStatus.CONFLICT,
   [CatalogErrorCodeEnum.CATEGORY_ARCHIVED]: HttpStatus.CONFLICT,
 
+  // Media conflicts → 409: a second detach of an already-archived asset (illegal
+  // transition), or a reorder whose id set is not an exact permutation of the
+  // owner's active media (the bulk reorder is all-or-nothing) — both are
+  // well-formed requests the resource state forbids (ADR-029 §4).
+  [CatalogErrorCodeEnum.MEDIA_INVALID_STATE_TRANSITION]: HttpStatus.CONFLICT,
+  [CatalogErrorCodeEnum.MEDIA_REORDER_SET_MISMATCH]: HttpStatus.CONFLICT,
+
   // Malformed input invariants → 400. These are normally caught by the gateway
   // request DTOs first; this is the backstop for the directly-reachable RMQ path.
   [CatalogErrorCodeEnum.PRODUCT_NAME_REQUIRED]: HttpStatus.BAD_REQUEST,
@@ -46,6 +57,11 @@ const CATALOG_ERROR_STATUS: Record<CatalogErrorCodeEnum, HttpStatus> = {
   [CatalogErrorCodeEnum.CATEGORY_NAME_REQUIRED]: HttpStatus.BAD_REQUEST,
   [CatalogErrorCodeEnum.CATEGORY_SLUG_INVALID]: HttpStatus.BAD_REQUEST,
   [CatalogErrorCodeEnum.CATEGORY_SORT_ORDER_INVALID]: HttpStatus.BAD_REQUEST,
+  [CatalogErrorCodeEnum.MEDIA_URI_REQUIRED]: HttpStatus.BAD_REQUEST,
+  [CatalogErrorCodeEnum.MEDIA_TYPE_INVALID]: HttpStatus.BAD_REQUEST,
+  [CatalogErrorCodeEnum.MEDIA_OWNER_TYPE_INVALID]: HttpStatus.BAD_REQUEST,
+  [CatalogErrorCodeEnum.MEDIA_OWNER_ID_INVALID]: HttpStatus.BAD_REQUEST,
+  [CatalogErrorCodeEnum.MEDIA_SORT_ORDER_INVALID]: HttpStatus.BAD_REQUEST,
 };
 
 // Terminates a `CatalogDomainException` into the wire error shape the gateway's

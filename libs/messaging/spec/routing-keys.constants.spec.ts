@@ -103,6 +103,16 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.CATALOG_PRODUCT_RECLASSIFY).toBe(
       MicroserviceMessagePatternEnum.CATALOG_PRODUCT_RECLASSIFY,
     );
+    expect(ROUTING_KEYS.CATALOG_MEDIA_ATTACH).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_MEDIA_ATTACH,
+    );
+    expect(ROUTING_KEYS.CATALOG_MEDIA_REORDER).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_MEDIA_REORDER,
+    );
+    expect(ROUTING_KEYS.CATALOG_MEDIA_DETACH).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_MEDIA_DETACH,
+    );
+    expect(ROUTING_KEYS.CATALOG_MEDIA_LIST).toBe(MicroserviceMessagePatternEnum.CATALOG_MEDIA_LIST);
     expect(ROUTING_KEYS.RETAIL_CART_CREATE).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_CREATE);
     expect(ROUTING_KEYS.RETAIL_CART_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_GET);
     expect(ROUTING_KEYS.RETAIL_CART_ADD_LINE).toBe(

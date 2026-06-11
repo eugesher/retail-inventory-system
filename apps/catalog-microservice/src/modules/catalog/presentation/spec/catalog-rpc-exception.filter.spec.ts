@@ -31,6 +31,8 @@ describe('CatalogRpcExceptionFilter', () => {
       CatalogErrorCodeEnum.VARIANT_NOT_FOUND,
       CatalogErrorCodeEnum.CATEGORY_NOT_FOUND,
       CatalogErrorCodeEnum.CATEGORY_PARENT_NOT_FOUND,
+      CatalogErrorCodeEnum.MEDIA_NOT_FOUND,
+      CatalogErrorCodeEnum.MEDIA_OWNER_NOT_FOUND,
     ]) {
       await expect(statusFor(code)).resolves.toMatchObject({
         statusCode: HttpStatus.NOT_FOUND,
@@ -50,6 +52,8 @@ describe('CatalogRpcExceptionFilter', () => {
       CatalogErrorCodeEnum.CATEGORY_CYCLE,
       CatalogErrorCodeEnum.CATEGORY_INVALID_STATE_TRANSITION,
       CatalogErrorCodeEnum.CATEGORY_ARCHIVED,
+      CatalogErrorCodeEnum.MEDIA_INVALID_STATE_TRANSITION,
+      CatalogErrorCodeEnum.MEDIA_REORDER_SET_MISMATCH,
     ]) {
       await expect(statusFor(code)).resolves.toMatchObject({
         statusCode: HttpStatus.CONFLICT,
@@ -69,6 +73,11 @@ describe('CatalogRpcExceptionFilter', () => {
       CatalogErrorCodeEnum.CATEGORY_NAME_REQUIRED,
       CatalogErrorCodeEnum.CATEGORY_SLUG_INVALID,
       CatalogErrorCodeEnum.CATEGORY_SORT_ORDER_INVALID,
+      CatalogErrorCodeEnum.MEDIA_URI_REQUIRED,
+      CatalogErrorCodeEnum.MEDIA_TYPE_INVALID,
+      CatalogErrorCodeEnum.MEDIA_OWNER_TYPE_INVALID,
+      CatalogErrorCodeEnum.MEDIA_OWNER_ID_INVALID,
+      CatalogErrorCodeEnum.MEDIA_SORT_ORDER_INVALID,
     ]) {
       await expect(statusFor(code)).resolves.toMatchObject({
         statusCode: HttpStatus.BAD_REQUEST,

@@ -54,6 +54,30 @@ export enum CatalogErrorCodeEnum {
   CATEGORY_PARENT_NOT_FOUND = 'CATALOG_CATEGORY_PARENT_NOT_FOUND',
   CATEGORY_SLUG_TAKEN = 'CATALOG_CATEGORY_SLUG_TAKEN',
   CATEGORY_ARCHIVED = 'CATALOG_CATEGORY_ARCHIVED',
+
+  // MediaAsset invariants enforced in the `MediaAsset` aggregate (the domain
+  // re-validates what the gateway DTO also checks, because an RPC payload can
+  // arrive directly without the gateway). The `uri` is opaque — there is NO
+  // scheme allow-list (`MEDIA_URI_REQUIRED` is a non-empty check only); the owner
+  // and asset type are validated against the wire enums; `sortOrder` must be a
+  // non-negative integer (it is a slot index). All four are 400s (malformed
+  // input). ADR-029 §4.
+  MEDIA_URI_REQUIRED = 'CATALOG_MEDIA_URI_REQUIRED',
+  MEDIA_TYPE_INVALID = 'CATALOG_MEDIA_TYPE_INVALID',
+  MEDIA_OWNER_TYPE_INVALID = 'CATALOG_MEDIA_OWNER_TYPE_INVALID',
+  MEDIA_OWNER_ID_INVALID = 'CATALOG_MEDIA_OWNER_ID_INVALID',
+  MEDIA_SORT_ORDER_INVALID = 'CATALOG_MEDIA_SORT_ORDER_INVALID',
+  // Repository / use-case level media rejections. `MEDIA_NOT_FOUND` is the detach
+  // miss (404); `MEDIA_OWNER_NOT_FOUND` is the attach owner-existence miss (404 —
+  // the polymorphic owner has no FK, so the use case probes the product/variant
+  // table by hand). `MEDIA_INVALID_STATE_TRANSITION` is a second detach of an
+  // already-archived asset (409); `MEDIA_REORDER_SET_MISMATCH` is a reorder whose
+  // id set is not an exact permutation of the owner's active media (409 — the bulk
+  // reorder is all-or-nothing). ADR-029 §4.
+  MEDIA_NOT_FOUND = 'CATALOG_MEDIA_NOT_FOUND',
+  MEDIA_OWNER_NOT_FOUND = 'CATALOG_MEDIA_OWNER_NOT_FOUND',
+  MEDIA_INVALID_STATE_TRANSITION = 'CATALOG_MEDIA_INVALID_STATE_TRANSITION',
+  MEDIA_REORDER_SET_MISMATCH = 'CATALOG_MEDIA_REORDER_SET_MISMATCH',
 }
 
 // The catalog bounded context is the first concrete consumer of the

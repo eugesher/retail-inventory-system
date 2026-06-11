@@ -48,6 +48,20 @@ export const ROUTING_KEYS = {
   CATALOG_CATEGORY_GET_TREE: 'catalog.category.get-tree',
   CATALOG_CATEGORY_LIST_PRODUCTS: 'catalog.category.list-products',
   CATALOG_PRODUCT_RECLASSIFY: 'catalog.product.reclassify',
+  // Media RPC command + read keys (API Gateway → Catalog on `catalog_queue`).
+  // Each is served by a `@MessagePattern` handler on the catalog media controller:
+  // `catalog.media.attach` → `AttachMediaUseCase` → `MediaAssetView`,
+  // `catalog.media.reorder` → `ReorderMediaUseCase` → `MediaAssetView[]`,
+  // `catalog.media.detach` → `DetachMediaUseCase` → `MediaAssetView`,
+  // `catalog.media.list` → `ListMediaUseCase` → `MediaAssetView[]`.
+  // Like the category surface, the media capability emits NO events — attach /
+  // reorder / detach are state changes with no cross-service consumer today and
+  // list is a read, so there are no past-tense `catalog.media.*` surfaces to pair
+  // with these commands (ADR-029 §6).
+  CATALOG_MEDIA_ATTACH: 'catalog.media.attach',
+  CATALOG_MEDIA_REORDER: 'catalog.media.reorder',
+  CATALOG_MEDIA_DETACH: 'catalog.media.detach',
+  CATALOG_MEDIA_LIST: 'catalog.media.list',
   // Cart RPC command keys (API Gateway → Retail). Each is served by a
   // `@MessagePattern` handler on the retail cart controller and resolves to a
   // `CartView`; `retail.cart.claim` is the guest-promotion re-point (ADR-028 §9).
