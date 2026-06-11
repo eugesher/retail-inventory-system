@@ -145,7 +145,19 @@ export class PlaceOrderUseCase {
       await this.addressRepository.save(shipping, scope);
       await this.orderRepository.attachAddresses(orderId, billing.id!, shipping.id!, scope);
 
-      await this.cartReader.markConverted(cartId, scope);
+      const converted = await this.cartReader.markConverted(cartId, scope);
+      if (!converted) {
+        // The compare-and-swap matched no `active` row: a concurrent place
+        // converted (or a purge abandoned) this cart between the state guard and
+        // here. Throwing rolls this transaction back — without it both racers
+        // would commit, minting two orders (and two authorized payments) from one
+        // cart. The loser surfaces a 409; a retry resolves the winner's order via
+        // the converted-cart idempotency path.
+        throw new OrderDomainException(
+          OrderErrorCodeEnum.ORDER_CART_NOT_PLACEABLE,
+          `Cart ${cartId} was converted or abandoned concurrently; place aborted`,
+        );
+      }
       return persisted;
     });
 

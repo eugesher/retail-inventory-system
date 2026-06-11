@@ -63,12 +63,15 @@ export class FakeCartReader implements IOrderCartReaderPort {
     });
   }
 
-  public markConverted(cartId: string): Promise<void> {
-    if (this.snapshot?.cartId === cartId) {
+  // Mirrors the adapter's compare-and-swap: only an `active` snapshot flips, and
+  // the boolean reports whether the flip happened (false = lost the convert race).
+  public markConverted(cartId: string): Promise<boolean> {
+    if (this.snapshot?.cartId === cartId && this.snapshot.status === CartStatusEnum.ACTIVE) {
       this.snapshot = { ...this.snapshot, status: CartStatusEnum.CONVERTED };
+      this.convertedCount += 1;
+      return Promise.resolve(true);
     }
-    this.convertedCount += 1;
-    return Promise.resolve();
+    return Promise.resolve(false);
   }
 }
 

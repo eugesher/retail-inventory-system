@@ -10,15 +10,14 @@ import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 import { CartModule, cartEntities } from '../modules/cart';
 import { OrdersModule, orderEntities } from '../modules/orders';
 
-// The retail microservice owns the rebuilt checkout context. The `cart` module's
-// mutable `Cart`/`CartLine` aggregate and the `orders` module's immutable `Order`/
-// `OrderLine` + polymorphic `Address` aggregates are both registered as foundation;
-// the `Payment` aggregate and every cart/order operation land in later capabilities.
+// The retail microservice owns the rebuilt checkout context. The `cart` module
+// carries the mutable `Cart`/`CartLine` aggregate plus the six cart command RPCs;
+// the `orders` module carries the immutable `Order`/`OrderLine`, the polymorphic
+// `Address`, and the `Payment` aggregates plus the place / capture / read RPCs —
+// ten `@MessagePattern` handlers in total, all served off `retail_queue` (ADR-028).
 // `DatabaseModule.forRoot` opens the one MySQL connection the context's modules
 // share — `cartEntities` + `orderEntities` are concrete entity arrays, merged into
-// one list. No `@MessagePattern` / `@EventPattern` handlers exist yet — the
-// operations + their gateway arrive with a later capability, so the service still
-// listens on `retail_queue` with no handlers.
+// one list.
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),

@@ -38,9 +38,9 @@ import { toOrderView } from './order-view.factory';
 //
 // **Idempotent by payment state** (Q10): re-capturing an already-`captured` payment
 // returns the current `captured` state rather than erroring; the `Idempotency-Key` is
-// accepted + logged but not deduped. `amountMinor` defaults to the order's
-// `grandTotalMinor` (partial capture is a later capability — the fake captures the
-// full authorized amount).
+// accepted + logged but not deduped. `amountMinor` is accepted for forward-compat,
+// but partial capture is a later capability — the gateway always captures the full
+// authorized amount, and the emitted event reports the payment row's actual amount.
 //
 // The gateway `capture` call is **out-of-process**, so it runs outside the DB
 // transaction (the authorize-on-place rationale); only the two writes that follow —
@@ -107,9 +107,16 @@ export class CapturePaymentUseCase {
       );
     }
 
-    // `amountMinor` defaults to the order's grand total; partial capture is a later
-    // capability, so the gateway captures the full authorized amount regardless.
-    const captureAmount = amountMinor ?? order.grandTotalMinor;
+    // `amountMinor` is accepted for forward-compat but partial capture is a later
+    // capability — the gateway captures the full authorized amount regardless, so
+    // the requested figure is only logged (the emitted event reports the payment
+    // row's actual amount, never an uncaptured request).
+    if (amountMinor !== undefined && amountMinor !== order.grandTotalMinor) {
+      this.logger.info(
+        { correlationId, orderId, requestedAmountMinor: amountMinor },
+        'Partial capture is not supported yet — capturing the full authorized amount',
+      );
+    }
 
     // Out-of-process gateway call — deliberately outside the DB transaction.
     const result = await this.paymentGateway.capture(payment.gatewayReference, correlationId);
@@ -149,7 +156,7 @@ export class CapturePaymentUseCase {
       throw new Error(`CapturePaymentUseCase: order ${orderId} vanished after capture`);
     }
 
-    await this.emitCaptured(finalOrder, finalPayment, captureAmount, idempotencyKey, correlationId);
+    await this.emitCaptured(finalOrder, finalPayment, idempotencyKey, correlationId);
 
     this.logger.info({ correlationId, orderId, paymentId: finalPayment.id }, 'Payment captured');
     return toOrderView(finalOrder, finalPayment);
@@ -160,7 +167,6 @@ export class CapturePaymentUseCase {
   private async emitCaptured(
     order: Order,
     payment: Payment,
-    capturedAmountMinor: number,
     idempotencyKey: string | undefined,
     correlationId: string,
   ): Promise<void> {
@@ -168,7 +174,10 @@ export class CapturePaymentUseCase {
       await this.publisher.publishPaymentCaptured({
         orderId: order.id!,
         paymentId: payment.id!,
-        amountMinor: capturedAmountMinor,
+        // The payment row's actual amount — the gateway captured the full
+        // authorized figure, so a caller-requested partial amount never leaks
+        // into the event as if it had been captured.
+        amountMinor: payment.amountMinor,
         currency: payment.currency,
         eventVersion: 'v1',
         occurredAt: (payment.capturedAt ?? new Date()).toISOString(),

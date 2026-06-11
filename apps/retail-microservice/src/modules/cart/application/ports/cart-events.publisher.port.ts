@@ -21,11 +21,8 @@ export const CART_EVENTS_PUBLISHER = Symbol('CART_EVENTS_PUBLISHER');
 // is best-effort: the use case warn-logs and swallows it because the cart write
 // has already committed.
 export interface ICartEventsPublisherPort {
-  publishCartCreated(event: IRetailCartCreatedEvent, correlationId?: string): Promise<void>;
-  publishCartLineAdded(event: IRetailCartLineAddedEvent, correlationId?: string): Promise<void>;
-  publishCartLineRemoved(event: IRetailCartLineRemovedEvent, correlationId?: string): Promise<void>;
-  publishCartLineQuantityChanged(
-    event: IRetailCartLineQuantityChangedEvent,
-    correlationId?: string,
-  ): Promise<void>;
+  publishCartCreated(event: IRetailCartCreatedEvent): Promise<void>;
+  publishCartLineAdded(event: IRetailCartLineAddedEvent): Promise<void>;
+  publishCartLineRemoved(event: IRetailCartLineRemovedEvent): Promise<void>;
+  publishCartLineQuantityChanged(event: IRetailCartLineQuantityChangedEvent): Promise<void>;
 }

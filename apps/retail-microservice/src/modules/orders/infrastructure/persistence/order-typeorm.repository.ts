@@ -166,7 +166,9 @@ export class OrderTypeormRepository
     delete rootPartial.orderNumber;
     await orderRepo.save({ ...rootPartial, id: existingId });
 
-    await this.persistLines(lineRepo, order, existingId);
+    // The lines are immutable place-time snapshots (no domain mutator touches
+    // them), so a re-save — a payment-status / version bump — updates the root
+    // only; rewriting N unchanged line rows would be pure waste.
     this.logger.debug({ orderId: existingId }, 'Order updated');
     return existingId;
   }

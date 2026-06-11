@@ -117,41 +117,28 @@ export class InMemoryCartCatalogGateway implements ICartCatalogGatewayPort {
 // Recording cart events publisher — collects each emitted wire event per kind so
 // specs can assert the right event fired with the right payload.
 export class InMemoryCartEventsPublisher implements ICartEventsPublisherPort {
-  public readonly created: { event: IRetailCartCreatedEvent; correlationId?: string }[] = [];
-  public readonly lineAdded: { event: IRetailCartLineAddedEvent; correlationId?: string }[] = [];
-  public readonly lineRemoved: { event: IRetailCartLineRemovedEvent; correlationId?: string }[] =
-    [];
-  public readonly lineQuantityChanged: {
-    event: IRetailCartLineQuantityChangedEvent;
-    correlationId?: string;
-  }[] = [];
+  public readonly created: { event: IRetailCartCreatedEvent }[] = [];
+  public readonly lineAdded: { event: IRetailCartLineAddedEvent }[] = [];
+  public readonly lineRemoved: { event: IRetailCartLineRemovedEvent }[] = [];
+  public readonly lineQuantityChanged: { event: IRetailCartLineQuantityChangedEvent }[] = [];
 
-  public publishCartCreated(event: IRetailCartCreatedEvent, correlationId?: string): Promise<void> {
-    this.created.push({ event, correlationId });
+  public publishCartCreated(event: IRetailCartCreatedEvent): Promise<void> {
+    this.created.push({ event });
     return Promise.resolve();
   }
 
-  public publishCartLineAdded(
-    event: IRetailCartLineAddedEvent,
-    correlationId?: string,
-  ): Promise<void> {
-    this.lineAdded.push({ event, correlationId });
+  public publishCartLineAdded(event: IRetailCartLineAddedEvent): Promise<void> {
+    this.lineAdded.push({ event });
     return Promise.resolve();
   }
 
-  public publishCartLineRemoved(
-    event: IRetailCartLineRemovedEvent,
-    correlationId?: string,
-  ): Promise<void> {
-    this.lineRemoved.push({ event, correlationId });
+  public publishCartLineRemoved(event: IRetailCartLineRemovedEvent): Promise<void> {
+    this.lineRemoved.push({ event });
     return Promise.resolve();
   }
 
-  public publishCartLineQuantityChanged(
-    event: IRetailCartLineQuantityChangedEvent,
-    correlationId?: string,
-  ): Promise<void> {
-    this.lineQuantityChanged.push({ event, correlationId });
+  public publishCartLineQuantityChanged(event: IRetailCartLineQuantityChangedEvent): Promise<void> {
+    this.lineQuantityChanged.push({ event });
     return Promise.resolve();
   }
 }

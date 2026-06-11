@@ -74,19 +74,25 @@ export class CartReaderTypeormAdapter implements IOrderCartReaderPort {
     };
   }
 
-  public async markConverted(cartId: string, scope?: ITransactionScope): Promise<void> {
+  public async markConverted(cartId: string, scope?: ITransactionScope): Promise<boolean> {
     // Run on the place transaction's manager when a scope is supplied (the convert
     // commits atomically with the order + address writes); else the default manager.
     // `version = version + 1` keeps the cart's optimistic-concurrency token advancing
     // on this mutation for parity with the domain bump (the column ships, the guard
-    // is a later capability — ADR-028 §6). `WHERE status = 'active'` makes a
-    // double-convert a harmless no-op.
+    // is a later capability — ADR-028 §6).
+    //
+    // `WHERE status = 'active'` is the compare-and-swap that serializes racing
+    // places: the InnoDB row lock blocks the second UPDATE until the first place
+    // commits, after which it matches 0 rows. The returned boolean surfaces that
+    // (`affectedRows` is reliable here — the SET always changes a matched row), so
+    // the caller can roll back instead of committing a duplicate order.
     const manager = scope ? (scope as unknown as EntityManager) : this.entityManager;
-    await manager.query(
+    const result = await manager.query<{ affectedRows?: number }>(
       `UPDATE cart
           SET status = 'converted', version = version + 1, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'active'`,
       [cartId],
     );
+    return Number(result?.affectedRows ?? 0) > 0;
   }
 }

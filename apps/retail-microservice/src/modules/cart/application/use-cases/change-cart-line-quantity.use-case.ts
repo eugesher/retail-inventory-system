@@ -40,10 +40,14 @@ export class ChangeCartLineQuantityUseCase {
     const occurredAt = (cart.pullDomainEvents()[0]?.occurredAt ?? new Date()).toISOString();
 
     try {
-      await this.publisher.publishCartLineQuantityChanged(
-        { cartId, lineId, quantity, eventVersion: 'v1', occurredAt, correlationId },
+      await this.publisher.publishCartLineQuantityChanged({
+        cartId,
+        lineId,
+        quantity,
+        eventVersion: 'v1',
+        occurredAt,
         correlationId,
-      );
+      });
     } catch (err) {
       this.logger.warn(
         { err: err as Error, correlationId, cartId, lineId },
