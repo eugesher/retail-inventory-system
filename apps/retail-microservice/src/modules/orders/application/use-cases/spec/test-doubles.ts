@@ -1,4 +1,5 @@
 import {
+  CartStatusEnum,
   OrderFulfillmentStatusEnum,
   OrderLineStatusEnum,
   OrderPaymentStatusEnum,
@@ -62,12 +63,15 @@ export class FakeCartReader implements IOrderCartReaderPort {
     });
   }
 
-  public markConverted(cartId: string): Promise<void> {
-    if (this.snapshot?.cartId === cartId) {
-      this.snapshot = { ...this.snapshot, status: 'converted' };
+  // Mirrors the adapter's compare-and-swap: only an `active` snapshot flips, and
+  // the boolean reports whether the flip happened (false = lost the convert race).
+  public markConverted(cartId: string): Promise<boolean> {
+    if (this.snapshot?.cartId === cartId && this.snapshot.status === CartStatusEnum.ACTIVE) {
+      this.snapshot = { ...this.snapshot, status: CartStatusEnum.CONVERTED };
+      this.convertedCount += 1;
+      return Promise.resolve(true);
     }
-    this.convertedCount += 1;
-    return Promise.resolve();
+    return Promise.resolve(false);
   }
 }
 
@@ -146,10 +150,6 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
     const start = (page.page - 1) * page.size;
     const items = all.slice(start, start + page.size);
     return Promise.resolve({ items, total: all.length, page: page.page, size: page.size });
-  }
-
-  public nextOrderNumber(): Promise<string> {
-    return Promise.resolve(`ORD-2026-${String(this.seq + 1).padStart(8, '0')}`);
   }
 
   // Reconstitutes an order with the stored billing/shipping ids folded back in, so a

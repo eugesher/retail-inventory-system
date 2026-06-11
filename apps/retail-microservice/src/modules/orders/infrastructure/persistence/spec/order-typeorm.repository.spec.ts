@@ -126,9 +126,9 @@ describe('order mappers', () => {
 });
 
 describe('OrderTypeormRepository', () => {
-  let orderRepo: jest.Mocked<
-    Pick<Repository<OrderEntity>, 'findOne' | 'findAndCount' | 'createQueryBuilder'>
-  > & { manager: { transaction: jest.Mock } };
+  let orderRepo: jest.Mocked<Pick<Repository<OrderEntity>, 'findOne' | 'findAndCount'>> & {
+    manager: { transaction: jest.Mock };
+  };
   let lineRepo: jest.Mocked<Pick<Repository<OrderLineEntity>, 'save'>>;
   let logger: PinoLoggerMock;
   let repository: OrderTypeormRepository;
@@ -139,7 +139,6 @@ describe('OrderTypeormRepository', () => {
     orderRepo = {
       findOne: jest.fn(),
       findAndCount: jest.fn(),
-      createQueryBuilder: jest.fn(),
       manager: { transaction: jest.fn() },
     } as never;
     logger = makePinoLoggerMock();
@@ -260,32 +259,6 @@ describe('OrderTypeormRepository', () => {
       expect(orderRepo.findAndCount).toHaveBeenCalledWith(
         expect.objectContaining({ where: { customerId: 'cust-1' }, skip: 0, take: 20 }),
       );
-    });
-  });
-
-  describe('nextOrderNumber', () => {
-    it('formats ORD-<year>-00000001 when the table is empty', async () => {
-      const qb = {
-        select: jest.fn().mockReturnThis(),
-        getRawOne: jest.fn().mockResolvedValue({ maxId: null }),
-      };
-      orderRepo.createQueryBuilder.mockReturnValue(qb as never);
-
-      const result = await repository.nextOrderNumber();
-      const year = new Date().getUTCFullYear();
-      expect(result).toBe(`ORD-${year}-00000001`);
-    });
-
-    it('formats the number after the current max id', async () => {
-      const qb = {
-        select: jest.fn().mockReturnThis(),
-        getRawOne: jest.fn().mockResolvedValue({ maxId: '41' }),
-      };
-      orderRepo.createQueryBuilder.mockReturnValue(qb as never);
-
-      const result = await repository.nextOrderNumber();
-      const year = new Date().getUTCFullYear();
-      expect(result).toBe(`ORD-${year}-00000042`);
     });
   });
 });

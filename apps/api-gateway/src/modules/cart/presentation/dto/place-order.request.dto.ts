@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsNotEmpty, IsOptional, IsString, Length, ValidateNested } from 'class-validator';
+import {
+  IsDefined,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Length,
+  ValidateNested,
+} from 'class-validator';
 
 // One address bundle on the Place Order body. Required fields are non-empty;
 // `country` is exactly 2 chars (the ISO-3166 alpha-2 code the retail domain
@@ -55,12 +62,17 @@ export class AddressInputDto {
 // `@CurrentUser().id` and the retail use case re-asserts ownership. `@ValidateNested`
 // + `@Type` make class-validator recurse into the two address bundles.
 export class PlaceOrderRequestDto {
+  // `@IsDefined` is load-bearing: `@ValidateNested` is silently skipped on an
+  // undefined value, so without it a `{}` body sails past the edge and is only
+  // rejected by the domain inside the place transaction.
   @ApiProperty({ type: AddressInputDto })
+  @IsDefined()
   @ValidateNested()
   @Type(() => AddressInputDto)
   public shippingAddress: AddressInputDto;
 
   @ApiProperty({ type: AddressInputDto })
+  @IsDefined()
   @ValidateNested()
   @Type(() => AddressInputDto)
   public billingAddress: AddressInputDto;

@@ -36,12 +36,12 @@ describe('CreateCartUseCase', () => {
     expect(view.subtotalMinor).toBe(0);
 
     expect(publisher.created).toHaveLength(1);
-    const [{ event, correlationId }] = publisher.created;
+    const [{ event }] = publisher.created;
     expect(event.cartId).toBe(view.id);
     expect(event.customerId).toBe(CUSTOMER_ID);
     expect(event.currency).toBe('EUR');
     expect(event.eventVersion).toBe('v1');
-    expect(correlationId).toBe('corr-1');
+    expect(event.correlationId).toBe('corr-1');
   });
 
   it('defaults the currency to USD when omitted', async () => {

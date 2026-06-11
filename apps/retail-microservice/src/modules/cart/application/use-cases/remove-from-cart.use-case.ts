@@ -39,10 +39,13 @@ export class RemoveFromCartUseCase {
     const occurredAt = (cart.pullDomainEvents()[0]?.occurredAt ?? new Date()).toISOString();
 
     try {
-      await this.publisher.publishCartLineRemoved(
-        { cartId, lineId, eventVersion: 'v1', occurredAt, correlationId },
+      await this.publisher.publishCartLineRemoved({
+        cartId,
+        lineId,
+        eventVersion: 'v1',
+        occurredAt,
         correlationId,
-      );
+      });
     } catch (err) {
       this.logger.warn(
         { err: err as Error, correlationId, cartId, lineId },

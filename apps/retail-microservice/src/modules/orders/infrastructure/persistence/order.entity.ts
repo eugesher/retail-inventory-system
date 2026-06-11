@@ -94,10 +94,10 @@ export class OrderEntity extends BaseEntity {
   @VersionColumn()
   public version: number;
 
-  // `cascade: ['insert','update']` is declared per the aggregate's owned-children
-  // relation, but the repository drives line persistence explicitly inside one
-  // transaction. `onDelete: 'RESTRICT'` (the DB-level FK) means an order's lines
-  // are never orphaned — orders are append-only.
-  @OneToMany(() => OrderLineEntity, (line) => line.order, { cascade: ['insert', 'update'] })
+  // No TypeORM `cascade`: the repository drives line persistence explicitly inside
+  // one transaction (root save → line save), so a cascade option would never fire.
+  // `onDelete: 'RESTRICT'` (the DB-level FK) means an order's lines are never
+  // orphaned — orders are append-only.
+  @OneToMany(() => OrderLineEntity, (line) => line.order)
   public lines: OrderLineEntity[];
 }

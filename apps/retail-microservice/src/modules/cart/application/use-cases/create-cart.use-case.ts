@@ -46,17 +46,14 @@ export class CreateCartUseCase {
     const occurredAt = (cart.pullDomainEvents()[0]?.occurredAt ?? new Date()).toISOString();
 
     try {
-      await this.publisher.publishCartCreated(
-        {
-          cartId,
-          customerId: saved.customerId,
-          currency: saved.currency,
-          eventVersion: 'v1',
-          occurredAt,
-          correlationId,
-        },
+      await this.publisher.publishCartCreated({
+        cartId,
+        customerId: saved.customerId,
+        currency: saved.currency,
+        eventVersion: 'v1',
+        occurredAt,
         correlationId,
-      );
+      });
     } catch (err) {
       // Best-effort: the cart is already committed — a publish failure never
       // fails the operation (ADR-020).

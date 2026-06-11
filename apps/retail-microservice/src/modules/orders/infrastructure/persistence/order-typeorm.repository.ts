@@ -95,20 +95,6 @@ export class OrderTypeormRepository
     };
   }
 
-  // Walking-skeleton order numbering: formats the next human-facing number from the
-  // current max id. The **binding** value is finalized inside `save` from the
-  // order's real generated id (so it always matches the row), making this a
-  // non-binding preview; a dedicated monotonic sequence is a later refinement. The
-  // year segment uses the current UTC year.
-  public async nextOrderNumber(): Promise<string> {
-    const row = await this.orderRepository
-      .createQueryBuilder('o')
-      .select('MAX(o.id)', 'maxId')
-      .getRawOne<{ maxId: string | null }>();
-    const nextId = (row?.maxId ? Number(row.maxId) : 0) + 1;
-    return OrderTypeormRepository.formatOrderNumber(new Date().getUTCFullYear(), nextId);
-  }
-
   public async save(order: Order, scope?: ITransactionScope): Promise<Order> {
     // One transaction for the root + its lines: a half-written graph (the header
     // committed but a line missing) would corrupt the totals the order view reports.
@@ -180,7 +166,9 @@ export class OrderTypeormRepository
     delete rootPartial.orderNumber;
     await orderRepo.save({ ...rootPartial, id: existingId });
 
-    await this.persistLines(lineRepo, order, existingId);
+    // The lines are immutable place-time snapshots (no domain mutator touches
+    // them), so a re-save — a payment-status / version bump — updates the root
+    // only; rewriting N unchanged line rows would be pure waste.
     this.logger.debug({ orderId: existingId }, 'Order updated');
     return existingId;
   }

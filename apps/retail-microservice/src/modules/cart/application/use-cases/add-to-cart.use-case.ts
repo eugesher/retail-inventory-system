@@ -63,10 +63,14 @@ export class AddToCartUseCase {
     const occurredAt = (cart.pullDomainEvents()[0]?.occurredAt ?? new Date()).toISOString();
 
     try {
-      await this.publisher.publishCartLineAdded(
-        { cartId, variantId, quantity, eventVersion: 'v1', occurredAt, correlationId },
+      await this.publisher.publishCartLineAdded({
+        cartId,
+        variantId,
+        quantity,
+        eventVersion: 'v1',
+        occurredAt,
         correlationId,
-      );
+      });
     } catch (err) {
       this.logger.warn(
         { err: err as Error, correlationId, cartId, variantId },

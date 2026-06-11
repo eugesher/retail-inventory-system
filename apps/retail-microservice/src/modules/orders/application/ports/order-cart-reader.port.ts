@@ -1,3 +1,5 @@
+import { CartStatusEnum } from '@retail-inventory-system/contracts';
+
 import { ITransactionScope } from './transaction.port';
 
 export const ORDER_CART_READER = Symbol('ORDER_CART_READER');
@@ -12,7 +14,7 @@ export interface IOrderCartSnapshot {
   cartId: string;
   customerId: string | null;
   currency: string;
-  status: string; // 'active' | 'abandoned' | 'converted'
+  status: CartStatusEnum;
   lines: { variantId: number; quantity: number }[];
 }
 
@@ -26,9 +28,12 @@ export interface IOrderCartSnapshot {
 // - `findCart` resolves the snapshot (read-only, outside any transaction).
 // - `markConverted` flips an `active` cart to `converted` inside the place
 //   transaction (the `scope`), the one-shot conversion (ADR-028 §1). The
-//   `WHERE status = 'active'` guard makes a double-convert a no-op. Domain types
-//   only — no `typeorm` leak (ADR-017).
+//   `WHERE status = 'active'` guard is a compare-and-swap: the returned boolean
+//   is whether an `active` row was actually flipped. `false` means a concurrent
+//   place already converted (or a purge abandoned) the cart — the caller MUST
+//   abort its own transaction, or two racing places would each commit an order
+//   off the same cart. Domain types only — no `typeorm` leak (ADR-017).
 export interface IOrderCartReaderPort {
   findCart(cartId: string): Promise<IOrderCartSnapshot | null>;
-  markConverted(cartId: string, scope?: ITransactionScope): Promise<void>;
+  markConverted(cartId: string, scope?: ITransactionScope): Promise<boolean>;
 }
