@@ -1,6 +1,7 @@
 export * from './category.view';
 export * from './category-reparent.view';
 export * from './category-tree.view';
+export * from './media-asset.view';
 export * from './page.view';
 export * from './price.view';
 export * from './product.view';

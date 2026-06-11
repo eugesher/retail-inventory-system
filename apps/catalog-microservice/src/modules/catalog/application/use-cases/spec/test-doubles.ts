@@ -2,9 +2,10 @@ import {
   ICatalogProductArchivedEvent,
   ICatalogProductPublishedEvent,
   ICatalogVariantCreatedEvent,
+  MediaOwnerTypeEnum,
 } from '@retail-inventory-system/contracts';
 
-import { Category, Product, ProductVariant } from '../../../domain';
+import { Category, MediaAsset, Product, ProductVariant } from '../../../domain';
 import {
   IActivePriceProbePort,
   ICatalogEventsPublisherPort,
@@ -14,6 +15,8 @@ import {
   ICategoryListAllOptions,
   ICategoryRepositoryPort,
   ICategorySubtreeOptions,
+  IMediaAssetRepositoryPort,
+  IMediaListByOwnerOptions,
   IProductPage,
 } from '../../ports';
 
@@ -344,5 +347,93 @@ export class InMemoryCategoryRepository implements ICategoryRepositoryPort {
       .filter((category): category is Category => category !== undefined)
       .sort((a, b) => a.path.localeCompare(b.path));
     return Promise.resolve(categories);
+  }
+}
+
+// In-memory MediaAsset repository. `save` mimics the TypeORM repository's
+// post-commit re-read: it assigns a concrete id and returns a reconstituted
+// aggregate, so the attach use case reads the concrete `mediaId` back. `seed`
+// preloads a persisted asset. `maxSortOrder` mirrors the real adapter's
+// `MAX(sort_order)` across ALL rows (archived included), so the attach defaulting
+// spec can assert a detached row's slot is still counted into the max.
+// `reorder` RECORDS its arguments in `reorderCalls` (the reorder spec asserts it
+// is called exactly once on a valid permutation and never on a mismatch) and
+// re-slots the affected rows by array index before returning the refreshed active
+// list — the single-transaction mechanics are the real repository's concern,
+// locked by its own spec.
+export class InMemoryMediaAssetRepository implements IMediaAssetRepositoryPort {
+  public readonly saved: MediaAsset[] = [];
+  public readonly reorderCalls: {
+    ownerType: MediaOwnerTypeEnum;
+    ownerId: number;
+    orderedIds: number[];
+  }[] = [];
+
+  private readonly store = new Map<number, MediaAsset>();
+  private nextMediaId = 1000;
+
+  public seed(media: MediaAsset): void {
+    if (media.id === null) {
+      throw new Error(
+        'InMemoryMediaAssetRepository.seed: aggregate must be persisted (id !== null)',
+      );
+    }
+    this.store.set(media.id, media);
+  }
+
+  public save(media: MediaAsset): Promise<MediaAsset> {
+    const id = media.id ?? this.nextMediaId++;
+    const persisted = MediaAsset.reconstitute({
+      id,
+      ownerType: media.ownerType,
+      ownerId: media.ownerId,
+      uri: media.uri,
+      type: media.type,
+      altText: media.altText,
+      sortOrder: media.sortOrder,
+      status: media.status,
+    });
+    this.store.set(id, persisted);
+    this.saved.push(persisted);
+    return Promise.resolve(persisted);
+  }
+
+  public findById(id: number): Promise<MediaAsset | null> {
+    return Promise.resolve(this.store.get(id) ?? null);
+  }
+
+  public listByOwner(
+    ownerType: MediaOwnerTypeEnum,
+    ownerId: number,
+    opts?: IMediaListByOwnerOptions,
+  ): Promise<MediaAsset[]> {
+    let matched = [...this.store.values()].filter(
+      (media) => media.ownerType === ownerType && media.ownerId === ownerId,
+    );
+    if (opts?.activeOnly) {
+      matched = matched.filter((media) => media.isActive());
+    }
+    // `sortOrder ASC, id ASC` — mirrors the real adapter's ORDER BY.
+    matched.sort((a, b) => a.sortOrder - b.sortOrder || (a.id ?? 0) - (b.id ?? 0));
+    return Promise.resolve(matched);
+  }
+
+  public maxSortOrder(ownerType: MediaOwnerTypeEnum, ownerId: number): Promise<number | null> {
+    const slots = [...this.store.values()]
+      .filter((media) => media.ownerType === ownerType && media.ownerId === ownerId)
+      .map((media) => media.sortOrder);
+    return Promise.resolve(slots.length === 0 ? null : Math.max(...slots));
+  }
+
+  public reorder(
+    ownerType: MediaOwnerTypeEnum,
+    ownerId: number,
+    orderedIds: number[],
+  ): Promise<MediaAsset[]> {
+    this.reorderCalls.push({ ownerType, ownerId, orderedIds: [...orderedIds] });
+    orderedIds.forEach((id, index) => {
+      this.store.get(id)?.changeSortOrder(index);
+    });
+    return this.listByOwner(ownerType, ownerId, { activeOnly: true });
   }
 }
