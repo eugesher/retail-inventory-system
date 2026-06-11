@@ -77,8 +77,11 @@ describe('MediaAssetTypeormRepository', () => {
   let txQueryMock: jest.Mock;
   let transactionMock: jest.Mock;
   let findMock: jest.Mock;
+  let queryMock: jest.Mock;
   let createQueryBuilderMock: jest.Mock;
-  let mediaRepo: jest.Mocked<Pick<Repository<MediaAssetEntity>, 'find' | 'createQueryBuilder'>> & {
+  let mediaRepo: jest.Mocked<
+    Pick<Repository<MediaAssetEntity>, 'find' | 'query' | 'createQueryBuilder'>
+  > & {
     manager: { transaction: jest.Mock };
   };
   let repository: MediaAssetTypeormRepository;
@@ -87,6 +90,7 @@ describe('MediaAssetTypeormRepository', () => {
     jest.resetAllMocks();
     txQueryMock = jest.fn().mockResolvedValue(undefined);
     findMock = jest.fn();
+    queryMock = jest.fn();
     createQueryBuilderMock = jest.fn();
     // `manager.transaction(cb)` invokes the callback with a manager exposing a
     // `query` mock, so the spec drives every slot UPDATE through one stub.
@@ -95,6 +99,7 @@ describe('MediaAssetTypeormRepository', () => {
     );
     mediaRepo = {
       find: findMock,
+      query: queryMock,
       createQueryBuilder: createQueryBuilderMock,
       manager: { transaction: transactionMock },
     } as never;
@@ -173,6 +178,46 @@ describe('MediaAssetTypeormRepository', () => {
       createQueryBuilderMock.mockReturnValue(buildBuilder({ max: '4' }));
 
       await expect(repository.maxSortOrder(MediaOwnerTypeEnum.PRODUCT, 42)).resolves.toBe(4);
+    });
+  });
+
+  describe('hasActiveForOwners', () => {
+    it('short-circuits an empty owner list to false without touching the DB', async () => {
+      await expect(repository.hasActiveForOwners([])).resolves.toBe(false);
+      expect(queryMock).not.toHaveBeenCalled();
+    });
+
+    it('issues ONE parameterized owner-pair IN-list probe (LIMIT 1, status active)', async () => {
+      // A non-empty result set means at least one owner has active media.
+      queryMock.mockResolvedValue([{ present: 1 }]);
+
+      const result = await repository.hasActiveForOwners([
+        { ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: 100 },
+        { ownerType: MediaOwnerTypeEnum.PRODUCT_VARIANT, ownerId: 5001 },
+      ]);
+
+      expect(result).toBe(true);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+      // One `(?, ?)` placeholder per owner pair; values bound positionally, the
+      // status appended last — nothing interpolated.
+      expect(queryMock).toHaveBeenCalledWith(
+        'SELECT 1 AS present FROM media_asset WHERE (owner_type, owner_id) IN ((?, ?), (?, ?)) AND status = ? LIMIT 1',
+        [
+          MediaOwnerTypeEnum.PRODUCT,
+          100,
+          MediaOwnerTypeEnum.PRODUCT_VARIANT,
+          5001,
+          MediaAssetStatusEnum.ACTIVE,
+        ],
+      );
+    });
+
+    it('returns false when the probe finds no active media (empty result set)', async () => {
+      queryMock.mockResolvedValue([]);
+
+      await expect(
+        repository.hasActiveForOwners([{ ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: 100 }]),
+      ).resolves.toBe(false);
     });
   });
 });
