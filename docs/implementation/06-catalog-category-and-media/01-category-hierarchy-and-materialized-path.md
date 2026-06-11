@@ -95,7 +95,7 @@ schema-free test is also the cycle guard the reparent path calls (§6).
 ## 4. The schema
 
 Two tables ship in
-[`migrations/1781260000000-CreateCategoryTables.ts`](../../../migrations/1781260000000-CreateCategoryTables.ts).
+[`migrations/1781189000000-CreateCategoryTables.ts`](../../../migrations/1781189000000-CreateCategoryTables.ts).
 
 `category`:
 

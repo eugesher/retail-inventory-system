@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateCategoryTables1781260000000 implements MigrationInterface {
+export class CreateCategoryTables1781189000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // `id` is BIGINT UNSIGNED AUTO_INCREMENT to match the project convention for
     // catalog tables (see CreateCatalogTables). The entities extend `BaseEntity`,
