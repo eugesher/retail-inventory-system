@@ -12,6 +12,8 @@ const CATALOG_ERROR_STATUS: Record<CatalogErrorCodeEnum, HttpStatus> = {
   // Read/lookup misses → 404.
   [CatalogErrorCodeEnum.PRODUCT_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [CatalogErrorCodeEnum.VARIANT_NOT_FOUND]: HttpStatus.NOT_FOUND,
+  [CatalogErrorCodeEnum.CATEGORY_NOT_FOUND]: HttpStatus.NOT_FOUND,
+  [CatalogErrorCodeEnum.CATEGORY_PARENT_NOT_FOUND]: HttpStatus.NOT_FOUND,
 
   // Uniqueness collisions and lifecycle conflicts → 409: the request is
   // well-formed but conflicts with the current state of the resource (a slug/sku
@@ -25,6 +27,14 @@ const CATALOG_ERROR_STATUS: Record<CatalogErrorCodeEnum, HttpStatus> = {
   // variant-count and illegal-transition conflicts above (ADR-026).
   [CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_PRICE]: HttpStatus.CONFLICT,
 
+  // Category conflicts → 409: a duplicate slug, a reparent that would form a
+  // cycle, an illegal archive transition, or an operation on an archived
+  // category are all well-formed requests the resource state forbids (ADR-029).
+  [CatalogErrorCodeEnum.CATEGORY_SLUG_TAKEN]: HttpStatus.CONFLICT,
+  [CatalogErrorCodeEnum.CATEGORY_CYCLE]: HttpStatus.CONFLICT,
+  [CatalogErrorCodeEnum.CATEGORY_INVALID_STATE_TRANSITION]: HttpStatus.CONFLICT,
+  [CatalogErrorCodeEnum.CATEGORY_ARCHIVED]: HttpStatus.CONFLICT,
+
   // Malformed input invariants → 400. These are normally caught by the gateway
   // request DTOs first; this is the backstop for the directly-reachable RMQ path.
   [CatalogErrorCodeEnum.PRODUCT_NAME_REQUIRED]: HttpStatus.BAD_REQUEST,
@@ -33,6 +43,9 @@ const CATALOG_ERROR_STATUS: Record<CatalogErrorCodeEnum, HttpStatus> = {
   [CatalogErrorCodeEnum.VARIANT_OPTION_VALUES_REQUIRED]: HttpStatus.BAD_REQUEST,
   [CatalogErrorCodeEnum.VARIANT_WEIGHT_INVALID]: HttpStatus.BAD_REQUEST,
   [CatalogErrorCodeEnum.VARIANT_DIMENSIONS_INVALID]: HttpStatus.BAD_REQUEST,
+  [CatalogErrorCodeEnum.CATEGORY_NAME_REQUIRED]: HttpStatus.BAD_REQUEST,
+  [CatalogErrorCodeEnum.CATEGORY_SLUG_INVALID]: HttpStatus.BAD_REQUEST,
+  [CatalogErrorCodeEnum.CATEGORY_SORT_ORDER_INVALID]: HttpStatus.BAD_REQUEST,
 };
 
 // Terminates a `CatalogDomainException` into the wire error shape the gateway's
