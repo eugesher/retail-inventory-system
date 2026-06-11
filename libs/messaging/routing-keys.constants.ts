@@ -26,6 +26,15 @@ export const ROUTING_KEYS = {
   CATALOG_TAX_CATEGORY_CREATE: 'catalog.tax-category.create',
   CATALOG_TAX_CATEGORY_LIST: 'catalog.tax-category.list',
   CATALOG_VARIANT_SET_TAX_CATEGORY: 'catalog.variant.set-tax-category',
+  // Category RPC command keys (API Gateway → Catalog on `catalog_queue`). Each is
+  // served by a `@MessagePattern` handler on the catalog category controller:
+  // `catalog.category.create` → `CreateCategoryUseCase` → `CategoryView`,
+  // `catalog.category.reparent` → `ReparentCategoryUseCase` → `CategoryReparentView`.
+  // The category capability emits NO events — a reparent or create has no
+  // cross-service consumer today, so there are no past-tense `catalog.category.*`
+  // surfaces to pair with these commands (ADR-029 §6).
+  CATALOG_CATEGORY_CREATE: 'catalog.category.create',
+  CATALOG_CATEGORY_REPARENT: 'catalog.category.reparent',
   // Cart RPC command keys (API Gateway → Retail). Each is served by a
   // `@MessagePattern` handler on the retail cart controller and resolves to a
   // `CartView`; `retail.cart.claim` is the guest-promotion re-point (ADR-028 §9).

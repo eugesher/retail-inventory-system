@@ -85,6 +85,12 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.CATALOG_VARIANT_SET_TAX_CATEGORY).toBe(
       MicroserviceMessagePatternEnum.CATALOG_VARIANT_SET_TAX_CATEGORY,
     );
+    expect(ROUTING_KEYS.CATALOG_CATEGORY_CREATE).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_CATEGORY_CREATE,
+    );
+    expect(ROUTING_KEYS.CATALOG_CATEGORY_REPARENT).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_CATEGORY_REPARENT,
+    );
     expect(ROUTING_KEYS.RETAIL_CART_CREATE).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_CREATE);
     expect(ROUTING_KEYS.RETAIL_CART_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_GET);
     expect(ROUTING_KEYS.RETAIL_CART_ADD_LINE).toBe(

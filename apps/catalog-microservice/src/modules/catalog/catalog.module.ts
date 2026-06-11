@@ -18,11 +18,13 @@ import {
 import {
   AddVariantUseCase,
   ArchiveProductUseCase,
+  CreateCategoryUseCase,
   GetProductBySlugUseCase,
   GetVariantUseCase,
   ListProductsUseCase,
   PublishProductUseCase,
   RegisterProductUseCase,
+  ReparentCategoryUseCase,
 } from './application/use-cases';
 import { CatalogRabbitmqPublisher } from './infrastructure/messaging';
 import {
@@ -33,7 +35,7 @@ import {
   ProductEntity,
   ProductVariantEntity,
 } from './infrastructure/persistence';
-import { CatalogController, CatalogRpcExceptionFilter } from './presentation';
+import { CatalogController, CatalogRpcExceptionFilter, CategoryController } from './presentation';
 
 // The currency the publish precondition resolves against. `ConfigModule` is
 // global (registered at the app root), so `ConfigService` injects here without a
@@ -62,7 +64,7 @@ const DEFAULT_CURRENCY_PROVIDER = {
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
   ],
-  controllers: [CatalogController],
+  controllers: [CatalogController, CategoryController],
   providers: [
     // Maps every `CatalogDomainException` onto a wire error carrying an HTTP
     // `statusCode`, so the gateway resolves not-found → 404, taken/illegal-state
@@ -75,8 +77,8 @@ const DEFAULT_CURRENCY_PROVIDER = {
     { provide: CATALOG_REPOSITORY, useExisting: CatalogTypeormRepository },
 
     // The Category aggregate's own repository seam (a separate port from
-    // `CATALOG_REPOSITORY` — one port per aggregate, ADR-029 §8). No category
-    // use cases yet; the binding lands here so the next session is contract-only.
+    // `CATALOG_REPOSITORY` — one port per aggregate, ADR-029 §8). Consumed by the
+    // category write use cases (create / reparent) registered below.
     CategoryTypeormRepository,
     { provide: CATEGORY_REPOSITORY, useExisting: CategoryTypeormRepository },
 
@@ -97,6 +99,10 @@ const DEFAULT_CURRENCY_PROVIDER = {
     ListProductsUseCase,
     GetProductBySlugUseCase,
     GetVariantUseCase,
+
+    // Category write use cases — served by `CategoryController` on `catalog_queue`.
+    CreateCategoryUseCase,
+    ReparentCategoryUseCase,
   ],
 })
 export class CatalogModule {}

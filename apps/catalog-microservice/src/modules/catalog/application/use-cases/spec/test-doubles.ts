@@ -4,12 +4,15 @@ import {
   ICatalogVariantCreatedEvent,
 } from '@retail-inventory-system/contracts';
 
-import { Product, ProductVariant } from '../../../domain';
+import { Category, Product, ProductVariant } from '../../../domain';
 import {
   IActivePriceProbePort,
   ICatalogEventsPublisherPort,
   ICatalogListActiveQuery,
   ICatalogRepositoryPort,
+  ICategoryListAllOptions,
+  ICategoryRepositoryPort,
+  ICategorySubtreeOptions,
   IProductPage,
 } from '../../ports';
 
@@ -171,5 +174,98 @@ export class InMemoryCatalogEventsPublisher implements ICatalogEventsPublisherPo
   ): Promise<void> {
     this.productArchived.push({ event, correlationId });
     return Promise.resolve();
+  }
+}
+
+// In-memory Category repository. `save` mimics the TypeORM repository's
+// post-commit re-read: it assigns a concrete id and returns a reconstituted
+// aggregate, so the create use case reads the concrete `categoryId` back. `seed`
+// preloads a persisted category (e.g. a parent or a reparent target). `existsBySlug`
+// honours an explicit `slugTaken` override (so a spec can force the duplicate-slug
+// path) on top of the seeded rows. `reparentSubtree` RECORDS its arguments in
+// `reparentCalls` (the use-case spec asserts it received the recomputed aggregate +
+// the captured `oldPath`) and returns the configurable `reparentReturnCount` — the
+// single-transaction rebase itself is the real repository's concern, locked by its
+// own spec, so the double only needs to surface the count.
+export class InMemoryCategoryRepository implements ICategoryRepositoryPort {
+  public slugTaken = false;
+  public reparentReturnCount = 0;
+  public readonly saved: Category[] = [];
+  public readonly reparentCalls: { category: Category; oldPath: string }[] = [];
+
+  private readonly store = new Map<number, Category>();
+  private nextCategoryId = 100;
+
+  public seed(category: Category): void {
+    if (category.id === null) {
+      throw new Error('InMemoryCategoryRepository.seed: aggregate must be persisted (id !== null)');
+    }
+    this.store.set(category.id, category);
+  }
+
+  public save(category: Category): Promise<Category> {
+    const id = category.id ?? this.nextCategoryId++;
+    const persisted = Category.reconstitute({
+      id,
+      name: category.name,
+      slug: category.slug,
+      parentId: category.parentId,
+      path: category.path,
+      sortOrder: category.sortOrder,
+      status: category.status,
+    });
+    this.store.set(id, persisted);
+    this.saved.push(persisted);
+    return Promise.resolve(persisted);
+  }
+
+  public findById(id: number): Promise<Category | null> {
+    return Promise.resolve(this.store.get(id) ?? null);
+  }
+
+  public findBySlug(slug: string): Promise<Category | null> {
+    for (const category of this.store.values()) {
+      if (category.slug === slug) return Promise.resolve(category);
+    }
+    return Promise.resolve(null);
+  }
+
+  public existsBySlug(slug: string): Promise<boolean> {
+    if (this.slugTaken) return Promise.resolve(true);
+    for (const category of this.store.values()) {
+      if (category.slug === slug) return Promise.resolve(true);
+    }
+    return Promise.resolve(false);
+  }
+
+  public listAll(opts: ICategoryListAllOptions): Promise<Category[]> {
+    let matched = [...this.store.values()];
+    if (opts.rootOnly) {
+      matched = matched.filter((category) => category.parentId === null);
+    }
+    if (opts.activeOnly) {
+      matched = matched.filter((category) => category.isActive());
+    }
+    matched.sort((a, b) => a.path.localeCompare(b.path));
+    return Promise.resolve(matched);
+  }
+
+  public listSubtree(pathPrefix: string, opts?: ICategorySubtreeOptions): Promise<Category[]> {
+    let matched = [...this.store.values()].filter(
+      (category) => category.path === pathPrefix || category.path.startsWith(`${pathPrefix}/`),
+    );
+    if (opts?.activeOnly) {
+      matched = matched.filter((category) => category.isActive());
+    }
+    matched.sort((a, b) => a.path.localeCompare(b.path));
+    return Promise.resolve(matched);
+  }
+
+  public reparentSubtree(category: Category, oldPath: string): Promise<number> {
+    this.reparentCalls.push({ category, oldPath });
+    if (category.id !== null) {
+      this.store.set(category.id, category);
+    }
+    return Promise.resolve(this.reparentReturnCount);
   }
 }
