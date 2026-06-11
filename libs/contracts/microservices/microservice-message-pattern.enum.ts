@@ -29,6 +29,8 @@ export enum MicroserviceMessagePatternEnum {
   CATALOG_TAX_CATEGORY_CREATE = 'catalog.tax-category.create',
   CATALOG_TAX_CATEGORY_LIST = 'catalog.tax-category.list',
   CATALOG_VARIANT_SET_TAX_CATEGORY = 'catalog.variant.set-tax-category',
+  CATALOG_CATEGORY_CREATE = 'catalog.category.create',
+  CATALOG_CATEGORY_REPARENT = 'catalog.category.reparent',
   RETAIL_CART_CREATE = 'retail.cart.create',
   RETAIL_CART_GET = 'retail.cart.get',
   RETAIL_CART_ADD_LINE = 'retail.cart.add-line',

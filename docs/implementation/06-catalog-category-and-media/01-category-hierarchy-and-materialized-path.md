@@ -1,14 +1,16 @@
 # 01 — Category hierarchy and the materialized path
 
-This document records the **foundation of the catalog category hierarchy**: a
-`Category` write aggregate that models a tree with a *materialized path*, its
-repository contract and TypeORM adapter (including the one-transaction subtree
-rebase), and the `category` + `product_categories` schema. It is the first half
-of the category capability — the domain model, the persistence, and the
-migration. The use cases that *drive* it (create a category, reparent a subtree,
-reclassify a product, browse by category) build on this contract in later
-catalog work; the "Reparenting and cycle detection in practice" section below is
-the seam they fill in.
+This document records the **catalog category hierarchy**: a `Category` write
+aggregate that models a tree with a *materialized path*, its repository contract
+and TypeORM adapter (including the one-transaction subtree rebase), the
+`category` + `product_categories` schema, and the two write operations that drive
+it over RabbitMQ — **create a category** and **reparent a subtree**. The domain
+model, persistence, and migration are the foundation; the create/reparent use
+cases, their wire contracts, and the `catalog.category.create` /
+`catalog.category.reparent` RPC keys build directly on that contract and are
+covered in §8–§9. Two category capabilities are still ahead — **reclassifying a
+product** into categories and **browsing** a category's products — along with the
+gateway HTTP surface that fronts these RPCs; they reuse this same repository port.
 
 The code lives under `apps/catalog-microservice/src/modules/catalog/` — `Category`
 is a **sibling write aggregate inside the existing catalog module**, next to
@@ -186,23 +188,152 @@ landing the codes and mappings here keeps the filter's status map total.
 
 ## 8. Reparenting and cycle detection in practice
 
-> **Placeholder — completed by the reparent use-case work.**
->
-> The mechanism is in place at the model and repository layers and is described
-> above:
->
-> - `Category.reparentUnder(newParent | null)` recomputes the moved category's
->   **own** `parentId` + `path` (a `null` parent demotes it to a root) and rejects
->   a cycle with `CATEGORY_CYCLE` when `this.isAncestorOfOrSelf(newParent)` (you
->   cannot move a category under itself or one of its own descendants).
-> - `CategoryTypeormRepository.reparentSubtree(category, oldPath)` rebases the
->   subtree in **one** transaction: the moved-row `UPDATE`, then a single bulk
->   `UPDATE category SET path = CONCAT(?, SUBSTRING(path, LENGTH(oldPath)+1))
->   WHERE path LIKE ?` over the old subtree (all parameterized), returning the
->   descendant-rewrite count.
->
-> The end-to-end reparent flow — the use case that loads the category and the new
-> parent, snapshots the old path, calls `reparentUnder`, persists via
-> `reparentSubtree`, and surfaces the rewrite count in the response, plus the RPC
-> key, the gateway route, and the worked example of a multi-level move — is
-> documented here when that work lands.
+Reparenting a category is the one structurally interesting category write: moving
+a node moves its **whole subtree**, because every descendant's materialized `path`
+embeds the moved node's path as a prefix. The work is split deliberately across
+the domain and the repository.
+
+### Who recomputes what
+
+`Category.reparentUnder(newParent | null)` recomputes **only the moved node's own**
+`parentId` + `path` — a `null` parent demotes it to a root (`path = '/<slug>'`),
+otherwise it hangs off the new parent (`path = newParent.path + '/<slug>'`). It
+does **not** touch its descendants: each `category` row is its own aggregate, so
+rebasing the rest of the subtree is a persistence concern, not a model one. Before
+mutating, it runs the **cycle guard** — `isAncestorOfOrSelf(newParent)` from §3 —
+and throws `CATEGORY_CYCLE` when the target is the node itself or one of its own
+descendants. You cannot move a branch under a leaf of that same branch; the
+path-prefix test catches it with no recursion. The `/`-boundary edge matters here
+too: with paths `/a` and `/ab`, moving `/a` under `/ab` is **allowed** (`/ab` is a
+different category that merely shares a slug prefix — it is not a descendant of
+`/a`), whereas moving `/a` under `/a/b` is rejected.
+
+`ReparentCategoryUseCase` is the orchestrator that sequences this with the
+repository:
+
+1. `findBySlug(slug)` the category to move → `CATEGORY_NOT_FOUND` (404) on a miss.
+2. Resolve the destination parent: a non-null `newParentSlug` → `findBySlug` →
+   `CATEGORY_PARENT_NOT_FOUND` (404) on a miss, `CATEGORY_ARCHIVED` (409) on an
+   archived parent (a live subtree must not be moved under a hidden one);
+   `null`/omitted → root demotion.
+3. **Snapshot `oldPath = category.path` BEFORE** calling `reparentUnder`. This is
+   load-bearing: the repository rebases descendants by matching the *old* path
+   prefix, so it must be captured while the aggregate still carries the pre-move
+   path. Recomputing first would lose it.
+4. `category.reparentUnder(newParent)` — recompute own position + the cycle guard.
+5. `repository.reparentSubtree(category, oldPath)` — persist both halves in one
+   transaction (below) and return the descendant-rewrite count.
+6. Map the moved aggregate (already carrying its recomputed position) into the
+   response and surface the count.
+
+### The one-transaction subtree rebase
+
+`CategoryTypeormRepository.reparentSubtree(category, oldPath)` writes both the
+moved row and every descendant inside a **single** `manager.transaction` — the
+`PricingTypeormRepository.appendPrice` precedent, where the transaction lives
+inside the repository method (no `ITransactionPort` needed). A window in which the
+parent had moved but its descendants still carried the old prefix would leave the
+tree internally inconsistent, so the two statements commit together:
+
+```sql
+-- 1. the moved row: write its already-recomputed parent_id + path
+UPDATE category SET parent_id = ?, path = ? WHERE id = ?;
+
+-- 2. every strict descendant: swap the old path prefix for the new one in bulk
+UPDATE category
+   SET path = CONCAT(?, SUBSTRING(path, ? + 1))
+ WHERE path LIKE ?;
+```
+
+The bulk statement is the heart of the rebase. `SUBSTRING(path, LENGTH(oldPath) + 1)`
+is the **tail** of each descendant path after the old prefix (for a descendant
+`/electronics/phones/audio` moved out of `/electronics/phones`, the tail is
+`/audio`), and `CONCAT(newPath, …)` re-prefixes it with the moved node's new path
+— so `/gadgets/phones/audio` falls out. The `LIKE` bind is `oldPath + '/%'`, which
+matches **strict descendants only** and excludes the moved row itself (its path no
+longer starts with `oldPath/` after step 1). Both statements are **parameterized**
+— `?` placeholders bound by the driver, never string-interpolated; a materialized
+path contains only kebab-case slugs and `/`, so it can never carry a `LIKE`
+wildcard, but the bind keeps the query injection-safe regardless. The statement
+returns mysql2's `affectedRows` — the descendant-rewrite count the response
+surfaces (`CategoryReparentView.rewrittenDescendantCount`; `0` for a leaf move).
+
+### Root demotion and the idempotent same-parent reparent
+
+Two edges fall out of the same mechanism for free, neither special-cased:
+
+- **Root demotion** — omitting `newParentSlug` (or sending `null`) reparents under
+  `null`: `reparentUnder(null)` recomputes the path to `/<slug>` and nulls
+  `parentId`. A category dragged out of `/electronics/phones` to the top becomes
+  `/phones`, and its descendants rebase onto the new short prefix exactly as a
+  normal move.
+- **Same-parent reparent is an idempotent success** — moving a category under the
+  parent it already has recomputes its path to the identical value, and the cycle
+  guard does **not** fire (a node is not its own descendant). The rebase rewrites
+  the descendants to the same paths they already held. This is deliberately **not**
+  rejected: a no-op move returning the unchanged tree is the least surprising
+  behaviour for a caller that re-issues a move.
+
+## 9. The write operations over RabbitMQ
+
+Both category writes are RPC commands (Gateway → Catalog on `catalog_queue`),
+served by `CategoryController` — a controller **separate** from the product
+`CatalogController` so each file stays one-aggregate-shaped. The handlers are thin
+(`@MessagePattern` → use case); `correlationId` is logged inline inside each use
+case, never in the handler, because `PinoLogger.assign()` throws outside an HTTP
+request scope (ADR-001 / ADR-011). The `APP_FILTER`-registered
+`CatalogRpcExceptionFilter` already covers every controller in the module, so the
+`CATEGORY_*` codes map to HTTP with no extra wiring. **The category capability
+emits no events** (§6), so there are no past-tense `catalog.category.*` surfaces to
+pair with these commands.
+
+| RPC key | Use case | Payload | Response |
+| --- | --- | --- | --- |
+| `catalog.category.create` | `CreateCategoryUseCase` | `ICreateCategoryPayload` (`name`, `slug`, `parentSlug?`, `sortOrder?`) | `CategoryView` |
+| `catalog.category.reparent` | `ReparentCategoryUseCase` | `IReparentCategoryPayload` (`slug`, `newParentSlug?`) | `CategoryReparentView` |
+
+**Create** inserts an `active` category: it pre-checks slug uniqueness through the
+repository (`existsBySlug` → `CATEGORY_SLUG_TAKEN`, the UNIQUE constraint staying
+the hard guard), resolves the parent by slug when `parentSlug` is present (a miss
+is `CATEGORY_PARENT_NOT_FOUND`, an archived parent `CATEGORY_ARCHIVED` — a new
+child must not extend a hidden subtree), then `Category.create(...)` derives the
+`path` from the loaded parent (root when absent) and enforces the field invariants.
+The parent is addressed by **slug**, not id — the stable handle the gateway holds.
+
+The contracts (`CategoryView` / `CategoryReparentView` / `ICreateCategoryPayload` /
+`IReparentCategoryPayload`) live in `@retail-inventory-system/contracts`, imported
+by both the gateway and the catalog microservice, so a drift fails TypeScript on
+both ends (ADR-005). The dotted RPC keys are mirrored value-for-value into
+`MicroserviceMessagePatternEnum`, locked by `routing-keys.constants.spec.ts`
+(ADR-008). The shared `toCategoryView` factory is the single projection from the
+`Category` aggregate to the wire view (the `catalog-view.factory.ts` pattern).
+
+### The use-case rejection matrix
+
+Every category rejection is a typed `CatalogErrorCodeEnum` code the filter maps to
+an HTTP status:
+
+| Code | HTTP | Raised when |
+| --- | --- | --- |
+| `CATEGORY_NAME_REQUIRED` / `CATEGORY_SLUG_INVALID` / `CATEGORY_SORT_ORDER_INVALID` | 400 | `Category.create` invariant violation (malformed input). |
+| `CATEGORY_NOT_FOUND` | 404 | Reparent target slug resolves to nothing. |
+| `CATEGORY_PARENT_NOT_FOUND` | 404 | Create/reparent parent slug resolves to nothing. |
+| `CATEGORY_SLUG_TAKEN` | 409 | Create slug already exists. |
+| `CATEGORY_ARCHIVED` | 409 | Create/reparent under an archived parent. |
+| `CATEGORY_CYCLE` | 409 | Reparent under self or a descendant. |
+
+**No gateway HTTP route ships yet** — the RPCs are reachable through an RMQ client
+and exercised by the use-case unit specs; the gateway `modules/catalog/` route
+that fronts them lands with the gateway category work.
+
+## See also
+
+- [ADR-029](../../adr/029-category-materialized-path-and-polymorphic-media.md) —
+  the decision of record: the materialized path, the reparent split, cycle
+  detection in the domain, no events, and the per-aggregate repository port.
+- [ADR-025](../../adr/025-catalog-product-and-variant-aggregate.md) — the catalog
+  `Product` aggregate whose template (`AggregateRoot` + status soft-delete,
+  repository-level slug uniqueness, the typed `CatalogDomainException`) `Category`
+  follows.
+- [ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md) — the dotted routing-key
+  convention and the `ROUTING_KEYS` ⇆ `MicroserviceMessagePatternEnum` lock-step.

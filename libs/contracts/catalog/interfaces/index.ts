@@ -1,4 +1,6 @@
 export * from './archive-product.interface';
+export * from './category-create.interface';
+export * from './category-reparent.interface';
 export * from './create-variant.interface';
 export * from './get-product-by-slug.interface';
 export * from './get-variant.interface';
