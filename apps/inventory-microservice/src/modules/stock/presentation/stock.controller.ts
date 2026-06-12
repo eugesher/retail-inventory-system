@@ -1,8 +1,7 @@
 import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import { MessagePattern, Payload } from '@nestjs/microservices';
 
 import {
-  IProductStockOrderConfirmPayload,
   IStockAdjustPayload,
   IStockLocationsListPayload,
   IStockReceivePayload,
@@ -60,21 +59,5 @@ export class StockController {
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST)
   public handleStockAdjust(@Payload() payload: IStockAdjustPayload): Promise<StockLevelView> {
     return this.adjustStock.execute(payload);
-  }
-
-  // The `inventory.order.confirm` seam is preserved as an explicit deprecation
-  // error rather than removed outright, so any lingering caller resolves to a
-  // typed error instead of an RPC timeout. Stock reservation now belongs to the
-  // inventory-reservation capability; the whole seam (this handler + the
-  // `IProductStockOrderConfirmPayload` contract) is removed when that capability
-  // lands. The legacy retail-side caller has already been torn down; the
-  // `@Payload()` signature is kept only so the reserved contract still
-  // type-checks (ADR-027).
-  @MessagePattern(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM)
-  public handleOrderConfirm(@Payload() payload: IProductStockOrderConfirmPayload): never {
-    void payload;
-    throw new RpcException(
-      'inventory.order.confirm is deprecated; reservation is handled by the inventory-reservation capability',
-    );
   }
 }
