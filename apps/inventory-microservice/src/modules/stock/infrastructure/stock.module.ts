@@ -40,9 +40,8 @@ import {
 // Two messaging clients are imported: `MicroserviceClientNotificationModule` for
 // `inventory.stock.low`, and `MicroserviceClientInventoryModule` so the publisher
 // can emit `inventory.stock-level.initialized` onto this service's own queue. The
-// transaction adapter is retained for the write operations later inventory
-// capabilities add; the `inventory.order.confirm` deprecation stub stays on the
-// controller.
+// transaction adapter backs the Receive/Adjust write path and the optimistic
+// writes the inventory-reservation capability adds.
 @Module({
   imports: [
     DatabaseModule.forFeature([StockLocationEntity, StockLevelEntity]),

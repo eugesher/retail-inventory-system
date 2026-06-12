@@ -3,7 +3,6 @@ import {
   StockLevelInitializedEvent,
   StockLowEvent,
   StockReceivedEvent,
-  StockReservedEvent,
 } from '../../domain';
 
 export const STOCK_EVENTS_PUBLISHER = Symbol('STOCK_EVENTS_PUBLISHER');
@@ -15,7 +14,6 @@ export interface IStockEventsPublisherPort {
   // service's queue); everything else here is a reserved surface on the
   // inventory service's own `inventory_queue` (no cross-service consumer yet).
   publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void>;
-  publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void>;
   // Emitted by the Receive Stock operation onto `inventory_queue`.
   publishStockReceived(event: StockReceivedEvent, correlationId?: string): Promise<void>;
   // Emitted by the Adjust Stock operation onto `inventory_queue`.

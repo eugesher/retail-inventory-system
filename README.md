@@ -84,7 +84,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  Retail Microservice   │  │    Inventory Microservice     │
 │  Cart: 6 RPCs + place  │  │  RPC: stock-level.get,        │
 │  + 4 events (cart).    │  │  location.list, receive,      │
-│  Orders: get / list /  │  │  adjust; order.confirm (stub) │
+│  Orders: get / list /  │  │  adjust                       │
 │  capture (orders).     │  │  Consumes: variant.created    │
 │  PAYMENT_GATEWAY ->    │  │  Emits: inventory.stock.low ──┼─┐
 │  FakePaymentGateway.   │  │                               │ │
@@ -263,13 +263,13 @@ apps/inventory-microservice/src/
     │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (inventory_queue + notification_events)
     │   └── stock.module.ts                    # binds the four port symbols → adapters; APP_FILTER → InventoryRpcExceptionFilter
     └── presentation/
-        ├── stock.controller.ts                # @MessagePattern: stock-level.get/receive/adjust, location.list, order.confirm (stub)
+        ├── stock.controller.ts                # @MessagePattern: stock-level.get/receive/adjust, location.list
         └── inventory-rpc-exception.filter.ts  # maps InventoryErrorCodeEnum → HTTP status
 ```
 
 The `stock` context keys everything on the catalog **`variantId`** (an opaque cross-service FK to `product_variant`), not a local product id. `StockLevel` persists running totals per `(variantId, stockLocationId)` and exposes only `changeOnHand(delta)` today (with `available = onHand − allocated − reserved` a pure getter); `StockLocation` is a first-class aggregate with a caller-assigned string PK (`default-warehouse` is auto-provisioned by the migration). Reservation, allocation, transfer, and a `StockMovement` audit ledger — together with the `version` optimistic-lock enforcement — are deferred to a later inventory-reservation capability.
 
-`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the four inventory events (`inventory.stock.{received,adjusted,low}` + `inventory.stock-level.initialized`); the `inventory.order.confirm` handler is a kept-but-deprecated `RpcException` stub (stock reservation moves to the later inventory-reservation capability). See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
+`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the four inventory events (`inventory.stock.{received,adjusted,low}` + `inventory.stock-level.initialized`). See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
 
 The retail microservice hosts the **mutable side of the rebuilt checkout**: the `cart` bounded-context module. Its first-generation `orders` model — a single `Order` aggregate that expanded each line into one `order_product` row per unit, a two-value status, and a cross-service `inventory.order.confirm` reserve call — was torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild. The `Cart` aggregate root (a caller-assigned `CHAR(36)` UUID id, generated in-app) owns its `CartLine` children; the status machine is `active → converted` (placement) / `active → abandoned` (purge), both terminal. Each mutator (`addLine` increments an existing line rather than duplicating it; `changeLineQuantity` rejects `0`; `removeLine`; `markConverted`; `markAbandoned`) advances a `version` optimistic-concurrency token — shipped now though its guard is a later capability — and records a framework-free domain event. A `CartLine` snapshots its unit price (in minor units) and currency at add-time, so a sibling line's change never re-prices it; `variantId` is the opaque catalog backbone key. The `cart` / `cart_line` tables FK onto the gateway `customer` and the catalog `product_variant` in the one shared database.
 

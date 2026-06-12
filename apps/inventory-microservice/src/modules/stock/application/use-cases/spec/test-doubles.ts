@@ -7,7 +7,6 @@ import {
   StockLocation,
   StockLowEvent,
   StockReceivedEvent,
-  StockReservedEvent,
 } from '../../../domain';
 import {
   IStockCacheGetPayload,
@@ -212,16 +211,10 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
   public readonly low: { event: StockLowEvent; correlationId?: string }[] = [];
   public readonly received: { event: StockReceivedEvent; correlationId?: string }[] = [];
   public readonly adjusted: { event: StockAdjustedEvent; correlationId?: string }[] = [];
-  public readonly reserved: { event: StockReservedEvent; correlationId?: string }[] = [];
   public readonly initialized: { event: StockLevelInitializedEvent; correlationId?: string }[] = [];
 
   public publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void> {
     this.low.push({ event, correlationId });
-    return Promise.resolve();
-  }
-
-  public publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void> {
-    this.reserved.push({ event, correlationId });
     return Promise.resolve();
   }
 

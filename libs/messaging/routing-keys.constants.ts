@@ -1,5 +1,4 @@
 export const ROUTING_KEYS = {
-  INVENTORY_ORDER_CONFIRM: 'inventory.order.confirm',
   INVENTORY_STOCK_LOW: 'inventory.stock.low',
   INVENTORY_STOCK_RECEIVED: 'inventory.stock.received',
   INVENTORY_STOCK_ADJUSTED: 'inventory.stock.adjusted',
