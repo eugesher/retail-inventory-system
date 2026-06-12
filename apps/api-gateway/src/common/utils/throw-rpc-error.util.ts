@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   HttpStatus,
   InternalServerErrorException,
   NotFoundException,
@@ -31,6 +32,22 @@ export function throwRpcError(error: unknown): never {
     // the gateway owner-check normally fires first, but map it so the backstop
     // never collapses into a 500.
     if (statusCode === HttpStatus.FORBIDDEN) throw new ForbiddenException(payload);
+
+    // Any OTHER upstream HTTP error status that still carried a typed code (a
+    // future 401/422/429 mapping, or an upstream 500 that nonetheless tagged a
+    // code) — forward the status AND the code rather than letting the `payload`
+    // just built collapse into a bodyless 500, which would silently defeat the
+    // code-forwarding above. A non-RPC error (no `code`, or a NaN `statusCode`
+    // from a transport-level rejection) still falls through to the bare 500.
+    const numericStatus = Number(statusCode);
+    if (
+      code !== undefined &&
+      Number.isInteger(numericStatus) &&
+      numericStatus >= 400 &&
+      numericStatus <= 599
+    ) {
+      throw new HttpException({ statusCode, message, code }, statusCode);
+    }
   }
 
   throw new InternalServerErrorException();

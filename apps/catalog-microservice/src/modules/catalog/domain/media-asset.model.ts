@@ -55,7 +55,7 @@ export class MediaAsset extends AggregateRoot<number | null> {
   private readonly _uri: string;
   private readonly _type: MediaAssetTypeEnum;
   private readonly _altText: string | null;
-  private _sortOrder: number;
+  private readonly _sortOrder: number;
   private _status: MediaAssetStatusEnum;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
@@ -175,18 +175,5 @@ export class MediaAsset extends AggregateRoot<number | null> {
       );
     }
     this._status = MediaAssetStatusEnum.ARCHIVED;
-  }
-
-  // Repositions the asset within its owner's strip. Used by the bulk reorder,
-  // which assigns each asset its array index. Re-validates the non-negative-integer
-  // invariant so an out-of-band caller cannot forge a bad slot.
-  public changeSortOrder(sortOrder: number): void {
-    if (!Number.isInteger(sortOrder) || sortOrder < 0) {
-      throw new CatalogDomainException(
-        CatalogErrorCodeEnum.MEDIA_SORT_ORDER_INVALID,
-        'MediaAsset.changeSortOrder: sortOrder must be a non-negative integer',
-      );
-    }
-    this._sortOrder = sortOrder;
   }
 }

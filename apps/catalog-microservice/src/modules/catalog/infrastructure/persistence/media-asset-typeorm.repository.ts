@@ -17,13 +17,6 @@ interface IMaxSortOrderRaw {
   max: string | number | null;
 }
 
-// The existence-probe row shape (`SELECT 1 AS present`). Typing the `query<...>`
-// generic with this row keeps the result off `any` (no cast, no `no-unsafe-*`
-// leak) — the `ActivePriceProbeTypeormAdapter` precedent.
-interface IExistsRow {
-  present: number;
-}
-
 // The single `InjectRepository` site for the MediaAsset aggregate. Extends
 // `BaseTypeormRepository` for the `toDomain`/`toEntity` seam; `save` re-reads for
 // the concrete id, and `reorder` runs its own `manager.transaction` (the
@@ -157,8 +150,10 @@ export class MediaAssetTypeormRepository
     }
     params.push(MediaAssetStatusEnum.ACTIVE);
 
-    const rows = await this.mediaRepository.query<IExistsRow[]>(
-      `SELECT 1 AS present FROM media_asset WHERE (owner_type, owner_id) IN (${placeholders}) AND status = ? LIMIT 1`,
+    // Existence only — we read `rows.length`, never a column — so a bare `SELECT 1`
+    // typed as `unknown[]` keeps the result off `any` without naming a row shape.
+    const rows = await this.mediaRepository.query<unknown[]>(
+      `SELECT 1 FROM media_asset WHERE (owner_type, owner_id) IN (${placeholders}) AND status = ? LIMIT 1`,
       params,
     );
 

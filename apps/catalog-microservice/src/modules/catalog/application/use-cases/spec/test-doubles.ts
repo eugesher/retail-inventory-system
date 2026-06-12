@@ -431,8 +431,27 @@ export class InMemoryMediaAssetRepository implements IMediaAssetRepositoryPort {
     orderedIds: number[],
   ): Promise<MediaAsset[]> {
     this.reorderCalls.push({ ownerType, ownerId, orderedIds: [...orderedIds] });
+    // Re-slot each affected row by reconstituting it at its array index — the same
+    // "the row's column changed" simulation `save` uses, so the fake never depends
+    // on a domain mutator the production SQL reorder path doesn't (the real adapter
+    // UPDATEs the `sort_order` column directly).
     orderedIds.forEach((id, index) => {
-      this.store.get(id)?.changeSortOrder(index);
+      const existing = this.store.get(id);
+      if (existing) {
+        this.store.set(
+          id,
+          MediaAsset.reconstitute({
+            id,
+            ownerType: existing.ownerType,
+            ownerId: existing.ownerId,
+            uri: existing.uri,
+            type: existing.type,
+            altText: existing.altText,
+            sortOrder: index,
+            status: existing.status,
+          }),
+        );
+      }
     });
     return this.listByOwner(ownerType, ownerId, { activeOnly: true });
   }
