@@ -1,0 +1,310 @@
+# Catalog category endpoints
+# (apps/api-gateway/src/modules/catalog/presentation/category.controller.ts)
+#
+# The API gateway fronts the catalog microservice's category RPCs over HTTP at
+# /api/catalog: two protected writes (create a category, reparent a category and
+# its subtree), three public reads (flat list, nested tree, browse the products
+# in a category), and the two reclassify routes (attach/detach a product to/from
+# a category). Write routes are permission-gated with catalog:write — the SAME
+# code that gates product authoring, no new permission is minted for categories;
+# read routes are @Public(), so an unauthenticated shopper can walk the
+# navigation tree. The attach/detach routes return 200 (a membership UPDATE, not
+# a creation).
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures the seeded admin's bearer token
+#      into @accessToken, which every write request below substitutes into its
+#      Authorization header. The read GETs send no token (proving the @Public()
+#      routes work unauthenticated).
+#   3. The category slugs below are fixed, kebab-case, and globally UNIQUE (a
+#      duplicate slug → 409 CATALOG_CATEGORY_SLUG_TAKEN). A second top-to-bottom
+#      run therefore wants a fresh database — re-seed between runs with
+#      `yarn test:infra:reload`. The slugs use the `workshop-*` family so they
+#      never collide with the seeded category tree or the e2e fixtures.
+#
+# Send the blocks in order: they chain. The category slugs are defined once as
+# @-variables below and reused in every body and path, so renaming a category is
+# a single-line edit. The reclassify blocks target the seeded product 1
+# (aurora-desk-lamp). The final block is a DELIBERATE cycle reparent expected to
+# return 409 — it is the last block so it never interrupts the chain.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+# Category slugs, defined once and reused by the create/reparent/browse blocks.
+# `root` is the top-level category; `tools` + `benches` nest under it; `handPlanes`
+# nests under `tools`; `clearance` is a second root used to demonstrate reparenting.
+@root = workshop
+@tools = workshop-tools
+@benches = workshop-benches
+@handPlanes = workshop-hand-planes
+@clearance = workshop-clearance
+
+# The seeded product the reclassify blocks attach/detach (aurora-desk-lamp).
+@productId = 1
+
+###
+
+# @name login
+# POST /api/auth/staff/login
+# Seeded admin login (admin@example.com / admin1234). The admin holds every
+# permission code, including catalog:write, so this single token unlocks the
+# create / reparent / attach / detach routes below. Response is TokenResponseDto
+# { accessToken, refreshToken, expiresIn }.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name createRoot
+# POST /api/catalog/categories  (Bearer — catalog:write)
+# Creates a ROOT category (no parentSlug). The materialized path of a root is
+# `/<slug>`. Body shape (CreateCategoryRequestDto):
+#   name:        1..255
+#   slug:        kebab-case, globally unique (^[a-z0-9]+(?:-[a-z0-9]+)*$)
+#   parentSlug?: omit to create a root; supply to nest under that parent
+#   sortOrder?:  sibling ordering, default 0
+# Response is CategoryView { id, name, slug, parentId: null, path: '/workshop',
+# sortOrder, status: 'active' }.
+POST {{baseUrl}}/catalog/categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Workshop",
+  "slug": "{{root}}"
+}
+
+###
+
+# @name createTools
+# POST /api/catalog/categories  (Bearer — catalog:write)
+# Creates a CHILD category by naming its parentSlug. The child's path is derived
+# from the parent's: `/workshop/workshop-tools`. parentId points at the root just
+# created. Response is CategoryView.
+POST {{baseUrl}}/catalog/categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Hand Tools",
+  "slug": "{{tools}}",
+  "parentSlug": "{{root}}"
+}
+
+###
+
+# @name createBenches
+# POST /api/catalog/categories  (Bearer — catalog:write)
+# A second child under the root (path `/workshop/workshop-benches`). Two children
+# under one parent let the tree read below return a multi-entry `children` array.
+POST {{baseUrl}}/catalog/categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Benches",
+  "slug": "{{benches}}",
+  "parentSlug": "{{root}}"
+}
+
+###
+
+# @name createHandPlanes
+# POST /api/catalog/categories  (Bearer — catalog:write)
+# A GRANDCHILD under `tools` (path `/workshop/workshop-tools/workshop-hand-planes`).
+# It is the descendant whose path the reparent below rebases in the same
+# transaction.
+POST {{baseUrl}}/catalog/categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Hand Planes",
+  "slug": "{{handPlanes}}",
+  "parentSlug": "{{tools}}"
+}
+
+###
+
+# @name listRoots
+# GET /api/catalog/categories?root=true  (public)
+# Lists the top-level (root) categories only — the `?root` flag narrows the flat
+# list to parentId IS NULL. No Authorization header (the @Public() read route).
+# `workshop` appears; `workshop-tools` (a child) does not. Response is
+# CategoryView[].
+GET {{baseUrl}}/catalog/categories?root=true
+
+###
+
+# @name listAll
+# GET /api/catalog/categories  (public)
+# The full flat list, ordered for navigation (sortOrder ASC, name ASC). All four
+# categories created above appear, each carrying its materialized `path`.
+GET {{baseUrl}}/catalog/categories
+
+###
+
+# @name getTree
+# GET /api/catalog/categories/:slug/tree  (public)
+# Fetches the root with its nested ACTIVE subtree assembled into
+# CategoryTreeNodeView { ...category, children: [...] }. `workshop` nests
+# `workshop-tools` (→ `workshop-hand-planes`) and `workshop-benches`. A leaf
+# carries `children: []`.
+GET {{baseUrl}}/catalog/categories/{{root}}/tree
+
+###
+
+# @name createClearance
+# POST /api/catalog/categories  (Bearer — catalog:write)
+# A second ROOT category, the destination for the reparent demonstration below.
+POST {{baseUrl}}/catalog/categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Clearance",
+  "slug": "{{clearance}}"
+}
+
+###
+
+# @name reparentToolsUnderClearance
+# PATCH /api/catalog/categories/:slug/parent  (Bearer — catalog:write)
+# Moves `workshop-tools` (and its whole subtree) under `workshop-clearance`. Body
+# (ReparentCategoryRequestDto): { newParentSlug?: string | null }. The response is
+# CategoryReparentView { category, rewrittenDescendantCount }:
+#   category.path === '/workshop-clearance/workshop-tools'
+#   rewrittenDescendantCount === 1   (the grandchild workshop-hand-planes, rebased
+#                                      in the SAME transaction as the moved row)
+PATCH {{baseUrl}}/catalog/categories/{{tools}}/parent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "newParentSlug": "{{clearance}}"
+}
+
+###
+
+# @name getTreeAfterReparent
+# GET /api/catalog/categories/:slug/tree  (public)
+# Reads the new owner's subtree. workshop-hand-planes now resolves at
+# `/workshop-clearance/workshop-tools/workshop-hand-planes` — proof the descendant
+# path was rewritten, not just the moved row.
+GET {{baseUrl}}/catalog/categories/{{clearance}}/tree
+
+###
+
+# @name demoteToolsToRoot
+# PATCH /api/catalog/categories/:slug/parent  (Bearer — catalog:write)
+# A null (or omitted) newParentSlug DEMOTES the category to a root: its path
+# collapses to `/workshop-tools` and parentId becomes null. The subtree rebases
+# with it (workshop-hand-planes → `/workshop-tools/workshop-hand-planes`).
+PATCH {{baseUrl}}/catalog/categories/{{tools}}/parent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "newParentSlug": null
+}
+
+###
+
+# @name restoreToolsUnderWorkshop
+# PATCH /api/catalog/categories/:slug/parent  (Bearer — catalog:write)
+# Reparents `workshop-tools` back under `workshop`, restoring the original
+# hierarchy (path `/workshop/workshop-tools`) so the browse blocks below read a
+# meaningful tree. rewrittenDescendantCount === 1 again.
+PATCH {{baseUrl}}/catalog/categories/{{tools}}/parent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "newParentSlug": "{{root}}"
+}
+
+###
+
+# @name attachProductToCategories
+# POST /api/catalog/products/:productId/categories  (Bearer — catalog:write)
+# Attaches the seeded product 1 to BOTH `workshop` and `workshop-tools`. Body
+# (AttachProductCategoriesRequestDto): { categorySlugs: string[] } (non-empty,
+# kebab-case). Returns 200 (a membership UPDATE) with ProductCategoriesView
+# { product, categories } — `categories` is the product's FULL current membership.
+# Re-sending the same slugs is idempotent (still 200, membership unchanged).
+POST {{baseUrl}}/catalog/products/{{productId}}/categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "categorySlugs": ["{{root}}", "{{tools}}"]
+}
+
+###
+
+# @name browseWorkshopProducts
+# GET /api/catalog/categories/:slug/products  (public)
+# Browses the ACTIVE products directly in `workshop`, paginated. No Authorization
+# header. Query (CategoryProductsQueryDto): includeDescendants? (default false),
+# page? (default 1), pageSize? (default 20). Product 1 appears here because it was
+# attached directly to `workshop`. Response is the IPage envelope
+# { items, total, page, size }; each item is a ProductWithVariantsView.
+GET {{baseUrl}}/catalog/categories/{{root}}/products
+
+###
+
+# @name browseWorkshopProductsWithDescendants
+# GET /api/catalog/categories/:slug/products?includeDescendants=true  (public)
+# Same browse, but the scope widens from `workshop` to `workshop` PLUS its active
+# subtree (a path-prefix expansion). Product 1 still appears — and it would still
+# appear here even after it is detached from `workshop` directly (next block),
+# because it stays attached to `workshop-tools`, a descendant.
+GET {{baseUrl}}/catalog/categories/{{root}}/products?includeDescendants=true
+
+###
+
+# @name detachProductFromWorkshop
+# DELETE /api/catalog/products/:productId/categories/:categorySlug  (Bearer — catalog:write)
+# Detaches product 1 from `workshop` (idempotent — a detach of an absent
+# membership is still a 200). Returns ProductCategoriesView with the product's
+# membership after removal: it now lists only `workshop-tools`. Re-run
+# `browseWorkshopProducts` (no flag) afterwards and product 1 is gone; re-run
+# `browseWorkshopProductsWithDescendants` and it reappears (still under the
+# descendant `workshop-tools`).
+DELETE {{baseUrl}}/catalog/products/{{productId}}/categories/{{root}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name reparentCycleRejected  (EXPECTED 409 — demonstration block)
+# PATCH /api/catalog/categories/:slug/parent  (Bearer — catalog:write)
+# A DELIBERATE failure: reparenting `workshop` under `workshop-hand-planes` (its
+# own descendant) would form a cycle. The catalog domain rejects it and the
+# gateway surfaces 409 with body { statusCode: 409, message,
+# code: 'CATALOG_CATEGORY_CYCLE' }. This block is last so it never interrupts the
+# chain above. (Reparenting a category under ITSELF — newParentSlug === the slug —
+# is rejected the same way.)
+PATCH {{baseUrl}}/catalog/categories/{{root}}/parent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "newParentSlug": "{{handPlanes}}"
+}
