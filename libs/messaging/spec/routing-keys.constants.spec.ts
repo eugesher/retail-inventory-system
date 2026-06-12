@@ -8,9 +8,6 @@ import { ROUTING_KEYS } from '../routing-keys.constants';
 // would silently route messages to the wrong queue.
 describe('ROUTING_KEYS', () => {
   it('matches MicroserviceMessagePatternEnum values', () => {
-    expect(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
-    );
     expect(ROUTING_KEYS.INVENTORY_STOCK_LOW).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LOW,
     );

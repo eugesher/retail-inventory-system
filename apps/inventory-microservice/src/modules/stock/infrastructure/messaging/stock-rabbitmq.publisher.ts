@@ -15,7 +15,6 @@ import {
   StockLevelInitializedEvent,
   StockLowEvent,
   StockReceivedEvent,
-  StockReservedEvent,
 } from '../../domain';
 import { IStockEventsPublisherPort } from '../../application/ports';
 
@@ -57,15 +56,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
-  }
-
-  public publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void> {
-    // Intentional no-op rather than a `not implemented` throw — no
-    // cross-service consumer today, but the port stays callable so emit
-    // sites do not have to guard the call.
-    void event;
-    void correlationId;
-    return Promise.resolve();
   }
 
   public async publishStockReceived(
