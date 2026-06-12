@@ -3,20 +3,35 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
 import {
+  CategoryReparentView,
+  CategoryTreeNodeView,
+  CategoryView,
   IArchiveProductPayload,
+  IAttachMediaPayload,
   IAttachVariantTaxCategoryPayload,
+  ICategoryListQuery,
+  ICategoryProductsQuery,
+  ICategoryTreeQuery,
   ICorrelationPayload,
+  ICreateCategoryPayload,
   ICreateTaxCategoryPayload,
   ICreateVariantPayload,
+  IDetachMediaPayload,
   IGetProductBySlugQuery,
   IGetVariantQuery,
   IListProductsQuery,
+  IMediaListQuery,
   IPage,
   IPriceQuery,
   IPriceSetPayload,
   IPublishProductPayload,
+  IReclassifyProductPayload,
   IRegisterProductPayload,
+  IReorderMediaPayload,
+  IReparentCategoryPayload,
+  MediaAssetView,
   PriceView,
+  ProductCategoriesView,
   ProductVariantView,
   ProductView,
   ProductWithVariantsView,
@@ -27,13 +42,21 @@ import {
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import {
+  IAttachMediaCommand,
   IAttachVariantTaxCategoryCommand,
   ICatalogGatewayPort,
+  ICategoryProductsCommand,
+  ICreateCategoryCommand,
   ICreateTaxCategoryCommand,
   ICreateVariantCommand,
+  IListCategoriesCommand,
+  IListMediaCommand,
   IListProductsCommand,
   IPriceQueryCommand,
+  IReclassifyProductCommand,
   IRegisterProductCommand,
+  IReorderMediaCommand,
+  IReparentCategoryCommand,
   ISetPriceCommand,
 } from '../../application/ports';
 
@@ -189,6 +212,120 @@ export class CatalogRabbitmqAdapter implements ICatalogGatewayPort {
         ROUTING_KEYS.CATALOG_VARIANT_SET_TAX_CATEGORY,
         { ...command, correlationId },
       ),
+    );
+  }
+
+  public async createCategory(
+    command: ICreateCategoryCommand,
+    correlationId: string,
+  ): Promise<CategoryView> {
+    return firstValueFrom(
+      this.client.send<CategoryView, ICreateCategoryPayload>(ROUTING_KEYS.CATALOG_CATEGORY_CREATE, {
+        ...command,
+        correlationId,
+      }),
+    );
+  }
+
+  public async reparentCategory(
+    command: IReparentCategoryCommand,
+    correlationId: string,
+  ): Promise<CategoryReparentView> {
+    return firstValueFrom(
+      this.client.send<CategoryReparentView, IReparentCategoryPayload>(
+        ROUTING_KEYS.CATALOG_CATEGORY_REPARENT,
+        { ...command, correlationId },
+      ),
+    );
+  }
+
+  public async listCategories(
+    query: IListCategoriesCommand,
+    correlationId: string,
+  ): Promise<CategoryView[]> {
+    return firstValueFrom(
+      this.client.send<CategoryView[], ICategoryListQuery>(ROUTING_KEYS.CATALOG_CATEGORY_LIST, {
+        ...query,
+        correlationId,
+      }),
+    );
+  }
+
+  public async getCategoryTree(slug: string, correlationId: string): Promise<CategoryTreeNodeView> {
+    return firstValueFrom(
+      this.client.send<CategoryTreeNodeView, ICategoryTreeQuery>(
+        ROUTING_KEYS.CATALOG_CATEGORY_GET_TREE,
+        { slug, correlationId },
+      ),
+    );
+  }
+
+  public async listCategoryProducts(
+    query: ICategoryProductsCommand,
+    correlationId: string,
+  ): Promise<IPage<ProductWithVariantsView>> {
+    return firstValueFrom(
+      this.client.send<IPage<ProductWithVariantsView>, ICategoryProductsQuery>(
+        ROUTING_KEYS.CATALOG_CATEGORY_LIST_PRODUCTS,
+        { ...query, correlationId },
+      ),
+    );
+  }
+
+  public async reclassifyProduct(
+    command: IReclassifyProductCommand,
+    correlationId: string,
+  ): Promise<ProductCategoriesView> {
+    return firstValueFrom(
+      this.client.send<ProductCategoriesView, IReclassifyProductPayload>(
+        ROUTING_KEYS.CATALOG_PRODUCT_RECLASSIFY,
+        { ...command, correlationId },
+      ),
+    );
+  }
+
+  public async attachMedia(
+    command: IAttachMediaCommand,
+    correlationId: string,
+  ): Promise<MediaAssetView> {
+    return firstValueFrom(
+      this.client.send<MediaAssetView, IAttachMediaPayload>(ROUTING_KEYS.CATALOG_MEDIA_ATTACH, {
+        ...command,
+        correlationId,
+      }),
+    );
+  }
+
+  public async reorderMedia(
+    command: IReorderMediaCommand,
+    correlationId: string,
+  ): Promise<MediaAssetView[]> {
+    return firstValueFrom(
+      this.client.send<MediaAssetView[], IReorderMediaPayload>(ROUTING_KEYS.CATALOG_MEDIA_REORDER, {
+        ...command,
+        correlationId,
+      }),
+    );
+  }
+
+  public async detachMedia(mediaId: number, correlationId: string): Promise<MediaAssetView> {
+    return firstValueFrom(
+      this.client.send<MediaAssetView, IDetachMediaPayload>(ROUTING_KEYS.CATALOG_MEDIA_DETACH, {
+        mediaId,
+        correlationId,
+      }),
+    );
+  }
+
+  public async listMedia(
+    query: IListMediaCommand,
+    correlationId: string,
+  ): Promise<MediaAssetView[]> {
+    return firstValueFrom(
+      this.client.send<MediaAssetView[], IMediaListQuery>(ROUTING_KEYS.CATALOG_MEDIA_LIST, {
+        ...query,
+        correlationId,
+      }),
     );
   }
 }

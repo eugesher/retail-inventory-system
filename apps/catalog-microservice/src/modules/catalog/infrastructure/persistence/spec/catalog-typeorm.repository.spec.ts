@@ -115,14 +115,22 @@ describe('catalog mappers', () => {
 });
 
 describe('CatalogTypeormRepository', () => {
-  let productRepo: jest.Mocked<Pick<Repository<ProductEntity>, 'existsBy' | 'findOne'>>;
+  let productRepo: jest.Mocked<
+    Pick<Repository<ProductEntity>, 'existsBy' | 'findOne' | 'createQueryBuilder'>
+  >;
   let variantRepo: jest.Mocked<Pick<Repository<ProductVariantEntity>, 'existsBy' | 'findOne'>>;
+  let createQueryBuilderMock: jest.Mock;
   let logger: PinoLoggerMock;
   let repository: CatalogTypeormRepository;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    productRepo = { existsBy: jest.fn(), findOne: jest.fn() } as never;
+    createQueryBuilderMock = jest.fn();
+    productRepo = {
+      existsBy: jest.fn(),
+      findOne: jest.fn(),
+      createQueryBuilder: createQueryBuilderMock,
+    } as never;
     variantRepo = { existsBy: jest.fn(), findOne: jest.fn() } as never;
     logger = makePinoLoggerMock();
     repository = new CatalogTypeormRepository(
@@ -176,6 +184,50 @@ describe('CatalogTypeormRepository', () => {
 
       expect(result?.slug).toBe('classic-tee');
       expect(result?.status).toBe(ProductStatusEnum.ACTIVE);
+    });
+  });
+
+  describe('listActiveByCategoryIds', () => {
+    it('short-circuits to an empty page for an empty id list (no query)', async () => {
+      const result = await repository.listActiveByCategoryIds({
+        categoryIds: [],
+        page: 1,
+        size: 20,
+      });
+
+      expect(result).toEqual({ items: [], total: 0, page: 1, size: 20 });
+      expect(createQueryBuilderMock).not.toHaveBeenCalled();
+    });
+
+    it('filters active products by a parameterized category-membership subselect, newest first', async () => {
+      const builder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      createQueryBuilderMock.mockReturnValue(builder);
+
+      const result = await repository.listActiveByCategoryIds({
+        categoryIds: [1, 2],
+        page: 1,
+        size: 20,
+      });
+
+      expect(builder.where).toHaveBeenCalledWith('Product.status = :status', {
+        status: ProductStatusEnum.ACTIVE,
+      });
+      // The membership filter is an id-subselect — ids BOUND via `:...categoryIds`,
+      // never string-interpolated.
+      expect(builder.andWhere).toHaveBeenCalledWith(
+        'Product.id IN (SELECT pc.product_id FROM product_categories pc WHERE pc.category_id IN (:...categoryIds))',
+        { categoryIds: [1, 2] },
+      );
+      expect(builder.orderBy).toHaveBeenCalledWith('Product.id', 'DESC');
+      expect(result).toEqual({ items: [], total: 0, page: 1, size: 20 });
     });
   });
 });

@@ -1,6 +1,13 @@
 import {
+  CategoryReparentView,
+  CategoryTreeNodeView,
+  CategoryView,
   IPage,
+  MediaAssetTypeEnum,
+  MediaAssetView,
+  MediaOwnerTypeEnum,
   PriceView,
+  ProductCategoriesView,
   ProductVariantView,
   ProductView,
   ProductWithVariantsView,
@@ -69,6 +76,66 @@ export interface IAttachVariantTaxCategoryCommand {
   taxCategoryCode: string;
 }
 
+// Category command/query inputs. Both category nodes are addressed by **slug** —
+// the stable, human-supplied handle the gateway already holds; the catalog use
+// cases resolve a slug to a row (ADR-029). `correlationId` is threaded separately
+// (the existing split). The catalog domain owns every invariant — these shapes
+// are the gateway's edge contract.
+export interface ICreateCategoryCommand {
+  name: string;
+  slug: string;
+  parentSlug?: string;
+  sortOrder?: number;
+}
+
+export interface IReparentCategoryCommand {
+  slug: string;
+  // `null` or an omitted value demotes the category to a root (`path = /<slug>`);
+  // a non-null slug reparents under that category.
+  newParentSlug?: string | null;
+}
+
+export interface IListCategoriesCommand {
+  rootOnly?: boolean;
+}
+
+export interface ICategoryProductsCommand {
+  slug: string;
+  includeDescendants?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface IReclassifyProductCommand {
+  productId: number;
+  attachCategorySlugs: string[];
+  detachCategorySlugs: string[];
+}
+
+// Media command/query inputs. The owner is addressed by its BIGINT id (resolved
+// from the route param — the product/variant id an operator already holds), and
+// `ownerType` is the polymorphic discriminator (ADR-029 §4). Attach always
+// appends, so it carries no `sortOrder` (reordering is the separate operation);
+// detach is addressed by the media row's own id, so it needs no command shape.
+export interface IAttachMediaCommand {
+  ownerType: MediaOwnerTypeEnum;
+  ownerId: number;
+  uri: string;
+  type: MediaAssetTypeEnum;
+  altText?: string;
+}
+
+export interface IReorderMediaCommand {
+  ownerType: MediaOwnerTypeEnum;
+  ownerId: number;
+  mediaIdsInOrder: number[];
+}
+
+export interface IListMediaCommand {
+  ownerType: MediaOwnerTypeEnum;
+  ownerId: number;
+}
+
 // The gateway-side seam onto the catalog microservice's seven RPCs. The
 // concrete implementation (`CatalogRabbitmqAdapter`) is the only holder of a
 // `ClientProxy`; use cases and the controller depend on this interface
@@ -101,4 +168,28 @@ export interface ICatalogGatewayPort {
     command: IAttachVariantTaxCategoryCommand,
     correlationId: string,
   ): Promise<VariantTaxHeaderView>;
+  // Category surface (`catalog.category.*` + `catalog.product.reclassify`). The
+  // tree read is addressed by a bare slug (the only query input it carries), so
+  // it takes the slug directly rather than a command object.
+  createCategory(command: ICreateCategoryCommand, correlationId: string): Promise<CategoryView>;
+  reparentCategory(
+    command: IReparentCategoryCommand,
+    correlationId: string,
+  ): Promise<CategoryReparentView>;
+  listCategories(query: IListCategoriesCommand, correlationId: string): Promise<CategoryView[]>;
+  getCategoryTree(slug: string, correlationId: string): Promise<CategoryTreeNodeView>;
+  listCategoryProducts(
+    query: ICategoryProductsCommand,
+    correlationId: string,
+  ): Promise<IPage<ProductWithVariantsView>>;
+  reclassifyProduct(
+    command: IReclassifyProductCommand,
+    correlationId: string,
+  ): Promise<ProductCategoriesView>;
+  // Media surface (`catalog.media.*`). Detach is addressed by the media row's own
+  // globally-unique id, so it takes the id directly rather than a command object.
+  attachMedia(command: IAttachMediaCommand, correlationId: string): Promise<MediaAssetView>;
+  reorderMedia(command: IReorderMediaCommand, correlationId: string): Promise<MediaAssetView[]>;
+  detachMedia(mediaId: number, correlationId: string): Promise<MediaAssetView>;
+  listMedia(query: IListMediaCommand, correlationId: string): Promise<MediaAssetView[]>;
 }

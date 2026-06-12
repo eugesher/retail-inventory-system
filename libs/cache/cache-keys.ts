@@ -56,6 +56,18 @@ const CATALOG_PRODUCT_KEY_VERSION = 'v1';
 // unmet). They exist so a future cached read path adopts the v1 key shape without
 // re-keying; a bump of this constant re-keys every entry on the next deploy.
 const CATALOG_PRICE_KEY_VERSION = 'v1';
+// Reserved for a future cached category navigation read path (the tree + the
+// per-category children facet). Category reads are the natural caching candidate
+// in the catalog (a deep, mostly-static hierarchy walked on every storefront
+// render), but the `catalogCategory*` builders below are **not consumed yet**:
+// the catalog service does not import `CacheModule`. They exist so a future
+// cached tree/children read path adopts the v1 key shape without re-keying; a
+// bump of this constant re-keys every entry on the next deploy. Note the
+// asymmetric `<id>`/`<version>` segment order across the two builders — the whole
+// tree is a single SINGLETON (no `<id>` axis, so `…category-tree:<version>`
+// terminates at the version), while the children facet is per-category and keeps
+// the standard `…category:<version>:<categoryId>:children` shape.
+const CATALOG_CATEGORY_KEY_VERSION = 'v1';
 
 // Sentinel for the "every facet for this id" key. Non-glob so the literal
 // cannot be confused with a Redis MATCH pattern (CACHE-011 fix from ADR-016).
@@ -124,6 +136,25 @@ export const CACHE_KEYS = {
 
   catalogPrice: (variantId: number, currency: string, opts?: ITenantOptions): string =>
     `${CACHE_KEYS.catalogPricePrefix(variantId, opts)}${currency}`,
+
+  // Reserved category navigation read-path builders (ADR-016 / ADR-022 /
+  // ADR-029). **Not consumed yet**: the catalog service does not import
+  // `CacheModule`; these + `CATALOG_CATEGORY_KEY_VERSION` exist so a future
+  // cached tree/children read path can adopt the v1 key shape without re-keying.
+  //
+  // The whole category tree is a SINGLETON (one materialized hierarchy, no `<id>`
+  // axis) — key shape `ris:[t:<tenantId>:]catalog:category-tree:v1`.
+  catalogCategoryTree: (opts?: ITenantOptions): string =>
+    `${rootPrefix(opts)}catalog:category-tree:${CATALOG_CATEGORY_KEY_VERSION}`,
+
+  // The per-category children facet is keyed on `categoryId` with a `children`
+  // facet — key shape `ris:[t:<tenantId>:]catalog:category:v1:<categoryId>:children`.
+  // The prefix wipes every facet of one category in a single `delByPrefix`.
+  catalogCategoryChildrenPrefix: (categoryId: number, opts?: ITenantOptions): string =>
+    `${rootPrefix(opts)}catalog:category:${CATALOG_CATEGORY_KEY_VERSION}:${categoryId}:`,
+
+  catalogCategoryChildren: (categoryId: number, opts?: ITenantOptions): string =>
+    `${CACHE_KEYS.catalogCategoryChildrenPrefix(categoryId, opts)}children`,
 
   // -- Pre-v2 (v1) shape — invalidate-only ----------------------------------
   // Returns the retired v1 stock prefix `ris:inventory:stock:v1:<id>:`. The v1

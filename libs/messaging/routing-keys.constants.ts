@@ -26,6 +26,42 @@ export const ROUTING_KEYS = {
   CATALOG_TAX_CATEGORY_CREATE: 'catalog.tax-category.create',
   CATALOG_TAX_CATEGORY_LIST: 'catalog.tax-category.list',
   CATALOG_VARIANT_SET_TAX_CATEGORY: 'catalog.variant.set-tax-category',
+  // Category RPC command + read keys (API Gateway → Catalog on `catalog_queue`).
+  // Each is served by a `@MessagePattern` handler on the catalog category
+  // controller:
+  // `catalog.category.create` → `CreateCategoryUseCase` → `CategoryView`,
+  // `catalog.category.reparent` → `ReparentCategoryUseCase` → `CategoryReparentView`,
+  // `catalog.category.list` → `ListCategoriesUseCase` → `CategoryView[]`,
+  // `catalog.category.get-tree` → `GetCategoryTreeUseCase` → `CategoryTreeNodeView`,
+  // `catalog.category.list-products` → `ListCategoryProductsUseCase` → `IPage<ProductWithVariantsView>`.
+  // `catalog.product.reclassify` is a `product.*` key but is served by the SAME
+  // category controller (the operation's subject is the category membership, not
+  // the product header) → `ReclassifyProductUseCase` → `ProductCategoriesView` —
+  // the `retail.cart.place`-served-by-orders-controller precedent.
+  // The category capability emits NO events — list/tree/browse are reads and
+  // reclassify is a navigation reshape with no cross-service consumer today, so
+  // there are no past-tense `catalog.category.*` surfaces to pair with these
+  // commands (ADR-029 §6).
+  CATALOG_CATEGORY_CREATE: 'catalog.category.create',
+  CATALOG_CATEGORY_REPARENT: 'catalog.category.reparent',
+  CATALOG_CATEGORY_LIST: 'catalog.category.list',
+  CATALOG_CATEGORY_GET_TREE: 'catalog.category.get-tree',
+  CATALOG_CATEGORY_LIST_PRODUCTS: 'catalog.category.list-products',
+  CATALOG_PRODUCT_RECLASSIFY: 'catalog.product.reclassify',
+  // Media RPC command + read keys (API Gateway → Catalog on `catalog_queue`).
+  // Each is served by a `@MessagePattern` handler on the catalog media controller:
+  // `catalog.media.attach` → `AttachMediaUseCase` → `MediaAssetView`,
+  // `catalog.media.reorder` → `ReorderMediaUseCase` → `MediaAssetView[]`,
+  // `catalog.media.detach` → `DetachMediaUseCase` → `MediaAssetView`,
+  // `catalog.media.list` → `ListMediaUseCase` → `MediaAssetView[]`.
+  // Like the category surface, the media capability emits NO events — attach /
+  // reorder / detach are state changes with no cross-service consumer today and
+  // list is a read, so there are no past-tense `catalog.media.*` surfaces to pair
+  // with these commands (ADR-029 §6).
+  CATALOG_MEDIA_ATTACH: 'catalog.media.attach',
+  CATALOG_MEDIA_REORDER: 'catalog.media.reorder',
+  CATALOG_MEDIA_DETACH: 'catalog.media.detach',
+  CATALOG_MEDIA_LIST: 'catalog.media.list',
   // Cart RPC command keys (API Gateway → Retail). Each is served by a
   // `@MessagePattern` handler on the retail cart controller and resolves to a
   // `CartView`; `retail.cart.claim` is the guest-promotion re-point (ADR-028 §9).

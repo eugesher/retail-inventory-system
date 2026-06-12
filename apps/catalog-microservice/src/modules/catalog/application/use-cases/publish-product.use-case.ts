@@ -1,9 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { IPublishProductPayload, ProductView } from '@retail-inventory-system/contracts';
+import {
+  CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA,
+  IPublishProductPayload,
+  MediaOwnerTypeEnum,
+  ProductView,
+  PublishWarningView,
+} from '@retail-inventory-system/contracts';
 
-import { CatalogDomainException, CatalogErrorCodeEnum, ProductPublishedEvent } from '../../domain';
+import {
+  CatalogDomainException,
+  CatalogErrorCodeEnum,
+  Product,
+  ProductPublishedEvent,
+} from '../../domain';
 import {
   ACTIVE_PRICE_PROBE,
   CATALOG_DEFAULT_CURRENCY,
@@ -12,20 +23,41 @@ import {
   IActivePriceProbePort,
   ICatalogEventsPublisherPort,
   ICatalogRepositoryPort,
+  IMediaAssetRepositoryPort,
+  MEDIA_ASSET_REPOSITORY,
 } from '../ports';
 import { toProductView } from './catalog-view.factory';
 
-// Publish Product flips a product `draft → active`. Two layers of preconditions
-// guard the transition. The domain (`Product.publish`) enforces what the
-// aggregate can see — the product is in `draft` and has at least one variant.
-// This use case adds the one cross-aggregate precondition the domain cannot see:
-// every variant must have an in-effect Price in the default currency, probed
-// through `ACTIVE_PRICE_PROBE` (the catalog module cannot import pricing state,
-// so it asks the probe instead — ADR-017 / ADR-025 §6). A missing active price
-// raises `PRODUCT_PUBLISH_REQUIRES_PRICE` → 409. After persistence the use case
-// drains the recorded `ProductPublishedEvent` and emits `catalog.product.published`;
-// that publish is best-effort post-commit — a broker failure is warn-logged and
-// swallowed, the product stays active regardless (ADR-020 / ADR-025).
+// Publish Product flips a product `draft → active`. Preconditions guard the
+// transition at two strengths.
+//
+// HARD gates (block the publish):
+//   - The domain (`Product.publish`) enforces what the aggregate can see — the
+//     product is in `draft` and has at least one variant.
+//   - This use case adds the one cross-aggregate HARD precondition the domain
+//     cannot see: every variant must have an in-effect Price in the default
+//     currency, probed through `ACTIVE_PRICE_PROBE` (the catalog module cannot
+//     import pricing state, so it asks the probe instead — ADR-017 / ADR-025 §6).
+//     A missing active price raises `PRODUCT_PUBLISH_REQUIRES_PRICE` → 409, and a
+//     price-less product genuinely breaks checkout, so blocking is correct.
+//
+// SOFT recommendation (informs, never blocks):
+//   - A published product *should* carry ≥1 active media asset. A media-less
+//     product is not broken — it only looks bare — so this is surfaced as a
+//     `warnings[]` entry in the response, NOT a 409 (the deliberate contrast with
+//     the price gate; ADR-029 §7). The check runs AFTER the save, by which point
+//     the product is already active — so it is provably unable to influence the
+//     outcome. The catalog domain cannot see media (a separate aggregate with no
+//     FK back to `Product`), so — like the price gate — the recommendation lives
+//     in the use case, not `Product.publish()` (ADR-025 §6). The probe is wrapped
+//     in try/catch: a probe failure is warn-logged and swallowed, exactly as the
+//     best-effort event emit is — a recommendation must never be able to fail a
+//     publish.
+//
+// After persistence the use case drains the recorded `ProductPublishedEvent` and
+// emits `catalog.product.published`; that publish is best-effort post-commit — a
+// broker failure is warn-logged and swallowed, the product stays active
+// regardless (ADR-020 / ADR-025).
 @Injectable()
 export class PublishProductUseCase {
   constructor(
@@ -37,6 +69,8 @@ export class PublishProductUseCase {
     private readonly priceProbe: IActivePriceProbePort,
     @Inject(CATALOG_DEFAULT_CURRENCY)
     private readonly defaultCurrency: string,
+    @Inject(MEDIA_ASSET_REPOSITORY)
+    private readonly mediaRepository: IMediaAssetRepositoryPort,
     @InjectPinoLogger(PublishProductUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -117,6 +151,63 @@ export class PublishProductUseCase {
       );
     }
 
-    return { ...toProductView(saved), publishedAt };
+    // Soft recommendation: warn (never block) when the now-active product carries
+    // no media. Runs last, on the already-persisted aggregate — it cannot change
+    // the publish outcome by construction.
+    const warnings = await this.collectMediaWarnings(saved, productId, correlationId);
+
+    const view: ProductView = { ...toProductView(saved), publishedAt };
+    // Only attach `warnings` when there IS one — absent (`undefined`), never an
+    // empty `[]`, on a clean publish (the `ProductView.warnings` contract).
+    if (warnings.length > 0) {
+      view.warnings = warnings;
+    }
+    return view;
+  }
+
+  // Probes for ≥1 active media asset across the product owner and every persisted
+  // variant owner in ONE repository call, and returns the soft warnings to attach
+  // to the publish response. A clean product (media present) returns `[]`. A probe
+  // failure returns `[]` too — warn-logged and swallowed, so a recommendation can
+  // never fail an already-committed publish (the best-effort event-emit stance).
+  private async collectMediaWarnings(
+    saved: Product,
+    productId: number,
+    correlationId?: string,
+  ): Promise<PublishWarningView[]> {
+    // The owner set = the product itself, plus one `product-variant` owner per
+    // persisted variant. `saved` came back from the repository, so its variant ids
+    // are concrete; the `!== null` filter is a type guard, not an expected branch.
+    const owners = [
+      { ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: productId },
+      ...saved.variants
+        .map((variant) => variant.id)
+        .filter((id): id is number => id !== null)
+        .map((id) => ({ ownerType: MediaOwnerTypeEnum.PRODUCT_VARIANT, ownerId: id })),
+    ];
+
+    try {
+      const hasActiveMedia = await this.mediaRepository.hasActiveForOwners(owners);
+      if (hasActiveMedia) {
+        return [];
+      }
+
+      this.logger.warn(
+        { correlationId, productId },
+        'Published product has no active media asset (≥1 recommended)',
+      );
+      return [
+        {
+          code: CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA,
+          message: `Product #${productId} has no active media asset; publishing proceeded — attaching at least one image is recommended.`,
+        },
+      ];
+    } catch (err) {
+      this.logger.warn(
+        { err: err as Error, correlationId, productId },
+        'Media soft-warning probe failed; publish unaffected, no warning emitted',
+      );
+      return [];
+    }
   }
 }

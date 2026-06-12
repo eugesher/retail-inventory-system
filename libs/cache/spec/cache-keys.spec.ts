@@ -183,6 +183,45 @@ describe('CACHE_KEYS', () => {
     });
   });
 
+  describe('catalogCategory (reserved navigation read-path builders — not consumed yet)', () => {
+    // Locks the reserved category navigation key shapes (ADR-016 / ADR-022 /
+    // ADR-029). Neither builder is consumed by any code path today: the catalog
+    // service does not import `CacheModule`. These assertions exist so a future
+    // cached tree/children read path adopts the locked v1 shape without re-keying.
+    it('keys the whole tree as a singleton — no `<id>` axis, version terminates the key', () => {
+      // The materialized hierarchy is a single value, so there is no per-id
+      // segment: the version is the final segment.
+      expect(CACHE_KEYS.catalogCategoryTree()).toBe('ris:catalog:category-tree:v1');
+    });
+
+    it('keys the per-category children facet on categoryId with a `children` facet', () => {
+      expect(CACHE_KEYS.catalogCategoryChildrenPrefix(7)).toBe('ris:catalog:category:v1:7:');
+      expect(CACHE_KEYS.catalogCategoryChildren(7)).toBe('ris:catalog:category:v1:7:children');
+    });
+
+    it('keeps the children prefix a prefix of the full key so delByPrefix wipes the facet', () => {
+      const prefix = CACHE_KEYS.catalogCategoryChildrenPrefix(7);
+      expect(CACHE_KEYS.catalogCategoryChildren(7).startsWith(prefix)).toBe(true);
+    });
+
+    it('prepends `t:<tenantId>:` immediately after the `ris:` root when tenantId is supplied', () => {
+      expect(CACHE_KEYS.catalogCategoryTree({ tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:catalog:category-tree:v1',
+      );
+      expect(CACHE_KEYS.catalogCategoryChildrenPrefix(7, { tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:catalog:category:v1:7:',
+      );
+      expect(CACHE_KEYS.catalogCategoryChildren(7, { tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:catalog:category:v1:7:children',
+      );
+    });
+
+    it('omits the tenant segment entirely when no tenantId is supplied', () => {
+      expect(CACHE_KEYS.catalogCategoryTree()).not.toMatch(/(^|:)t:/);
+      expect(CACHE_KEYS.catalogCategoryChildren(7)).not.toMatch(/(^|:)t:/);
+    });
+  });
+
   describe('productStock (pre-ADR-016 legacy — kept for original transition window)', () => {
     it('uses the bare stock prefix', () => {
       expect(CACHE_KEYS.productStockPrefix(42)).toBe('stock:42:');

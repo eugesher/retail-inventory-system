@@ -57,6 +57,18 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/catalog/tax-categories                        │
 │  GET   /api/catalog/tax-categories                        │
 │  PATCH /api/catalog/variants/:id/tax-category             │
+│  POST  /api/catalog/categories                            │
+│  PATCH /api/catalog/categories/:slug/parent               │
+│  GET   /api/catalog/categories                            │
+│  GET   /api/catalog/categories/:slug/tree                 │
+│  GET   /api/catalog/categories/:slug/products             │
+│  POST  /api/catalog/products/:id/categories               │
+│  DELETE /api/catalog/products/:id/categories/:slug        │
+│  POST  /api/catalog/media                                 │
+│  PATCH /api/catalog/media/reorder                         │
+│  DELETE /api/catalog/media/:id                            │
+│  GET   /api/catalog/products/:id/media                    │
+│  GET   /api/catalog/variants/:id/media                    │
 │                                                           │
 │  Inventory (locations: bearer + inventory:read,           │
 │             variant stock: public,                        │
@@ -90,6 +102,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  role_permissions / staff_user_roles                      │ │
 │  stock_location / stock_level                              │ │
 │  product / product_variant                                │ │
+│  category / product_categories / media_asset              │ │
 │  price / tax_category                                     │ │
 │  cart / cart_line                                         │ │
 │  order / order_line / address / payment                   │ │
@@ -116,7 +129,7 @@ otel-collector → Jaeger UI at http://localhost:16686 (see the
 "Distributed tracing" section below).
 ```
 
-The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. Inventory already keys on the variant: `stock_level.variant_id` is a real foreign key to `product_variant(id)` — the append-only `product_stock` ledger was dropped in the [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) rewrite. The legacy retail order tables (`order` / `order_product` / the two `*_status` lookups) have been torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild; the order/cart lines that replace them key on the catalog `variantId` from the start.
+The catalog microservice owns the merchandisable graph as a `Product` aggregate with `ProductVariant` children. **`variantId` is the downstream backbone key, not `productId`**: every cluster that hangs off the catalog keys on the *variant* — inventory stock levels, pricing, and order/cart lines all address a concrete variant (the unit that is stocked, priced, and sold), not the product header. Inventory already keys on the variant: `stock_level.variant_id` is a real foreign key to `product_variant(id)` — the append-only `product_stock` ledger was dropped in the [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) rewrite. The legacy retail order tables (`order` / `order_product` / the two `*_status` lookups) have been torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild; the order/cart lines that replace them key on the catalog `variantId` from the start. The catalog module also owns a **`Category` hierarchy** ([ADR-029](docs/adr/029-category-materialized-path-and-polymorphic-media.md)): each `category` row stores a **materialized `path`** (`/electronics/phones`) so a subtree read is one indexed `path LIKE` and an ancestry check is a pure string-prefix test, with reparenting done as a recompute-self-plus-one-transaction-bulk-rebase in the repository and cycle detection in the domain. **The category surface is now RPC-complete over RabbitMQ** — two writes, three reads, and reclassify: `catalog.category.create` (insert a root or child category, slug-unique, parent resolved by slug) and `catalog.category.reparent` (move a category + its whole subtree, or demote it to a root — the reparent response surfaces the descendant-rewrite count); `catalog.category.list` (the flat navigation list, `?root` filter, ordered `sortOrder, name`, active-only), `catalog.category.get-tree` (the nested active subtree by slug — an archived intermediate hides its whole branch), and `catalog.category.list-products` (the paged active products under a category, optionally widened to its descendant subtree via the materialized-path expansion); and `catalog.product.reclassify` (a bulk attach + detach of a product's category memberships in one idempotent command — attach to an archived category is blocked, detach from one is allowed). The `product_categories` N↔M membership is a **bare join** (composite PK, no surrogate id, no entity) maintained with parameterized `INSERT IGNORE` / `DELETE` straight at the repository; none of the category operations emits an event. The same module also owns a **polymorphic `MediaAsset`** ([ADR-029](docs/adr/029-category-materialized-path-and-polymorphic-media.md)): one `media_asset` table carries images / videos / documents that hang off either a `product` or a `product-variant`, discriminated by an `owner_type` column with **no foreign key** on the polymorphic `owner_id` (the attach use case probes the owner's existence by hand; a composite `(owner_type, owner_id, sort_order)` index is the read-path compensation). The media surface is **RPC-complete over RabbitMQ**: `catalog.media.attach` (append a new asset at `max(sort_order)+1`, owner counted across active **and** archived rows so slots stay monotonic), `catalog.media.reorder` (one-transaction bulk re-sequence — the id set must be an exact permutation of the owner's active media, all-or-nothing), `catalog.media.detach` (a state-guarded `active → archived` flip — the row survives so historical references still resolve), and `catalog.media.list` (the owner's active strip, `sortOrder ASC`, an unknown owner yields `[]` not a 404). The `uri` is an **opaque, already-uploaded reference** (`https://…` / `s3://…`) — no scheme validation, no upload pipeline. None of the media operations emits an event. Media also feeds a **soft publish recommendation**: publishing a product whose product owner and every variant owner lack an active media asset still succeeds, but the publish response's `warnings[]` carries `CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA` — never a block, the deliberate contrast with the hard price gate. **The gateway now fronts the category + media RPCs over HTTP** at `/api/catalog` (twelve routes — seven category, five media; writes gated by `catalog:write`, reads `@Public()`; see [docs/implementation/06-catalog-category-and-media/05-category-and-media-api.md](docs/implementation/06-catalog-category-and-media/05-category-and-media-api.md)). The `warnings[]` field already flows over the existing publish route untouched.
 
 A sibling **`pricing`** module colocates inside the same microservice (it shares `catalog_queue` and keys on the same `variantId`). It owns two tables: `price` — an append-only-for-history, `(variantId, currency)`-scoped, time-bounded ledger where a price change is a new row plus a close of the predecessor's `[validFrom, validTo)` interval (at most one open row per scope, backstopped by a generated-column UNIQUE index) — and `tax_category`, a classification label that variants point at through the nullable `product_variant.tax_category_id` FK (`ON DELETE SET NULL`). See [ADR-026](docs/adr/026-price-append-only-ledger-and-tax-category.md). It exposes six RPCs on `catalog_queue` — three price (`catalog.price.set`, one command for both Set and Schedule distinguished by `validFrom`; `catalog.price.list`; and `catalog.price.select`, Select Applicable Price: the deterministic `(variantId, currency, asOf)` → single price, resolved priority-then-recency in the use case) and three tax-category (`catalog.tax-category.create`, `catalog.tax-category.list`, and `catalog.variant.set-tax-category`, which attaches a category to a variant by writing the `product_variant.tax_category_id` FK through a parameterized query rather than a cross-module entity import) — and emits `catalog.price.changed` / `catalog.price.scheduled`. Rates/jurisdictions and the gateway HTTP endpoints are later work.
 
@@ -144,7 +157,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — the mutable `Cart`/`CartLine` (`modules/cart/`) with **full cart operations** (create/get/add/change/remove/claim over six RPCs, fronted at `/api/cart`) and the immutable `Order`/`OrderLine` + polymorphic `Address` + `Payment` (`modules/orders/`) with **Place Order** (authorize-on-place), **Capture Payment** (explicit), **Get Order**, and **List My Orders** live (`PAYMENT_GATEWAY` → `FakePaymentGatewayAdapter`) |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low` and `retail.order.placed` to a notifier port |
-| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
+| `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, handles the category writes `catalog.category.create` / `catalog.category.reparent`, the category reads `catalog.category.list` / `catalog.category.get-tree` / `catalog.category.list-products`, the membership write `catalog.product.reclassify`, and the media operations `catalog.media.attach` / `catalog.media.reorder` / `catalog.media.detach` / `catalog.media.list`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
 
@@ -162,11 +175,16 @@ apps/api-gateway/src/
     │   │   └── use-cases/                     # Register/AddVariant/Publish/Archive + List/GetProduct/GetVariant
     │   │                                      #   + SetPrice/ListPrices/GetApplicablePrice
     │   │                                      #   + CreateTaxCategory/ListTaxCategories/AttachVariantTaxCategory
+    │   │                                      #   + CreateCategory/ReparentCategory/ListCategories/GetCategoryTree/ListCategoryProducts
+    │   │                                      #   + AttachProductCategories/DetachProductCategory
+    │   │                                      #   + AttachMedia/ReorderMedia/DetachMedia/ListMedia
     │   ├── infrastructure/
-    │   │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder (catalog + pricing RPCs)
+    │   │   └── messaging/catalog-rabbitmq.adapter.ts   # only ClientProxy holder (catalog + pricing + category + media RPCs)
     │   ├── presentation/
     │   │   ├── catalog.controller.ts          # POST/GET /api/catalog/products[/...], /variants/:id[/prices|/price|/tax-category], /tax-categories
-    │   │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory request + ListProducts/PriceQuery query DTOs
+    │   │   ├── category.controller.ts         # POST/PATCH/GET/DELETE /api/catalog/categories[/...], /products/:id/categories[/:slug]
+    │   │   ├── media.controller.ts            # POST/PATCH/DELETE /api/catalog/media[/...], GET /products|variants/:id/media
+    │   │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory/CreateCategory/ReparentCategory/AttachProductCategories/AttachMedia/ReorderMedia request + ListProducts/PriceQuery/ListCategories/CategoryProducts query DTOs
     │   └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
     └── inventory/                             # talks to inventory-microservice (read + write RPCs)
         ├── application/
@@ -392,9 +410,31 @@ GET   /api/catalog/variants/:variantId/price          # public  — single appli
 POST  /api/catalog/tax-categories                     # bearer + pricing:write  — create a tax category
 GET   /api/catalog/tax-categories                     # public  — list tax categories
 PATCH /api/catalog/variants/:variantId/tax-category   # bearer + pricing:write  — attach a tax category by code
+
+# Categories (a self-hierarchical tree on a materialized path)
+POST   /api/catalog/categories                        # bearer + catalog:write  — create a root or child category
+PATCH  /api/catalog/categories/:slug/parent           # bearer + catalog:write  — reparent (or demote to root) + rebase its subtree
+GET    /api/catalog/categories                        # public  — flat active list (?root for roots only)
+GET    /api/catalog/categories/:slug/tree             # public  — nested active subtree from a root
+GET    /api/catalog/categories/:slug/products         # public  — paged active products (?includeDescendants, ?page, ?pageSize)
+POST   /api/catalog/products/:productId/categories    # bearer + catalog:write  — attach a product to categories (200)
+DELETE /api/catalog/products/:productId/categories/:categorySlug  # bearer + catalog:write  — detach a product from one category
+
+# Media (polymorphic assets on a product or a variant)
+POST   /api/catalog/media                             # bearer + catalog:write  — attach an asset (appends at max sort_order + 1)
+PATCH  /api/catalog/media/reorder                     # bearer + catalog:write  — bulk re-sequence (exact permutation, all-or-nothing)
+DELETE /api/catalog/media/:id                         # bearer + catalog:write  — detach (state-guarded active → archived flip)
+GET    /api/catalog/products/:productId/media         # public  — a product's active media, sort_order ASC
+GET    /api/catalog/variants/:variantId/media         # public  — a variant's active media, sort_order ASC
 ```
 
-The publish route enforces an **active-price precondition**: it `409`s (`PRODUCT_PUBLISH_REQUIRES_PRICE`) unless *every* variant has an in-effect price in the configured currency. That currency is an environment variable read by the catalog microservice:
+The category writes reuse `catalog:write` — **no new permission code was minted** for category/media authoring ([ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md)). The attach/detach membership routes both fold onto the single `catalog.product.reclassify` RPC (attach sends only the attach list, detach only the detach list) and return the **full** post-op membership view with a `200` (a membership update, not a creation). The two media `GET`s share one `ListMedia` use case, the controller folding the matching owner type; an unknown owner is a `200 []`, not a 404. See [docs/implementation/06-catalog-category-and-media/05-category-and-media-api.md](docs/implementation/06-catalog-category-and-media/05-category-and-media-api.md).
+
+#### Catalog navigation
+
+Categories form a **tree** via a `parentId` plus a **materialized `path`** — each `category` row stores its full root-to-self slug chain (`/electronics/phones`), so a subtree read is one indexed `path LIKE '/electronics%'` and an ancestry test is a pure string-prefix check rather than a recursive walk. **Reparenting rewrites the moved node's subtree in a single transaction**: the domain recomputes the moved node's own `parentId` + `path` (rejecting a cycle — you cannot move a category under itself or a descendant), then the repository rebases every descendant's `path` with one bulk `UPDATE … CONCAT/SUBSTRING … WHERE path LIKE` (the response carries the descendant-rewrite count). The browse endpoints **filter to active** and an archived intermediate hides its whole branch; `…/categories/:slug/products` can **include descendants** by expanding the materialized path prefix into the id scope (`?includeDescendants`). **Media attaches polymorphically** — one `media_asset` table hangs an asset off either a product or a variant via `(owner_type, owner_id)` with no foreign key on the polymorphic owner. The full design is recorded in [ADR-029](docs/adr/029-category-materialized-path-and-polymorphic-media.md), with the per-topic walkthroughs under [docs/implementation/06-catalog-category-and-media/](docs/implementation/06-catalog-category-and-media/).
+
+The publish route enforces an **active-price precondition**: it `409`s (`PRODUCT_PUBLISH_REQUIRES_PRICE`) unless *every* variant has an in-effect price in the configured currency. A second, **softer** precondition rides the same response: when the published product (and none of its variants) has an active media asset, the publish *still proceeds* but the `ProductView` carries a `warnings[]` entry with the code `CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA` — a recommendation to attach at least one image, never a block. The contrast is deliberate: a price-less product breaks checkout (hard 409), a media-less one only looks bare (soft warning). A clean publish omits `warnings` entirely. The currency the price gate resolves against is an environment variable read by the catalog microservice:
 
 | Variable | Default | Notes |
 | -------- | ------- | ----- |
@@ -564,7 +604,7 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `support@example.com` | `support1234` | `order-support` | StaffUser |
 | `customer@example.com` | `customer1234` | — | Customer |
 
-The same seed loads a small **catalog + pricing** fixture so the catalog read paths and the publish precondition return seeded answers. Two products carry four variants; each variant has one open `USD` price; three tax categories exist as classification labels (none attached to a variant by default).
+The same seed loads a small **catalog + pricing** fixture so the catalog read paths and the publish precondition return seeded answers. Two products carry four variants; each variant has one open `USD` price; three tax categories exist as classification labels (none attached to a variant by default). A small **category tree** and two **media assets** on product 1 round out the navigation surface so the browse/tree reads and the media strip return seeded answers from a cold start.
 
 Catalog products → variants:
 
@@ -574,6 +614,32 @@ Catalog products → variants:
 | 2 | `AURORA-COOL` | `aurora-desk-lamp` | active |
 | 3 | `NIMBUS-BLACK` | `nimbus-office-chair` | active |
 | 4 | `NIMBUS-GREY` | `nimbus-office-chair` | active |
+
+Categories (`category` — a materialized-path hierarchy; two roots and one child):
+
+| id | Name | Slug | Parent | `path` | Sort |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Electronics | `electronics` | — | `/electronics` | 0 |
+| 2 | Phones | `phones` | 1 (`electronics`) | `/electronics/phones` | 0 |
+| 3 | Apparel | `apparel` | — | `/apparel` | 1 |
+
+Product ↔ category memberships (`product_categories` — the bare N↔M join):
+
+| Product (slug) | Category (slug) |
+| --- | --- |
+| 1 (`aurora-desk-lamp`) | 1 (`electronics`) |
+| 1 (`aurora-desk-lamp`) | 2 (`phones`) |
+
+So `GET /api/catalog/categories/electronics/products?includeDescendants=true` returns product 1 — directly under `electronics` and via the `phones` descendant.
+
+Media assets (`media_asset` — polymorphic; two on product 1, ordered):
+
+| id | Owner | `type` | `sort_order` | `uri` |
+| --- | --- | --- | --- | --- |
+| 1 | product 1 | image | 0 | `https://cdn.example.com/aurora-desk-lamp/front.jpg` |
+| 2 | product 1 | video | 1 | `https://cdn.example.com/aurora-desk-lamp/demo.mp4` |
+
+So `GET /api/catalog/products/1/media` returns the image then the video. The `uri` host is illustrative — media URIs are opaque, already-uploaded references (no upload pipeline; [ADR-029](docs/adr/029-category-materialized-path-and-polymorphic-media.md)).
 
 Tax categories (`tax_category` — labels only, no rate):
 
@@ -613,7 +679,7 @@ The seed also loads one **example cart** for the seeded customer so `GET /api/ca
 
 The `order:capture` permission is seeded (id `...-b000-00000000000e`) and bound to the `order-support` and `admin` roles — it is the staff override on `POST /api/orders/:orderId/payments/capture` (the owning customer needs no permission, only ownership).
 
-Every catalog / pricing / stock / cart seed row uses a fixed id and `INSERT IGNORE`, so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed.
+Every catalog / category / membership / media / pricing / stock / cart seed row uses a fixed id and `INSERT IGNORE` (the membership row, having no surrogate id, is `INSERT IGNORE` on its composite `(product_id, category_id)` PK), so re-running `yarn test:seed` is idempotent (no duplicate rows, no error). Each price carries a fixed *past* `valid_from`, so `GET /api/catalog/variants/:variantId/price?currency=USD` returns the seeded row for variants 1–4 immediately after a seed. The seed SQL files apply in FK-safe order (`scripts/utils/test-db-seed.util.ts`): `category.sql` → `product-categories.sql` → `media-asset.sql` follow `catalog-product(-variant).sql` because the membership FKs both the product and the category.
 
 Auth events emit Pino log lines with `userId` and `correlationId`, and (when wired) flow through the `AUDIT_LOG_PUBLISHER` port; the default binding is the in-process `NoOpAuditLogPublisher` (logs the event at `debug` under the `AuditLog` context). They are not fanned out to RabbitMQ today; if login alerts become a requirement, the notification microservice already has the consumer template ready — only an `auth.*` routing key plus a publisher binding are missing.
 
@@ -744,7 +810,7 @@ The cache layer follows the conventions formalized in [ADR-016](docs/adr/016-cac
 
 ### What is not cached
 
-Only the per-variant availability read is cached today. The location list (`GET /api/inventory/locations` → `ListLocationsUseCase`) is **not** cached — it is a small, slow-changing set, and the gateway adds no caching of its own. The catalog browse/resolve reads and the **pricing** reads (`catalog.price.select` / `catalog.price.list` and their gateway routes) deliberately go straight to MySQL on every call — their read volume has not crossed the threshold where cache-aside complexity (key versioning plus post-commit invalidation on every price append/close) pays for itself. The key shape is already reserved for when it does: `CACHE_KEYS.catalogPrice(variantId, currency)` builds `ris:catalog:price:v1:<variantId>:<currency>` (mirroring the stock keys and the reserved `catalogProduct*` block), versioned and ready — but no catalog/pricing module imports `CacheModule` for it yet. Caching pricing reads is a later capability gated on measured read pressure, not a missing feature.
+Only the per-variant availability read is cached today. The location list (`GET /api/inventory/locations` → `ListLocationsUseCase`) is **not** cached — it is a small, slow-changing set, and the gateway adds no caching of its own. The catalog browse/resolve reads, the **category** navigation reads (`catalog.category.list` / `.get-tree` / `.list-products`), and the **pricing** reads (`catalog.price.select` / `catalog.price.list` and their gateway routes) deliberately go straight to MySQL on every call — their read volume has not crossed the threshold where cache-aside complexity (key versioning plus post-commit invalidation on every write) pays for itself. The key shapes are already reserved for when they do: `CACHE_KEYS.catalogPrice(variantId, currency)` builds `ris:catalog:price:v1:<variantId>:<currency>`, and the category navigation builders `CACHE_KEYS.catalogCategoryTree()` / `catalogCategoryChildren(categoryId)` build `ris:catalog:category-tree:v1` (a singleton — the whole tree) and `ris:catalog:category:v1:<categoryId>:children` (mirroring the stock keys and the reserved `catalogProduct*` block) — versioned and ready, but no catalog/pricing module imports `CacheModule` for them yet. Caching these reads is a later capability gated on measured read pressure, not a missing feature.
 
 ### Read flow
 

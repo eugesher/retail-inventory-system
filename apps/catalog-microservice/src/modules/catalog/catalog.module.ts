@@ -13,24 +13,45 @@ import {
   CATALOG_DEFAULT_CURRENCY,
   CATALOG_EVENTS_PUBLISHER,
   CATALOG_REPOSITORY,
+  CATEGORY_REPOSITORY,
+  MEDIA_ASSET_REPOSITORY,
 } from './application/ports';
 import {
   AddVariantUseCase,
   ArchiveProductUseCase,
+  AttachMediaUseCase,
+  CreateCategoryUseCase,
+  DetachMediaUseCase,
+  GetCategoryTreeUseCase,
   GetProductBySlugUseCase,
   GetVariantUseCase,
+  ListCategoriesUseCase,
+  ListCategoryProductsUseCase,
+  ListMediaUseCase,
   ListProductsUseCase,
   PublishProductUseCase,
+  ReclassifyProductUseCase,
   RegisterProductUseCase,
+  ReorderMediaUseCase,
+  ReparentCategoryUseCase,
 } from './application/use-cases';
 import { CatalogRabbitmqPublisher } from './infrastructure/messaging';
 import {
   ActivePriceProbeTypeormAdapter,
   CatalogTypeormRepository,
+  CategoryEntity,
+  CategoryTypeormRepository,
+  MediaAssetEntity,
+  MediaAssetTypeormRepository,
   ProductEntity,
   ProductVariantEntity,
 } from './infrastructure/persistence';
-import { CatalogController, CatalogRpcExceptionFilter } from './presentation';
+import {
+  CatalogController,
+  CatalogRpcExceptionFilter,
+  CategoryController,
+  MediaController,
+} from './presentation';
 
 // The currency the publish precondition resolves against. `ConfigModule` is
 // global (registered at the app root), so `ConfigService` injects here without a
@@ -55,11 +76,16 @@ const DEFAULT_CURRENCY_PROVIDER = {
 // `catalogEntities` const type does not satisfy `forFeature`).
 @Module({
   imports: [
-    DatabaseModule.forFeature([ProductEntity, ProductVariantEntity]),
+    DatabaseModule.forFeature([
+      ProductEntity,
+      ProductVariantEntity,
+      CategoryEntity,
+      MediaAssetEntity,
+    ]),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
   ],
-  controllers: [CatalogController],
+  controllers: [CatalogController, CategoryController, MediaController],
   providers: [
     // Maps every `CatalogDomainException` onto a wire error carrying an HTTP
     // `statusCode`, so the gateway resolves not-found → 404, taken/illegal-state
@@ -70,6 +96,20 @@ const DEFAULT_CURRENCY_PROVIDER = {
 
     CatalogTypeormRepository,
     { provide: CATALOG_REPOSITORY, useExisting: CatalogTypeormRepository },
+
+    // The Category aggregate's own repository seam (a separate port from
+    // `CATALOG_REPOSITORY` — one port per aggregate, ADR-029 §8). Consumed by the
+    // category write use cases (create / reparent) registered below.
+    CategoryTypeormRepository,
+    { provide: CATEGORY_REPOSITORY, useExisting: CategoryTypeormRepository },
+
+    // The MediaAsset aggregate's own repository seam (a third separate port,
+    // alongside `CATALOG_REPOSITORY` / `CATEGORY_REPOSITORY` — one port per
+    // aggregate, ADR-029 §8). Consumed by the media use cases registered below;
+    // attach also injects `CATALOG_REPOSITORY` for the polymorphic owner-existence
+    // probe (no FK on `media_asset.owner_id`).
+    MediaAssetTypeormRepository,
+    { provide: MEDIA_ASSET_REPOSITORY, useExisting: MediaAssetTypeormRepository },
 
     CatalogRabbitmqPublisher,
     { provide: CATALOG_EVENTS_PUBLISHER, useExisting: CatalogRabbitmqPublisher },
@@ -88,6 +128,25 @@ const DEFAULT_CURRENCY_PROVIDER = {
     ListProductsUseCase,
     GetProductBySlugUseCase,
     GetVariantUseCase,
+
+    // Category write + read use cases + the product reclassify — all served by
+    // `CategoryController` on `catalog_queue`. Reclassify spans both repository
+    // seams (product existence + the `product_categories` membership), and the
+    // category-scoped browse reuses `CATALOG_REPOSITORY` for the product read.
+    CreateCategoryUseCase,
+    ReparentCategoryUseCase,
+    ListCategoriesUseCase,
+    GetCategoryTreeUseCase,
+    ListCategoryProductsUseCase,
+    ReclassifyProductUseCase,
+
+    // Media use cases — all served by `MediaController` on `catalog_queue`. Attach
+    // spans both the media and catalog repository seams (owner existence + the
+    // media write); reorder / detach / list touch only the media seam.
+    AttachMediaUseCase,
+    ReorderMediaUseCase,
+    DetachMediaUseCase,
+    ListMediaUseCase,
   ],
 })
 export class CatalogModule {}

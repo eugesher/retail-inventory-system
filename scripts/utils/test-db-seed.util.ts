@@ -4,6 +4,15 @@ export class TestDbSeedUtil {
   public static seedFiles: string[] = [
     'catalog-product.sql',
     'catalog-product-variant.sql',
+    // Category hierarchy, then the product↔category membership, then media.
+    // category.sql has no FK to product; product-categories.sql references both
+    // product (catalog-product.sql) and category (category.sql); media-asset.sql
+    // references product 1 by opaque owner id (no FK). So the order within this
+    // group is category -> product-categories -> media-asset, and the group
+    // follows catalog-product(-variant).sql.
+    'category.sql',
+    'product-categories.sql',
+    'media-asset.sql',
     // After the variants: tax_category has no FK dependency, and price.variant_id
     // references product_variant.id, so both must follow catalog-product-variant.sql.
     'tax-category.sql',
