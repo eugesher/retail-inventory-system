@@ -1,0 +1,337 @@
+# Catalog media endpoints (+ the publish media soft warning)
+# (apps/api-gateway/src/modules/catalog/presentation/media.controller.ts)
+#
+# The API gateway fronts the catalog microservice's polymorphic MediaAsset RPCs
+# over HTTP at /api/catalog: three protected writes (attach an asset, reorder an
+# owner's strip, detach an asset) and two public reads (a product's media, a
+# variant's media). A media asset hangs off either a product or a product-variant
+# via (ownerType, ownerId). Write routes are permission-gated with catalog:write —
+# the SAME code as product/category authoring; read routes are @Public(), so a
+# storefront renders a product's media without a token. Attach appends to the end
+# of the strip; reorder is an all-or-nothing permutation of the owner's ACTIVE
+# media; detach is a status flip (active → archived) — the row survives.
+#
+# This file ALSO demonstrates the publish "≥1 active media" SOFT WARNING: a
+# product publishes even with no media, but the publish response carries a
+# warnings[] entry recommending an image — the deliberate contrast with the HARD
+# price gate (which blocks publish). The publish route lives on the product
+# controller (http/catalog.http), but media is its natural home, so the demo
+# lives here.
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures the seeded admin's bearer token
+#      into @accessToken (the admin holds catalog:write AND pricing:write, so the
+#      same token covers the attach/reorder/detach writes and the publish-demo's
+#      price write). The read GETs send no token (proving the @Public() routes).
+#   3. The media flow targets the seeded product 1 (aurora-desk-lamp) and its
+#      variant 1 (AURORA-WARM); the reorder block assumes product 1 starts with NO
+#      media (true on a fresh seed), so its three attached assets ARE the whole
+#      active strip — an exact permutation. The publish demo registers a fresh
+#      `workshop-easel` product, whose slug/SKU are globally UNIQUE. A second
+#      top-to-bottom run therefore wants a fresh database — re-seed between runs
+#      with `yarn test:infra:reload`. The `workshop-*` slugs/URIs never collide
+#      with the seeded or e2e fixtures.
+#
+# Send the blocks in order: they chain. attachImage / attachVideo / attachDocument
+# capture @imageId / @videoId / @documentId, which the reorder, detach, and
+# mismatch blocks reference; the publish demo captures @easelId / @easelVariantId.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+# Seeded media owners (aurora-desk-lamp + its warm-white variant).
+@productId = 1
+@variantId = 1
+
+###
+
+# @name login
+# POST /api/auth/staff/login
+# Seeded admin login (admin@example.com / admin1234). The admin holds every
+# permission code (catalog:write + pricing:write), so this single token unlocks
+# every write below. Response is TokenResponseDto
+# { accessToken, refreshToken, expiresIn }.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name attachImage
+# POST /api/catalog/media  (Bearer — catalog:write)
+# Attaches the first asset to product 1. Body shape (AttachMediaRequestDto):
+#   ownerType: 'product' | 'product-variant'
+#   ownerId:   BIGINT id of the owning product/variant
+#   uri:       opaque, already-uploaded reference (no scheme allow-list), 1..1024
+#   type:      'image' | 'video' | 'document'
+#   altText?:  <= 255
+# There is NO sortOrder field — attach always APPENDS (slot = max(sort_order) + 1
+# across all rows, archived included). Response is MediaAssetView
+# { id, ownerType, ownerId, uri, type, altText, sortOrder, status: 'active' }.
+POST {{baseUrl}}/catalog/media
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ownerType": "product",
+  "ownerId": {{productId}},
+  "uri": "https://cdn.example.com/workshop/lamp-front.jpg",
+  "type": "image",
+  "altText": "Aurora desk lamp, front view"
+}
+
+###
+@imageId = {{attachImage.response.body.$.id}}
+
+###
+
+# @name attachVideo
+# POST /api/catalog/media  (Bearer — catalog:write)
+# A second asset on product 1 — appends at the next slot (a higher sort_order).
+POST {{baseUrl}}/catalog/media
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ownerType": "product",
+  "ownerId": {{productId}},
+  "uri": "https://cdn.example.com/workshop/lamp-demo.mp4",
+  "type": "video"
+}
+
+###
+@videoId = {{attachVideo.response.body.$.id}}
+
+###
+
+# @name attachDocument
+# POST /api/catalog/media  (Bearer — catalog:write)
+# A third asset on product 1 — the last slot. The three now form the strip in
+# creation order (image, video, document).
+POST {{baseUrl}}/catalog/media
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ownerType": "product",
+  "ownerId": {{productId}},
+  "uri": "https://cdn.example.com/workshop/lamp-manual.pdf",
+  "type": "document"
+}
+
+###
+@documentId = {{attachDocument.response.body.$.id}}
+
+###
+
+# @name listProductMedia
+# GET /api/catalog/products/:productId/media  (public)
+# Lists product 1's ACTIVE media, sorted by sort_order ASC. No Authorization
+# header (the @Public() storefront read). Returns the three just-attached assets
+# in creation order (image, video, document). Response is MediaAssetView[].
+GET {{baseUrl}}/catalog/products/{{productId}}/media
+
+###
+
+# @name reorderReversed
+# PATCH /api/catalog/media/reorder  (Bearer — catalog:write)
+# Re-sequences product 1's strip in a single shot. Body (ReorderMediaRequestDto):
+#   ownerType, ownerId, mediaIdsInOrder: number[]
+# mediaIdsInOrder must be an EXACT permutation of the owner's ACTIVE media (same
+# ids, no duplicates/omissions/foreign ids); each asset's new sort_order is its
+# array index. Here the three ids are reversed (document, video, image). Returns
+# 200 with the refreshed active strip in the new order (MediaAssetView[]).
+PATCH {{baseUrl}}/catalog/media/reorder
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ownerType": "product",
+  "ownerId": {{productId}},
+  "mediaIdsInOrder": [{{documentId}}, {{videoId}}, {{imageId}}]
+}
+
+###
+
+# @name listProductMediaAfterReorder
+# GET /api/catalog/products/:productId/media  (public)
+# The strip now returns in the reversed order (document, video, image) — proof the
+# reorder persisted the new slots.
+GET {{baseUrl}}/catalog/products/{{productId}}/media
+
+###
+
+# @name reorderMismatchRejected  (EXPECTED 409 — demonstration block)
+# PATCH /api/catalog/media/reorder  (Bearer — catalog:write)
+# A DELIBERATE failure: smuggling a foreign id (999999999) alongside the real trio
+# makes the set NOT an exact permutation of the active strip. The reorder is
+# all-or-nothing, so the catalog writes NOTHING and the gateway surfaces 409 with
+# body { statusCode: 409, message, code: 'CATALOG_MEDIA_REORDER_SET_MISMATCH' }.
+# The strip order from the previous block is unchanged.
+PATCH {{baseUrl}}/catalog/media/reorder
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ownerType": "product",
+  "ownerId": {{productId}},
+  "mediaIdsInOrder": [{{documentId}}, {{videoId}}, {{imageId}}, 999999999]
+}
+
+###
+
+# @name detachVideo
+# DELETE /api/catalog/media/:id  (Bearer — catalog:write)
+# Detaches the middle asset (the video). Detach is a STATUS FLIP active → archived
+# — the row survives so historical references still resolve; there is no sibling
+# compaction. Returns 200 with the archived MediaAssetView { ..., status:
+# 'archived' }. A SECOND detach of the same id → 409
+# CATALOG_MEDIA_INVALID_STATE_TRANSITION (the flip is state-guarded, not idempotent).
+DELETE {{baseUrl}}/catalog/media/{{videoId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name listProductMediaAfterDetach
+# GET /api/catalog/products/:productId/media  (public)
+# The active strip now returns only the two survivors (document, image) — the
+# archived video dropped out of the active read, the relative order preserved.
+GET {{baseUrl}}/catalog/products/{{productId}}/media
+
+###
+
+# @name attachVariantMedia
+# POST /api/catalog/media  (Bearer — catalog:write)
+# Attaches an asset to a VARIANT (ownerType 'product-variant', ownerId = variant
+# 1). Media are owner-scoped by (ownerType, ownerId), so a variant's strip is
+# independent of its product's strip.
+POST {{baseUrl}}/catalog/media
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ownerType": "product-variant",
+  "ownerId": {{variantId}},
+  "uri": "https://cdn.example.com/workshop/lamp-warm-swatch.jpg",
+  "type": "image",
+  "altText": "Warm-white swatch"
+}
+
+###
+
+# @name listVariantMedia
+# GET /api/catalog/variants/:variantId/media  (public)
+# Lists variant 1's active media — the single swatch just attached. The product's
+# strip (listProductMediaAfterDetach) is unaffected. An unknown owner here returns
+# 200 with [] (the zero-answer convention), never a 404.
+GET {{baseUrl}}/catalog/variants/{{variantId}}/media
+
+###
+# ----------------------------------------------------------------------------
+# Publish media SOFT WARNING demonstration
+# ----------------------------------------------------------------------------
+# A product publishes even with no media, but the publish response carries a soft
+# warning recommending an image. Below: register a fresh draft product + a variant
+# + a price (the HARD precondition — publish 409s without an in-effect price),
+# then publish it media-less and read warnings[] in the response.
+
+# @name registerEasel
+# POST /api/catalog/products  (Bearer — catalog:write)
+# Registers a fresh draft product (RegisterProductRequestDto: name, slug,
+# description?). The `workshop-easel` slug is globally unique. Response is
+# ProductView { id, ..., status: 'draft' }.
+POST {{baseUrl}}/catalog/products
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Workshop Easel",
+  "slug": "workshop-easel",
+  "description": "A sturdy oak studio easel"
+}
+
+###
+@easelId = {{registerEasel.response.body.$.id}}
+
+###
+
+# @name addEaselVariant
+# POST /api/catalog/products/:productId/variants  (Bearer — catalog:write)
+# Appends a variant (publish requires ≥ 1 variant). Response is ProductVariantView
+# { id, productId, sku, ..., status: 'active' }.
+POST {{baseUrl}}/catalog/products/{{easelId}}/variants
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "sku": "WORKSHOP-EASEL-OAK",
+  "optionValues": { "material": "oak" }
+}
+
+###
+@easelVariantId = {{addEaselVariant.response.body.$.id}}
+
+###
+
+# @name setEaselPrice
+# POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+# Sets an immediate USD price for the variant — the HARD publish precondition
+# (without an in-effect price in the default currency, publish 409s
+# PRODUCT_PUBLISH_REQUIRES_PRICE). Body (SetPriceRequestDto): currency,
+# amountMinor, validFrom? (omitted = immediate). Response is the persisted
+# PriceView.
+POST {{baseUrl}}/catalog/variants/{{easelVariantId}}/prices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD",
+  "amountMinor": 8900
+}
+
+###
+
+# @name publishEaselMediaLess
+# POST /api/catalog/products/:productId/publish  (Bearer — catalog:publish)
+# Publishes the product draft → active. It has a priced variant but NO media, so
+# the publish SUCCEEDS (200) and the response carries the SOFT warning:
+#   ProductView { ..., status: 'active', publishedAt,
+#     warnings: [{ code: 'CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA', message }] }
+# Contrast with the price gate: a missing price would have BLOCKED publish (409),
+# whereas a missing image only WARNS. Inspect `warnings[]` in the response body.
+POST {{baseUrl}}/catalog/products/{{easelId}}/publish
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name attachEaselMedia
+# POST /api/catalog/media  (Bearer — catalog:write)
+# The recommended follow-up: attach an image to the freshly-published product.
+# (Re-publishing a DIFFERENT fresh product that already carries an active media
+# asset would omit the warning entirely — the warning is computed per publish.)
+POST {{baseUrl}}/catalog/media
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ownerType": "product",
+  "ownerId": {{easelId}},
+  "uri": "https://cdn.example.com/workshop/easel-front.jpg",
+  "type": "image",
+  "altText": "Workshop easel, front view"
+}
