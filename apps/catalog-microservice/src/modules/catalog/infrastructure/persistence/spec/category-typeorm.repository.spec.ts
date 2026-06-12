@@ -149,6 +149,26 @@ describe('CategoryTypeormRepository', () => {
       );
     });
 
+    it('skips the transaction and returns 0 when the move is a no-op (path unchanged)', async () => {
+      // Same parent ⇒ the domain re-derives the identical path: there is nothing
+      // to rebase, so the repository must short-circuit before opening a tx.
+      const moved = Category.reconstitute({
+        id: 10,
+        name: 'Phones',
+        slug: 'phones',
+        parentId: 7,
+        path: '/gadgets/phones',
+        sortOrder: 0,
+        status: CategoryStatusEnum.ACTIVE,
+      });
+
+      const count = await repository.reparentSubtree(moved, '/gadgets/phones');
+
+      expect(count).toBe(0);
+      expect(transactionMock).not.toHaveBeenCalled();
+      expect(queryMock).not.toHaveBeenCalled();
+    });
+
     it('throws when the category has no id', async () => {
       const unsaved = Category.create({ name: 'Phones', slug: 'phones' });
       await expect(repository.reparentSubtree(unsaved, '/phones')).rejects.toThrow(/has no id/);

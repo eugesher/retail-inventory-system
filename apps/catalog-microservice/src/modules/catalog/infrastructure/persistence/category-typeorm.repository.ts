@@ -126,6 +126,22 @@ export class CategoryTypeormRepository
     const movedId = category.id;
     const newParentId = category.parentId;
 
+    // A no-op move (reparenting under the CURRENT parent ⇒ the domain re-derives
+    // the identical path) would rewrite the moved row AND every descendant to its
+    // existing value — pure write amplification, plus a spurious `updated_at` bump
+    // across the whole subtree. Nothing changed, so skip the transaction entirely
+    // and report zero rebased descendants (the use case treats same-parent as an
+    // idempotent success). `newPath === oldPath` implies the parent is unchanged
+    // too, since a node's path uniquely identifies it, so the moved-row UPDATE is
+    // equally a no-op.
+    if (newPath === oldPath) {
+      this.logger.debug(
+        { categoryId: movedId, path: newPath },
+        'Category reparent is a no-op (path unchanged); skipping subtree rebase',
+      );
+      return 0;
+    }
+
     // One transaction for the moved-row UPDATE + the bulk descendant rebase: a
     // window where the parent moved but its descendants still carry the old path
     // prefix would leave the tree inconsistent. Both statements are PARAMETERIZED
