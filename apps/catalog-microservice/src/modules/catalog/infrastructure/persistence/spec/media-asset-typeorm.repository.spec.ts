@@ -188,8 +188,9 @@ describe('MediaAssetTypeormRepository', () => {
     });
 
     it('issues ONE parameterized owner-pair IN-list probe (LIMIT 1, status active)', async () => {
-      // A non-empty result set means at least one owner has active media.
-      queryMock.mockResolvedValue([{ present: 1 }]);
+      // A non-empty result set means at least one owner has active media (the probe
+      // reads only `rows.length`, never a column, so the row body is irrelevant).
+      queryMock.mockResolvedValue([{}]);
 
       const result = await repository.hasActiveForOwners([
         { ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: 100 },
@@ -201,7 +202,7 @@ describe('MediaAssetTypeormRepository', () => {
       // One `(?, ?)` placeholder per owner pair; values bound positionally, the
       // status appended last — nothing interpolated.
       expect(queryMock).toHaveBeenCalledWith(
-        'SELECT 1 AS present FROM media_asset WHERE (owner_type, owner_id) IN ((?, ?), (?, ?)) AND status = ? LIMIT 1',
+        'SELECT 1 FROM media_asset WHERE (owner_type, owner_id) IN ((?, ?), (?, ?)) AND status = ? LIMIT 1',
         [
           MediaOwnerTypeEnum.PRODUCT,
           100,

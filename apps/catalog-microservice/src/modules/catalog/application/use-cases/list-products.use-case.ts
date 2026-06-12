@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
+import { clampPageWindow } from '@retail-inventory-system/common';
 import {
   IListProductsQuery,
   IPage,
@@ -9,12 +10,6 @@ import {
 
 import { CATALOG_REPOSITORY, ICatalogRepositoryPort } from '../ports';
 import { toProductWithVariantsView } from './catalog-view.factory';
-
-// Browse defaults. `page` is 1-based; `size` is capped so an oversized
-// `pageSize` cannot ask the DB for an unbounded result set.
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
 
 // List Products is the Customer-facing browse of the published catalogue: it
 // returns a page of **active** products, each with its **active** variants
@@ -32,16 +27,9 @@ export class ListProductsUseCase {
 
   public async execute(query: IListProductsQuery): Promise<IPage<ProductWithVariantsView>> {
     const { search, correlationId } = query;
-    // Floor BEFORE the positivity guard. A fractional page in (0, 1) passes a
-    // `> 0` check but floors to 0, which the repository turns into a negative
-    // OFFSET (`skip((page - 1) * size)`); flooring first collapses it to the
-    // default. The gateway DTO already enforces an integer >= 1 over HTTP, so
-    // this guards the directly-reachable RMQ handler (page is an unconstrained
-    // number on the wire contract).
-    const flooredPage = Math.floor(query.page ?? 0);
-    const page = flooredPage > 0 ? flooredPage : DEFAULT_PAGE;
-    const flooredSize = Math.floor(query.pageSize ?? 0);
-    const size = flooredSize > 0 ? Math.min(flooredSize, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+    // Normalize the untrusted page/size from the wire contract (the gateway DTO
+    // enforces an integer >= 1 over HTTP, but this RMQ handler is directly reachable).
+    const { page, size } = clampPageWindow(query.page, query.pageSize);
 
     this.logger.info({ correlationId, page, size, search }, 'Received RPC: list products');
 
