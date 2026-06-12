@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
+import { clampPageWindow } from '@retail-inventory-system/common';
 import {
   ICategoryProductsQuery,
   IPage,
@@ -15,12 +16,6 @@ import {
   ICategoryRepositoryPort,
 } from '../ports';
 import { toProductWithVariantsView } from './catalog-view.factory';
-
-// Browse defaults — identical to `ListProductsUseCase` (the gateway normalizes
-// page/size at the edge later; this guards the directly-reachable RMQ handler).
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
 
 // List Category Products is the category-scoped browse: a page of ACTIVE products
 // (each with its active variants — identical semantics to the plain browse,
@@ -43,12 +38,9 @@ export class ListCategoryProductsUseCase {
   public async execute(query: ICategoryProductsQuery): Promise<IPage<ProductWithVariantsView>> {
     const { slug, includeDescendants, correlationId } = query;
 
-    // Floor BEFORE the positivity guard (a fractional page in (0, 1) floors to 0,
-    // which would become a negative OFFSET) — the `ListProductsUseCase` fallback.
-    const flooredPage = Math.floor(query.page ?? 0);
-    const page = flooredPage > 0 ? flooredPage : DEFAULT_PAGE;
-    const flooredSize = Math.floor(query.pageSize ?? 0);
-    const size = flooredSize > 0 ? Math.min(flooredSize, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+    // Normalize the untrusted page/size from the wire contract — the same window
+    // as the plain browse (`ListProductsUseCase`), now via the shared helper.
+    const { page, size } = clampPageWindow(query.page, query.pageSize);
 
     this.logger.info(
       { correlationId, slug, includeDescendants: includeDescendants ?? false, page, size },

@@ -6,7 +6,7 @@ import {
   ProductCategoriesView,
 } from '@retail-inventory-system/contracts';
 
-import { CatalogDomainException, CatalogErrorCodeEnum, Category } from '../../domain';
+import { CatalogDomainException, CatalogErrorCodeEnum } from '../../domain';
 import {
   CATALOG_REPOSITORY,
   CATEGORY_REPOSITORY,
@@ -115,14 +115,10 @@ export class ReclassifyProductUseCase {
           `Category "${slug}" is archived; cannot attach a product to an archived category`,
         );
       }
-      this.pushId(ids, category);
+      if (category.id !== null) {
+        ids.push(category.id);
+      }
     }
     return ids;
-  }
-
-  private pushId(ids: number[], category: Category): void {
-    if (category.id !== null) {
-      ids.push(category.id);
-    }
   }
 }

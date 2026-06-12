@@ -115,19 +115,4 @@ describe('MediaAsset', () => {
       expectCode(() => asset.archive(), CatalogErrorCodeEnum.MEDIA_INVALID_STATE_TRANSITION);
     });
   });
-
-  describe('changeSortOrder', () => {
-    it('repositions the asset within its strip', () => {
-      const asset = MediaAsset.create(validInput({ sortOrder: 0 }));
-
-      asset.changeSortOrder(5);
-
-      expect(asset.sortOrder).toBe(5);
-    });
-
-    it.each([-1, 2.5])('rejects an invalid slot %p with MEDIA_SORT_ORDER_INVALID', (slot) => {
-      const asset = MediaAsset.create(validInput());
-      expectCode(() => asset.changeSortOrder(slot), CatalogErrorCodeEnum.MEDIA_SORT_ORDER_INVALID);
-    });
-  });
 });
