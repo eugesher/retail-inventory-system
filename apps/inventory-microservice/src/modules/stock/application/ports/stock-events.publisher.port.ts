@@ -2,7 +2,10 @@ import {
   StockAdjustedEvent,
   StockLevelInitializedEvent,
   StockLowEvent,
+  StockMovement,
   StockReceivedEvent,
+  StockReleasedEvent,
+  StockReservedEvent,
 } from '../../domain';
 
 export const STOCK_EVENTS_PUBLISHER = Symbol('STOCK_EVENTS_PUBLISHER');
@@ -25,4 +28,15 @@ export interface IStockEventsPublisherPort {
     event: StockLevelInitializedEvent,
     correlationId?: string,
   ): Promise<void>;
+  // Emitted by the Reserve operation onto `inventory_queue` (reserved surface).
+  publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void>;
+  // Emitted by the Release operation onto `inventory_queue` (reserved surface).
+  publishStockReleased(event: StockReleasedEvent, correlationId?: string): Promise<void>;
+  // Emitted for EVERY ledger insert (high-volume). It takes the domain
+  // `StockMovement` record directly — a deliberate divergence from the other
+  // methods (which take a `DomainEvent`): a dedicated wrapper event class would
+  // only duplicate the row's fields, so the publisher maps the record straight to
+  // the wire `IInventoryStockMovementRecordedEvent`. Reserved surface on
+  // `inventory_queue`.
+  publishStockMovementRecorded(movement: StockMovement, correlationId?: string): Promise<void>;
 }

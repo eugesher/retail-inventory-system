@@ -41,6 +41,23 @@ export enum InventoryErrorCodeEnum {
   // `expiresAt` is already in the past. The allocate use case (a later capability)
   // refreshes the TTL first when it decides to honor a stale-but-still-held hold.
   RESERVATION_EXPIRED = 'INVENTORY_RESERVATION_EXPIRED',
+
+  // No-oversell rejection → 409 (ADR-030 §3): a Reserve asked for more than the
+  // variant's `available` at the location. Carries the live `available` in the
+  // exception's structured `details` so a client branches on the number, not the
+  // human message. The reserve-side counterpart of `STOCK_RESULT_NEGATIVE`.
+  OUT_OF_STOCK = 'INVENTORY_OUT_OF_STOCK',
+
+  // Release-by-id miss → 404: the `reservationId` selector named a hold that does
+  // not exist. (The release-by-cart selector returns an idempotent empty result on
+  // a no-match instead — only the precise by-id path 404s.)
+  RESERVATION_NOT_FOUND = 'INVENTORY_RESERVATION_NOT_FOUND',
+
+  // Malformed Release selector → 400: a release request must carry EXACTLY one
+  // selector family — either `reservationId` (one row) or `cartId` (+ optional
+  // `variantId` / `stockLocationId`, all matching active rows). Supplying both, or
+  // neither, is rejected here.
+  RESERVATION_SELECTOR_INVALID = 'INVENTORY_RESERVATION_SELECTOR_INVALID',
 }
 
 // The inventory bounded context's concrete `DomainException` (the third in the
@@ -53,9 +70,19 @@ export enum InventoryErrorCodeEnum {
 // HTTP caller, so it needs a typed, mappable error.
 export class InventoryDomainException extends DomainException {
   public readonly code: InventoryErrorCodeEnum;
+  // Optional structured payload forwarded through the RPC filter and the gateway
+  // error util (ADR-030 §6), so a client branches on data (e.g. `{ available }` on
+  // an out-of-stock rejection) rather than parsing the human message. Frozen-shaped
+  // (`Readonly`) because it is read, never mutated, downstream.
+  public readonly details?: Readonly<Record<string, unknown>>;
 
-  constructor(code: InventoryErrorCodeEnum, message: string) {
+  constructor(
+    code: InventoryErrorCodeEnum,
+    message: string,
+    details?: Readonly<Record<string, unknown>>,
+  ) {
     super(message);
     this.code = code;
+    this.details = details;
   }
 }

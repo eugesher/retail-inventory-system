@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
@@ -9,6 +10,7 @@ import {
 
 import {
   RESERVATION_REPOSITORY,
+  RESERVATION_TTL_MINUTES,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_MOVEMENT_REPOSITORY,
@@ -21,6 +23,8 @@ import {
   ListLocationsUseCase,
   QueryAvailabilityUseCase,
   ReceiveStockUseCase,
+  ReleaseReservationUseCase,
+  ReserveStockUseCase,
 } from '../application/use-cases';
 import { InventoryRpcExceptionFilter, StockController } from '../presentation';
 import { StockCache } from './cache';
@@ -64,18 +68,27 @@ import {
     StockTypeormRepository,
     { provide: STOCK_REPOSITORY, useExisting: StockTypeormRepository },
 
-    // The reservation aggregate's repository (ADR-030). Bound now as the
-    // foundation; the Reserve / Release / Allocate use cases that consume it land
-    // in later sessions. No use case can reach the aggregate yet.
+    // The reservation aggregate's repository (ADR-030), consumed by the Reserve /
+    // Release use cases below; Allocate / Cancel-Allocation land in a later session.
     ReservationTypeormRepository,
     { provide: RESERVATION_REPOSITORY, useExisting: ReservationTypeormRepository },
 
-    // The append-only stock-movement audit ledger's repository (ADR-030 §2). Bound
-    // now so the seam is complete; the writers (Release / Allocate / Receive /
-    // Adjust / Transfer) and the audit read RPC land in later sessions. No producer
-    // writes movements yet.
+    // The append-only stock-movement audit ledger's repository (ADR-030 §2).
+    // Release is its first writer (one negative `release` row per released hold);
+    // the other writers (Allocate / Receive / Adjust / Transfer) and the audit read
+    // RPC land in later sessions.
     StockMovementTypeormRepository,
     { provide: STOCK_MOVEMENT_REPOSITORY, useExisting: StockMovementTypeormRepository },
+
+    // The reservation hold lifetime (minutes), resolved from `RESERVATION_TTL_MINUTES`
+    // (Joi default 15) so the Reserve use case injects a plain number rather than
+    // reading env (the catalog `CATALOG_DEFAULT_CURRENCY` precedent; ADR-030 §4).
+    {
+      provide: RESERVATION_TTL_MINUTES,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('RESERVATION_TTL_MINUTES') ?? 15,
+      inject: [ConfigService],
+    },
 
     StockCache,
     { provide: STOCK_CACHE, useExisting: StockCache },
@@ -91,6 +104,8 @@ import {
     ListLocationsUseCase,
     ReceiveStockUseCase,
     AdjustStockUseCase,
+    ReserveStockUseCase,
+    ReleaseReservationUseCase,
 
     // Terminates `InventoryDomainException` into the `{ statusCode, message, code }`
     // wire shape the gateway maps (ADR-027). Registered via APP_FILTER so it

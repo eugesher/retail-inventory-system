@@ -139,7 +139,7 @@ describe('Inventory cache post-commit invalidation (e2e)', () => {
 
   it('serves the post-commit figure on the read after a Receive (invalidation runs post-commit)', async () => {
     // Prime: this read loads the pre-receive figure (0) from MySQL and writes the
-    // `VariantStockView` back to Redis under ris:inventory:stock:v2:<variantId>:__all__.
+    // `VariantStockView` back to Redis under ris:inventory:stock:v3:<variantId>:__all__.
     const primed = await supertest(apiGatewayApp.getHttpServer()).get(
       `/api/inventory/variants/${variantId}/stock`,
     );

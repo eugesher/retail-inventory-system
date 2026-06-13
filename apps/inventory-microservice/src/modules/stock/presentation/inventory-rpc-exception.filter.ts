@@ -27,13 +27,17 @@ const INVENTORY_ERROR_STATUS: Record<InventoryErrorCodeEnum, HttpStatus> = {
   [InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE]: HttpStatus.CONFLICT,
   [InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT]: HttpStatus.CONFLICT,
 
-  // Reservation invariants (ADR-030). The aggregate enforces these now; the
-  // Reserve / Release / Allocate use cases that surface them to a caller land in
-  // later sessions, but the codes are mapped here so the total `Record` stays
-  // exhaustive and the foundation compiles.
+  // Reservation invariants (ADR-030). Surfaced by the Reserve / Release use cases.
   [InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID]: HttpStatus.BAD_REQUEST,
   [InventoryErrorCodeEnum.RESERVATION_INVALID_STATE]: HttpStatus.CONFLICT,
   [InventoryErrorCodeEnum.RESERVATION_EXPIRED]: HttpStatus.CONFLICT,
+  // Malformed Release selector → 400 (both/neither selector family).
+  [InventoryErrorCodeEnum.RESERVATION_SELECTOR_INVALID]: HttpStatus.BAD_REQUEST,
+  // Release-by-id miss → 404.
+  [InventoryErrorCodeEnum.RESERVATION_NOT_FOUND]: HttpStatus.NOT_FOUND,
+  // No-oversell rejection → 409 (Reserve asked for more than `available`); the
+  // wire object carries the live `available` in `details`.
+  [InventoryErrorCodeEnum.OUT_OF_STOCK]: HttpStatus.CONFLICT,
 };
 
 // Terminates an `InventoryDomainException` into the wire error shape the gateway's
@@ -48,11 +52,15 @@ export class InventoryRpcExceptionFilter implements RpcExceptionFilter<Inventory
     const statusCode = INVENTORY_ERROR_STATUS[exception.code] ?? HttpStatus.INTERNAL_SERVER_ERROR;
 
     // The errored stream value is what the RMQ client receives as the rejection
-    // payload (the same channel the catalog/pricing filters use).
+    // payload (the same channel the catalog/pricing filters use). `details` rides
+    // along only when present (e.g. `{ available }` on `OUT_OF_STOCK`) — ADR-030
+    // §6; the gateway util forwards it once the retail-wiring capability teaches
+    // `throwRpcError` to, and harmlessly drops it until then.
     return throwError(() => ({
       statusCode,
       message: exception.message,
       code: exception.code,
+      ...(exception.details !== undefined ? { details: exception.details } : {}),
     }));
   }
 }

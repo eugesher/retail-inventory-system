@@ -6,6 +6,7 @@ import {
   IStockRepositoryPort,
   IStockWithInvalidationOptions,
   ITransactionPort,
+  ITransactionScope,
 } from '../ports';
 import { StockWriteConflictError } from './stock-write-conflict.error';
 
@@ -15,11 +16,74 @@ import { StockWriteConflictError } from './stock-write-conflict.error';
 // transaction, so it re-reads the now-current version under a new snapshot.
 const MAX_WRITE_ATTEMPTS = 5;
 
-export interface IStockMutationDeps {
+// The minimal dependency set the bounded-retry core needs: a transaction port to
+// open a fresh unit of work per attempt, and a logger for the retry/exhaustion
+// trace. `IStockMutationDeps` is a superset, so it satisfies this structurally.
+export interface IStockWriteRetryDeps {
   transactionPort: ITransactionPort;
+  logger: PinoLogger;
+}
+
+// Logging/identity context for the retry trace + the exhaustion error message.
+// Optional throughout: a multi-row write (Release) may span several
+// (variantId, stockLocationId) pairs, so it omits the per-row identity.
+export interface IStockWriteRetryContext {
+  variantId?: number;
+  stockLocationId?: string;
+  correlationId?: string;
+}
+
+// The reusable no-oversell write protocol, generalized out of `applyOnHandChange`
+// so every reserve-side use case (Reserve / Release) shares one budget and one
+// conflict-translation policy (ADR-030 §3). It opens a fresh transaction per
+// attempt and runs `attempt(scope)`; a `StockWriteConflictError` (a lost
+// compare-and-swap on `persistStockLevelChange`, or a lost INSERT race on the
+// reservation UNIQUE triple translated by the repository) is retried up to
+// `MAX_WRITE_ATTEMPTS`, re-reading the now-current rows under a new snapshot.
+// Every other error — a domain rejection (`OUT_OF_STOCK`, below-zero) or anything
+// unexpected — propagates immediately and is never retried. Exhaustion surfaces a
+// 409 `STOCK_WRITE_CONFLICT`.
+export async function runWithStockWriteRetry<T>(
+  deps: IStockWriteRetryDeps,
+  attempt: (scope: ITransactionScope) => Promise<T>,
+  context: IStockWriteRetryContext = {},
+): Promise<T> {
+  const { transactionPort, logger } = deps;
+  const { variantId, stockLocationId, correlationId } = context;
+
+  for (let attemptNo = 1; attemptNo <= MAX_WRITE_ATTEMPTS; attemptNo++) {
+    try {
+      return await transactionPort.runInTransaction((scope) => attempt(scope));
+    } catch (error) {
+      if (!(error instanceof StockWriteConflictError)) {
+        throw error;
+      }
+      if (attemptNo >= MAX_WRITE_ATTEMPTS) {
+        logger.warn(
+          { correlationId, variantId, stockLocationId, attempts: attemptNo },
+          'Stock write conflict exhausted retry budget',
+        );
+        const target =
+          variantId !== undefined ? `for variant ${variantId} @ ${stockLocationId} ` : '';
+        throw new InventoryDomainException(
+          InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
+          `Stock write ${target}lost the optimistic race after ${attemptNo} attempts`,
+        );
+      }
+      logger.debug(
+        { correlationId, variantId, stockLocationId, attempt: attemptNo },
+        'Stock write conflict — retrying with a fresh read',
+      );
+    }
+  }
+
+  // Unreachable: the final attempt either returns or throws inside the loop.
+  throw new Error('runWithStockWriteRetry: optimistic retry loop exited unexpectedly');
+}
+
+export interface IStockMutationDeps extends IStockWriteRetryDeps {
   repository: IStockRepositoryPort;
   stockCache: IStockCachePort;
-  logger: PinoLogger;
 }
 
 export interface IApplyOnHandChangeParams {
@@ -32,7 +96,7 @@ export interface IApplyOnHandChangeParams {
 // The shared read-modify-write for every on-hand mutation (Receive / Adjust),
 // so the write protocol lives in exactly one place (ADR-027). The protocol is:
 //   post-commit cache invalidation (ADR-023)
-//     └─ bounded optimistic retry (ADR-027 §concurrency)
+//     └─ bounded optimistic retry (`runWithStockWriteRetry`)
 //          └─ transaction: find-or-init → `changeOnHand` → version-checked persist
 // A domain rejection (e.g. a below-zero Adjust → `STOCK_RESULT_NEGATIVE`)
 // propagates immediately and is NOT retried; only a `StockWriteConflictError`
@@ -41,55 +105,26 @@ export async function applyOnHandChange(
   deps: IStockMutationDeps,
   params: IApplyOnHandChangeParams,
 ): Promise<StockLevel> {
-  const opts: IStockWithInvalidationOptions = { correlationId: params.correlationId };
+  const { repository } = deps;
+  const { variantId, stockLocationId, delta, correlationId } = params;
+  const opts: IStockWithInvalidationOptions = { correlationId };
+
   return deps.stockCache.withInvalidation(
-    () => runWithRetry(deps, params),
+    () =>
+      runWithStockWriteRetry(
+        deps,
+        async (scope) => {
+          const existing = await repository.findStockLevel(variantId, stockLocationId, scope);
+          // Capture the optimistic token BEFORE `changeOnHand` bumps it; null
+          // marks a first-touch INSERT.
+          const expectedVersion = existing ? existing.version : null;
+          const level = existing ?? StockLevel.initialAt(variantId, stockLocationId);
+          level.changeOnHand(delta);
+          return repository.persistStockLevelChange(level, expectedVersion, scope);
+        },
+        { variantId, stockLocationId, correlationId },
+      ),
     (saved) => [{ variantId: saved.variantId, stockLocationId: saved.stockLocationId }],
     opts,
   );
-}
-
-async function runWithRetry(
-  deps: IStockMutationDeps,
-  params: IApplyOnHandChangeParams,
-): Promise<StockLevel> {
-  const { transactionPort, repository, logger } = deps;
-  const { variantId, stockLocationId, delta, correlationId } = params;
-
-  for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
-    try {
-      return await transactionPort.runInTransaction(async (scope) => {
-        const existing = await repository.findStockLevel(variantId, stockLocationId, scope);
-        // Capture the optimistic token BEFORE `changeOnHand` bumps it; null marks
-        // a first-touch INSERT.
-        const expectedVersion = existing ? existing.version : null;
-        const level = existing ?? StockLevel.initialAt(variantId, stockLocationId);
-        level.changeOnHand(delta);
-        return repository.persistStockLevelChange(level, expectedVersion, scope);
-      });
-    } catch (error) {
-      // Only an optimistic conflict is retryable. Domain rejections (below-zero,
-      // bad delta) and anything else propagate untouched.
-      if (!(error instanceof StockWriteConflictError)) {
-        throw error;
-      }
-      if (attempt >= MAX_WRITE_ATTEMPTS) {
-        logger.warn(
-          { correlationId, variantId, stockLocationId, attempts: attempt },
-          'Stock write conflict exhausted retry budget',
-        );
-        throw new InventoryDomainException(
-          InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
-          `Stock write for variant ${variantId} @ ${stockLocationId} lost the optimistic race after ${attempt} attempts`,
-        );
-      }
-      logger.debug(
-        { correlationId, variantId, stockLocationId, attempt },
-        'Stock write conflict — retrying with a fresh read',
-      );
-    }
-  }
-
-  // Unreachable: the final attempt either returns or throws inside the loop.
-  throw new Error('applyOnHandChange: optimistic retry loop exited unexpectedly');
 }
