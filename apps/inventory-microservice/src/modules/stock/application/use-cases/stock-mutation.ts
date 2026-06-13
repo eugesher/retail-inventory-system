@@ -1,8 +1,14 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { InventoryDomainException, InventoryErrorCodeEnum, StockLevel } from '../../domain';
+import {
+  InventoryDomainException,
+  InventoryErrorCodeEnum,
+  StockLevel,
+  StockMovement,
+} from '../../domain';
 import {
   IStockCachePort,
+  IStockMovementRepositoryPort,
   IStockRepositoryPort,
   IStockWithInvalidationOptions,
   ITransactionPort,
@@ -83,6 +89,7 @@ export async function runWithStockWriteRetry<T>(
 
 export interface IStockMutationDeps extends IStockWriteRetryDeps {
   repository: IStockRepositoryPort;
+  movementRepository: IStockMovementRepositoryPort;
   stockCache: IStockCachePort;
 }
 
@@ -91,6 +98,23 @@ export interface IApplyOnHandChangeParams {
   stockLocationId: string;
   delta: number;
   correlationId?: string;
+  // Optional ledger factory (ADR-030 §2). When supplied, the returned movement is
+  // appended to `STOCK_MOVEMENT_REPOSITORY` **inside the same transaction** as the
+  // counter persist — so a counter change and the audit row that explains it are
+  // one atomic unit of work. Receive passes a `receipt` factory, Adjust an
+  // `adjustment` one; a caller that only moves the counter omits it. The factory
+  // receives the persisted `StockLevel` (its `variantId` / `stockLocationId` are
+  // the post-write authority); the signed `quantity` comes from the caller.
+  buildMovement?: (saved: StockLevel) => StockMovement;
+}
+
+// The result of an on-hand mutation: the persisted level, plus the appended ledger
+// row when a `buildMovement` factory was supplied (else `null`). Returning the
+// movement lets the use case emit `inventory.stock-movement.recorded` post-commit
+// without a re-query — the row already carries its DB-assigned id.
+export interface IApplyOnHandChangeResult {
+  level: StockLevel;
+  movement: StockMovement | null;
 }
 
 // The shared read-modify-write for every on-hand mutation (Receive / Adjust),
@@ -98,33 +122,46 @@ export interface IApplyOnHandChangeParams {
 //   post-commit cache invalidation (ADR-023)
 //     └─ bounded optimistic retry (`runWithStockWriteRetry`)
 //          └─ transaction: find-or-init → `changeOnHand` → version-checked persist
+//                          → (optional) append the ledger movement
 // A domain rejection (e.g. a below-zero Adjust → `STOCK_RESULT_NEGATIVE`)
 // propagates immediately and is NOT retried; only a `StockWriteConflictError`
 // (a lost compare-and-swap or a first-touch INSERT race) triggers a retry.
+//
+// The ledger append runs AFTER the version-checked persist, so a lost CAS throws
+// the conflict before any movement is written — a retry re-runs the whole attempt
+// from a fresh read and a conflicting attempt never leaves an orphaned ledger row.
+// Exactly one movement lands per successful mutation, regardless of how many
+// attempts the optimistic race burned.
 export async function applyOnHandChange(
   deps: IStockMutationDeps,
   params: IApplyOnHandChangeParams,
-): Promise<StockLevel> {
-  const { repository } = deps;
-  const { variantId, stockLocationId, delta, correlationId } = params;
+): Promise<IApplyOnHandChangeResult> {
+  const { repository, movementRepository } = deps;
+  const { variantId, stockLocationId, delta, correlationId, buildMovement } = params;
   const opts: IStockWithInvalidationOptions = { correlationId };
 
   return deps.stockCache.withInvalidation(
     () =>
       runWithStockWriteRetry(
         deps,
-        async (scope) => {
+        async (scope): Promise<IApplyOnHandChangeResult> => {
           const existing = await repository.findStockLevel(variantId, stockLocationId, scope);
           // Capture the optimistic token BEFORE `changeOnHand` bumps it; null
           // marks a first-touch INSERT.
           const expectedVersion = existing ? existing.version : null;
           const level = existing ?? StockLevel.initialAt(variantId, stockLocationId);
           level.changeOnHand(delta);
-          return repository.persistStockLevelChange(level, expectedVersion, scope);
+          const saved = await repository.persistStockLevelChange(level, expectedVersion, scope);
+          const movement = buildMovement
+            ? await movementRepository.append(buildMovement(saved), scope)
+            : null;
+          return { level: saved, movement };
         },
         { variantId, stockLocationId, correlationId },
       ),
-    (saved) => [{ variantId: saved.variantId, stockLocationId: saved.stockLocationId }],
+    (result) => [
+      { variantId: result.level.variantId, stockLocationId: result.level.stockLocationId },
+    ],
     opts,
   );
 }

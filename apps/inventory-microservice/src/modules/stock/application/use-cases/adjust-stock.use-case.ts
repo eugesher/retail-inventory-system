@@ -6,6 +6,7 @@ import {
   INVENTORY_DEFAULT_STOCK_LOCATION,
   IStockAdjustPayload,
   StockLevelView,
+  StockMovementTypeEnum,
 } from '@retail-inventory-system/contracts';
 
 import {
@@ -14,14 +15,17 @@ import {
   StockAdjustedEvent,
   StockLevel,
   StockLowEvent,
+  StockMovement,
 } from '../../domain';
 import {
   IStockCachePort,
   IStockEventsPublisherPort,
+  IStockMovementRepositoryPort,
   IStockRepositoryPort,
   ITransactionPort,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
+  STOCK_MOVEMENT_REPOSITORY,
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
@@ -39,9 +43,14 @@ import { toStockLevelView } from './stock-view.factory';
 // `inventory.stock.low` event re-fires when the post-commit on-hand falls at or
 // below `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD` (best-effort, ADR-020).
 //
-// `reasonCode` is carried in the request, the `inventory.stock.adjusted` payload,
-// and the logs only — **no `StockMovement` row is written** (that audit ledger
-// lands with a later inventory-reservation / audit capability).
+// Adjust appends a signed `adjustment` `StockMovement` row **inside the same
+// transaction** as the counter write (ADR-030 §2) — its `quantity` is the signed
+// delta and its `reasonCode` is the mandatory operator reason, attributed to the
+// acting staff user (`actorId`, null = system). The running total stays the balance
+// authority (ADR-027); the ledger row is the immutable audit record. A below-zero
+// rejection throws before the persist, so neither the counter nor a ledger row is
+// written. The reserved-surface `inventory.stock-movement.recorded` event is the
+// third post-commit emit alongside adjusted + maybe-low.
 @Injectable()
 export class AdjustStockUseCase {
   constructor(
@@ -49,6 +58,8 @@ export class AdjustStockUseCase {
     private readonly transactionPort: ITransactionPort,
     @Inject(STOCK_REPOSITORY)
     private readonly repository: IStockRepositoryPort,
+    @Inject(STOCK_MOVEMENT_REPOSITORY)
+    private readonly movementRepository: IStockMovementRepositoryPort,
     @Inject(STOCK_CACHE)
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
@@ -85,18 +96,37 @@ export class AdjustStockUseCase {
 
     // The shared mutator owns the write protocol (ADR-027): post-commit cache
     // invalidation (ADR-023) around a bounded optimistic retry around the
-    // transactional find-or-init → changeOnHand → version-checked persist.
-    // `changeOnHand` throws `STOCK_RESULT_NEGATIVE` before any save when the delta
-    // would drive on-hand below zero; that domain rejection is not retried and
-    // propagates out so no cache mutation or event fires, mapped to a 409.
-    const saved = await applyOnHandChange(
+    // transactional find-or-init → changeOnHand → version-checked persist →
+    // ledger append. `changeOnHand` throws `STOCK_RESULT_NEGATIVE` before any save
+    // when the delta would drive on-hand below zero; that domain rejection is not
+    // retried and propagates out so no cache mutation, no ledger row, and no event
+    // fires, mapped to a 409. `buildMovement` records the signed `adjustment` row
+    // in the same transaction as the counter, so they commit atomically.
+    const { level: saved, movement } = await applyOnHandChange(
       {
         transactionPort: this.transactionPort,
         repository: this.repository,
+        movementRepository: this.movementRepository,
         stockCache: this.stockCache,
         logger: this.logger,
       },
-      { variantId, stockLocationId, delta: quantityDelta, correlationId },
+      {
+        variantId,
+        stockLocationId,
+        delta: quantityDelta,
+        correlationId,
+        buildMovement: (persisted) =>
+          StockMovement.record({
+            variantId: persisted.variantId,
+            stockLocationId: persisted.stockLocationId,
+            type: StockMovementTypeEnum.ADJUSTMENT,
+            quantity: quantityDelta, // signed, non-zero — `adjustment` accepts both signs
+            reasonCode,
+            referenceType: null,
+            referenceId: null,
+            actorId: actorId ?? null,
+          }),
+      },
     );
 
     this.logger.info(
@@ -104,12 +134,13 @@ export class AdjustStockUseCase {
       'Stock adjusted — signed delta applied',
     );
 
-    // Post-commit, best-effort (ADR-020). The two emits are independent and
-    // each swallows its own failure, so they run concurrently — on the
-    // low-stock path this removes one serial broker round-trip from the RPC.
+    // Post-commit, best-effort (ADR-020). The three emits are independent and
+    // each swallows its own failure, so they run concurrently — removing serial
+    // broker round-trips from the RPC.
     await Promise.all([
       this.emitAdjusted(saved, quantityDelta, reasonCode, actorId, correlationId),
       this.maybeEmitLow(saved, quantityDelta, correlationId),
+      this.emitMovementRecorded(saved, movement, correlationId),
     ]);
 
     return toStockLevelView(saved);
@@ -184,6 +215,28 @@ export class AdjustStockUseCase {
       this.logger.warn(
         { err: error as Error, correlationId, variantId: saved.variantId },
         'Failed to publish inventory.stock.low (write already committed)',
+      );
+    }
+  }
+
+  // The `adjustment` ledger row committed with the counter; this only announces it
+  // (ADR-030 §2). Best-effort like every post-commit emit. `movement` is always
+  // present on the adjust path (a `buildMovement` factory is always supplied), but
+  // the helper's result type is nullable, so guard for safety.
+  private async emitMovementRecorded(
+    saved: StockLevel,
+    movement: StockMovement | null,
+    correlationId?: string,
+  ): Promise<void> {
+    if (movement === null) {
+      return;
+    }
+    try {
+      await this.publisher.publishStockMovementRecorded(movement, correlationId);
+    } catch (error) {
+      this.logger.warn(
+        { err: error as Error, correlationId, variantId: saved.variantId },
+        'Failed to publish inventory.stock-movement.recorded (write already committed)',
       );
     }
   }
