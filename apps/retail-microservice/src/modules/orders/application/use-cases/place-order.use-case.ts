@@ -20,6 +20,7 @@ import {
   IOrderCartReaderPort,
   IOrderCatalogGatewayPort,
   IOrderEventsPublisherPort,
+  IOrderInventoryGatewayPort,
   IOrderRepositoryPort,
   IAddressRepositoryPort,
   IPaymentRepositoryPort,
@@ -28,6 +29,7 @@ import {
   ORDER_CART_READER,
   ORDER_CATALOG_GATEWAY,
   ORDER_EVENTS_PUBLISHER,
+  ORDER_INVENTORY_GATEWAY,
   ORDER_REPOSITORY,
   PAYMENT_REPOSITORY,
   TRANSACTION_PORT,
@@ -44,9 +46,12 @@ const PROVISIONAL_ORDER_NUMBER = 'PENDING';
 // §1). It snapshots each line from the catalog at write-time (`sku` / `nameSnapshot`
 // via `catalog.variant.get`, `unitPriceMinor` via `catalog.price.select` — ADR-025
 // / ADR-026), snapshots the buyer's billing + shipping addresses as immutable
-// `ownerType=order` copies (ADR-028 §5), authorizes payment inline via the
-// `PAYMENT_GATEWAY` (authorize-on-place, Q5), and emits `retail.order.placed` +
-// `retail.payment.authorized` post-commit.
+// `ownerType=order` copies (ADR-028 §5), allocates the cart's stock holds into the
+// order **inside the place transaction, after the cart-conversion CAS** (ADR-030 —
+// reserved → allocated, or a direct allocation fallback), authorizes payment inline
+// via the `PAYMENT_GATEWAY` (authorize-on-place, Q5) — allocate precedes payment, so
+// money is never authorized for stock that could not be allocated — and emits
+// `retail.order.placed` + `retail.payment.authorized` post-commit.
 //
 // **The snapshot is the contract with the buyer.** A later catalog/price/name change
 // must never rewrite a placed order, so the line freezes the catalog values at
@@ -64,6 +69,8 @@ export class PlaceOrderUseCase {
     private readonly cartReader: IOrderCartReaderPort,
     @Inject(ORDER_CATALOG_GATEWAY)
     private readonly catalog: IOrderCatalogGatewayPort,
+    @Inject(ORDER_INVENTORY_GATEWAY)
+    private readonly inventory: IOrderInventoryGatewayPort,
     @Inject(ORDER_REPOSITORY)
     private readonly orderRepository: IOrderRepositoryPort,
     @Inject(ADDRESS_REPOSITORY)
@@ -120,46 +127,114 @@ export class PlaceOrderUseCase {
     // 2. Snapshot the lines from the catalog (read-only, no transaction).
     const lines = await this.snapshotLines(cart.lines, cart.currency, correlationId);
 
-    // 3. Build + persist the order, the two snapshot addresses, and the cart
-    //    conversion in one transaction.
+    // 3. Build + persist the order, the two snapshot addresses, the cart
+    //    conversion, and the stock allocation in one transaction.
     const placedAt = new Date();
-    const saved = await this.transactionPort.runInTransaction(async (scope) => {
-      const order = Order.place({
-        orderNumber: PROVISIONAL_ORDER_NUMBER,
-        customerId,
-        currency: cart.currency,
-        lines,
-        // Inserted NULL, then patched once the address rows exist (they FK onto
-        // `address`, so the order row precedes the pointer — ADR-028 §5).
-        billingAddressId: null,
-        shippingAddressId: null,
-        sourceCartId: cartId,
-        placedAt,
+    // The allocation lines snapshot — reused by the in-tx allocate AND the
+    // post-failure compensation cancel, so both reference the same lines.
+    const allocationLines = lines.map((line) => ({
+      variantId: line.variantId,
+      quantity: line.quantity,
+    }));
+    // Tracked across the tx boundary: `allocated` flips true only once the
+    // allocate RPC resolves (the allocation committed inventory-side), so the
+    // compensation fires only for the rare "allocated then the place commit
+    // failed" case — never for an allocate rejection (which inventory already
+    // rolled back itself).
+    let allocated = false;
+    let allocatedOrderId: number | null = null;
+
+    let saved: Order;
+    try {
+      saved = await this.transactionPort.runInTransaction(async (scope) => {
+        const order = Order.place({
+          orderNumber: PROVISIONAL_ORDER_NUMBER,
+          customerId,
+          currency: cart.currency,
+          lines,
+          // Inserted NULL, then patched once the address rows exist (they FK onto
+          // `address`, so the order row precedes the pointer — ADR-028 §5).
+          billingAddressId: null,
+          shippingAddressId: null,
+          sourceCartId: cartId,
+          placedAt,
+        });
+        const persisted = await this.orderRepository.save(order, scope);
+        const orderId = persisted.id!;
+
+        const billing = Address.forOrder({ orderId: String(orderId), ...payload.billingAddress });
+        const shipping = Address.forOrder({ orderId: String(orderId), ...payload.shippingAddress });
+        await this.addressRepository.save(billing, scope);
+        await this.addressRepository.save(shipping, scope);
+        await this.orderRepository.attachAddresses(orderId, billing.id!, shipping.id!, scope);
+
+        const converted = await this.cartReader.markConverted(cartId, scope);
+        if (!converted) {
+          // The compare-and-swap matched no `active` row: a concurrent place
+          // converted (or a purge abandoned) this cart between the state guard and
+          // here. Throwing rolls this transaction back — without it both racers
+          // would commit, minting two orders (and two authorized payments) from one
+          // cart. The loser surfaces a 409; a retry resolves the winner's order via
+          // the converted-cart idempotency path.
+          throw new OrderDomainException(
+            OrderErrorCodeEnum.ORDER_CART_NOT_PLACEABLE,
+            `Cart ${cartId} was converted or abandoned concurrently; place aborted`,
+          );
+        }
+
+        // Allocate AFTER the conversion CAS succeeds — the final step before the
+        // callback returns (ADR-030). Allocate-after-CAS means a concurrent
+        // double-place loser threw on the CAS above and never reaches here, so
+        // there is no double allocation to unwind. Per line the inventory service
+        // commits the active hold (reserved → allocated) or falls back to a direct
+        // allocation; an out-of-stock fallback rejects with `INVENTORY_OUT_OF_STOCK`
+        // and the rejection propagates out of this callback → the whole place rolls
+        // back (no order row, no conversion, the cart stays `active` and fixable),
+        // and the typed code + `details.available` reach the gateway. Holding the
+        // DB tx across this in-cluster RPC is accepted and bounded: the inventory
+        // handler runs its own short transaction on DISJOINT tables of the one
+        // shared MySQL, so there is no lock interplay (ADR-030).
+        await this.inventory.allocateStock({
+          cartId,
+          orderId,
+          lines: allocationLines,
+          correlationId,
+        });
+        // The allocation committed inventory-side. From here only the place tx's
+        // own commit can still fail; if it does, the orphaned allocation is
+        // compensated below.
+        allocated = true;
+        allocatedOrderId = orderId;
+        return persisted;
       });
-      const persisted = await this.orderRepository.save(order, scope);
-      const orderId = persisted.id!;
-
-      const billing = Address.forOrder({ orderId: String(orderId), ...payload.billingAddress });
-      const shipping = Address.forOrder({ orderId: String(orderId), ...payload.shippingAddress });
-      await this.addressRepository.save(billing, scope);
-      await this.addressRepository.save(shipping, scope);
-      await this.orderRepository.attachAddresses(orderId, billing.id!, shipping.id!, scope);
-
-      const converted = await this.cartReader.markConverted(cartId, scope);
-      if (!converted) {
-        // The compare-and-swap matched no `active` row: a concurrent place
-        // converted (or a purge abandoned) this cart between the state guard and
-        // here. Throwing rolls this transaction back — without it both racers
-        // would commit, minting two orders (and two authorized payments) from one
-        // cart. The loser surfaces a 409; a retry resolves the winner's order via
-        // the converted-cart idempotency path.
-        throw new OrderDomainException(
-          OrderErrorCodeEnum.ORDER_CART_NOT_PLACEABLE,
-          `Cart ${cartId} was converted or abandoned concurrently; place aborted`,
-        );
+    } catch (err) {
+      // Compensation for the rare "allocated then the place commit failed" case:
+      // the allocation committed in inventory's own transaction, but this place tx
+      // then failed at commit, so the counters are left allocated for an order that
+      // never persisted. Best-effort cancel the orphaned allocation (its own RPC
+      // into inventory's own tx, OUTSIDE this failed transaction), then rethrow the
+      // original error so the caller still sees the place failure. `allocated`
+      // stays false for an allocate rejection, so nothing is unwound there.
+      if (allocated && allocatedOrderId !== null) {
+        try {
+          await this.inventory.cancelAllocation({
+            orderId: allocatedOrderId,
+            lines: allocationLines,
+            // A free-string movement `reason_code` recording WHY the allocation was
+            // unwound (the default is `order-cancelled`); `place-rollback` keeps the
+            // ledger honest about a compensation vs a genuine cancel.
+            reason: 'place-rollback',
+            correlationId,
+          });
+        } catch (cancelErr) {
+          this.logger.warn(
+            { err: cancelErr as Error, correlationId, cartId, orderId: allocatedOrderId },
+            'Failed to compensate allocation after a post-allocate place failure (stock left allocated)',
+          );
+        }
       }
-      return persisted;
-    });
+      throw err;
+    }
 
     const orderId = saved.id!;
 

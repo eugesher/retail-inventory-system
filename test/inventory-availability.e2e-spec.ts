@@ -21,6 +21,15 @@ const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const DEFAULT_WAREHOUSE = 'default-warehouse';
 
+// The absolute `available === 100` assertions read a seeded variant that NO other
+// suite consumes. The cart/order suites now reserve (add-to-cart) and allocate
+// (place) seeded stock, and they run before this suite in the shared single-DB
+// e2e pass — so variants 1 and 3 (which they touch) would show drifted `available`
+// here. Variant 2 is seeded identically (100 on hand) and is never reserved or
+// allocated by any suite, so its availability stays a stable 100 (the
+// disjoint-fixtures convention).
+const PRISTINE_VARIANT_ID = 2;
+
 interface ITokenResponse {
   accessToken: string;
   refreshToken: string;
@@ -100,12 +109,12 @@ describe('Inventory availability read path (e2e)', () => {
   describe('GET /api/inventory/variants/:variantId/stock (public)', () => {
     it('returns the seeded availability without an Authorization header (proves @Public())', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(
-        '/api/inventory/variants/1/stock',
+        `/api/inventory/variants/${PRISTINE_VARIANT_ID}/stock`,
       );
 
       expect(status).toBe(HttpStatus.OK);
       const stock = body as IVariantStockBody;
-      expect(stock.variantId).toBe(1);
+      expect(stock.variantId).toBe(PRISTINE_VARIANT_ID);
       expect(stock.totalOnHand).toBe(100);
       expect(stock.totalAvailable).toBe(100);
       expect(stock.locations).toHaveLength(1);
@@ -118,14 +127,14 @@ describe('Inventory availability read path (e2e)', () => {
 
     it('serves the second identical read from the cache (miss then hit)', async () => {
       // Cache-aside (ADR-002): the first read is a miss that loads from MySQL and
-      // writes the `VariantStockView` back under `ris:inventory:stock:v3:1:__all__`;
+      // writes the `VariantStockView` back under `ris:inventory:stock:v3:2:__all__`;
       // the second is a hit served from Redis. The cached value is deterministic
       // (the read use case sorts locations), so the two HTTP bodies are byte-equal.
       const first = await supertest(apiGatewayApp.getHttpServer()).get(
-        '/api/inventory/variants/1/stock',
+        `/api/inventory/variants/${PRISTINE_VARIANT_ID}/stock`,
       );
       const second = await supertest(apiGatewayApp.getHttpServer()).get(
-        '/api/inventory/variants/1/stock',
+        `/api/inventory/variants/${PRISTINE_VARIANT_ID}/stock`,
       );
 
       expect(first.status).toBe(HttpStatus.OK);
@@ -150,7 +159,7 @@ describe('Inventory availability read path (e2e)', () => {
 
     it('scopes the answer to a single location via the comma-separated ?locationIds', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(
-        `/api/inventory/variants/1/stock?locationIds=${DEFAULT_WAREHOUSE}`,
+        `/api/inventory/variants/${PRISTINE_VARIANT_ID}/stock?locationIds=${DEFAULT_WAREHOUSE}`,
       );
 
       expect(status).toBe(HttpStatus.OK);

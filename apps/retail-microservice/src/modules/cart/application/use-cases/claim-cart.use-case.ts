@@ -15,6 +15,10 @@ import { toCartView } from './cart-view.factory';
 // owner. A missing cart is a 404; a wrong `fromCustomerId` is a 403. On success
 // the cart's `customerId` is reassigned to the registered customer and the
 // updated view is returned.
+//
+// No inventory call: reservations key on `cartId`, which a claim re-points the
+// owner of but never changes, so the holds survive guest-cart promotion untouched
+// (ADR-030). Reserve/release are tied to the cart id, not the customer id.
 @Injectable()
 export class ClaimCartUseCase {
   constructor(

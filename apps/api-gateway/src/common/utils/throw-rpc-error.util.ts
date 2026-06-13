@@ -14,16 +14,31 @@ export function throwRpcError(error: unknown): never {
     const statusCode = Number(record.statusCode) as HttpStatus;
     const message = typeof record.message === 'string' ? record.message : undefined;
     const code = typeof record.code === 'string' ? record.code : undefined;
+    // Some upstream rejections carry a structured `details` object — e.g. an
+    // inventory `INVENTORY_OUT_OF_STOCK` (409) ships `details: { available: n }`
+    // so the storefront can show "only n left" without re-reading stock. Forward
+    // it (when it is an object) alongside the code; a string/absent `details` is
+    // dropped, keeping the body shape stable.
+    const details =
+      typeof record.details === 'object' && record.details !== null
+        ? (record.details as Record<string, unknown>)
+        : undefined;
 
     // Forward the upstream typed error code (e.g. CATALOG_CATEGORY_CYCLE,
-    // CATALOG_MEDIA_REORDER_SET_MISMATCH) into the HTTP error body so a client
-    // can branch on a stable, greppable code instead of brittle-matching the
-    // human-readable message. Every microservice RPC filter already emits
-    // `{ statusCode, message, code }`; the gateway used to drop the code at this
-    // boundary. With a code present the body becomes `{ statusCode, message,
-    // code }`; without one the standard Nest `{ statusCode, message, error }`
+    // CATALOG_MEDIA_REORDER_SET_MISMATCH, INVENTORY_OUT_OF_STOCK) into the HTTP
+    // error body so a client can branch on a stable, greppable code instead of
+    // brittle-matching the human-readable message. Every microservice RPC filter
+    // already emits `{ statusCode, message, code }` (+ optional `details`); the
+    // gateway used to drop both at this boundary. With a code present the body
+    // becomes `{ statusCode, message, code }` (+ `details` when the upstream
+    // carried one); without one the standard Nest `{ statusCode, message, error }`
     // shape is preserved (a non-RPC error carries no code to forward).
-    const payload = code !== undefined ? { statusCode, message, code } : message;
+    const payload =
+      code !== undefined
+        ? details !== undefined
+          ? { statusCode, message, code, details }
+          : { statusCode, message, code }
+        : message;
 
     if (statusCode === HttpStatus.NOT_FOUND) throw new NotFoundException(payload);
     if (statusCode === HttpStatus.BAD_REQUEST) throw new BadRequestException(payload);
@@ -46,7 +61,12 @@ export function throwRpcError(error: unknown): never {
       numericStatus >= 400 &&
       numericStatus <= 599
     ) {
-      throw new HttpException({ statusCode, message, code }, statusCode);
+      throw new HttpException(
+        details !== undefined
+          ? { statusCode, message, code, details }
+          : { statusCode, message, code },
+        statusCode,
+      );
     }
   }
 

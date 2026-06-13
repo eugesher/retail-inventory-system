@@ -81,8 +81,13 @@ Authorization: Bearer {{accessToken}}
 # POST /api/cart/:cartId/lines  (Bearer + owner-check)
 # Adds a variant line. The price is NEVER sent — it is snapshotted retail-side
 # from catalog.price.select in the cart's currency. An unknown/unpriced variant
-# is rejected 409. Body (AddLineRequestDto):
-#   variantId: positive int (the catalog variant id; seeded variant 1 has a USD price)
+# is rejected 409. The retail use case then RESERVES the line's absolute target
+# quantity against inventory (inventory.reservation.reserve) BEFORE saving — an
+# out-of-stock target is rejected 409 with the body
+# { statusCode: 409, code: "INVENTORY_OUT_OF_STOCK", details: { available } }
+# and the cart is left untouched (so the inventory microservice must be running;
+# `yarn start:dev` starts it). Body (AddLineRequestDto):
+#   variantId: positive int (the catalog variant id; seeded variant 1 has a USD price + 100 on hand)
 #   quantity:  positive int
 # Response is the updated CartView; the new line carries unitPriceSnapshotMinor.
 POST {{baseUrl}}/cart/{{cartId}}/lines
@@ -102,7 +107,10 @@ Content-Type: application/json
 # @name changeLineQuantity
 # PATCH /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
 # Sets a line's quantity to a new positive value (a 0 is rejected — removal is
-# the explicit DELETE). Body (ChangeLineQuantityRequestDto):
+# the explicit DELETE). The retail use case RE-RESERVES the absolute new quantity
+# (inventory.reservation.reserve, idempotent-by-absolute-quantity) before saving —
+# raising it past available stock is a 409 INVENTORY_OUT_OF_STOCK. Body
+# (ChangeLineQuantityRequestDto):
 #   quantity: positive int
 # Response is the updated CartView.
 PATCH {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
@@ -117,8 +125,10 @@ Content-Type: application/json
 
 # @name removeLine
 # DELETE /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
-# Drops the line from the cart. An unknown line id is 404. Response is the
-# updated CartView (now with an empty lines array).
+# Drops the line from the cart. An unknown line id is 404. After the cart write
+# the retail use case RELEASES the line's stock hold (inventory.reservation.release)
+# best-effort — a release failure is logged and swallowed, never fails the remove.
+# Response is the updated CartView (now with an empty lines array).
 DELETE {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
 Authorization: Bearer {{accessToken}}
 
