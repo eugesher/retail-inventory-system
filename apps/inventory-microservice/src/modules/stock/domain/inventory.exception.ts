@@ -25,6 +25,22 @@ export enum InventoryErrorCodeEnum {
   // update the bounded number of times and still lost the race to a concurrent
   // writer on the same `(variantId, stockLocationId)`. The caller may simply retry.
   STOCK_WRITE_CONFLICT = 'INVENTORY_STOCK_WRITE_CONFLICT',
+
+  // Reservation invariants (ADR-030). The TTL-bounded, cart-scoped hold the
+  // inventory-reservation capability builds on. The aggregate enforces these now;
+  // the Reserve / Release / Allocate use cases that surface them to a caller land
+  // in later sessions.
+  //
+  // Malformed input → 400: a non-positive / non-integer reserved quantity.
+  RESERVATION_QUANTITY_INVALID = 'INVENTORY_RESERVATION_QUANTITY_INVALID',
+  // Illegal status-machine move → 409: e.g. releasing a non-active hold, or
+  // reactivating a committed one. The request is well-formed but clashes with the
+  // hold's current lifecycle state.
+  RESERVATION_INVALID_STATE = 'INVENTORY_RESERVATION_INVALID_STATE',
+  // Wall-clock-expired commit → 409: `commit` was called on a hold whose
+  // `expiresAt` is already in the past. The allocate use case (a later capability)
+  // refreshes the TTL first when it decides to honor a stale-but-still-held hold.
+  RESERVATION_EXPIRED = 'INVENTORY_RESERVATION_EXPIRED',
 }
 
 // The inventory bounded context's concrete `DomainException` (the third in the
