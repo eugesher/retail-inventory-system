@@ -1,4 +1,5 @@
 import {
+  IStockTransferResult,
   StockLevelView,
   StockLocationView,
   VariantStockView,
@@ -40,6 +41,18 @@ export interface IAdjustStockCommand {
   actorId?: string;
 }
 
+// Transfer Stock command: move a positive `quantity` of on-hand for one variant
+// from `fromLocationId` to `toLocationId`. Unlike receive/adjust, BOTH locations are
+// required (a transfer is intrinsically between two named locations). `actorId` is
+// the staff user (the gateway threads it from `@CurrentUser()`).
+export interface ITransferStockCommand {
+  variantId: number;
+  fromLocationId: string;
+  toLocationId: string;
+  quantity: number;
+  actorId?: string;
+}
+
 // The gateway-side seam onto the inventory microservice's read + write RPCs
 // (`inventory.stock-level.get` / `inventory.location.list` reads;
 // `inventory.stock-level.receive` / `inventory.stock-level.adjust` writes). The
@@ -60,4 +73,11 @@ export interface IInventoryGatewayPort {
   // Adjust Stock: returns the updated `StockLevelView`. A below-zero result is a
   // 409 surfaced by the inventory service's domain filter.
   adjustStock(command: IAdjustStockCommand, correlationId: string): Promise<StockLevelView>;
+  // Transfer Stock: returns both post-transfer levels (`{ from, to }`). A bad
+  // quantity / same-location is a 400, an over-transfer a 409, surfaced by the
+  // inventory service's domain filter.
+  transferStock(
+    command: ITransferStockCommand,
+    correlationId: string,
+  ): Promise<IStockTransferResult>;
 }

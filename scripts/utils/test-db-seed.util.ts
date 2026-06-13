@@ -17,6 +17,11 @@ export class TestDbSeedUtil {
     // references product_variant.id, so both must follow catalog-product-variant.sql.
     'tax-category.sql',
     'price.sql',
+    // A second active stock location ('backup-store') so transfers have a
+    // destination. It is independent of stock-level.sql (no FK from a stock level
+    // seed targets it), but is registered before it so the destination exists for
+    // any later fixture; 'default-warehouse' still comes from the migration.
+    'stock-location.sql',
     // stock_level.variant_id references product_variant.id, so this also follows
     // catalog-product-variant.sql; stock_location ('default-warehouse') comes from
     // the migration, not a seed.

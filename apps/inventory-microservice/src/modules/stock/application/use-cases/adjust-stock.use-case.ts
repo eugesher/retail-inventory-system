@@ -2,7 +2,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import {
-  INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD,
   INVENTORY_DEFAULT_STOCK_LOCATION,
   IStockAdjustPayload,
   StockLevelView,
@@ -14,7 +13,6 @@ import {
   InventoryErrorCodeEnum,
   StockAdjustedEvent,
   StockLevel,
-  StockLowEvent,
   StockMovement,
 } from '../../domain';
 import {
@@ -29,6 +27,7 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { maybeEmitLowStock } from './low-stock.emitter';
 import { applyOnHandChange } from './stock-mutation';
 import { requireActiveLocation } from './stock-location.guard';
 import { toStockLevelView } from './stock-view.factory';
@@ -139,7 +138,7 @@ export class AdjustStockUseCase {
     // broker round-trips from the RPC.
     await Promise.all([
       this.emitAdjusted(saved, quantityDelta, reasonCode, actorId, correlationId),
-      this.maybeEmitLow(saved, quantityDelta, correlationId),
+      maybeEmitLowStock(this.publisher, this.logger, saved, quantityDelta, correlationId),
       this.emitMovementRecorded(saved, movement, correlationId),
     ]);
 
@@ -173,51 +172,8 @@ export class AdjustStockUseCase {
     }
   }
 
-  // Re-sourced from the new model: the preserved low-stock alert fires on the
-  // post-commit `StockLevel.quantityOnHand`, against the cross-service constant
-  // threshold (ADR-012 §low-stock). It is a depletion signal — emitted only when
-  // a NEGATIVE delta drives on-hand to at/below the threshold (the spec wording
-  // "falls at/below", and the unit coverage, both trigger on a decrease). A
-  // positive adjustment that merely leaves on-hand low has not "fallen" and must
-  // not raise a reorder alert — a write that increases stock is never a low-stock
-  // event.
-  private async maybeEmitLow(
-    saved: StockLevel,
-    quantityDelta: number,
-    correlationId?: string,
-  ): Promise<void> {
-    if (quantityDelta >= 0 || saved.quantityOnHand > INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD) {
-      return;
-    }
-
-    this.logger.info(
-      {
-        correlationId,
-        variantId: saved.variantId,
-        stockLocationId: saved.stockLocationId,
-        quantity: saved.quantityOnHand,
-        threshold: INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD,
-      },
-      'On-hand at/below threshold — emitting inventory.stock.low',
-    );
-
-    try {
-      await this.publisher.publishStockLow(
-        new StockLowEvent({
-          variantId: saved.variantId,
-          stockLocationId: saved.stockLocationId,
-          quantity: saved.quantityOnHand,
-          threshold: INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD,
-        }),
-        correlationId,
-      );
-    } catch (error) {
-      this.logger.warn(
-        { err: error as Error, correlationId, variantId: saved.variantId },
-        'Failed to publish inventory.stock.low (write already committed)',
-      );
-    }
-  }
+  // The low-stock depletion alert (Adjust's negative-delta path) is the shared
+  // `maybeEmitLowStock` helper — the same policy Transfer's source leg reuses.
 
   // The `adjustment` ledger row committed with the counter; this only announces it
   // (ADR-030 §2). Best-effort like every post-commit emit. `movement` is always

@@ -11,6 +11,8 @@ import {
   IStockAdjustPayload,
   IStockLocationsListPayload,
   IStockReceivePayload,
+  IStockTransferPayload,
+  IStockTransferResult,
   IVariantStockGetPayload,
   ReservationView,
   StockLevelView,
@@ -28,6 +30,7 @@ import {
   ReceiveStockUseCase,
   ReleaseReservationUseCase,
   ReserveStockUseCase,
+  TransferStockUseCase,
 } from '../application/use-cases';
 
 @Controller()
@@ -41,6 +44,7 @@ export class StockController {
     private readonly releaseReservation: ReleaseReservationUseCase,
     private readonly allocateStock: AllocateStockUseCase,
     private readonly cancelAllocation: CancelAllocationUseCase,
+    private readonly transferStock: TransferStockUseCase,
   ) {}
 
   // Read path on the new model (ADR-027): per-variant availability across the
@@ -74,6 +78,19 @@ export class StockController {
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST)
   public handleStockAdjust(@Payload() payload: IStockAdjustPayload): Promise<StockLevelView> {
     return this.adjustStock.execute(payload);
+  }
+
+  // Transfer Stock write path (ADR-030): moves on-hand between two locations of one
+  // variant atomically — two version-checked `StockLevel` writes + two paired
+  // `adjustment` movements (sharing a `transfer` reference) in one transaction. A
+  // bad quantity / same-location is a 400; an over-transfer (source below zero) is a
+  // 409 `STOCK_RESULT_NEGATIVE`; an unknown/inactive location reuses the existing
+  // location codes — all mapped by the `InventoryRpcExceptionFilter`.
+  @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_TRANSFER)
+  public handleStockTransfer(
+    @Payload() payload: IStockTransferPayload,
+  ): Promise<IStockTransferResult> {
+    return this.transferStock.execute(payload);
   }
 
   // Reserve Stock (ADR-030): holds units for a cart against the no-oversell

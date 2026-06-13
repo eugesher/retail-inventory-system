@@ -26,6 +26,9 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_ADJUST,
     );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_TRANSFER).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_TRANSFER,
+    );
     expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_INITIALIZED,
     );

@@ -12,17 +12,20 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiProduces,
   ApiQuery,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 
 import { CurrentUser, Public, RequiresPermission } from '@retail-inventory-system/auth';
 import {
   ICurrentUser,
+  IStockTransferResult,
   PermissionCodeEnum,
   StockLevelView,
   StockLocationView,
@@ -35,8 +38,14 @@ import {
   GetVariantStockUseCase,
   ListLocationsUseCase,
   ReceiveStockUseCase,
+  TransferStockUseCase,
 } from '../application/use-cases';
-import { AdjustStockRequestDto, ReceiveStockRequestDto, VariantStockQueryDto } from './dto';
+import {
+  AdjustStockRequestDto,
+  ReceiveStockRequestDto,
+  TransferStockRequestDto,
+  VariantStockQueryDto,
+} from './dto';
 
 // HTTP surface over the inventory microservice's read + write RPCs (ADR-009). The
 // gateway holds no inventory state of its own — each method is a thin port→adapter
@@ -56,6 +65,7 @@ export class InventoryController {
     private readonly listLocationsUseCase: ListLocationsUseCase,
     private readonly receiveStockUseCase: ReceiveStockUseCase,
     private readonly adjustStockUseCase: AdjustStockUseCase,
+    private readonly transferStockUseCase: TransferStockUseCase,
   ) {}
 
   @Get('locations')
@@ -143,5 +153,39 @@ export class InventoryController {
     @CorrelationId() correlationId: string,
   ): Promise<StockLevelView> {
     return this.adjustStockUseCase.execute({ ...dto, variantId, actorId: actor.id }, correlationId);
+  }
+
+  @Post('variants/:variantId/stock/transfer')
+  @RequiresPermission(PermissionCodeEnum.INVENTORY_TRANSFER)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Transfer stock between two locations (staff, inventory:transfer)',
+  })
+  @ApiParam({ name: 'variantId', type: Number, example: 1 })
+  // A transfer of more than the source's on-hand is a 409 (the domain below-zero
+  // invariant); a bad quantity or identical source/destination is a 400.
+  @ApiExtraModels(StockLevelView)
+  @ApiOkResponse({
+    description: 'Both post-transfer levels: from (debited source) and to (credited destination)',
+    schema: {
+      type: 'object',
+      properties: {
+        from: { $ref: getSchemaPath(StockLevelView) },
+        to: { $ref: getSchemaPath(StockLevelView) },
+      },
+    },
+  })
+  @ApiProduces('application/json')
+  public async transferStock(
+    @Param('variantId', ParseIntPipe) variantId: number,
+    @Body() dto: TransferStockRequestDto,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<IStockTransferResult> {
+    return this.transferStockUseCase.execute(
+      { ...dto, variantId, actorId: actor.id },
+      correlationId,
+    );
   }
 }
