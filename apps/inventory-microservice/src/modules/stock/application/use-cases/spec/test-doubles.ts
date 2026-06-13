@@ -207,10 +207,16 @@ export class InMemoryStockCache implements IStockCachePort {
 // exercises the find → changeOnHand → persist call path the write use cases take.
 export class ImmediateTransactionPort implements ITransactionPort {
   public calls = 0;
+  // The opaque sentinel scope handed to the most recent `work`. Specs assert that
+  // the movement repository's `append` received this exact reference — proof the
+  // ledger write joined the same transaction as the counter persist.
+  public lastScope: ITransactionScope | null = null;
 
   public runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
     this.calls += 1;
-    return work({} as unknown as ITransactionScope);
+    const scope = {} as unknown as ITransactionScope;
+    this.lastScope = scope;
+    return work(scope);
   }
 }
 
@@ -353,9 +359,14 @@ export class InMemoryReservationRepository implements IReservationRepositoryPort
 // newest-first page so the seam is fully implemented.
 export class InMemoryStockMovementRepository implements IStockMovementRepositoryPort {
   public readonly appended: StockMovement[] = [];
+  // The transaction scope each `append` was called with, in append order. Specs
+  // assert it matches the scope the transaction port opened (the movement joined
+  // the counter's transaction, ADR-030 §2).
+  public readonly appendScopes: (ITransactionScope | undefined)[] = [];
   private nextId = 1;
 
-  public append(movement: StockMovement): Promise<StockMovement> {
+  public append(movement: StockMovement, scope?: ITransactionScope): Promise<StockMovement> {
+    this.appendScopes.push(scope);
     const persisted = StockMovement.reconstitute({
       id: this.nextId++,
       variantId: movement.variantId,

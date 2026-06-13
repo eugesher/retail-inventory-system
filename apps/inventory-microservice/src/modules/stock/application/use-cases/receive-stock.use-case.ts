@@ -5,21 +5,25 @@ import {
   INVENTORY_DEFAULT_STOCK_LOCATION,
   IStockReceivePayload,
   StockLevelView,
+  StockMovementTypeEnum,
 } from '@retail-inventory-system/contracts';
 
 import {
   InventoryDomainException,
   InventoryErrorCodeEnum,
   StockLevel,
+  StockMovement,
   StockReceivedEvent,
 } from '../../domain';
 import {
   IStockCachePort,
   IStockEventsPublisherPort,
+  IStockMovementRepositoryPort,
   IStockRepositoryPort,
   ITransactionPort,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
+  STOCK_MOVEMENT_REPOSITORY,
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
@@ -33,9 +37,14 @@ import { toStockLevelView } from './stock-view.factory';
 // `stockCache.withInvalidation(...)` so the cached availability is invalidated
 // **after** the commit (ADR-023) — the write body is `work`, `resolveItems`
 // yields the `(variantId, stockLocationId)` to wipe, and the prefix delete runs
-// post-commit. The reserved-surface `inventory.stock.received` event is emitted
-// afterwards (best-effort, ADR-020). Receive never lowers on-hand, so there is no
-// low-stock check.
+// post-commit. Receive never lowers on-hand, so there is no low-stock check.
+//
+// Receive also appends a positive `receipt` `StockMovement` row **inside the same
+// transaction** as the counter write (ADR-030 §2): the running total stays the
+// balance authority (ADR-027), and the ledger row is the immutable audit record of
+// why on-hand rose, attributed to the acting staff user (`actorId`, null = system).
+// Two reserved-surface events fire post-commit, best-effort and independent
+// (ADR-020): `inventory.stock.received` and `inventory.stock-movement.recorded`.
 @Injectable()
 export class ReceiveStockUseCase {
   constructor(
@@ -43,6 +52,8 @@ export class ReceiveStockUseCase {
     private readonly transactionPort: ITransactionPort,
     @Inject(STOCK_REPOSITORY)
     private readonly repository: IStockRepositoryPort,
+    @Inject(STOCK_MOVEMENT_REPOSITORY)
+    private readonly movementRepository: IStockMovementRepositoryPort,
     @Inject(STOCK_CACHE)
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
@@ -73,15 +84,34 @@ export class ReceiveStockUseCase {
 
     // The shared mutator owns the write protocol (ADR-027): post-commit cache
     // invalidation (ADR-023) around a bounded optimistic retry around the
-    // transactional find-or-init → changeOnHand → version-checked persist.
-    const saved = await applyOnHandChange(
+    // transactional find-or-init → changeOnHand → version-checked persist →
+    // ledger append. `buildMovement` records the positive `receipt` row in the
+    // same transaction, so the counter rise and its audit trail commit atomically.
+    const { level: saved, movement } = await applyOnHandChange(
       {
         transactionPort: this.transactionPort,
         repository: this.repository,
+        movementRepository: this.movementRepository,
         stockCache: this.stockCache,
         logger: this.logger,
       },
-      { variantId, stockLocationId, delta: quantity, correlationId },
+      {
+        variantId,
+        stockLocationId,
+        delta: quantity,
+        correlationId,
+        buildMovement: (persisted) =>
+          StockMovement.record({
+            variantId: persisted.variantId,
+            stockLocationId: persisted.stockLocationId,
+            type: StockMovementTypeEnum.RECEIPT,
+            quantity, // positive — the received amount (a `receipt` is +ve by sign rule)
+            reasonCode: null,
+            referenceType: null,
+            referenceId: null,
+            actorId: actorId ?? null,
+          }),
+      },
     );
 
     this.logger.info(
@@ -91,8 +121,12 @@ export class ReceiveStockUseCase {
 
     // Post-commit, best-effort (ADR-020): a publish failure is warn-logged, not
     // raised — the write already committed, so failing the RPC would mislead the
-    // caller into thinking the receive did not happen.
-    await this.emitReceived(saved, quantity, actorId, correlationId);
+    // caller into thinking the receive did not happen. The two emits are
+    // independent and each swallows its own failure, so they run concurrently.
+    await Promise.all([
+      this.emitReceived(saved, quantity, actorId, correlationId),
+      this.emitMovementRecorded(saved, movement, correlationId),
+    ]);
 
     return toStockLevelView(saved);
   }
@@ -118,6 +152,28 @@ export class ReceiveStockUseCase {
       this.logger.warn(
         { err: error as Error, correlationId, variantId: saved.variantId },
         'Failed to publish inventory.stock.received (write already committed)',
+      );
+    }
+  }
+
+  // The ledger row committed with the counter; this only announces it (ADR-030 §2).
+  // Best-effort like every post-commit emit — a broker hiccup must not fail the RPC.
+  // `movement` is always present on the receive path (a `buildMovement` factory is
+  // always supplied), but the helper's result type is nullable, so guard for safety.
+  private async emitMovementRecorded(
+    saved: StockLevel,
+    movement: StockMovement | null,
+    correlationId?: string,
+  ): Promise<void> {
+    if (movement === null) {
+      return;
+    }
+    try {
+      await this.publisher.publishStockMovementRecorded(movement, correlationId);
+    } catch (error) {
+      this.logger.warn(
+        { err: error as Error, correlationId, variantId: saved.variantId },
+        'Failed to publish inventory.stock-movement.recorded (write already committed)',
       );
     }
   }

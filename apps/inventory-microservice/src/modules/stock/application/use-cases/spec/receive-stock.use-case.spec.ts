@@ -1,6 +1,9 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { INVENTORY_DEFAULT_STOCK_LOCATION } from '@retail-inventory-system/contracts';
+import {
+  INVENTORY_DEFAULT_STOCK_LOCATION,
+  StockMovementTypeEnum,
+} from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import {
@@ -14,6 +17,7 @@ import { ReceiveStockUseCase } from '../receive-stock.use-case';
 import {
   ImmediateTransactionPort,
   InMemoryStockCache,
+  InMemoryStockMovementRepository,
   InMemoryStockRepository,
   RecordingStockEventsPublisher,
 } from './test-doubles';
@@ -31,6 +35,7 @@ const activeLocation = (id = INVENTORY_DEFAULT_STOCK_LOCATION): StockLocation =>
 
 describe('ReceiveStockUseCase', () => {
   let repository: InMemoryStockRepository;
+  let movements: InMemoryStockMovementRepository;
   let cache: InMemoryStockCache;
   let publisher: RecordingStockEventsPublisher;
   let transaction: ImmediateTransactionPort;
@@ -38,6 +43,7 @@ describe('ReceiveStockUseCase', () => {
 
   beforeEach(() => {
     repository = new InMemoryStockRepository();
+    movements = new InMemoryStockMovementRepository();
     cache = new InMemoryStockCache();
     publisher = new RecordingStockEventsPublisher();
     transaction = new ImmediateTransactionPort();
@@ -45,6 +51,7 @@ describe('ReceiveStockUseCase', () => {
     useCase = new ReceiveStockUseCase(
       transaction,
       repository,
+      movements,
       cache,
       publisher,
       makePinoLoggerMock() as unknown as PinoLogger,
@@ -153,5 +160,73 @@ describe('ReceiveStockUseCase', () => {
 
     // Receive never lowers on-hand, so it never fires the low-stock alert.
     expect(publisher.low).toHaveLength(0);
+  });
+
+  it('appends a positive receipt movement inside the counter transaction, attributed to the caller', async () => {
+    repository.seedLevel(
+      new StockLevel({
+        variantId: VARIANT_ID,
+        stockLocationId: INVENTORY_DEFAULT_STOCK_LOCATION,
+        quantityOnHand: 10,
+        quantityAllocated: 0,
+        quantityReserved: 0,
+        version: 0,
+      }),
+    );
+
+    await useCase.execute({
+      variantId: VARIANT_ID,
+      quantity: 50,
+      actorId: 'staff-7',
+      correlationId: CORRELATION_ID,
+    });
+
+    // Exactly one `receipt` ledger row with the positive received quantity.
+    expect(movements.appended).toHaveLength(1);
+    const [movement] = movements.appended;
+    expect(movement.type).toBe(StockMovementTypeEnum.RECEIPT);
+    expect(movement.quantity).toBe(50);
+    expect(movement.variantId).toBe(VARIANT_ID);
+    expect(movement.stockLocationId).toBe(INVENTORY_DEFAULT_STOCK_LOCATION);
+    expect(movement.actorId).toBe('staff-7');
+    expect(movement.reasonCode).toBeNull();
+    expect(movement.referenceType).toBeNull();
+    expect(movement.referenceId).toBeNull();
+
+    // It was appended on the same transaction scope as the counter persist.
+    expect(movements.appendScopes[0]).toBe(transaction.lastScope);
+
+    // The recorded event fires post-commit alongside `inventory.stock.received`.
+    expect(publisher.movementsRecorded).toHaveLength(1);
+    expect(publisher.movementsRecorded[0].movement).toBe(movement);
+    expect(publisher.movementsRecorded[0].correlationId).toBe(CORRELATION_ID);
+  });
+
+  it('attributes the receipt movement to the system (null actor) when no actorId is given', async () => {
+    await useCase.execute({ variantId: VARIANT_ID, quantity: 5 });
+
+    expect(movements.appended).toHaveLength(1);
+    expect(movements.appended[0].actorId).toBeNull();
+  });
+
+  it('appends no movement when the quantity is rejected', async () => {
+    await expect(useCase.execute({ variantId: VARIANT_ID, quantity: -3 })).rejects.toMatchObject({
+      code: InventoryErrorCodeEnum.STOCK_RECEIVE_QUANTITY_INVALID,
+    });
+
+    expect(movements.appended).toHaveLength(0);
+    expect(publisher.movementsRecorded).toHaveLength(0);
+  });
+
+  it('swallows a recorded-event publish failure without failing the RPC (write already committed)', async () => {
+    jest
+      .spyOn(publisher, 'publishStockMovementRecorded')
+      .mockRejectedValueOnce(new Error('broker down'));
+
+    const view = await useCase.execute({ variantId: VARIANT_ID, quantity: 5 });
+
+    // The receive still succeeds and the ledger row still landed in the tx.
+    expect(view.quantityOnHand).toBe(5);
+    expect(movements.appended).toHaveLength(1);
   });
 });
