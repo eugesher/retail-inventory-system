@@ -4,6 +4,7 @@ import {
   Reservation,
   ReservationStatusEnum,
   StockAdjustedEvent,
+  StockAllocatedEvent,
   StockLevel,
   StockLevelInitializedEvent,
   StockLocation,
@@ -222,6 +223,7 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
   public readonly adjusted: { event: StockAdjustedEvent; correlationId?: string }[] = [];
   public readonly initialized: { event: StockLevelInitializedEvent; correlationId?: string }[] = [];
   public readonly reserved: { event: StockReservedEvent; correlationId?: string }[] = [];
+  public readonly allocated: { event: StockAllocatedEvent; correlationId?: string }[] = [];
   public readonly released: { event: StockReleasedEvent; correlationId?: string }[] = [];
   public readonly movementsRecorded: { movement: StockMovement; correlationId?: string }[] = [];
 
@@ -250,6 +252,11 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
 
   public publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void> {
     this.reserved.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockAllocated(event: StockAllocatedEvent, correlationId?: string): Promise<void> {
+    this.allocated.push({ event, correlationId });
     return Promise.resolve();
   }
 

@@ -19,7 +19,9 @@ import {
 } from '../application/ports';
 import {
   AdjustStockUseCase,
+  AllocateStockUseCase,
   AutoInitStockLevelUseCase,
+  CancelAllocationUseCase,
   ListLocationsUseCase,
   QueryAvailabilityUseCase,
   ReceiveStockUseCase,
@@ -69,14 +71,14 @@ import {
     { provide: STOCK_REPOSITORY, useExisting: StockTypeormRepository },
 
     // The reservation aggregate's repository (ADR-030), consumed by the Reserve /
-    // Release use cases below; Allocate / Cancel-Allocation land in a later session.
+    // Release / Allocate use cases below (Cancel-Allocation touches no holds).
     ReservationTypeormRepository,
     { provide: RESERVATION_REPOSITORY, useExisting: ReservationTypeormRepository },
 
     // The append-only stock-movement audit ledger's repository (ADR-030 §2).
-    // Release is its first writer (one negative `release` row per released hold);
-    // the other writers (Allocate / Receive / Adjust / Transfer) and the audit read
-    // RPC land in later sessions.
+    // Written by Release (`release` rows), Allocate (`allocation` rows), and
+    // Cancel-Allocation (`release` rows); the remaining writers (Receive / Adjust /
+    // Transfer) and the audit read RPC land in later sessions.
     StockMovementTypeormRepository,
     { provide: STOCK_MOVEMENT_REPOSITORY, useExisting: StockMovementTypeormRepository },
 
@@ -106,6 +108,8 @@ import {
     AdjustStockUseCase,
     ReserveStockUseCase,
     ReleaseReservationUseCase,
+    AllocateStockUseCase,
+    CancelAllocationUseCase,
 
     // Terminates `InventoryDomainException` into the `{ statusCode, message, code }`
     // wire shape the gateway maps (ADR-027). Registered via APP_FILTER so it

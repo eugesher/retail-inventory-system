@@ -30,9 +30,9 @@ export interface IStockMovementListQuery {
 export interface IStockMovementRepositoryPort {
   // INSERT a new movement and re-read it so the DB-assigned BIGINT `id` (and the
   // stored `occurred_at`) come back concrete. Scope-aware so a movement is written
-  // in the SAME unit of work as the `StockLevel` counter change that caused it (the
-  // Receive / Adjust / Reserve / Allocate / Transfer use cases of later tasks): a
-  // rolled-back counter change leaves no orphan movement row.
+  // in the SAME unit of work as the `StockLevel` counter change that caused it
+  // (Release / Allocate / Cancel-Allocation today; Receive / Adjust / Transfer in
+  // later capabilities): a rolled-back counter change leaves no orphan movement row.
   append(movement: StockMovement, scope?: ITransactionScope): Promise<StockMovement>;
   // Newest-first (`occurred_at DESC, id DESC`) page of one variant's movements,
   // optionally narrowed by type and an inclusive `occurred_at` window. Backs the

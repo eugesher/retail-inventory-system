@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   IInventoryStockAdjustedEvent,
+  IInventoryStockAllocatedEvent,
   IInventoryStockLevelInitializedEvent,
   IInventoryStockLowEvent,
   IInventoryStockMovementRecordedEvent,
@@ -15,6 +16,7 @@ import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-sys
 
 import {
   StockAdjustedEvent,
+  StockAllocatedEvent,
   StockLevelInitializedEvent,
   StockLowEvent,
   StockMovement,
@@ -158,6 +160,30 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockReservedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_RESERVED,
+        wire,
+      ),
+    );
+  }
+
+  public async publishStockAllocated(
+    event: StockAllocatedEvent,
+    correlationId?: string,
+  ): Promise<void> {
+    const wire: IInventoryStockAllocatedEvent = {
+      variantId: event.aggregateId,
+      stockLocationId: event.stockLocationId,
+      quantity: event.quantity,
+      orderId: event.orderId,
+      reservationId: event.reservationId,
+      eventVersion: 'v1',
+      occurredAt: event.occurredAt.toISOString(),
+      correlationId: correlationId ?? '',
+    };
+
+    // Reserved surface on `inventory_queue` (no handler bound yet).
+    await firstValueFrom(
+      this.inventoryClient.emit<void, IInventoryStockAllocatedEvent>(
+        ROUTING_KEYS.INVENTORY_STOCK_ALLOCATED,
         wire,
       ),
     );

@@ -174,6 +174,124 @@ describe('StockLevel', () => {
     });
   });
 
+  describe('allocateFromReserved', () => {
+    it('moves units from reserved to allocated, leaving available unchanged, and bumps the version', () => {
+      // onHand 10, allocated 2, reserved 3 → available 5.
+      const level = new StockLevel(makeProps({ version: 0 }));
+      level.allocateFromReserved(2);
+      expect(level.quantityReserved).toBe(1);
+      expect(level.quantityAllocated).toBe(4);
+      // A pure reserved → allocated transfer: both subtract from available, so it
+      // is unchanged.
+      expect(level.available).toBe(5);
+      expect(level.version).toBe(1);
+    });
+
+    it('moves exactly the reserved amount (the boundary) without throwing', () => {
+      const level = new StockLevel(makeProps({ quantityReserved: 3 }));
+      expect(() => level.allocateFromReserved(3)).not.toThrow();
+      expect(level.quantityReserved).toBe(0);
+      expect(level.quantityAllocated).toBe(5);
+    });
+
+    it('throws a plain Error (counter drift) when moving more than is reserved', () => {
+      const level = new StockLevel(makeProps({ quantityReserved: 3, version: 4 }));
+      expect(() => level.allocateFromReserved(4)).toThrow('only 3 reserved');
+      // Drift is an invariant breach (a 500), not a typed client-facing exception.
+      expect(() => level.allocateFromReserved(4)).not.toThrow(InventoryDomainException);
+      expect(level.quantityReserved).toBe(3);
+      expect(level.quantityAllocated).toBe(2);
+      expect(level.version).toBe(4);
+    });
+
+    it.each([0, -1, 1.5])('rejects a non-positive / non-integer quantity (%p)', (quantity) => {
+      const level = new StockLevel(makeProps());
+      expect(() => level.allocateFromReserved(quantity)).toThrow('positive integer');
+    });
+  });
+
+  describe('allocateDirect', () => {
+    it('raises allocated, lowers available, and bumps the version', () => {
+      // available = 5.
+      const level = new StockLevel(makeProps({ version: 0 }));
+      level.allocateDirect(4);
+      expect(level.quantityAllocated).toBe(6);
+      expect(level.available).toBe(1);
+      expect(level.version).toBe(1);
+    });
+
+    it('allocates exactly `available` (the boundary) without throwing', () => {
+      const level = new StockLevel(makeProps());
+      expect(level.available).toBe(5);
+      expect(() => level.allocateDirect(5)).not.toThrow();
+      expect(level.quantityAllocated).toBe(7);
+      expect(level.available).toBe(0);
+    });
+
+    it('throws OUT_OF_STOCK with details.available when asked for one more than available', () => {
+      const level = new StockLevel(makeProps({ version: 2 }));
+      let caught: unknown;
+      try {
+        level.allocateDirect(6); // available is 5
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(InventoryDomainException);
+      expect((caught as InventoryDomainException).code).toBe(InventoryErrorCodeEnum.OUT_OF_STOCK);
+      expect((caught as InventoryDomainException).details).toEqual({ available: 5 });
+      // No partial mutation.
+      expect(level.quantityAllocated).toBe(2);
+      expect(level.version).toBe(2);
+    });
+
+    it.each([0, -1, 1.5])('rejects a non-positive / non-integer quantity (%p)', (quantity) => {
+      const level = new StockLevel(makeProps());
+      expect(() => level.allocateDirect(quantity)).toThrow('positive integer');
+      // A plain Error, not a typed domain exception (internal caller bug).
+      expect(() => level.allocateDirect(quantity)).not.toThrow(InventoryDomainException);
+    });
+  });
+
+  describe('releaseAllocated', () => {
+    it('lowers allocated, raises available, and bumps the version', () => {
+      const level = new StockLevel(makeProps({ quantityAllocated: 2, version: 0 }));
+      level.releaseAllocated(2);
+      expect(level.quantityAllocated).toBe(0);
+      expect(level.available).toBe(7);
+      expect(level.version).toBe(1);
+    });
+
+    it('releasing the full allocated amount returns it all to available', () => {
+      const level = new StockLevel(makeProps({ quantityAllocated: 2 }));
+      level.releaseAllocated(2);
+      expect(level.quantityAllocated).toBe(0);
+      expect(level.available).toBe(7);
+    });
+
+    it('throws STOCK_RESULT_NEGATIVE (a user-reachable 409) when releasing more than is allocated', () => {
+      const level = new StockLevel(makeProps({ quantityAllocated: 2, version: 4 }));
+      let caught: unknown;
+      try {
+        level.releaseAllocated(3);
+      } catch (error) {
+        caught = error;
+      }
+      // Unlike allocateFromReserved's drift (a 500), an over-cancel IS reachable
+      // (a Cancel RPC with a wrong quantity) — a typed 409, not a plain Error.
+      expect(caught).toBeInstanceOf(InventoryDomainException);
+      expect((caught as InventoryDomainException).code).toBe(
+        InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
+      );
+      expect(level.quantityAllocated).toBe(2);
+      expect(level.version).toBe(4);
+    });
+
+    it.each([0, -1, 1.5])('rejects a non-positive / non-integer quantity (%p)', (quantity) => {
+      const level = new StockLevel(makeProps());
+      expect(() => level.releaseAllocated(quantity)).toThrow('positive integer');
+    });
+  });
+
   describe('initialAt', () => {
     it('yields a zeroed level at version 0', () => {
       const level = StockLevel.initialAt(42, 'default-warehouse');

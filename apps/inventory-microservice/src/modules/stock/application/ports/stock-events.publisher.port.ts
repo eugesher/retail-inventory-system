@@ -1,5 +1,6 @@
 import {
   StockAdjustedEvent,
+  StockAllocatedEvent,
   StockLevelInitializedEvent,
   StockLowEvent,
   StockMovement,
@@ -30,7 +31,11 @@ export interface IStockEventsPublisherPort {
   ): Promise<void>;
   // Emitted by the Reserve operation onto `inventory_queue` (reserved surface).
   publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void>;
-  // Emitted by the Release operation onto `inventory_queue` (reserved surface).
+  // Emitted by the Allocate operation onto `inventory_queue` (reserved surface),
+  // one per allocated line.
+  publishStockAllocated(event: StockAllocatedEvent, correlationId?: string): Promise<void>;
+  // Emitted by the Release + Cancel-Allocation operations onto `inventory_queue`
+  // (reserved surface).
   publishStockReleased(event: StockReleasedEvent, correlationId?: string): Promise<void>;
   // Emitted for EVERY ledger insert (high-volume). It takes the domain
   // `StockMovement` record directly — a deliberate divergence from the other

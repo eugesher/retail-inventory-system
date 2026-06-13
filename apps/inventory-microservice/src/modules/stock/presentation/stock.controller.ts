@@ -2,6 +2,9 @@ import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 
 import {
+  IAllocationCancelPayload,
+  IAllocationResult,
+  IReservationAllocatePayload,
   IReservationReleasePayload,
   IReservationReleaseResult,
   IReservationReservePayload,
@@ -18,6 +21,8 @@ import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import {
   AdjustStockUseCase,
+  AllocateStockUseCase,
+  CancelAllocationUseCase,
   ListLocationsUseCase,
   QueryAvailabilityUseCase,
   ReceiveStockUseCase,
@@ -34,6 +39,8 @@ export class StockController {
     private readonly adjustStock: AdjustStockUseCase,
     private readonly reserveStock: ReserveStockUseCase,
     private readonly releaseReservation: ReleaseReservationUseCase,
+    private readonly allocateStock: AllocateStockUseCase,
+    private readonly cancelAllocation: CancelAllocationUseCase,
   ) {}
 
   // Read path on the new model (ADR-027): per-variant availability across the
@@ -85,5 +92,29 @@ export class StockController {
     @Payload() payload: IReservationReleasePayload,
   ): Promise<IReservationReleaseResult> {
     return this.releaseReservation.execute(payload);
+  }
+
+  // Allocate Stock (ADR-030): converts a cart's holds into an order's allocations
+  // at place-time (refresh-then-commit for a stale-but-held hold; direct-allocation
+  // fallback when no hold exists). All-lines-atomic; an over-allocation is a 409
+  // `OUT_OF_STOCK` (carrying `details.available`). Invoked by the retail place
+  // transaction pre-commit (a rejection rolls the place back).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_ALLOCATE)
+  public handleAllocate(
+    @Payload() payload: IReservationAllocatePayload,
+  ): Promise<IAllocationResult> {
+    return this.allocateStock.execute(payload);
+  }
+
+  // Cancel Allocation (ADR-030): reverses an order's allocation, returning the units
+  // to `available` and writing a `release` movement per line. Idempotency is
+  // quantity-guarded — an over-cancel is a 409 `STOCK_RESULT_NEGATIVE`. Resolves
+  // `{ cancelled }` (the line count) over RMQ. No in-repo caller yet — the later
+  // order-cancel flow + the place-failure compensation invoke it.
+  @MessagePattern(ROUTING_KEYS.INVENTORY_ALLOCATION_CANCEL)
+  public handleCancelAllocation(
+    @Payload() payload: IAllocationCancelPayload,
+  ): Promise<{ cancelled: number }> {
+    return this.cancelAllocation.execute(payload);
   }
 }

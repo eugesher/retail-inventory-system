@@ -160,9 +160,9 @@ export class Reservation {
 
   // active → committed: the hold is converted into a firm allocation at order
   // placement. Rejects a wall-clock-expired hold with `RESERVATION_EXPIRED` — the
-  // allocate use case (a later capability) refreshes the TTL first when it decides
-  // to honor a stale-but-still-held reservation, so commit never silently converts
-  // an expired hold.
+  // allocate use case refreshes the TTL first when it decides to honor a
+  // stale-but-still-held reservation, so commit never silently converts an expired
+  // hold.
   public commit(now: Date): void {
     this.requireActive('commit');
     if (this.isExpired(now)) {

@@ -38,8 +38,17 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_RELEASE,
     );
+    expect(ROUTING_KEYS.INVENTORY_RESERVATION_ALLOCATE).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_ALLOCATE,
+    );
+    expect(ROUTING_KEYS.INVENTORY_ALLOCATION_CANCEL).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_ALLOCATION_CANCEL,
+    );
     expect(ROUTING_KEYS.INVENTORY_STOCK_RESERVED).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_RESERVED,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_ALLOCATED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_ALLOCATED,
     );
     expect(ROUTING_KEYS.INVENTORY_STOCK_RELEASED).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_RELEASED,
