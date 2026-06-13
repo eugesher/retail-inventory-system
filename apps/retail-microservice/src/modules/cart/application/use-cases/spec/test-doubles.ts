@@ -1,15 +1,20 @@
 import {
+  IReservationReleasePayload,
+  IReservationReleaseResult,
+  IReservationReservePayload,
   IRetailCartCreatedEvent,
   IRetailCartLineAddedEvent,
   IRetailCartLineQuantityChangedEvent,
   IRetailCartLineRemovedEvent,
   PriceView,
+  ReservationView,
 } from '@retail-inventory-system/contracts';
 
 import { Cart, CartLine } from '../../../domain';
 import {
   ICartCatalogGatewayPort,
   ICartEventsPublisherPort,
+  ICartInventoryGatewayPort,
   ICartRepositoryPort,
 } from '../../ports';
 
@@ -111,6 +116,70 @@ export class InMemoryCartCatalogGateway implements ICartCatalogGatewayPort {
   ): Promise<PriceView | null> {
     this.calls.push({ variantId, currency, correlationId });
     return Promise.resolve(this.nextPrice ? { ...this.nextPrice, variantId } : null);
+  }
+}
+
+// Builds a wire-shaped RPC rejection: an `Error` (so it satisfies the
+// reject-with-Error lint rule and `instanceof Error`) carrying the
+// `{ statusCode, code, details }` fields the inventory RPC filter emits and the
+// gateway's `throwRpcError` reads. `toMatchObject({ code, details })` matches the
+// Error's own enumerable props.
+export const makeWireError = (
+  code: string,
+  statusCode: number,
+  message: string,
+  details?: Record<string, unknown>,
+): Error =>
+  Object.assign(new Error(message), { statusCode, code, ...(details ? { details } : {}) });
+
+// In-memory cart→inventory reservation gateway. Records every reserve/release
+// call so specs can assert the absolute quantity / selector passed, and exposes a
+// programmable rejection (`reserveError` / `releaseError`) so a spec can simulate
+// an `INVENTORY_OUT_OF_STOCK` reserve or a failed release. The reserve default
+// echoes the requested quantity back as an `active` hold.
+export class InMemoryCartInventoryGateway implements ICartInventoryGatewayPort {
+  public readonly reserveCalls: IReservationReservePayload[] = [];
+  public readonly releaseCalls: IReservationReleasePayload[] = [];
+  // Set to make the NEXT (and every) call reject with this. Use `makeWireError`
+  // to build a wire-shaped rejection (an Error carrying `statusCode`/`code`/
+  // `details`), mirroring the `{ statusCode, message, code, details }` the gateway
+  // ultimately surfaces.
+  public reserveError: Error | null = null;
+  public releaseError: Error | null = null;
+
+  public reserveStock(payload: IReservationReservePayload): Promise<ReservationView> {
+    this.reserveCalls.push(payload);
+    // Model the real reserve RPC's positive-int guard (RESERVATION_QUANTITY_INVALID,
+    // 400) so the fake is faithful on the reserve-before-mutate path.
+    if (!Number.isInteger(payload.quantity) || payload.quantity <= 0) {
+      return Promise.reject(
+        makeWireError(
+          'INVENTORY_RESERVATION_QUANTITY_INVALID',
+          400,
+          `Reservation quantity must be a positive integer, got ${payload.quantity}`,
+        ),
+      );
+    }
+    if (this.reserveError !== null) {
+      return Promise.reject(this.reserveError);
+    }
+    return Promise.resolve({
+      reservationId: 'res-1',
+      variantId: payload.variantId,
+      stockLocationId: payload.stockLocationId ?? 'default-warehouse',
+      quantity: payload.quantity,
+      cartId: payload.cartId,
+      expiresAt: '2026-06-14T00:15:00.000Z',
+      status: 'active',
+    });
+  }
+
+  public releaseStock(payload: IReservationReleasePayload): Promise<IReservationReleaseResult> {
+    this.releaseCalls.push(payload);
+    if (this.releaseError !== null) {
+      return Promise.reject(this.releaseError);
+    }
+    return Promise.resolve({ released: [] });
   }
 }
 

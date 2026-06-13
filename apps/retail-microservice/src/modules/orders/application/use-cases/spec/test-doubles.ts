@@ -1,5 +1,8 @@
 import {
   CartStatusEnum,
+  IAllocationCancelPayload,
+  IAllocationResult,
+  IReservationAllocatePayload,
   OrderFulfillmentStatusEnum,
   OrderLineStatusEnum,
   OrderPaymentStatusEnum,
@@ -16,6 +19,7 @@ import {
   IOrderCartSnapshot,
   IOrderCatalogGatewayPort,
   IOrderEventsPublisherPort,
+  IOrderInventoryGatewayPort,
   IOrderPage,
   IOrderPageRequest,
   IOrderRepositoryPort,
@@ -42,6 +46,67 @@ export const FAKE_SCOPE = {} as unknown as ITransactionScope;
 export class FakeTransactionPort implements ITransactionPort {
   public runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
     return work(FAKE_SCOPE);
+  }
+}
+
+// Runs the work to completion, then throws — simulating the rare "the callback
+// succeeded but the COMMIT itself failed" case. The work's side effects (incl. the
+// allocate RPC the place use case fires as the final tx step) have already run, so
+// this exercises the place-failure compensation path.
+export class CommitFailingTransactionPort implements ITransactionPort {
+  constructor(private readonly error: Error) {}
+
+  public async runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
+    await work(FAKE_SCOPE);
+    throw this.error;
+  }
+}
+
+// Builds a wire-shaped RPC rejection: an `Error` (so it satisfies the
+// reject-with-Error lint rule) carrying the `{ statusCode, code, details }` fields
+// the inventory RPC filter emits. `toMatchObject({ code, details })` matches the
+// Error's own enumerable props.
+export const makeWireError = (
+  code: string,
+  statusCode: number,
+  message: string,
+  details?: Record<string, unknown>,
+): Error =>
+  Object.assign(new Error(message), { statusCode, code, ...(details ? { details } : {}) });
+
+// In-memory order→inventory reservation gateway. Records every allocate/cancel call
+// so the place spec can assert the orderId + lines passed, and exposes programmable
+// rejections (`allocateError` / `cancelError`). The allocate default echoes each
+// requested line back as committed against the default location.
+export class FakeOrderInventoryGateway implements IOrderInventoryGatewayPort {
+  public readonly allocateCalls: IReservationAllocatePayload[] = [];
+  public readonly cancelCalls: IAllocationCancelPayload[] = [];
+  // Use `makeWireError` to build a wire-shaped rejection (an Error carrying
+  // `statusCode`/`code`/`details`), mirroring what the gateway surfaces.
+  public allocateError: Error | null = null;
+  public cancelError: Error | null = null;
+
+  public allocateStock(payload: IReservationAllocatePayload): Promise<IAllocationResult> {
+    this.allocateCalls.push(payload);
+    if (this.allocateError !== null) {
+      return Promise.reject(this.allocateError);
+    }
+    return Promise.resolve({
+      allocated: payload.lines.map((line) => ({
+        variantId: line.variantId,
+        stockLocationId: line.stockLocationId ?? 'default-warehouse',
+        quantity: line.quantity,
+        reservationId: `res-${line.variantId}`,
+      })),
+    });
+  }
+
+  public cancelAllocation(payload: IAllocationCancelPayload): Promise<void> {
+    this.cancelCalls.push(payload);
+    if (this.cancelError !== null) {
+      return Promise.reject(this.cancelError);
+    }
+    return Promise.resolve();
   }
 }
 
