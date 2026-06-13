@@ -4,7 +4,7 @@
 // Spec lives in a `spec/` sibling next to the production file; PinoLogger and
 // the `ICachePort` dependency are mocked as plain objects with jest fns.
 // Cache-key strings are part of the production contract and asserted exactly
-// — the spec is the place where `ris:inventory:stock:v2:*` becomes a regression
+// — the spec is the place where `ris:inventory:stock:v3:*` becomes a regression
 // boundary.
 // =============================================================================
 
@@ -70,12 +70,12 @@ describe('StockCache', () => {
       const result = await adapter.get({ variantId: 42, correlationId });
 
       expect(result).toEqual({ value: sampleView, available: true });
-      expect(cache.get).toHaveBeenCalledWith('ris:inventory:stock:v2:42:__all__');
+      expect(cache.get).toHaveBeenCalledWith('ris:inventory:stock:v3:42:__all__');
       expect(logger.debug).toHaveBeenCalledWith(
         {
           correlationId,
           variantId: 42,
-          cacheKey: 'ris:inventory:stock:v2:42:__all__',
+          cacheKey: 'ris:inventory:stock:v3:42:__all__',
           cacheHit: true,
         },
         'Cache hit for stock query',
@@ -104,7 +104,7 @@ describe('StockCache', () => {
       });
 
       expect(cache.get).toHaveBeenCalledWith(
-        'ris:inventory:stock:v2:42:head-warehouse,west-warehouse',
+        'ris:inventory:stock:v3:42:head-warehouse,west-warehouse',
       );
     });
 
@@ -115,7 +115,7 @@ describe('StockCache', () => {
 
       await adapter.get({ variantId: 42, tenantId: 'store-7', correlationId });
 
-      expect(cache.get).toHaveBeenCalledWith('ris:t:store-7:inventory:stock:v2:42:__all__');
+      expect(cache.get).toHaveBeenCalledWith('ris:t:store-7:inventory:stock:v3:42:__all__');
     });
 
     it('returns { value: undefined, available: false } and warn-logs when cache.get rejects', async () => {
@@ -129,7 +129,7 @@ describe('StockCache', () => {
 
       expect(result).toEqual({ value: undefined, available: false });
       expect(logger.warn).toHaveBeenCalledWith(
-        { err, correlationId, variantId: 42, cacheKey: 'ris:inventory:stock:v2:42:__all__' },
+        { err, correlationId, variantId: 42, cacheKey: 'ris:inventory:stock:v3:42:__all__' },
         'Failed to read from cache',
       );
     });
@@ -148,7 +148,7 @@ describe('StockCache', () => {
 
       expect(cache.set).toHaveBeenCalledTimes(1);
       const [calledKey, calledData, calledTtl] = cache.set.mock.calls[0];
-      expect(calledKey).toBe('ris:inventory:stock:v2:42:__all__');
+      expect(calledKey).toBe('ris:inventory:stock:v3:42:__all__');
       expect(calledData).toBe(sampleView);
       expect(calledTtl).toBeGreaterThanOrEqual(60000 * 0.9 - 1);
       expect(calledTtl).toBeLessThanOrEqual(60000 * 1.1);
@@ -156,7 +156,7 @@ describe('StockCache', () => {
         {
           correlationId,
           variantId: 42,
-          cacheKey: 'ris:inventory:stock:v2:42:__all__',
+          cacheKey: 'ris:inventory:stock:v3:42:__all__',
           ttl: calledTtl,
         },
         'Cache write for stock query',
@@ -236,7 +236,7 @@ describe('StockCache', () => {
 
       expect(result).toBe(sampleView);
       expect(cache.singleFlight).toHaveBeenCalledWith(
-        'ris:inventory:stock:v2:42:__all__',
+        'ris:inventory:stock:v3:42:__all__',
         expect.any(Function),
       );
       expect(load).toHaveBeenCalledTimes(1);
@@ -330,7 +330,8 @@ describe('StockCache', () => {
     // internal prefix-delete. These tests cover the contract at the
     // StockCache level: work-then-invalidate ordering on success,
     // no-invalidate-on-rejection, no-invalidate-on-empty-items, the
-    // ADR-022/ADR-027 v2 + v1 + pre-v1 + pre-ADR-016 fan-out, and the tenant scoping.
+    // ADR-022/ADR-027/ADR-030 v3 + v2 + v1 + pre-v1 + pre-ADR-016 fan-out, and the
+    // tenant scoping.
 
     it('runs the prefix delete after work resolves, and returns the work result', async () => {
       cache.delByPrefix.mockResolvedValue(1);
@@ -354,8 +355,8 @@ describe('StockCache', () => {
       expect(work).toHaveBeenCalledTimes(1);
       expect(resolveItems).toHaveBeenCalledWith('work-result');
       expect(order).toEqual(['work', 'resolveItems']);
-      // Four prefixes per variantId (ADR-022 / ADR-027 transition window).
-      expect(cache.delByPrefix).toHaveBeenCalledTimes(4);
+      // Five prefixes per variantId (ADR-022 / ADR-027 / ADR-030 transition window).
+      expect(cache.delByPrefix).toHaveBeenCalledTimes(5);
       const workOrder = work.mock.invocationCallOrder[0];
       const delOrder = cache.delByPrefix.mock.invocationCallOrder[0];
       expect(workOrder).toBeLessThan(delOrder);
@@ -387,9 +388,9 @@ describe('StockCache', () => {
       expect(cache.delByPrefix).not.toHaveBeenCalled();
     });
 
-    it('wipes the v2 + v1 + pre-v1 + pre-ADR-016 prefixes per unique variantId', async () => {
-      // ADR-022 / ADR-027 transition window: every invalidation fans out to
-      // four prefixes per variantId so in-flight entries from any of the four
+    it('wipes the v3 + v2 + v1 + pre-v1 + pre-ADR-016 prefixes per unique variantId', async () => {
+      // ADR-022 / ADR-027 / ADR-030 transition window: every invalidation fans out
+      // to five prefixes per variantId so in-flight entries from any of the five
       // historical shapes are wiped on the first post-deploy invalidate.
       cache.delByPrefix.mockResolvedValue(1);
 
@@ -403,22 +404,25 @@ describe('StockCache', () => {
         { correlationId },
       );
 
-      // 2 variantIds * 4 prefixes each
-      expect(cache.delByPrefix).toHaveBeenCalledTimes(8);
+      // 2 variantIds * 5 prefixes each
+      expect(cache.delByPrefix).toHaveBeenCalledTimes(10);
+      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v3:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v2:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v1:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('stock:1:');
+      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v3:2:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v2:2:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v1:2:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:2:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('stock:2:');
     });
 
-    it('scopes the v2 wipe to the supplied tenant but keeps the legacy wipes tenant-agnostic', async () => {
-      // ADR-022: the v1, pre-v1, and pre-ADR-016 shapes never carried a tenant
-      // segment, so the transition-window wipes are unconditionally
-      // single-tenant. Only the current v2 shape gets the `t:` prefix.
+    it('scopes the v3 wipe to the supplied tenant but keeps the legacy wipes tenant-agnostic', async () => {
+      // ADR-022 / ADR-030: the v2, v1, pre-v1, and pre-ADR-016 shapes are wiped
+      // tenant-agnostically (the v2 legacy builder takes only the id; the older
+      // shapes never carried a tenant segment). Only the current v3 shape gets the
+      // `t:` prefix.
       cache.delByPrefix.mockResolvedValue(1);
 
       await adapter.withInvalidation(
@@ -427,18 +431,19 @@ describe('StockCache', () => {
         { tenantId: 'store-7', correlationId },
       );
 
-      expect(cache.delByPrefix).toHaveBeenCalledTimes(4);
-      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:t:store-7:inventory:stock:v2:1:');
+      expect(cache.delByPrefix).toHaveBeenCalledTimes(5);
+      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:t:store-7:inventory:stock:v3:1:');
+      expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v2:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:v1:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('ris:inventory:stock:1:');
       expect(cache.delByPrefix).toHaveBeenCalledWith('stock:1:');
     });
 
     it('debug-logs total unlinked count on success', async () => {
-      // Match only the v2 prefix; the v1, pre-v1, and pre-ADR-016 transition
-      // prefixes return 0 (no in-flight stale entries in this test).
+      // Match only the current v3 prefix; the v2, v1, pre-v1, and pre-ADR-016
+      // transition prefixes return 0 (no in-flight stale entries in this test).
       cache.delByPrefix.mockImplementation((prefix) =>
-        Promise.resolve(prefix.startsWith('ris:inventory:stock:v2:') ? 3 : 0),
+        Promise.resolve(prefix.startsWith('ris:inventory:stock:v3:') ? 3 : 0),
       );
 
       await adapter.withInvalidation(

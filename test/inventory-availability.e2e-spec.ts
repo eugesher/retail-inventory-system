@@ -118,7 +118,7 @@ describe('Inventory availability read path (e2e)', () => {
 
     it('serves the second identical read from the cache (miss then hit)', async () => {
       // Cache-aside (ADR-002): the first read is a miss that loads from MySQL and
-      // writes the `VariantStockView` back under `ris:inventory:stock:v2:1:__all__`;
+      // writes the `VariantStockView` back under `ris:inventory:stock:v3:1:__all__`;
       // the second is a hit served from Redis. The cached value is deterministic
       // (the read use case sorts locations), so the two HTTP bodies are byte-equal.
       const first = await supertest(apiGatewayApp.getHttpServer()).get(

@@ -1,3 +1,4 @@
+import { InventoryDomainException, InventoryErrorCodeEnum } from '../inventory.exception';
 import { StockLevel } from '../stock-level.model';
 
 type StockLevelProps = ConstructorParameters<typeof StockLevel>[0];
@@ -93,6 +94,83 @@ describe('StockLevel', () => {
     it('rejects a non-integer delta', () => {
       const level = new StockLevel(makeProps());
       expect(() => level.changeOnHand(1.5)).toThrow('integer');
+    });
+  });
+
+  describe('reserve', () => {
+    it('raises quantityReserved and bumps the version', () => {
+      // available = 10 − 2 − 3 = 5.
+      const level = new StockLevel(makeProps({ version: 0 }));
+      level.reserve(4);
+      expect(level.quantityReserved).toBe(7);
+      expect(level.available).toBe(1);
+      expect(level.version).toBe(1);
+    });
+
+    it('reserves exactly `available` (the boundary) without throwing', () => {
+      const level = new StockLevel(makeProps());
+      expect(level.available).toBe(5);
+      expect(() => level.reserve(5)).not.toThrow();
+      expect(level.quantityReserved).toBe(8);
+      expect(level.available).toBe(0);
+    });
+
+    it('throws OUT_OF_STOCK with details.available when asked for one more than available', () => {
+      const level = new StockLevel(makeProps({ version: 2 }));
+      let caught: unknown;
+      try {
+        level.reserve(6); // available is 5
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(InventoryDomainException);
+      expect((caught as InventoryDomainException).code).toBe(InventoryErrorCodeEnum.OUT_OF_STOCK);
+      expect((caught as InventoryDomainException).details).toEqual({ available: 5 });
+      // No partial mutation: the rejected reserve neither moved the counter nor
+      // bumped the version.
+      expect(level.quantityReserved).toBe(3);
+      expect(level.version).toBe(2);
+    });
+
+    it.each([0, -1, 1.5])(
+      'rejects a non-positive / non-integer quantity (%p) as a plain Error',
+      (quantity) => {
+        const level = new StockLevel(makeProps());
+        expect(() => level.reserve(quantity)).toThrow('positive integer');
+        // A plain Error, not a typed domain exception (internal caller bug).
+        expect(() => level.reserve(quantity)).not.toThrow(InventoryDomainException);
+      },
+    );
+  });
+
+  describe('releaseReserved', () => {
+    it('lowers quantityReserved and bumps the version', () => {
+      const level = new StockLevel(makeProps({ quantityReserved: 3, version: 0 }));
+      level.releaseReserved(2);
+      expect(level.quantityReserved).toBe(1);
+      expect(level.available).toBe(7);
+      expect(level.version).toBe(1);
+    });
+
+    it('releasing the full reserved amount returns it all to available', () => {
+      const level = new StockLevel(makeProps({ quantityReserved: 3 }));
+      level.releaseReserved(3);
+      expect(level.quantityReserved).toBe(0);
+      expect(level.available).toBe(8);
+    });
+
+    it('throws a plain Error (counter drift) when releasing more than is reserved', () => {
+      const level = new StockLevel(makeProps({ quantityReserved: 3, version: 4 }));
+      expect(() => level.releaseReserved(4)).toThrow('only 3 reserved');
+      // Drift is an invariant breach (a 500), not a typed client-facing exception.
+      expect(() => level.releaseReserved(4)).not.toThrow(InventoryDomainException);
+      expect(level.quantityReserved).toBe(3);
+      expect(level.version).toBe(4);
+    });
+
+    it('rejects a non-positive / non-integer quantity', () => {
+      const level = new StockLevel(makeProps());
+      expect(() => level.releaseReserved(0)).toThrow('positive integer');
     });
   });
 

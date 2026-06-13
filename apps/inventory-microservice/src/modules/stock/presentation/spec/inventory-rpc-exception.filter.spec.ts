@@ -62,4 +62,32 @@ describe('InventoryRpcExceptionFilter', () => {
       expect(payload.statusCode).not.toBe(HttpStatus.INTERNAL_SERVER_ERROR);
     }
   });
+
+  it('maps OUT_OF_STOCK to 409 and forwards structured details', async () => {
+    const exception = new InventoryDomainException(
+      InventoryErrorCodeEnum.OUT_OF_STOCK,
+      'out of stock',
+      { available: 2 },
+    );
+    const payload = await firstValueFrom(filter.catch(exception)).then(
+      () => {
+        throw new Error('filter stream resolved; expected it to error');
+      },
+      (rejected: unknown) => rejected,
+    );
+
+    expect(payload).toMatchObject({
+      statusCode: HttpStatus.CONFLICT,
+      code: InventoryErrorCodeEnum.OUT_OF_STOCK,
+      details: { available: 2 },
+    });
+  });
+
+  it('omits the details key entirely when the exception carries none', async () => {
+    const payload = (await statusFor(InventoryErrorCodeEnum.RESERVATION_NOT_FOUND)) as Record<
+      string,
+      unknown
+    >;
+    expect(payload).not.toHaveProperty('details');
+  });
 });

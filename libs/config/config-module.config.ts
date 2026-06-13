@@ -27,6 +27,11 @@ export const configModuleConfig = {
     CACHE_TTL_MS_DEFAULT: Joi.number().integer().positive().default(60000),
     CACHE_TTL_MS_PRODUCT_STOCK: Joi.number().integer().positive().default(60000),
 
+    // Lifetime (minutes) of a stock reservation hold — `expiresAt = now +
+    // RESERVATION_TTL_MINUTES` when a Reserve lands or refreshes (ADR-030 §4).
+    // Defaulted, so a missing var never fails boot.
+    RESERVATION_TTL_MINUTES: Joi.number().integer().positive().default(15),
+
     JWT_ACCESS_SECRET: Joi.string().min(32).required(),
     JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
     JWT_REFRESH_SECRET: Joi.string()

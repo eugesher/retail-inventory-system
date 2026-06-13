@@ -3,5 +3,8 @@ export * from './auto-init-stock-level.use-case';
 export * from './list-locations.use-case';
 export * from './query-availability.use-case';
 export * from './receive-stock.use-case';
+export * from './release-reservation.use-case';
+export * from './reservation-view.factory';
+export * from './reserve-stock.use-case';
 export * from './stock-mutation';
 export * from './stock-write-conflict.error';

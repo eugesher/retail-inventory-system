@@ -7,6 +7,21 @@ export const ROUTING_KEYS = {
   INVENTORY_STOCK_LEVEL_ADJUST: 'inventory.stock-level.adjust',
   INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized',
   INVENTORY_LOCATION_LIST: 'inventory.location.list',
+  // Reservation RPC commands (Gateway / Retail → Inventory on `inventory_queue`,
+  // each served by a `@MessagePattern` handler on the inventory stock controller):
+  // `inventory.reservation.reserve` → `ReserveStockUseCase` → `ReservationView`,
+  // `inventory.reservation.release` → `ReleaseReservationUseCase` →
+  // `IReservationReleaseResult` (ADR-030 §5).
+  INVENTORY_RESERVATION_RESERVE: 'inventory.reservation.reserve',
+  INVENTORY_RESERVATION_RELEASE: 'inventory.reservation.release',
+  // Reservation + ledger events — reserved surfaces on `inventory_queue` (no
+  // cross-service consumer yet; the intended consumer is a future event-store
+  // capability — the `inventory.stock.{received,adjusted}` precedent).
+  // `inventory.stock.reserved` (Reserve) / `inventory.stock.released` (Release) and
+  // the high-volume `inventory.stock-movement.recorded` (every ledger insert).
+  INVENTORY_STOCK_RESERVED: 'inventory.stock.reserved',
+  INVENTORY_STOCK_RELEASED: 'inventory.stock.released',
+  INVENTORY_STOCK_MOVEMENT_RECORDED: 'inventory.stock-movement.recorded',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',
   CATALOG_PRODUCT_PUBLISH: 'catalog.product.publish',
   CATALOG_PRODUCT_ARCHIVE: 'catalog.product.archive',

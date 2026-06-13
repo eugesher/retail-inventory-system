@@ -1,27 +1,34 @@
 // Central registry of cache-key templates. Every cache key in `apps/*/src`
 // must come from this file — no string literals. For the inventory stock
-// aggregate, **four** key families coexist (the current shape plus three
+// aggregate, **five** key families coexist (the current shape plus four
 // invalidate-only legacy shapes the rolling-deploy invalidate path still wipes):
 //
-//   * **Current convention** (ADR-022 / ADR-027 `v2`): a per-aggregate
+//   * **Current convention** (ADR-022 / ADR-027 / ADR-030 `v3`): a per-aggregate
 //     schema-version segment (defaulted at the builder) and an opt-in tenant
 //     segment near the root:
 //       `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]`.
-//     For stock the `<id>` axis is now the **`variantId`** (not the old
-//     `productId`) and the facet is a sorted stock-location set — the cached
-//     value is a per-variant `VariantStockView` projection, not a per-product
-//     `SUM` aggregate (ADR-027). Examples:
-//       - `ris:inventory:stock:v2:42:__all__`                          — single-tenant, all locations
-//       - `ris:t:store-7:inventory:stock:v2:42:__all__`                 — tenant supplied
-//       - `ris:inventory:stock:v2:42:head-warehouse,west-warehouse`     — a location subset
+//     For stock the `<id>` axis is the **`variantId`** and the facet is a sorted
+//     stock-location set — the cached value is a per-variant `VariantStockView`
+//     projection. The `v2 → v3` bump (ADR-030 §7) records a SEMANTIC change with
+//     no field change: once TTL'd reservations move `quantityReserved`, the same
+//     `VariantStockView` field set reflects holds a `v2` reader never knew about.
+//     Examples:
+//       - `ris:inventory:stock:v3:42:__all__`                          — single-tenant, all locations
+//       - `ris:t:store-7:inventory:stock:v3:42:__all__`                 — tenant supplied
+//       - `ris:inventory:stock:v3:42:head-warehouse,west-warehouse`     — a location subset
 //       - `ris:retail:order:v1:7:__all__`
 //
+//   * **Pre-v3 (v2) shape** (`inventoryStockLegacyPrefixV2`): the now-retired
+//     `ris:inventory:stock:v2:<id>:…` family from the previous bump. Exposed
+//     **invalidate-only** so the write path can wipe in-flight v2 entries during
+//     the rolling deploy that adopts v3 (ADR-030 §7).
+//
 //   * **Pre-v2 (v1) shape** (`inventoryStockLegacyPrefixV1`): the now-retired
-//     `ris:inventory:stock:v1:<id>:…` family from the previous bump. Exposed
+//     `ris:inventory:stock:v1:<id>:…` family from the v1→v2 bump. Exposed
 //     **invalidate-only** so the write path can wipe in-flight v1 entries during
-//     the rolling deploy that adopts v2. (v1 keyed the OLD `productId` axis; we
-//     wipe by the now-`variantId` numeric id, which is sufficient for the
-//     transition window — no production data exists.)
+//     a rolling deploy. (v1 keyed the OLD `productId` axis; we wipe by the
+//     now-`variantId` numeric id, which is sufficient for the transition window —
+//     no production data exists.)
 //
 //   * **Pre-v1 (post-ADR-016) shape** (`inventoryStockLegacyPrefix`):
 //     `ris:<service>:<aggregate>:<id>[:<facet>]` — no version segment.
@@ -41,7 +48,7 @@
 // Per-aggregate schema versions. Bumping any of these is a one-line edit
 // that re-keys every entry on the next deploy; the StockCache invalidate
 // path keeps wiping the pre-bump shape for one transition window.
-const INVENTORY_STOCK_KEY_VERSION = 'v2';
+const INVENTORY_STOCK_KEY_VERSION = 'v3';
 const RETAIL_ORDER_KEY_VERSION = 'v1';
 // Reserved for a future cached catalog read path. The catalog product cache is
 // keyed on `variantId` (not `productId`) because the variant is the downstream
@@ -156,13 +163,22 @@ export const CACHE_KEYS = {
   catalogCategoryChildren: (categoryId: number, opts?: ITenantOptions): string =>
     `${CACHE_KEYS.catalogCategoryChildrenPrefix(categoryId, opts)}children`,
 
+  // -- Pre-v3 (v2) shape — invalidate-only ----------------------------------
+  // Returns the retired v2 stock prefix `ris:inventory:stock:v2:<id>:`. Exposed
+  // solely so `StockCache.withInvalidation` can wipe in-flight v2 entries during
+  // the rolling deploy that adopts v3 (ADR-030 §7 — the `v2 → v3` semantic bump
+  // when reservations start moving `quantityReserved`). Reads and writes MUST use
+  // `inventoryStockPrefix` / `inventoryStock` above (now `v3`); this builder is
+  // for SCAN+UNLINK only.
+  inventoryStockLegacyPrefixV2: (id: number): string => `ris:inventory:stock:v2:${id}:`,
+
   // -- Pre-v2 (v1) shape — invalidate-only ----------------------------------
   // Returns the retired v1 stock prefix `ris:inventory:stock:v1:<id>:`. The v1
   // keys were `…inventory:stock:v1:<productId>:…` (the OLD productId axis); we
   // wipe by the now-`variantId` numeric id, which is sufficient for the
   // rolling-deploy transition window (no production data exists). Exposed solely
-  // so `StockCache.withInvalidation` can wipe in-flight v1 entries during the
-  // deploy that adopts v2. Reads and writes MUST use `inventoryStockPrefix` /
+  // so `StockCache.withInvalidation` can wipe in-flight v1 entries during a
+  // rolling deploy. Reads and writes MUST use `inventoryStockPrefix` /
   // `inventoryStock` above; this builder is for SCAN+UNLINK only.
   inventoryStockLegacyPrefixV1: (id: number): string => `ris:inventory:stock:v1:${id}:`,
 

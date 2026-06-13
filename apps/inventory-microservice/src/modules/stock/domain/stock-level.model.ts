@@ -77,13 +77,10 @@ export class StockLevel {
     return this._quantityOnHand - this._quantityAllocated - this._quantityReserved;
   }
 
-  // The only mutation this capability needs. `allocate`/`reserve`/`release`
-  // belong to the later inventory-reservation capability and are intentionally
-  // absent — shipping them now would be dead, untested code (ADR-027).
-  //
-  // Every mutation bumps `version` so the optimistic-concurrency token advances
-  // observably, even though the no-oversell invariant it guards is enforced
-  // later (the column ships now to make that retrofit non-destructive).
+  // On-hand mutation (Receive / Adjust). Every mutation bumps `version` so the
+  // optimistic-concurrency token advances observably; the no-oversell invariant
+  // the column guards is enforced by the reserve/release mutators below, all
+  // running inside the same bounded version-checked write protocol (ADR-030 §3).
   public changeOnHand(delta: number): void {
     if (!Number.isInteger(delta)) {
       throw new Error(`StockLevel.changeOnHand: delta must be an integer, got ${delta}`);
@@ -102,6 +99,50 @@ export class StockLevel {
     }
     this._quantityOnHand = next;
     this._version += 1;
+  }
+
+  // Holds `quantity` more units against carts/orders (ADR-030). **This is the
+  // no-oversell guard**: a request for more than `available` is the one
+  // reserve-side domain rejection that reaches an HTTP caller, thrown as a typed
+  // `OUT_OF_STOCK` carrying the live `available` in structured `details` so a
+  // client branches on the number, not the message text. A non-positive quantity
+  // is an internal caller bug (the use case validates the request first and only
+  // ever passes a positive delta here), so it is a plain `Error`, not a typed
+  // exception the filter would surface as a 4xx. Bumps `version`.
+  public reserve(quantity: number): void {
+    StockLevel.requirePositiveDelta(quantity, 'reserve');
+    if (quantity > this.available) {
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.OUT_OF_STOCK,
+        `StockLevel.reserve: cannot reserve ${quantity} of variant ${this.variantId} @ ` +
+          `${this.stockLocationId} — only ${this.available} available`,
+        { available: this.available },
+      );
+    }
+    this._quantityReserved += quantity;
+    this._version += 1;
+  }
+
+  // Returns `quantity` held units to `available` (the Release / re-reserve-down
+  // paths). Releasing more than is reserved is a counter drift — an invariant
+  // breach, not user input — so it is a plain `Error` (surfaces as a 500, never
+  // reachable through this capability's flows because the held quantity always
+  // comes from the reservation row that occupied the counter). Bumps `version`.
+  public releaseReserved(quantity: number): void {
+    StockLevel.requirePositiveDelta(quantity, 'releaseReserved');
+    if (quantity > this._quantityReserved) {
+      throw new Error(
+        `StockLevel.releaseReserved: cannot release ${quantity}; only ${this._quantityReserved} reserved`,
+      );
+    }
+    this._quantityReserved -= quantity;
+    this._version += 1;
+  }
+
+  private static requirePositiveDelta(value: number, op: string): void {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`StockLevel.${op}: quantity must be a positive integer, got ${value}`);
+    }
   }
 
   // Zeroed level for a freshly seen `(variantId, stockLocationId)` pair — used

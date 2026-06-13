@@ -1,20 +1,29 @@
 import { VariantStockView } from '@retail-inventory-system/contracts';
 
 import {
+  Reservation,
+  ReservationStatusEnum,
   StockAdjustedEvent,
   StockLevel,
   StockLevelInitializedEvent,
   StockLocation,
   StockLowEvent,
+  StockMovement,
   StockReceivedEvent,
+  StockReleasedEvent,
+  StockReservedEvent,
 } from '../../../domain';
 import {
+  IReservationRepositoryPort,
   IStockCacheGetPayload,
   IStockCacheGetResult,
   IStockCacheInvalidateItem,
   IStockCachePort,
   IStockCacheSetPayload,
   IStockEventsPublisherPort,
+  IStockMovementListQuery,
+  IStockMovementPage,
+  IStockMovementRepositoryPort,
   IStockRepositoryPort,
   ITransactionPort,
   ITransactionScope,
@@ -212,6 +221,9 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
   public readonly received: { event: StockReceivedEvent; correlationId?: string }[] = [];
   public readonly adjusted: { event: StockAdjustedEvent; correlationId?: string }[] = [];
   public readonly initialized: { event: StockLevelInitializedEvent; correlationId?: string }[] = [];
+  public readonly reserved: { event: StockReservedEvent; correlationId?: string }[] = [];
+  public readonly released: { event: StockReleasedEvent; correlationId?: string }[] = [];
+  public readonly movementsRecorded: { movement: StockMovement; correlationId?: string }[] = [];
 
   public publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void> {
     this.low.push({ event, correlationId });
@@ -234,5 +246,134 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
   ): Promise<void> {
     this.initialized.push({ event, correlationId });
     return Promise.resolve();
+  }
+
+  public publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void> {
+    this.reserved.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockReleased(event: StockReleasedEvent, correlationId?: string): Promise<void> {
+    this.released.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockMovementRecorded(
+    movement: StockMovement,
+    correlationId?: string,
+  ): Promise<void> {
+    this.movementsRecorded.push({ movement, correlationId });
+    return Promise.resolve();
+  }
+}
+
+// In-memory `IReservationRepositoryPort` keyed on the reservation UUID. Clones on
+// every read (the `InMemoryStockRepository` precedent) so a retried use-case
+// attempt — which mutates the returned hold in place (`refresh`/`reactivate`/
+// `release`) — never leaks into the stored row.
+export class InMemoryReservationRepository implements IReservationRepositoryPort {
+  public readonly rows = new Map<string, Reservation>();
+
+  private clone(reservation: Reservation): Reservation {
+    return Reservation.reconstitute({
+      id: reservation.id,
+      variantId: reservation.variantId,
+      stockLocationId: reservation.stockLocationId,
+      quantity: reservation.quantity,
+      cartId: reservation.cartId,
+      expiresAt: reservation.expiresAt,
+      status: reservation.status,
+      version: reservation.version,
+      createdAt: reservation.createdAt,
+      updatedAt: reservation.updatedAt,
+    });
+  }
+
+  public seed(reservation: Reservation): void {
+    if (reservation.id === null) {
+      throw new Error('InMemoryReservationRepository.seed: reservation id is null');
+    }
+    this.rows.set(reservation.id, this.clone(reservation));
+  }
+
+  public findById(id: string): Promise<Reservation | null> {
+    const stored = this.rows.get(id);
+    return Promise.resolve(stored ? this.clone(stored) : null);
+  }
+
+  public findByKey(
+    cartId: string,
+    variantId: number,
+    stockLocationId: string,
+  ): Promise<Reservation | null> {
+    const match = [...this.rows.values()].find(
+      (row) =>
+        row.cartId === cartId &&
+        row.variantId === variantId &&
+        row.stockLocationId === stockLocationId,
+    );
+    return Promise.resolve(match ? this.clone(match) : null);
+  }
+
+  public listActiveByCart(cartId: string): Promise<Reservation[]> {
+    const matching = [...this.rows.values()].filter(
+      (row) => row.cartId === cartId && row.status === ReservationStatusEnum.ACTIVE,
+    );
+    return Promise.resolve(matching.map((row) => this.clone(row)));
+  }
+
+  public listActiveByCartAndVariant(cartId: string, variantId: number): Promise<Reservation[]> {
+    const matching = [...this.rows.values()].filter(
+      (row) =>
+        row.cartId === cartId &&
+        row.variantId === variantId &&
+        row.status === ReservationStatusEnum.ACTIVE,
+    );
+    return Promise.resolve(matching.map((row) => this.clone(row)));
+  }
+
+  public save(reservation: Reservation): Promise<Reservation> {
+    if (reservation.id === null) {
+      throw new Error('InMemoryReservationRepository.save: reservation id is null');
+    }
+    this.rows.set(reservation.id, this.clone(reservation));
+    return Promise.resolve(this.clone(reservation));
+  }
+}
+
+// In-memory append-only `IStockMovementRepositoryPort`. `append` assigns a
+// monotonic id and stores the frozen record; `listByVariant` is a minimal
+// newest-first page so the seam is fully implemented.
+export class InMemoryStockMovementRepository implements IStockMovementRepositoryPort {
+  public readonly appended: StockMovement[] = [];
+  private nextId = 1;
+
+  public append(movement: StockMovement): Promise<StockMovement> {
+    const persisted = StockMovement.reconstitute({
+      id: this.nextId++,
+      variantId: movement.variantId,
+      stockLocationId: movement.stockLocationId,
+      type: movement.type,
+      quantity: movement.quantity,
+      reasonCode: movement.reasonCode,
+      referenceType: movement.referenceType,
+      referenceId: movement.referenceId,
+      actorId: movement.actorId,
+      occurredAt: movement.occurredAt,
+    });
+    this.appended.push(persisted);
+    return Promise.resolve(persisted);
+  }
+
+  public listByVariant(query: IStockMovementListQuery): Promise<IStockMovementPage> {
+    const matching = this.appended
+      .filter((movement) => movement.variantId === query.variantId)
+      .filter((movement) => query.type === undefined || movement.type === query.type)
+      .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+    const start = (query.page - 1) * query.size;
+    return Promise.resolve({
+      items: matching.slice(start, start + query.size),
+      total: matching.length,
+    });
   }
 }

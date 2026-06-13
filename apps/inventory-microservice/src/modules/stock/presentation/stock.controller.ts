@@ -2,10 +2,14 @@ import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 
 import {
+  IReservationReleasePayload,
+  IReservationReleaseResult,
+  IReservationReservePayload,
   IStockAdjustPayload,
   IStockLocationsListPayload,
   IStockReceivePayload,
   IVariantStockGetPayload,
+  ReservationView,
   StockLevelView,
   StockLocationView,
   VariantStockView,
@@ -17,6 +21,8 @@ import {
   ListLocationsUseCase,
   QueryAvailabilityUseCase,
   ReceiveStockUseCase,
+  ReleaseReservationUseCase,
+  ReserveStockUseCase,
 } from '../application/use-cases';
 
 @Controller()
@@ -26,6 +32,8 @@ export class StockController {
     private readonly listLocations: ListLocationsUseCase,
     private readonly receiveStock: ReceiveStockUseCase,
     private readonly adjustStock: AdjustStockUseCase,
+    private readonly reserveStock: ReserveStockUseCase,
+    private readonly releaseReservation: ReleaseReservationUseCase,
   ) {}
 
   // Read path on the new model (ADR-027): per-variant availability across the
@@ -59,5 +67,23 @@ export class StockController {
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST)
   public handleStockAdjust(@Payload() payload: IStockAdjustPayload): Promise<StockLevelView> {
     return this.adjustStock.execute(payload);
+  }
+
+  // Reserve Stock (ADR-030): holds units for a cart against the no-oversell
+  // guard. An over-request is a 409 `OUT_OF_STOCK` (carrying `details.available`),
+  // mapped by the `InventoryRpcExceptionFilter`.
+  @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_RESERVE)
+  public handleReserve(@Payload() payload: IReservationReservePayload): Promise<ReservationView> {
+    return this.reserveStock.execute(payload);
+  }
+
+  // Release Reservation (ADR-030): returns held units to `available` and writes a
+  // `release` movement. Selector is `reservationId` (one row) or `cartId`
+  // (+ optional variantId/stockLocationId, all matching active rows).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE)
+  public handleRelease(
+    @Payload() payload: IReservationReleasePayload,
+  ): Promise<IReservationReleaseResult> {
+    return this.releaseReservation.execute(payload);
   }
 }
