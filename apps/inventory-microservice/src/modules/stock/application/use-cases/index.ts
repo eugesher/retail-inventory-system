@@ -1,5 +1,7 @@
 export * from './adjust-stock.use-case';
+export * from './allocate-stock.use-case';
 export * from './auto-init-stock-level.use-case';
+export * from './cancel-allocation.use-case';
 export * from './list-locations.use-case';
 export * from './query-availability.use-case';
 export * from './receive-stock.use-case';

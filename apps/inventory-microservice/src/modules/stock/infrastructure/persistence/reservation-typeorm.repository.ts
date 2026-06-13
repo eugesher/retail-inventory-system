@@ -102,10 +102,9 @@ export class ReservationTypeormRepository
     // `UC_RESERVATION_CART_VARIANT_LOCATION` race to a concurrent writer (who
     // created the row for the same triple under a DIFFERENT id) surfaces
     // `ER_DUP_ENTRY`. Translate it to `StockWriteConflictError` so the shared
-    // bounded-retry write protocol (the Reserve / Allocate use cases, a later
-    // capability) re-reads the now-present row via `findByKey` and reactivates it
-    // rather than
-    // duplicating — the all-statuses UNIQUE triple converges. An UPDATE never trips
+    // bounded-retry write protocol (the Reserve / Allocate use cases) re-reads the
+    // now-present row via `findByKey` and reactivates it rather than duplicating —
+    // the all-statuses UNIQUE triple converges. An UPDATE never trips
     // this: a reservation never changes its triple, only its quantity / TTL /
     // status / version.
     try {

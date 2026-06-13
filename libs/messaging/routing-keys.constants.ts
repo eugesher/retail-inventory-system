@@ -14,12 +14,23 @@ export const ROUTING_KEYS = {
   // `IReservationReleaseResult` (ADR-030 §5).
   INVENTORY_RESERVATION_RESERVE: 'inventory.reservation.reserve',
   INVENTORY_RESERVATION_RELEASE: 'inventory.reservation.release',
+  // `inventory.reservation.allocate` → `AllocateStockUseCase` → `IAllocationResult`
+  // (converts a cart's holds into an order's allocations at place-time, with a
+  // direct-allocation fallback) and `inventory.allocation.cancel` →
+  // `CancelAllocationUseCase` (reverses an order's allocation — the later
+  // order-cancel flow + the place-failure compensation). NOTE: `allocation` is an
+  // RPC-subject noun (the counters + ledger rows the operation acts on), not a
+  // persisted aggregate — the pseudo-aggregate naming precedent (ADR-030 §5).
+  INVENTORY_RESERVATION_ALLOCATE: 'inventory.reservation.allocate',
+  INVENTORY_ALLOCATION_CANCEL: 'inventory.allocation.cancel',
   // Reservation + ledger events — reserved surfaces on `inventory_queue` (no
   // cross-service consumer yet; the intended consumer is a future event-store
   // capability — the `inventory.stock.{received,adjusted}` precedent).
-  // `inventory.stock.reserved` (Reserve) / `inventory.stock.released` (Release) and
-  // the high-volume `inventory.stock-movement.recorded` (every ledger insert).
+  // `inventory.stock.reserved` (Reserve) / `inventory.stock.allocated` (Allocate) /
+  // `inventory.stock.released` (Release + Cancel-Allocation) and the high-volume
+  // `inventory.stock-movement.recorded` (every ledger insert).
   INVENTORY_STOCK_RESERVED: 'inventory.stock.reserved',
+  INVENTORY_STOCK_ALLOCATED: 'inventory.stock.allocated',
   INVENTORY_STOCK_RELEASED: 'inventory.stock.released',
   INVENTORY_STOCK_MOVEMENT_RECORDED: 'inventory.stock-movement.recorded',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',

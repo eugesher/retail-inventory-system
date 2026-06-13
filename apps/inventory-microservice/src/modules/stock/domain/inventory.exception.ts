@@ -38,8 +38,9 @@ export enum InventoryErrorCodeEnum {
   // hold's current lifecycle state.
   RESERVATION_INVALID_STATE = 'INVENTORY_RESERVATION_INVALID_STATE',
   // Wall-clock-expired commit → 409: `commit` was called on a hold whose
-  // `expiresAt` is already in the past. The allocate use case (a later capability)
-  // refreshes the TTL first when it decides to honor a stale-but-still-held hold.
+  // `expiresAt` is already in the past. The allocate use case refreshes the TTL
+  // first when it decides to honor a stale-but-still-held hold, so this never
+  // surfaces out of allocate.
   RESERVATION_EXPIRED = 'INVENTORY_RESERVATION_EXPIRED',
 
   // No-oversell rejection → 409 (ADR-030 §3): a Reserve asked for more than the
