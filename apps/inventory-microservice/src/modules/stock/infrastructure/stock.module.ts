@@ -11,6 +11,7 @@ import {
   RESERVATION_REPOSITORY,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
+  STOCK_MOVEMENT_REPOSITORY,
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../application/ports';
@@ -30,6 +31,8 @@ import {
   ReservationTypeormRepository,
   StockLevelEntity,
   StockLocationEntity,
+  StockMovementEntity,
+  StockMovementTypeormRepository,
   StockTypeormRepository,
   TypeormTransactionAdapter,
 } from './persistence';
@@ -47,7 +50,12 @@ import {
 // writes the inventory-reservation capability adds.
 @Module({
   imports: [
-    DatabaseModule.forFeature([StockLocationEntity, StockLevelEntity, ReservationEntity]),
+    DatabaseModule.forFeature([
+      StockLocationEntity,
+      StockLevelEntity,
+      ReservationEntity,
+      StockMovementEntity,
+    ]),
     MicroserviceClientNotificationModule,
     MicroserviceClientInventoryModule,
   ],
@@ -61,6 +69,13 @@ import {
     // in later sessions. No use case can reach the aggregate yet.
     ReservationTypeormRepository,
     { provide: RESERVATION_REPOSITORY, useExisting: ReservationTypeormRepository },
+
+    // The append-only stock-movement audit ledger's repository (ADR-030 §2). Bound
+    // now so the seam is complete; the writers (Release / Allocate / Receive /
+    // Adjust / Transfer) and the audit read RPC land in later sessions. No producer
+    // writes movements yet.
+    StockMovementTypeormRepository,
+    { provide: STOCK_MOVEMENT_REPOSITORY, useExisting: StockMovementTypeormRepository },
 
     StockCache,
     { provide: STOCK_CACHE, useExisting: StockCache },
