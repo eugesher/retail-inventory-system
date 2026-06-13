@@ -27,6 +27,7 @@ import {
   ReceiveStockUseCase,
   ReleaseReservationUseCase,
   ReserveStockUseCase,
+  TransferStockUseCase,
 } from '../application/use-cases';
 import { InventoryRpcExceptionFilter, StockController } from '../presentation';
 import { StockCache } from './cache';
@@ -76,9 +77,10 @@ import {
     { provide: RESERVATION_REPOSITORY, useExisting: ReservationTypeormRepository },
 
     // The append-only stock-movement audit ledger's repository (ADR-030 §2).
-    // Written by Release (`release` rows), Allocate (`allocation` rows), and
-    // Cancel-Allocation (`release` rows); the remaining writers (Receive / Adjust /
-    // Transfer) and the audit read RPC land in later sessions.
+    // Every counter-changing operation appends here: Receive (`receipt`), Adjust
+    // (signed `adjustment`), Reserve/Release/Cancel (`release`), Allocate
+    // (`allocation`), and Transfer (a paired `adjustment` per leg). The audit read
+    // RPC lands in a later session.
     StockMovementTypeormRepository,
     { provide: STOCK_MOVEMENT_REPOSITORY, useExisting: StockMovementTypeormRepository },
 
@@ -110,6 +112,7 @@ import {
     ReleaseReservationUseCase,
     AllocateStockUseCase,
     CancelAllocationUseCase,
+    TransferStockUseCase,
 
     // Terminates `InventoryDomainException` into the `{ statusCode, message, code }`
     // wire shape the gateway maps (ADR-027). Registered via APP_FILTER so it

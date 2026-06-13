@@ -6,6 +6,8 @@ import {
   IStockAdjustPayload,
   IStockLocationsListPayload,
   IStockReceivePayload,
+  IStockTransferPayload,
+  IStockTransferResult,
   IVariantStockGetPayload,
   StockLevelView,
   StockLocationView,
@@ -19,6 +21,7 @@ import {
   IInventoryGatewayPort,
   IListLocationsQuery,
   IReceiveStockCommand,
+  ITransferStockCommand,
 } from '../../application/ports';
 
 // The single `ClientProxy` holder for the inventory gateway module (ADR-009 /
@@ -75,6 +78,18 @@ export class InventoryRabbitmqAdapter implements IInventoryGatewayPort {
     return firstValueFrom(
       this.client.send<StockLevelView, IStockAdjustPayload>(
         ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST,
+        { ...command, correlationId },
+      ),
+    );
+  }
+
+  public async transferStock(
+    command: ITransferStockCommand,
+    correlationId: string,
+  ): Promise<IStockTransferResult> {
+    return firstValueFrom(
+      this.client.send<IStockTransferResult, IStockTransferPayload>(
+        ROUTING_KEYS.INVENTORY_STOCK_LEVEL_TRANSFER,
         { ...command, correlationId },
       ),
     );

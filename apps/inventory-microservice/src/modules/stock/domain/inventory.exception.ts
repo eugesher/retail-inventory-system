@@ -11,6 +11,14 @@ export enum InventoryErrorCodeEnum {
   STOCK_RECEIVE_QUANTITY_INVALID = 'INVENTORY_STOCK_RECEIVE_QUANTITY_INVALID',
   STOCK_ADJUSTMENT_DELTA_INVALID = 'INVENTORY_STOCK_ADJUSTMENT_DELTA_INVALID',
   STOCK_ADJUSTMENT_REASON_REQUIRED = 'INVENTORY_STOCK_ADJUSTMENT_REASON_REQUIRED',
+  // Transfer-input invariants → 400 (ADR-030). A non-positive / non-integer
+  // `quantity`, and a transfer whose source and destination are the same location
+  // (a no-op that would otherwise debit then credit the same row). A source
+  // shortfall needs no new code — `changeOnHand(−quantity)` already throws
+  // `STOCK_RESULT_NEGATIVE` (409); unknown/inactive locations reuse the existing
+  // `STOCK_LOCATION_NOT_FOUND` / `STOCK_LOCATION_INACTIVE` codes.
+  TRANSFER_QUANTITY_INVALID = 'INVENTORY_TRANSFER_QUANTITY_INVALID',
+  TRANSFER_SAME_LOCATION = 'INVENTORY_TRANSFER_SAME_LOCATION',
 
   // Lookup miss → 404: the named stock location does not exist.
   STOCK_LOCATION_NOT_FOUND = 'INVENTORY_STOCK_LOCATION_NOT_FOUND',

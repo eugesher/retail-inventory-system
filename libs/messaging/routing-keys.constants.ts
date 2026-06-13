@@ -5,6 +5,12 @@ export const ROUTING_KEYS = {
   INVENTORY_STOCK_LEVEL_GET: 'inventory.stock-level.get',
   INVENTORY_STOCK_LEVEL_RECEIVE: 'inventory.stock-level.receive',
   INVENTORY_STOCK_LEVEL_ADJUST: 'inventory.stock-level.adjust',
+  // `inventory.stock-level.transfer` → `TransferStockUseCase` (RPC, Gateway →
+  // Inventory): moves on-hand between two locations of one variant atomically —
+  // two `StockLevel` writes + two paired `adjustment` movements (sharing a
+  // `transfer` reference id) in one transaction (ADR-030). The `stock-level`
+  // aggregate noun matches the receive/adjust keys.
+  INVENTORY_STOCK_LEVEL_TRANSFER: 'inventory.stock-level.transfer',
   INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized',
   INVENTORY_LOCATION_LIST: 'inventory.location.list',
   // Reservation RPC commands (Gateway / Retail → Inventory on `inventory_queue`,

@@ -8,6 +8,7 @@ export enum MicroserviceMessagePatternEnum {
   INVENTORY_STOCK_LEVEL_GET = 'inventory.stock-level.get',
   INVENTORY_STOCK_LEVEL_RECEIVE = 'inventory.stock-level.receive',
   INVENTORY_STOCK_LEVEL_ADJUST = 'inventory.stock-level.adjust',
+  INVENTORY_STOCK_LEVEL_TRANSFER = 'inventory.stock-level.transfer',
   INVENTORY_STOCK_LEVEL_INITIALIZED = 'inventory.stock-level.initialized',
   INVENTORY_LOCATION_LIST = 'inventory.location.list',
   INVENTORY_RESERVATION_RESERVE = 'inventory.reservation.reserve',

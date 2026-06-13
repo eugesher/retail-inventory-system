@@ -15,6 +15,9 @@ const INVENTORY_ERROR_STATUS: Record<InventoryErrorCodeEnum, HttpStatus> = {
   [InventoryErrorCodeEnum.STOCK_RECEIVE_QUANTITY_INVALID]: HttpStatus.BAD_REQUEST,
   [InventoryErrorCodeEnum.STOCK_ADJUSTMENT_DELTA_INVALID]: HttpStatus.BAD_REQUEST,
   [InventoryErrorCodeEnum.STOCK_ADJUSTMENT_REASON_REQUIRED]: HttpStatus.BAD_REQUEST,
+  // Transfer-input invariants → 400 (bad quantity / same source-and-destination).
+  [InventoryErrorCodeEnum.TRANSFER_QUANTITY_INVALID]: HttpStatus.BAD_REQUEST,
+  [InventoryErrorCodeEnum.TRANSFER_SAME_LOCATION]: HttpStatus.BAD_REQUEST,
 
   // Lookup miss → 404.
   [InventoryErrorCodeEnum.STOCK_LOCATION_NOT_FOUND]: HttpStatus.NOT_FOUND,
