@@ -26,6 +26,14 @@ const INVENTORY_ERROR_STATUS: Record<InventoryErrorCodeEnum, HttpStatus> = {
   [InventoryErrorCodeEnum.STOCK_LOCATION_INACTIVE]: HttpStatus.CONFLICT,
   [InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE]: HttpStatus.CONFLICT,
   [InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT]: HttpStatus.CONFLICT,
+
+  // Reservation invariants (ADR-030). The aggregate enforces these now; the
+  // Reserve / Release / Allocate use cases that surface them to a caller land in
+  // later sessions, but the codes are mapped here so the total `Record` stays
+  // exhaustive and the foundation compiles.
+  [InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID]: HttpStatus.BAD_REQUEST,
+  [InventoryErrorCodeEnum.RESERVATION_INVALID_STATE]: HttpStatus.CONFLICT,
+  [InventoryErrorCodeEnum.RESERVATION_EXPIRED]: HttpStatus.CONFLICT,
 };
 
 // Terminates an `InventoryDomainException` into the wire error shape the gateway's

@@ -100,7 +100,7 @@ The system handles order lifecycle management and product stock tracking across 
 │                        Shared DB                          │ │
 │  staff_user / customer / role / permission                │ │
 │  role_permissions / staff_user_roles                      │ │
-│  stock_location / stock_level                              │ │
+│  stock_location / stock_level / reservation               │ │
 │  product / product_variant                                │ │
 │  category / product_categories / media_asset              │ │
 │  price / tax_category                                     │ │
@@ -242,11 +242,13 @@ apps/inventory-microservice/src/
     ├── domain/
     │   ├── stock-level.model.ts               # per-location running totals (changeOnHand; available getter; version)
     │   ├── stock-location.model.ts            # StockLocation aggregate (string PK; StockLocationTypeEnum; active flag)
+    │   ├── reservation.model.ts               # Reservation hold (TTL; status machine; reactivate; UUID PK) — ADR-030
     │   ├── inventory.exception.ts             # InventoryDomainException + InventoryErrorCodeEnum
     │   └── events/                            # StockReceived/Adjusted/Low + StockLevelInitialized events
     ├── application/
     │   ├── ports/
     │   │   ├── stock.repository.port.ts       # IStockRepositoryPort + STOCK_REPOSITORY symbol
+    │   │   ├── reservation.repository.port.ts # IReservationRepositoryPort + RESERVATION_REPOSITORY symbol (scope-aware) — ADR-030
     │   │   ├── stock-cache.port.ts            # IStockCachePort + STOCK_CACHE symbol (getOrLoad / withInvalidation)
     │   │   ├── stock-events.publisher.port.ts # IStockEventsPublisherPort + STOCK_EVENTS_PUBLISHER symbol
     │   │   └── transaction.port.ts            # ITransactionPort + TRANSACTION_PORT symbol (opaque ITransactionScope)
@@ -257,7 +259,7 @@ apps/inventory-microservice/src/
     │       ├── adjust-stock.use-case.ts       # signed delta + reasonCode (rejects below-zero → 409)
     │       └── auto-init-stock-level.use-case.ts # zero a StockLevel on catalog.variant.created
     ├── infrastructure/
-    │   ├── persistence/                       # StockLevel/StockLocation entities + mappers + StockTypeormRepository + TypeormTransactionAdapter
+    │   ├── persistence/                       # StockLevel/StockLocation/Reservation entities + mappers + StockTypeormRepository + ReservationTypeormRepository + TypeormTransactionAdapter
     │   ├── cache/stock.cache.ts               # STOCK_CACHE adapter; preserves ADR-002 cache-aside contract
     │   ├── consumers/catalog-events.consumer.ts # @EventPattern catalog.variant.created → AutoInitStockLevelUseCase
     │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (inventory_queue + notification_events)
@@ -267,7 +269,7 @@ apps/inventory-microservice/src/
         └── inventory-rpc-exception.filter.ts  # maps InventoryErrorCodeEnum → HTTP status
 ```
 
-The `stock` context keys everything on the catalog **`variantId`** (an opaque cross-service FK to `product_variant`), not a local product id. `StockLevel` persists running totals per `(variantId, stockLocationId)` and exposes only `changeOnHand(delta)` today (with `available = onHand − allocated − reserved` a pure getter); `StockLocation` is a first-class aggregate with a caller-assigned string PK (`default-warehouse` is auto-provisioned by the migration). Reservation, allocation, transfer, and a `StockMovement` audit ledger — together with the `version` optimistic-lock enforcement — are deferred to a later inventory-reservation capability.
+The `stock` context keys everything on the catalog **`variantId`** (an opaque cross-service FK to `product_variant`), not a local product id. `StockLevel` persists running totals per `(variantId, stockLocationId)` and exposes only `changeOnHand(delta)` today (with `available = onHand − allocated − reserved` a pure getter); `StockLocation` is a first-class aggregate with a caller-assigned string PK (`default-warehouse` is auto-provisioned by the migration). The **`Reservation` hold** is now landed as the foundation of the reservation capability ([ADR-030](docs/adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md)): a TTL-bounded, cart-scoped hold (plain class like `StockLevel`, app-generated `CHAR(36)` UUID PK) whose `quantity` is meant to move `StockLevel.quantityReserved`, with a status machine `active → committed` / `active → released` / `active → expired` and a `reactivate` row-reuse path that keeps the all-statuses UNIQUE `(cart_id, variant_id, stock_location_id)` triple workable when a removed line is re-added. The `reservation` table, the `RESERVATION_REPOSITORY` port + repository, and three typed error codes ship now; **no use case, RPC, or event reaches the aggregate yet** — the Reserve/Release/Allocate operations, the `StockMovement` audit ledger, transfer, the no-oversell enforcement on the `version` column, and the cache `v2 → v3` bump all follow in later inventory work (all decided in ADR-030).
 
 `ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the four inventory events (`inventory.stock.{received,adjusted,low}` + `inventory.stock-level.initialized`). See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
 

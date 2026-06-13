@@ -8,6 +8,7 @@ import {
 } from '@retail-inventory-system/messaging';
 
 import {
+  RESERVATION_REPOSITORY,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_REPOSITORY,
@@ -25,6 +26,8 @@ import { StockCache } from './cache';
 import { CatalogEventsConsumer } from './consumers';
 import { StockRabbitmqPublisher } from './messaging';
 import {
+  ReservationEntity,
+  ReservationTypeormRepository,
   StockLevelEntity,
   StockLocationEntity,
   StockTypeormRepository,
@@ -44,7 +47,7 @@ import {
 // writes the inventory-reservation capability adds.
 @Module({
   imports: [
-    DatabaseModule.forFeature([StockLocationEntity, StockLevelEntity]),
+    DatabaseModule.forFeature([StockLocationEntity, StockLevelEntity, ReservationEntity]),
     MicroserviceClientNotificationModule,
     MicroserviceClientInventoryModule,
   ],
@@ -52,6 +55,12 @@ import {
   providers: [
     StockTypeormRepository,
     { provide: STOCK_REPOSITORY, useExisting: StockTypeormRepository },
+
+    // The reservation aggregate's repository (ADR-030). Bound now as the
+    // foundation; the Reserve / Release / Allocate use cases that consume it land
+    // in later sessions. No use case can reach the aggregate yet.
+    ReservationTypeormRepository,
+    { provide: RESERVATION_REPOSITORY, useExisting: ReservationTypeormRepository },
 
     StockCache,
     { provide: STOCK_CACHE, useExisting: StockCache },
