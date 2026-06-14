@@ -29,6 +29,7 @@ import {
   TRANSACTION_PORT,
 } from '../ports';
 import { maybeEmitLowStock } from './low-stock.emitter';
+import { emitMovementRecorded } from './movement-recorded.emitter';
 import { requireActiveLocation } from './stock-location.guard';
 import { runWithStockWriteRetry } from './stock-mutation';
 import { toStockLevelView } from './stock-view.factory';
@@ -158,8 +159,8 @@ export class TransferStockUseCase {
     // never a depletion event). Each leg swallows its own failure and they run
     // concurrently.
     await Promise.all([
-      this.emitMovementRecorded(transferred.outMovement, variantId, correlationId),
-      this.emitMovementRecorded(transferred.inMovement, variantId, correlationId),
+      emitMovementRecorded(this.publisher, this.logger, transferred.outMovement, correlationId),
+      emitMovementRecorded(this.publisher, this.logger, transferred.inMovement, correlationId),
       maybeEmitLowStock(this.publisher, this.logger, transferred.source, -quantity, correlationId),
     ]);
 
@@ -242,23 +243,5 @@ export class TransferStockUseCase {
     );
 
     return { source: savedSource, destination: savedDestination, outMovement, inMovement };
-  }
-
-  // The paired `adjustment` row committed with its counter; this only announces it
-  // (ADR-030 §2). Best-effort like every post-commit emit — a broker hiccup must not
-  // fail the RPC, the transfer already committed.
-  private async emitMovementRecorded(
-    movement: StockMovement,
-    variantId: number,
-    correlationId?: string,
-  ): Promise<void> {
-    try {
-      await this.publisher.publishStockMovementRecorded(movement, correlationId);
-    } catch (error) {
-      this.logger.warn(
-        { err: error as Error, correlationId, variantId },
-        'Failed to publish inventory.stock-movement.recorded (transfer already committed)',
-      );
-    }
   }
 }

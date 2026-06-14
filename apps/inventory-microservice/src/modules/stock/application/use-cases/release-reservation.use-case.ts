@@ -18,7 +18,6 @@ import {
 } from '../../domain';
 import {
   IReservationRepositoryPort,
-  IStockCacheInvalidateItem,
   IStockCachePort,
   IStockEventsPublisherPort,
   IStockMovementRepositoryPort,
@@ -32,6 +31,7 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { emitMovementRecorded } from './movement-recorded.emitter';
 import { toReservationView } from './reservation-view.factory';
 import { runWithStockWriteRetry } from './stock-mutation';
 
@@ -123,7 +123,13 @@ export class ReleaseReservationUseCase {
           (scope) => this.releaseAll(scope, targetIds, reason, actorId),
           { correlationId },
         ),
-      (rows) => this.distinctItems(rows),
+      // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
+      // covering every location facet, so the raw per-row items are enough.
+      (rows) =>
+        rows.map((row) => ({
+          variantId: row.reservation.variantId,
+          stockLocationId: row.reservation.stockLocationId,
+        })),
       { correlationId },
     );
 
@@ -234,22 +240,6 @@ export class ReleaseReservationUseCase {
     return released;
   }
 
-  private distinctItems(rows: IReleasedRow[]): IStockCacheInvalidateItem[] {
-    const seen = new Set<string>();
-    const items: IStockCacheInvalidateItem[] = [];
-    for (const { reservation } of rows) {
-      const key = `${reservation.variantId}:${reservation.stockLocationId}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        items.push({
-          variantId: reservation.variantId,
-          stockLocationId: reservation.stockLocationId,
-        });
-      }
-    }
-    return items;
-  }
-
   private async emitReleased(
     row: IReleasedRow,
     reason: ReservationReleaseReason,
@@ -276,13 +266,6 @@ export class ReleaseReservationUseCase {
       );
     }
 
-    try {
-      await this.publisher.publishStockMovementRecorded(movement, correlationId);
-    } catch (error) {
-      this.logger.warn(
-        { err: error as Error, correlationId, variantId: reservation.variantId },
-        'Failed to publish inventory.stock-movement.recorded (release already committed)',
-      );
-    }
+    await emitMovementRecorded(this.publisher, this.logger, movement, correlationId);
   }
 }

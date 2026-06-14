@@ -27,6 +27,7 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { emitMovementRecorded } from './movement-recorded.emitter';
 import { applyOnHandChange } from './stock-mutation';
 import { requireActiveLocation } from './stock-location.guard';
 import { toStockLevelView } from './stock-view.factory';
@@ -125,7 +126,7 @@ export class ReceiveStockUseCase {
     // independent and each swallows its own failure, so they run concurrently.
     await Promise.all([
       this.emitReceived(saved, quantity, actorId, correlationId),
-      this.emitMovementRecorded(saved, movement, correlationId),
+      emitMovementRecorded(this.publisher, this.logger, movement, correlationId),
     ]);
 
     return toStockLevelView(saved);
@@ -152,28 +153,6 @@ export class ReceiveStockUseCase {
       this.logger.warn(
         { err: error as Error, correlationId, variantId: saved.variantId },
         'Failed to publish inventory.stock.received (write already committed)',
-      );
-    }
-  }
-
-  // The ledger row committed with the counter; this only announces it (ADR-030 §2).
-  // Best-effort like every post-commit emit — a broker hiccup must not fail the RPC.
-  // `movement` is always present on the receive path (a `buildMovement` factory is
-  // always supplied), but the helper's result type is nullable, so guard for safety.
-  private async emitMovementRecorded(
-    saved: StockLevel,
-    movement: StockMovement | null,
-    correlationId?: string,
-  ): Promise<void> {
-    if (movement === null) {
-      return;
-    }
-    try {
-      await this.publisher.publishStockMovementRecorded(movement, correlationId);
-    } catch (error) {
-      this.logger.warn(
-        { err: error as Error, correlationId, variantId: saved.variantId },
-        'Failed to publish inventory.stock-movement.recorded (write already committed)',
       );
     }
   }

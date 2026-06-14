@@ -7,24 +7,12 @@ import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import { StockLevel, StockLocation } from '../../domain';
 import { IStockRepositoryPort, ITransactionScope } from '../../application/ports';
+import { isDuplicateEntryError } from '../../application/use-cases/mysql-error.util';
 import { StockWriteConflictError } from '../../application/use-cases/stock-write-conflict.error';
 import { StockLevelEntity } from './stock-level.entity';
 import { StockLevelMapper } from './stock-level.mapper';
 import { StockLocationEntity } from './stock-location.entity';
 import { StockLocationMapper } from './stock-location.mapper';
-
-// MySQL's "duplicate entry for key" error number / code. A first-touch INSERT
-// that loses the `UNIQUE (variant_id, stock_location_id)` race surfaces a driver
-// error carrying these — duck-typed (not `instanceof QueryFailedError`) to match
-// the auto-init consumer's check.
-const MYSQL_ER_DUP_ENTRY_ERRNO = 1062;
-const MYSQL_ER_DUP_ENTRY_CODE = 'ER_DUP_ENTRY';
-
-interface IMysqlDriverError {
-  errno?: number;
-  code?: string;
-  driverError?: { errno?: number; code?: string };
-}
 
 // The only `@InjectRepository` site for the inventory context. Extends
 // `BaseTypeormRepository` for the `toDomain`/`toEntity` seam over the primary
@@ -132,7 +120,7 @@ export class StockTypeormRepository
         const saved = await repo.save(partial);
         savedId = saved.id;
       } catch (error) {
-        if (StockTypeormRepository.isUniqueViolation(error)) {
+        if (isDuplicateEntryError(error)) {
           throw new StockWriteConflictError(stockLevel.variantId, stockLevel.stockLocationId);
         }
         throw error;
@@ -182,14 +170,5 @@ export class StockTypeormRepository
       throw new Error(`StockTypeormRepository: stock_level ${id} vanished after commit`);
     }
     return StockLevelMapper.toDomain(reloaded);
-  }
-
-  private static isUniqueViolation(error: unknown): boolean {
-    if (typeof error !== 'object' || error === null) {
-      return false;
-    }
-    const candidate = error as IMysqlDriverError;
-    const driver = candidate.driverError ?? candidate;
-    return driver.errno === MYSQL_ER_DUP_ENTRY_ERRNO || driver.code === MYSQL_ER_DUP_ENTRY_CODE;
   }
 }

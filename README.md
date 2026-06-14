@@ -87,14 +87,22 @@ The system handles order lifecycle management and product stock tracking across 
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
 │  Cart: 6 RPCs + place  │  │  RPC: stock-level.get,        │
-│  + 4 events (cart).    │  │  location.list, receive,      │
-│  Orders: get / list /  │  │  adjust                       │
-│  capture (orders).     │  │  Consumes: variant.created    │
-│  PAYMENT_GATEWAY ->    │  │  Emits: inventory.stock.low ──┼─┐
-│  FakePaymentGateway.   │  │                               │ │
-│  Emits retail.order.   │  │  ┌────────────┐               │ │
-│  placed -> notification│  │  │   Redis    │◄──cache-aside─┤ │
-└──────────────┬─────────┘  │  │ stock keys │               │ │
+│  + 4 cart events.      │  │  location.list, receive,      │
+│  Orders: get / list /  │  │  adjust, transfer,            │
+│  capture.              │  │  stock-movement.list,         │
+│  PAYMENT_GATEWAY ->    │  │  reservation.reserve/         │
+│  FakePaymentGateway.   │  │  release/allocate,            │
+│  Calls inventory       │  │  allocation.cancel            │
+│  reserve/release/      │  │  Aggregates: StockLevel,      │
+│  allocate (RPC).       │  │  StockLocation, Reservation,  │
+│  Emits order.placed    │  │  StockMovement (ledger)       │
+│  -> notification.      │  │  Consumes: variant.created    │
+└──────────────┬─────────┘  │  Emits: reserved/allocated/   │
+               │            │  released, movement.recorded  │
+               │            │  + stock.low ─────────────────┼─┐
+               │            │  ┌────────────┐               │ │
+               │            │  │   Redis    │◄──cache-aside─┤ │
+               │            │  │ stock keys │               │ │
                │            │  └────────────┘               │ │
                │            └─────────────────┬─────────────┘ │
                │            MySQL             │               │
@@ -105,6 +113,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  staff_user / customer / role / permission                │ │
 │  role_permissions / staff_user_roles                      │ │
 │  stock_location / stock_level / reservation               │ │
+│  stock_movement                                           │ │
 │  product / product_variant                                │ │
 │  category / product_categories / media_asset              │ │
 │  price / tax_category                                     │ │
@@ -195,12 +204,14 @@ apps/api-gateway/src/
     └── inventory/                             # talks to inventory-microservice (read + write RPCs)
         ├── application/
         │   ├── ports/inventory-gateway.port.ts # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
-        │   └── use-cases/                     # GetVariantStock, ListLocations, ReceiveStock, AdjustStock
+        │   └── use-cases/                     # GetVariantStock, ListLocations, ListVariantMovements,
+        │                                      #   ReceiveStock, AdjustStock, TransferStock, ReleaseReservation
         ├── infrastructure/
-        │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read + write RPCs)
+        │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read + write + reservation RPCs)
         ├── presentation/
-        │   ├── inventory.controller.ts        # GET .../locations, /variants/:id/stock; POST /variants/:id/stock/receive|adjust
-        │   └── dto/                           # variant-stock-query (?locationIds), receive-stock, adjust-stock request DTOs
+        │   ├── inventory.controller.ts        # GET .../locations, /variants/:id/stock, /variants/:id/movements;
+        │   │                                  #   POST /variants/:id/stock/receive|adjust|transfer, /reservations/:id/release
+        │   └── dto/                           # variant-stock-query (?locationIds), movements-query, receive-stock, adjust-stock, transfer-stock request DTOs
         └── inventory.module.ts                # binds INVENTORY_GATEWAY_PORT -> InventoryRabbitmqAdapter
 ```
 
@@ -251,7 +262,7 @@ apps/inventory-microservice/src/
     │   ├── reservation.model.ts               # Reservation hold (TTL; status machine; reactivate; UUID PK) — ADR-030
     │   ├── stock-movement.model.ts            # StockMovement append-only ledger record (frozen; sign-per-type; no mutators) — ADR-030
     │   ├── inventory.exception.ts             # InventoryDomainException + InventoryErrorCodeEnum
-    │   └── events/                            # StockReceived/Adjusted/Low + StockLevelInitialized events
+    │   └── events/                            # StockReceived/Adjusted/Low/LevelInitialized + StockReserved/Released/Allocated events
     ├── application/
     │   ├── ports/
     │   │   ├── stock.repository.port.ts       # IStockRepositoryPort + STOCK_REPOSITORY symbol
@@ -263,8 +274,14 @@ apps/inventory-microservice/src/
     │   └── use-cases/
     │       ├── query-availability.use-case.ts # cache-aside per-variant availability read
     │       ├── list-locations.use-case.ts     # stock-location list (uncached)
+    │       ├── list-stock-movements.use-case.ts # paginated, filterable audit-ledger read (uncached) — ADR-030
     │       ├── receive-stock.use-case.ts      # quantityOnHand += n + receipt movement (post-commit invalidation)
     │       ├── adjust-stock.use-case.ts       # signed delta + reasonCode + adjustment movement (rejects below-zero → 409)
+    │       ├── transfer-stock.use-case.ts     # two-location on-hand move + two paired adjustment movements — ADR-030
+    │       ├── reserve-stock.use-case.ts      # no-oversell hold; idempotent-by-absolute-qty on the triple — ADR-030
+    │       ├── release-reservation.use-case.ts # return held units + append a release movement — ADR-030
+    │       ├── allocate-stock.use-case.ts     # commit a cart's holds into an order at place-time (all-lines-atomic) — ADR-030
+    │       ├── cancel-allocation.use-case.ts  # reverse an order's allocation (no holds touched) — ADR-030
     │       └── auto-init-stock-level.use-case.ts # zero a StockLevel on catalog.variant.created
     ├── infrastructure/
     │   ├── persistence/                       # StockLevel/StockLocation/Reservation/StockMovement entities + mappers + StockTypeormRepository + ReservationTypeormRepository + StockMovementTypeormRepository (insert-only) + TypeormTransactionAdapter
@@ -273,13 +290,13 @@ apps/inventory-microservice/src/
     │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (inventory_queue + notification_events)
     │   └── stock.module.ts                    # binds the port symbols → adapters; APP_FILTER → InventoryRpcExceptionFilter
     └── presentation/
-        ├── stock.controller.ts                # @MessagePattern: stock-level.get/receive/adjust, location.list
+        ├── stock.controller.ts                # 10 @MessagePattern: stock-level.get/receive/adjust/transfer, location.list, stock-movement.list, reservation.reserve/release/allocate, allocation.cancel
         └── inventory-rpc-exception.filter.ts  # maps InventoryErrorCodeEnum → HTTP status
 ```
 
 The `stock` context keys everything on the catalog **`variantId`** (an opaque cross-service FK to `product_variant`), not a local product id. `StockLevel` persists running totals per `(variantId, stockLocationId)` and exposes `changeOnHand(delta)` (Receive/Adjust) plus the reserve-side `reserve(n)` / `releaseReserved(n)` and the allocate-side `allocateFromReserved(n)` / `allocateDirect(n)` / `releaseAllocated(n)` mutators (with `available = onHand − allocated − reserved` a pure getter); `StockLocation` is a first-class aggregate with a caller-assigned string PK (`default-warehouse` is auto-provisioned by the migration). The **`Reservation` hold** ([ADR-030](docs/adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md)) is a TTL-bounded, cart-scoped hold (plain class like `StockLevel`, app-generated `CHAR(36)` UUID PK) whose `quantity` moves `StockLevel.quantityReserved`, with a status machine `active → committed` / `active → released` / `active → expired` and a `reactivate` row-reuse path that keeps the all-statuses UNIQUE `(cart_id, variant_id, stock_location_id)` triple workable when a removed line is re-added. The **`StockMovement` append-only audit ledger** (ADR-030 §2) is an immutable, frozen domain record (`StockMovement.record`/`reconstitute`, no mutators) whose six `type`s carry a **fixed sign** (`+` receipt/return, `−` sale/allocation/release, `±` non-zero adjustment); the `stock_movement` table (BIGINT PK, signed `quantity`, polymorphic FK-less `reference_type`/`reference_id`, a descending `(variant_id, occurred_at)` index, inert `updated_at`/`deleted_at`); and the `STOCK_MOVEMENT_REPOSITORY` port whose **`append` + `listByVariant`-only** surface makes UPDATE/DELETE inexpressible. It is an **audit trail, not the balance authority** — the running totals stay the source of truth, and row sums never reconstruct on-hand. **Reserve Stock, Release Reservation, Allocate Stock, and Cancel Allocation are all live** (`inventory.reservation.reserve` / `.release` / `.allocate` + `inventory.allocation.cancel`): Reserve enforces the no-oversell guard (a `409 INVENTORY_OUT_OF_STOCK` carrying `details.available`) and is idempotent-by-absolute-quantity on the triple, Release returns the held units and appends one negative `release` movement per hold; **Allocate** converts a cart's holds into an order's allocation at place-time (refresh-then-commit for a wall-clock-stale-but-held hold; a direct-allocation fallback against `available` when no hold exists — the request carries the order lines so the fallback needs no retail read), all-lines-atomic, one `allocation` movement per line; **Cancel Allocation** reverses an order's allocation with a `release` movement per line (no reservation rows touched — its callers, the order-cancel flow and the place-failure compensation, arrive later). All four run inside the shared bounded optimistic write protocol (version-checked persist + 5-attempt retry) and emit reserved-surface events (`inventory.stock.reserved` / `.allocated` / `.released` + the per-insert `inventory.stock-movement.recorded`). The cache key bumped `v2 → v3` to record the new `quantityReserved` semantics. **Receive and Adjust write the ledger too** — each appends a `receipt` / signed `adjustment` movement inside its counter transaction. **Transfer Stock is now live too** (`inventory.stock-level.transfer`, fronted at `POST /api/inventory/variants/:variantId/stock/transfer` behind `inventory:transfer`): it moves on-hand between two locations of one variant atomically — two version-checked `StockLevel` writes + two paired `adjustment` movements (sharing a `transfer` reference id) in one transaction — so **every counter-changing inventory operation now leaves a `StockMovement`**. The **retail microservice drives the reservation surface** — the cart write path reserves on add/change + releases on remove, and Place Order allocates inside the conversion transaction (with a best-effort cancel-allocation compensation). The **audit read is now live too** (`inventory.stock-movement.list` → `ListStockMovementsUseCase`, fronted at `GET /api/inventory/variants/:variantId/movements` behind `inventory:read`): a paginated, filterable, newest-first, **uncached** read of one variant's ledger; and a **manual reservation release** (`POST /api/inventory/reservations/:reservationId/release` behind `inventory:adjust`) rides the existing release RPC with the `reservationId` selector + a `manual` reason + the staff `actorId` — the only operator-reachable hold-freeing tool until a TTL sweeper exists. **Still later inventory work**: the TTL sweeper for expired holds (`Reservation.expire()` still has no caller).
 
-`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the four inventory events (`inventory.stock.{received,adjusted,low}` + `inventory.stock-level.initialized`). See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
+`ClientProxy` lives only in `infrastructure/messaging/stock-rabbitmq.publisher.ts` (which injects both the inventory and notification clients), and the cross-service consumer subscribes via `@EventPattern` under `infrastructure/consumers/`. The `STOCK_EVENTS_PUBLISHER` symbol carries the inventory events (`inventory.stock.{received,adjusted,low,reserved,allocated,released}` + `inventory.stock-level.initialized` + the per-ledger-insert `inventory.stock-movement.recorded`); all but `inventory.stock.low` (→ notification) are reserved surfaces on `inventory_queue` with no consumer yet. See [ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md) (which supersedes [ADR-012](docs/adr/012-stock-aggregate-and-port-adapter.md)) for the `StockLevel` / `StockLocation` aggregate boundaries.
 
 The retail microservice hosts the **mutable side of the rebuilt checkout**: the `cart` bounded-context module. Its first-generation `orders` model — a single `Order` aggregate that expanded each line into one `order_product` row per unit, a two-value status, and a cross-service `inventory.order.confirm` reserve call — was torn down in the [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) checkout rebuild. The `Cart` aggregate root (a caller-assigned `CHAR(36)` UUID id, generated in-app) owns its `CartLine` children; the status machine is `active → converted` (placement) / `active → abandoned` (purge), both terminal. Each mutator (`addLine` increments an existing line rather than duplicating it; `changeLineQuantity` rejects `0`; `removeLine`; `markConverted`; `markAbandoned`) advances a `version` optimistic-concurrency token — shipped now though its guard is a later capability — and records a framework-free domain event. A `CartLine` snapshots its unit price (in minor units) and currency at add-time, so a sibling line's change never re-prices it; `variantId` is the opaque catalog backbone key. The `cart` / `cart_line` tables FK onto the gateway `customer` and the catalog `product_variant` in the one shared database.
 
@@ -477,6 +494,16 @@ Two **operator** surfaces front this state over HTTP. The **audit read** (`GET /
 | Variable | Default | Notes |
 | -------- | ------- | ----- |
 | `RESERVATION_TTL_MINUTES` | `15` | Lifetime (minutes) of a stock reservation hold — `expiresAt = now + RESERVATION_TTL_MINUTES` on every Reserve write (Joi-validated positive integer). |
+
+### Inventory invariants
+
+Three guarantees hold across every inventory operation; the [ADR-030](docs/adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md) capability is built to keep them true under concurrency.
+
+**No-oversell.** `available = quantityOnHand − quantityAllocated − quantityReserved` is a pure getter on `StockLevel`, and **no operation ever lets it go negative**. Reserve and the direct-allocate fallback both check `quantity ≤ available` *before* moving a counter and reject the overflow with `409 INVENTORY_OUT_OF_STOCK` carrying `details.available`; Adjust and Transfer reject an on-hand result below zero with `409 INVENTORY_STOCK_RESULT_NEGATIVE`. The check and the write run **in one transaction** under the shared bounded optimistic-write protocol: read the `stock_level` row (capturing its `version`), mutate in memory, then persist with a version-checked `UPDATE`. A lost compare-and-swap (a concurrent writer bumped the `version` first) throws `StockWriteConflictError` and the whole attempt retries on a fresh transaction, up to `MAX_WRITE_ATTEMPTS = 5`, after which the caller gets `409 STOCK_WRITE_CONFLICT`. This is what makes two carts racing for the last unit deterministic — exactly one reserve wins, the loser sees `available: 0` — and it is locked by `test/concurrent-oversell.e2e-spec.ts` across 5 consecutive runs.
+
+**Reservation TTL.** A `Reservation` is a time-bounded hold: every Reserve write (re)sets `expiresAt = now + RESERVATION_TTL_MINUTES` (default `15`), so an active line keeps refreshing its lease as the shopper edits the cart. Placing an order **commits** the hold inside the place transaction (reserved → allocated; a wall-clock-stale-but-still-held hold is refreshed-then-committed rather than rejected, since its counter is still occupied and therefore oversell-safe). A hold returns to `available` three ways: the cart Remove route **releases** it, Place **allocates** it (after which it is the order's allocation, freed only by a cancel-allocation), or an operator **manually releases** it by id (`POST /api/inventory/reservations/:reservationId/release`). There is **no expiry sweeper yet** — `Reservation.expire()` has no caller — so until that capability lands the manual release is the only tool that reclaims a hold whose owner walked away; a stranded hold over-holds stock but is never lost (the next Reserve on the same triple reuses the row, and a future sweeper will reclaim it).
+
+**Audit, not balance.** The `stock_movement` ledger is an **append-only audit trail, never the balance authority** ([ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md)). The running totals on `stock_level` are the source of truth; the ledger only records *what happened* (one fixed-sign row per counter change — `receipt`/`adjustment`/`allocation`/`release`, etc.), and **summing ledger rows never reconstructs on-hand**. The append is inexpressible as an update or delete (the `STOCK_MOVEMENT_REPOSITORY` port exposes only `append` + `listByVariant`) and runs *after* the version-checked persist in the same transaction, so a lost optimistic-write race leaves no orphan row and a retry appends exactly once. Every counter-changing operation — Receive, Adjust, Transfer, Reserve's Release, Allocate, Cancel — leaves its movement, giving the audit read (`GET /api/inventory/variants/:variantId/movements`) a complete, ordered history.
 
 ### Auth
 

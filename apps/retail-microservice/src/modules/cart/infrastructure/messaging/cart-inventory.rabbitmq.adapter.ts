@@ -1,6 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ClientProxy, RpcException } from '@nestjs/microservices';
-import { firstValueFrom } from 'rxjs';
+import { ClientProxy } from '@nestjs/microservices';
 
 import {
   IReservationReleasePayload,
@@ -8,7 +7,11 @@ import {
   IReservationReservePayload,
   ReservationView,
 } from '@retail-inventory-system/contracts';
-import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientTokenEnum,
+  ROUTING_KEYS,
+  sendPreservingRpcError,
+} from '@retail-inventory-system/messaging';
 
 import { ICartInventoryGatewayPort } from '../../application/ports';
 
@@ -25,8 +28,13 @@ export class CartInventoryRabbitmqAdapter implements ICartInventoryGatewayPort {
     private readonly inventoryClient: ClientProxy,
   ) {}
 
+  // Both RPCs preserve the upstream typed error verbatim via the shared
+  // `sendPreservingRpcError` (e.g. an `INVENTORY_OUT_OF_STOCK` 409 with
+  // `details.available`) — the retail RPC filter only catches `CartDomainException`,
+  // so the `RpcException` it wraps passes straight through to the gateway.
   public async reserveStock(payload: IReservationReservePayload): Promise<ReservationView> {
-    return this.send<ReservationView, IReservationReservePayload>(
+    return sendPreservingRpcError<ReservationView, IReservationReservePayload>(
+      this.inventoryClient,
       ROUTING_KEYS.INVENTORY_RESERVATION_RESERVE,
       payload,
     );
@@ -35,28 +43,10 @@ export class CartInventoryRabbitmqAdapter implements ICartInventoryGatewayPort {
   public async releaseStock(
     payload: IReservationReleasePayload,
   ): Promise<IReservationReleaseResult> {
-    return this.send<IReservationReleaseResult, IReservationReleasePayload>(
+    return sendPreservingRpcError<IReservationReleaseResult, IReservationReleasePayload>(
+      this.inventoryClient,
       ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE,
       payload,
     );
-  }
-
-  // The shared send + error-passthrough rule. `firstValueFrom` materializes the
-  // cold `send()` Observable; on rejection the inventory RPC filter has already
-  // shaped the wire error as `{ statusCode, message, code, details? }` (e.g.
-  // `INVENTORY_OUT_OF_STOCK` with `details.available`). We rethrow it wrapped in
-  // `RpcException(err)` so that exact object reaches the gateway's `throwRpcError`
-  // verbatim — an uncaught plain-object rejection would be re-wrapped lossily by
-  // Nest's transport layer (the typed `code` + `details` would be dropped). The
-  // retail RPC filter only catches `CartDomainException`, so this `RpcException`
-  // passes straight through the retail handler and is serialized back unchanged.
-  private async send<TResult, TPayload>(routingKey: string, payload: TPayload): Promise<TResult> {
-    try {
-      return await firstValueFrom(
-        this.inventoryClient.send<TResult, TPayload>(routingKey, payload),
-      );
-    } catch (err) {
-      throw new RpcException(err as object);
-    }
   }
 }

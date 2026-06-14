@@ -298,8 +298,11 @@ describe('AllocateStockUseCase', () => {
     expect(movements.appended).toHaveLength(2);
     expect(publisher.allocated).toHaveLength(2);
     expect(publisher.movementsRecorded).toHaveLength(2);
-    // One distinct invalidation item for the shared pair.
+    // `resolveItems` yields one item per line (the shared pair, twice); the real
+    // `StockCache` dedupes by variantId and wipes a per-variant prefix, so the
+    // duplication is collapsed downstream and the cache effect is one wipe.
     expect(cache.invalidations[0].items).toEqual([
+      { variantId: VARIANT_ID, stockLocationId: LOCATION },
       { variantId: VARIANT_ID, stockLocationId: LOCATION },
     ]);
   });

@@ -7,21 +7,10 @@ import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import { Reservation, ReservationStatusEnum } from '../../domain';
 import { IReservationRepositoryPort, ITransactionScope } from '../../application/ports';
+import { isDuplicateEntryError } from '../../application/use-cases/mysql-error.util';
 import { StockWriteConflictError } from '../../application/use-cases/stock-write-conflict.error';
 import { ReservationEntity } from './reservation.entity';
 import { ReservationMapper } from './reservation.mapper';
-
-// MySQL's "duplicate entry for key" error number / code, duck-typed (not
-// `instanceof QueryFailedError`) to match the `StockTypeormRepository` /
-// auto-init-consumer checks.
-const MYSQL_ER_DUP_ENTRY_ERRNO = 1062;
-const MYSQL_ER_DUP_ENTRY_CODE = 'ER_DUP_ENTRY';
-
-interface IMysqlDriverError {
-  errno?: number;
-  code?: string;
-  driverError?: { errno?: number; code?: string };
-}
 
 // The single `@InjectRepository(ReservationEntity)` site. Extends
 // `BaseTypeormRepository` for the `toDomain`/`toEntity` seam; `save` is overridden
@@ -110,7 +99,7 @@ export class ReservationTypeormRepository
     try {
       await repo.save(partial);
     } catch (error) {
-      if (ReservationTypeormRepository.isUniqueViolation(error)) {
+      if (isDuplicateEntryError(error)) {
         throw new StockWriteConflictError(reservation.variantId, reservation.stockLocationId);
       }
       throw error;
@@ -145,14 +134,5 @@ export class ReservationTypeormRepository
       throw new Error(`ReservationTypeormRepository: reservation ${id} vanished after commit`);
     }
     return ReservationMapper.toDomain(reloaded);
-  }
-
-  private static isUniqueViolation(error: unknown): boolean {
-    if (typeof error !== 'object' || error === null) {
-      return false;
-    }
-    const candidate = error as IMysqlDriverError;
-    const driver = candidate.driverError ?? candidate;
-    return driver.errno === MYSQL_ER_DUP_ENTRY_ERRNO || driver.code === MYSQL_ER_DUP_ENTRY_CODE;
   }
 }
