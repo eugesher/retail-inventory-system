@@ -24,6 +24,19 @@
 #       atomically. Body { fromLocationId, toLocationId, quantity }. Both
 #       locations are required. Transferring more than the source's on-hand is a
 #       409. Returns { from, to } — both post-transfer StockLevelViews.
+#   - GET  /inventory/variants/:variantId/movements        (Bearer — inventory:read)
+#       The variant's stock-movement audit trail (the append-only ledger). A
+#       paginated, NEWEST-FIRST timeline. Query { page?, pageSize?, type?, from?,
+#       to? } — page defaults 1, pageSize defaults 20 (max 100); type filters to
+#       one movement kind; from/to are inclusive ISO-8601 bounds on occurredAt.
+#       Returns IPage<StockMovementView> { items, total, page, size }. An unknown
+#       variant (or one with no rows) is a 200 empty page, not a 404.
+#   - POST /inventory/reservations/:reservationId/release  (Bearer — inventory:adjust)
+#       Manually release ONE reservation hold by its UUID. No body. Frees the hold,
+#       returns the units to `available`, and writes a `manual`-reason `release`
+#       ledger row attributed to the staff actor. Returns { released: [...] }. An
+#       unknown id is a 404; an already-released/committed row a 409. This is the
+#       ONLY hold-freeing tool until a TTL-sweeper capability lands.
 #
 # Stock locations
 #   The migration provisions one default location with id `default-warehouse`,
@@ -55,7 +68,8 @@
 #      warehouse@example.com (warehouse-staff) carries all three and works here too.
 #   3. The two variant-stock GETs send no token — they prove the @Public() route
 #      works unauthenticated. The receive/adjust POSTs need inventory:adjust; the
-#      transfer POST needs inventory:transfer.
+#      transfer POST needs inventory:transfer; the movements GET needs
+#      inventory:read; the manual reservation release needs inventory:adjust.
 
 @baseUrl = {{ENV_BASE_URL}}
 
@@ -197,3 +211,70 @@ Content-Type: application/json
   "toLocationId": "backup-store",
   "quantity": 100000
 }
+
+###
+
+# @name listVariantMovements
+# GET /api/inventory/variants/:variantId/movements  (Bearer — inventory:read)
+# The variant's stock-movement audit trail: a paginated, NEWEST-FIRST timeline of
+# the append-only `stock_movement` ledger. Every counter-changing operation leaves
+# a row here — receive (`receipt`), adjust (`adjustment`), reserve/release/cancel
+# (`release`), allocate (`allocation`), transfer (a paired `adjustment` per leg).
+# Response is IPage<StockMovementView> { items, total, page, size }; each item is
+# { id, variantId, stockLocationId, type, quantity (signed), reasonCode,
+# referenceType, referenceId, actorId, occurredAt (ISO) }. Run the receive/adjust/
+# transfer requests above first to populate variant 1's ledger, then read it here.
+GET {{baseUrl}}/inventory/variants/1/movements?page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name listVariantMovementsFiltered
+# GET /api/inventory/variants/:variantId/movements?type=...&from=...&to=...  (Bearer — inventory:read)
+# The same audit read narrowed to one movement `type` and an INCLUSIVE occurredAt
+# window. Here: only `receipt` rows (the receiveStock request above) recorded in
+# June 2026. `from`/`to` are ISO-8601; an out-of-range or malformed bound is
+# ignored by the read path (the DTO's @IsISO8601() is the validation gate).
+GET {{baseUrl}}/inventory/variants/1/movements?type=receipt&from=2026-06-01T00:00:00.000Z&to=2026-06-30T23:59:59.999Z
+Authorization: Bearer {{accessToken}}
+
+###
+
+# A reservation (hold) UUID. There is deliberately NO HTTP endpoint that returns a
+# reservation id (a reservation list/read surface is not part of this capability).
+# An operator obtains the id from one of:
+#   * the reserve-path LOGS — `reservationId` is logged when a cart line is reserved
+#     (add-to-cart / change-quantity over /api/cart),
+#   * the `inventory.stock.reserved` EVENT payload (on `inventory_queue`), or
+#   * the `reservation` TABLE directly:
+#       SELECT id, cart_id, variant_id, quantity, status, expires_at FROM reservation
+#       WHERE status = 'active' ORDER BY created_at DESC LIMIT 5;
+# Paste a real active hold's id here, then run `releaseReservation`.
+@reservationId = 00000000-0000-0000-0000-000000000000
+
+###
+
+# @name releaseReservation
+# POST /api/inventory/reservations/:reservationId/release  (Bearer — inventory:adjust)
+# Manually release ONE hold by its UUID. No request body. Frees the hold, returns
+# the held units to `available`, flips the row to `released`, and appends a
+# `manual`-reason `release` row to the stock_movement ledger attributed to the staff
+# actor (visible afterwards via listVariantMovements). This is the ONLY hold-freeing
+# tool until a TTL-sweeper capability lands — a stale `active` hold otherwise keeps
+# occupying its counter until its TTL passes (and even then nothing reclaims it
+# automatically yet). Response is { released: [ ReservationView ] } (exactly one
+# element for a by-id release). With the placeholder id above this 404s; paste a
+# real active hold's id to see the success path.
+POST {{baseUrl}}/inventory/reservations/{{reservationId}}/release
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name releaseReservationNotFound
+# POST /api/inventory/reservations/:reservationId/release  (Bearer — inventory:adjust)
+# A release targeting an unknown id is a 404 (`INVENTORY_RESERVATION_NOT_FOUND`),
+# surfaced from the inventory domain via its RPC exception filter → the gateway. A
+# random UUID that matches no row demonstrates it. (Re-releasing an already-released
+# or committed hold is instead a 409 `INVENTORY_RESERVATION_INVALID_STATE`.)
+POST {{baseUrl}}/inventory/reservations/3f1c9b6e-4d2a-4f8e-9c1b-2a7d6e5f0a11/release
+Authorization: Bearer {{accessToken}}

@@ -25,10 +25,14 @@ import {
 import { CurrentUser, Public, RequiresPermission } from '@retail-inventory-system/auth';
 import {
   ICurrentUser,
+  IPage,
+  IReservationReleaseResult,
   IStockTransferResult,
   PermissionCodeEnum,
+  ReservationView,
   StockLevelView,
   StockLocationView,
+  StockMovementView,
   VariantStockView,
 } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
@@ -37,11 +41,14 @@ import {
   AdjustStockUseCase,
   GetVariantStockUseCase,
   ListLocationsUseCase,
+  ListVariantMovementsUseCase,
   ReceiveStockUseCase,
+  ReleaseReservationUseCase,
   TransferStockUseCase,
 } from '../application/use-cases';
 import {
   AdjustStockRequestDto,
+  MovementsQueryDto,
   ReceiveStockRequestDto,
   TransferStockRequestDto,
   VariantStockQueryDto,
@@ -53,10 +60,15 @@ import {
 //
 // The routes are gated by intent (ADR-024): the per-variant availability read is
 // `@Public()`, because an unauthenticated shopper needs to see whether an item is
-// in stock before checking out; the stock-location list is operational data, so it
-// requires `inventory:read`; the two write routes require `inventory:adjust`.
-// Both permission codes are staff-only — customer tokens carry no `permissions`
-// claim — so the location list and the writes are staff-only by construction.
+// in stock before checking out; the stock-location list and the per-variant
+// movements audit read are operational data, so they require `inventory:read`; the
+// receive/adjust/transfer writes require `inventory:adjust` / `inventory:transfer`;
+// the manual reservation release is an operator action over the holds, so it reuses
+// `inventory:adjust` (no new permission code was minted — the existing
+// read/adjust codes cover the audit + ops surface, ADR-024). Every permission code
+// is staff-only — customer tokens carry no `permissions` claim — so the location
+// list, the audit read, the writes, and the manual release are staff-only by
+// construction.
 @ApiTags('Inventory')
 @Controller('inventory')
 export class InventoryController {
@@ -66,6 +78,8 @@ export class InventoryController {
     private readonly receiveStockUseCase: ReceiveStockUseCase,
     private readonly adjustStockUseCase: AdjustStockUseCase,
     private readonly transferStockUseCase: TransferStockUseCase,
+    private readonly listVariantMovementsUseCase: ListVariantMovementsUseCase,
+    private readonly releaseReservationUseCase: ReleaseReservationUseCase,
   ) {}
 
   @Get('locations')
@@ -108,6 +122,48 @@ export class InventoryController {
       { variantId, stockLocationIds: query.locationIds },
       correlationId,
     );
+  }
+
+  @Get('variants/:variantId/movements')
+  @RequiresPermission(PermissionCodeEnum.INVENTORY_READ)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'List a variant’s stock-movement audit trail (staff, inventory:read)',
+  })
+  @ApiParam({ name: 'variantId', type: Number, example: 1 })
+  // A variant with no movements (or an unknown variant) is a `200` empty page —
+  // the public-read zero-answer convention; there is no existence probe. The
+  // timeline is newest-first (`occurredAt DESC`); `total` is the full match count.
+  @ApiExtraModels(StockMovementView)
+  @ApiOkResponse({
+    description: 'A paginated, newest-first page of the variant’s stock-movement ledger rows',
+    schema: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { $ref: getSchemaPath(StockMovementView) } },
+        total: { type: 'number' },
+        page: { type: 'number' },
+        size: { type: 'number' },
+      },
+    },
+  })
+  @ApiProduces('application/json')
+  public async listVariantMovements(
+    @Param('variantId', ParseIntPipe) variantId: number,
+    @Query() query: MovementsQueryDto,
+    @CorrelationId() correlationId: string,
+  ): Promise<IPage<StockMovementView>> {
+    // Defaults applied at the edge (`page`→1, `pageSize`→20); `pageSize` maps onto
+    // the RPC payload's `size`. The DTO already enforced the `1..100` bounds.
+    return this.listVariantMovementsUseCase.execute({
+      variantId,
+      page: query.page ?? 1,
+      size: query.pageSize ?? 20,
+      type: query.type,
+      from: query.from,
+      to: query.to,
+      correlationId,
+    });
   }
 
   @Post('variants/:variantId/stock/receive')
@@ -187,5 +243,50 @@ export class InventoryController {
       { ...dto, variantId, actorId: actor.id },
       correlationId,
     );
+  }
+
+  @Post('reservations/:reservationId/release')
+  @RequiresPermission(PermissionCodeEnum.INVENTORY_ADJUST)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Manually release a reservation hold (staff, inventory:adjust)',
+  })
+  @ApiParam({
+    name: 'reservationId',
+    type: String,
+    example: '3f1c9b6e-4d2a-4f8e-9c1b-2a7d6e5f0a11',
+    description:
+      'The reservation (hold) UUID — sourced from logs, the inventory.stock.reserved event, or the DB',
+  })
+  // Targets ONE hold by id: an unknown id is a 404 (`INVENTORY_RESERVATION_NOT_FOUND`),
+  // an already-released/committed row a 409 (`INVENTORY_RESERVATION_INVALID_STATE`),
+  // both surfaced from the inventory domain via its RPC exception filter. Frees the
+  // hold, returns the units to `available`, and writes a `manual`-reason `release`
+  // ledger row attributed to the staff actor. No request body.
+  @ApiExtraModels(ReservationView)
+  @ApiOkResponse({
+    description: 'The released hold(s) — exactly one element for a by-id release',
+    schema: {
+      type: 'object',
+      properties: {
+        released: { type: 'array', items: { $ref: getSchemaPath(ReservationView) } },
+      },
+    },
+  })
+  @ApiProduces('application/json')
+  public async releaseReservation(
+    @Param('reservationId') reservationId: string,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<IReservationReleaseResult> {
+    // The ops/manual release: a by-id selector, the fixed `manual` reason, and the
+    // staff actor folded in for the ledger attribution (ADR-030 §4).
+    return this.releaseReservationUseCase.execute({
+      reservationId,
+      reason: 'manual',
+      actorId: actor.id,
+      correlationId,
+    });
   }
 }

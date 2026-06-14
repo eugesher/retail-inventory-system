@@ -7,7 +7,9 @@ import {
   AdjustStockUseCase,
   GetVariantStockUseCase,
   ListLocationsUseCase,
+  ListVariantMovementsUseCase,
   ReceiveStockUseCase,
+  ReleaseReservationUseCase,
   TransferStockUseCase,
 } from './application/use-cases';
 import { InventoryRabbitmqAdapter } from './infrastructure/messaging';
@@ -27,6 +29,8 @@ import { InventoryController } from './presentation';
     ReceiveStockUseCase,
     AdjustStockUseCase,
     TransferStockUseCase,
+    ListVariantMovementsUseCase,
+    ReleaseReservationUseCase,
     { provide: INVENTORY_GATEWAY_PORT, useClass: InventoryRabbitmqAdapter },
   ],
 })

@@ -3,14 +3,19 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
 import {
+  IPage,
+  IReservationReleasePayload,
+  IReservationReleaseResult,
   IStockAdjustPayload,
   IStockLocationsListPayload,
+  IStockMovementListPayload,
   IStockReceivePayload,
   IStockTransferPayload,
   IStockTransferResult,
   IVariantStockGetPayload,
   StockLevelView,
   StockLocationView,
+  StockMovementView,
   VariantStockView,
 } from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
@@ -91,6 +96,32 @@ export class InventoryRabbitmqAdapter implements IInventoryGatewayPort {
       this.client.send<IStockTransferResult, IStockTransferPayload>(
         ROUTING_KEYS.INVENTORY_STOCK_LEVEL_TRANSFER,
         { ...command, correlationId },
+      ),
+    );
+  }
+
+  // The audit-list and manual-release RPCs take the FULL wire payload (the
+  // controller already folded the REQUIRED `correlationId` + the release's
+  // `reason` / `actorId`), so unlike the methods above there is no separate
+  // `correlationId` argument to stitch — the payload is sent verbatim.
+  public async listVariantMovements(
+    payload: IStockMovementListPayload,
+  ): Promise<IPage<StockMovementView>> {
+    return firstValueFrom(
+      this.client.send<IPage<StockMovementView>, IStockMovementListPayload>(
+        ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_LIST,
+        payload,
+      ),
+    );
+  }
+
+  public async releaseReservation(
+    payload: IReservationReleasePayload,
+  ): Promise<IReservationReleaseResult> {
+    return firstValueFrom(
+      this.client.send<IReservationReleaseResult, IReservationReleasePayload>(
+        ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE,
+        payload,
       ),
     );
   }
