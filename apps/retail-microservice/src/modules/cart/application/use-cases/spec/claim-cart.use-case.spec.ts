@@ -5,7 +5,7 @@ import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/obs
 
 import { Cart, CartErrorCodeEnum } from '../../../domain';
 import { ClaimCartUseCase } from '../claim-cart.use-case';
-import { InMemoryCartRepository } from './test-doubles';
+import { InMemoryCartInventoryGateway, InMemoryCartRepository } from './test-doubles';
 
 const CART_ID = '11111111-1111-4111-8111-111111111111';
 const GUEST_ID = '00000000-0000-4000-a000-0000000000aa';
@@ -13,11 +13,16 @@ const REGISTERED_ID = '00000000-0000-4000-a000-000000000002';
 
 describe('ClaimCartUseCase', () => {
   let repository: InMemoryCartRepository;
+  // The claim use case takes NO inventory gateway: reservations key on `cartId`,
+  // which a claim re-points the owner of but never changes, so the holds survive
+  // untouched. The fake is constructed only to assert it is never called.
+  let inventory: InMemoryCartInventoryGateway;
   let logger: PinoLoggerMock;
   let useCase: ClaimCartUseCase;
 
   beforeEach(() => {
     repository = new InMemoryCartRepository();
+    inventory = new InMemoryCartInventoryGateway();
     logger = makePinoLoggerMock();
     useCase = new ClaimCartUseCase(repository, logger as unknown as PinoLogger);
 
@@ -33,7 +38,7 @@ describe('ClaimCartUseCase', () => {
     );
   });
 
-  it('re-points the cart only when cart.customerId === fromCustomerId', async () => {
+  it('re-points the cart only when cart.customerId === fromCustomerId, with no inventory call', async () => {
     const view = await useCase.execute({
       cartId: CART_ID,
       fromCustomerId: GUEST_ID,
@@ -47,6 +52,10 @@ describe('ClaimCartUseCase', () => {
     // The repository now resolves the cart to the registered owner.
     const reloaded = await repository.findById(CART_ID);
     expect(reloaded?.customerId).toBe(REGISTERED_ID);
+
+    // The claim re-points ownership but touches no reservation (holds key on cartId).
+    expect(inventory.reserveCalls).toHaveLength(0);
+    expect(inventory.releaseCalls).toHaveLength(0);
   });
 
   it('rejects when the fromCustomerId proof does not match the cart owner', async () => {

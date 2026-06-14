@@ -1,23 +1,40 @@
 import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import { MessagePattern, Payload } from '@nestjs/microservices';
 
 import {
-  IProductStockOrderConfirmPayload,
+  IAllocationCancelPayload,
+  IAllocationResult,
+  IPage,
+  IReservationAllocatePayload,
+  IReservationReleasePayload,
+  IReservationReleaseResult,
+  IReservationReservePayload,
   IStockAdjustPayload,
   IStockLocationsListPayload,
+  IStockMovementListPayload,
   IStockReceivePayload,
+  IStockTransferPayload,
+  IStockTransferResult,
   IVariantStockGetPayload,
+  ReservationView,
   StockLevelView,
   StockLocationView,
+  StockMovementView,
   VariantStockView,
 } from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import {
   AdjustStockUseCase,
+  AllocateStockUseCase,
+  CancelAllocationUseCase,
   ListLocationsUseCase,
+  ListStockMovementsUseCase,
   QueryAvailabilityUseCase,
   ReceiveStockUseCase,
+  ReleaseReservationUseCase,
+  ReserveStockUseCase,
+  TransferStockUseCase,
 } from '../application/use-cases';
 
 @Controller()
@@ -27,6 +44,12 @@ export class StockController {
     private readonly listLocations: ListLocationsUseCase,
     private readonly receiveStock: ReceiveStockUseCase,
     private readonly adjustStock: AdjustStockUseCase,
+    private readonly reserveStock: ReserveStockUseCase,
+    private readonly releaseReservation: ReleaseReservationUseCase,
+    private readonly allocateStock: AllocateStockUseCase,
+    private readonly cancelAllocation: CancelAllocationUseCase,
+    private readonly transferStock: TransferStockUseCase,
+    private readonly listStockMovements: ListStockMovementsUseCase,
   ) {}
 
   // Read path on the new model (ADR-027): per-variant availability across the
@@ -46,6 +69,17 @@ export class StockController {
     return this.listLocations.execute(payload);
   }
 
+  // Audit read (ADR-030 §2): the paginated, filterable, newest-first timeline of
+  // one variant's `stock_movement` ledger rows. An unknown variant (or one with no
+  // movements) is an empty page, not a 404 — the public-read zero-answer
+  // convention. Uncached (an operator-driven audit query).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_LIST)
+  public handleStockMovementList(
+    @Payload() payload: IStockMovementListPayload,
+  ): Promise<IPage<StockMovementView>> {
+    return this.listStockMovements.execute(payload);
+  }
+
   // Receive Stock write path (ADR-027): raises on-hand by a positive quantity.
   // A domain rejection (e.g. an inactive/unknown location) is terminated by the
   // `InventoryRpcExceptionFilter` into a `{ statusCode, ... }` the gateway maps.
@@ -62,19 +96,58 @@ export class StockController {
     return this.adjustStock.execute(payload);
   }
 
-  // The `inventory.order.confirm` seam is preserved as an explicit deprecation
-  // error rather than removed outright, so any lingering caller resolves to a
-  // typed error instead of an RPC timeout. Stock reservation now belongs to the
-  // inventory-reservation capability; the whole seam (this handler + the
-  // `IProductStockOrderConfirmPayload` contract) is removed when that capability
-  // lands. The legacy retail-side caller has already been torn down; the
-  // `@Payload()` signature is kept only so the reserved contract still
-  // type-checks (ADR-027).
-  @MessagePattern(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM)
-  public handleOrderConfirm(@Payload() payload: IProductStockOrderConfirmPayload): never {
-    void payload;
-    throw new RpcException(
-      'inventory.order.confirm is deprecated; reservation is handled by the inventory-reservation capability',
-    );
+  // Transfer Stock write path (ADR-030): moves on-hand between two locations of one
+  // variant atomically — two version-checked `StockLevel` writes + two paired
+  // `adjustment` movements (sharing a `transfer` reference) in one transaction. A
+  // bad quantity / same-location is a 400; an over-transfer (source below zero) is a
+  // 409 `STOCK_RESULT_NEGATIVE`; an unknown/inactive location reuses the existing
+  // location codes — all mapped by the `InventoryRpcExceptionFilter`.
+  @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_TRANSFER)
+  public handleStockTransfer(
+    @Payload() payload: IStockTransferPayload,
+  ): Promise<IStockTransferResult> {
+    return this.transferStock.execute(payload);
+  }
+
+  // Reserve Stock (ADR-030): holds units for a cart against the no-oversell
+  // guard. An over-request is a 409 `OUT_OF_STOCK` (carrying `details.available`),
+  // mapped by the `InventoryRpcExceptionFilter`.
+  @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_RESERVE)
+  public handleReserve(@Payload() payload: IReservationReservePayload): Promise<ReservationView> {
+    return this.reserveStock.execute(payload);
+  }
+
+  // Release Reservation (ADR-030): returns held units to `available` and writes a
+  // `release` movement. Selector is `reservationId` (one row) or `cartId`
+  // (+ optional variantId/stockLocationId, all matching active rows).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE)
+  public handleRelease(
+    @Payload() payload: IReservationReleasePayload,
+  ): Promise<IReservationReleaseResult> {
+    return this.releaseReservation.execute(payload);
+  }
+
+  // Allocate Stock (ADR-030): converts a cart's holds into an order's allocations
+  // at place-time (refresh-then-commit for a stale-but-held hold; direct-allocation
+  // fallback when no hold exists). All-lines-atomic; an over-allocation is a 409
+  // `OUT_OF_STOCK` (carrying `details.available`). Invoked by the retail place
+  // transaction pre-commit (a rejection rolls the place back).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_ALLOCATE)
+  public handleAllocate(
+    @Payload() payload: IReservationAllocatePayload,
+  ): Promise<IAllocationResult> {
+    return this.allocateStock.execute(payload);
+  }
+
+  // Cancel Allocation (ADR-030): reverses an order's allocation, returning the units
+  // to `available` and writing a `release` movement per line. Idempotency is
+  // quantity-guarded — an over-cancel is a 409 `STOCK_RESULT_NEGATIVE`. Resolves
+  // `{ cancelled }` (the line count) over RMQ. No in-repo caller yet — the later
+  // order-cancel flow + the place-failure compensation invoke it.
+  @MessagePattern(ROUTING_KEYS.INVENTORY_ALLOCATION_CANCEL)
+  public handleCancelAllocation(
+    @Payload() payload: IAllocationCancelPayload,
+  ): Promise<{ cancelled: number }> {
+    return this.cancelAllocation.execute(payload);
   }
 }

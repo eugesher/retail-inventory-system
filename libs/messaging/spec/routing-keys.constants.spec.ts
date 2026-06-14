@@ -8,9 +8,6 @@ import { ROUTING_KEYS } from '../routing-keys.constants';
 // would silently route messages to the wrong queue.
 describe('ROUTING_KEYS', () => {
   it('matches MicroserviceMessagePatternEnum values', () => {
-    expect(ROUTING_KEYS.INVENTORY_ORDER_CONFIRM).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_ORDER_CONFIRM,
-    );
     expect(ROUTING_KEYS.INVENTORY_STOCK_LOW).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LOW,
     );
@@ -29,11 +26,41 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_ADJUST,
     );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_TRANSFER).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_TRANSFER,
+    );
     expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_INITIALIZED,
     );
     expect(ROUTING_KEYS.INVENTORY_LOCATION_LIST).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_LOCATION_LIST,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_LIST).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_MOVEMENT_LIST,
+    );
+    expect(ROUTING_KEYS.INVENTORY_RESERVATION_RESERVE).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_RESERVE,
+    );
+    expect(ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_RELEASE,
+    );
+    expect(ROUTING_KEYS.INVENTORY_RESERVATION_ALLOCATE).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_ALLOCATE,
+    );
+    expect(ROUTING_KEYS.INVENTORY_ALLOCATION_CANCEL).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_ALLOCATION_CANCEL,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_RESERVED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RESERVED,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_ALLOCATED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_ALLOCATED,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_RELEASED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RELEASED,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_RECORDED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_MOVEMENT_RECORDED,
     );
     expect(ROUTING_KEYS.CATALOG_PRODUCT_REGISTER).toBe(
       MicroserviceMessagePatternEnum.CATALOG_PRODUCT_REGISTER,

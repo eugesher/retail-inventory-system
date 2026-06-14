@@ -77,13 +77,10 @@ export class StockLevel {
     return this._quantityOnHand - this._quantityAllocated - this._quantityReserved;
   }
 
-  // The only mutation this capability needs. `allocate`/`reserve`/`release`
-  // belong to the later inventory-reservation capability and are intentionally
-  // absent — shipping them now would be dead, untested code (ADR-027).
-  //
-  // Every mutation bumps `version` so the optimistic-concurrency token advances
-  // observably, even though the no-oversell invariant it guards is enforced
-  // later (the column ships now to make that retrofit non-destructive).
+  // On-hand mutation (Receive / Adjust). Every mutation bumps `version` so the
+  // optimistic-concurrency token advances observably; the no-oversell invariant
+  // the column guards is enforced by the reserve/release mutators below, all
+  // running inside the same bounded version-checked write protocol (ADR-030 §3).
   public changeOnHand(delta: number): void {
     if (!Number.isInteger(delta)) {
       throw new Error(`StockLevel.changeOnHand: delta must be an integer, got ${delta}`);
@@ -102,6 +99,109 @@ export class StockLevel {
     }
     this._quantityOnHand = next;
     this._version += 1;
+  }
+
+  // Holds `quantity` more units against carts/orders (ADR-030). **This is the
+  // no-oversell guard**: a request for more than `available` is the one
+  // reserve-side domain rejection that reaches an HTTP caller, thrown as a typed
+  // `OUT_OF_STOCK` carrying the live `available` in structured `details` so a
+  // client branches on the number, not the message text. A non-positive quantity
+  // is an internal caller bug (the use case validates the request first and only
+  // ever passes a positive delta here), so it is a plain `Error`, not a typed
+  // exception the filter would surface as a 4xx. Bumps `version`.
+  public reserve(quantity: number): void {
+    StockLevel.requirePositiveDelta(quantity, 'reserve');
+    if (quantity > this.available) {
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.OUT_OF_STOCK,
+        `StockLevel.reserve: cannot reserve ${quantity} of variant ${this.variantId} @ ` +
+          `${this.stockLocationId} — only ${this.available} available`,
+        { available: this.available },
+      );
+    }
+    this._quantityReserved += quantity;
+    this._version += 1;
+  }
+
+  // Returns `quantity` held units to `available` (the Release / re-reserve-down
+  // paths). Releasing more than is reserved is a counter drift — an invariant
+  // breach, not user input — so it is a plain `Error` (surfaces as a 500, never
+  // reachable through this capability's flows because the held quantity always
+  // comes from the reservation row that occupied the counter). Bumps `version`.
+  public releaseReserved(quantity: number): void {
+    StockLevel.requirePositiveDelta(quantity, 'releaseReserved');
+    if (quantity > this._quantityReserved) {
+      throw new Error(
+        `StockLevel.releaseReserved: cannot release ${quantity}; only ${this._quantityReserved} reserved`,
+      );
+    }
+    this._quantityReserved -= quantity;
+    this._version += 1;
+  }
+
+  // Converts a held unit into a picked one at order placement (the common
+  // Allocate path, ADR-030 §4): a pure transfer from the reserved pool to the
+  // allocated pool — `available` is unchanged because both counters subtract from
+  // it. The held quantity always came from the reservation row that occupied the
+  // counter, so releasing more than is reserved here is a counter drift (an
+  // invariant breach surfacing as a 500), not user input — hence a plain `Error`.
+  // Counts as ONE mutation (a single `version` bump), so the optimistic write
+  // persists it with one version-checked UPDATE. Bumps `version`.
+  public allocateFromReserved(quantity: number): void {
+    StockLevel.requirePositiveDelta(quantity, 'allocateFromReserved');
+    if (quantity > this._quantityReserved) {
+      throw new Error(
+        `StockLevel.allocateFromReserved: cannot move ${quantity} from reserved; only ${this._quantityReserved} reserved`,
+      );
+    }
+    this._quantityReserved -= quantity;
+    this._quantityAllocated += quantity;
+    this._version += 1;
+  }
+
+  // Allocates `quantity` straight from `available` with no prior hold (the Allocate
+  // fallback path, ADR-030 §4 — and the larger leg of a quantity-drift re-balance).
+  // **This is a no-oversell guard**: an ask beyond `available` is a user-reachable
+  // 409 `OUT_OF_STOCK` carrying the live `available` in structured `details` (the
+  // `reserve` precedent), so a place that out-runs stock fails cleanly rather than
+  // overselling. A non-positive quantity is an internal caller bug (the use case
+  // validates first), so it stays a plain `Error`. Bumps `version`.
+  public allocateDirect(quantity: number): void {
+    StockLevel.requirePositiveDelta(quantity, 'allocateDirect');
+    if (quantity > this.available) {
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.OUT_OF_STOCK,
+        `StockLevel.allocateDirect: cannot allocate ${quantity} of variant ${this.variantId} @ ` +
+          `${this.stockLocationId} — only ${this.available} available`,
+        { available: this.available },
+      );
+    }
+    this._quantityAllocated += quantity;
+    this._version += 1;
+  }
+
+  // Returns `quantity` allocated units to `available` (the Cancel-Allocation path,
+  // ADR-030 §4). Unlike `allocateFromReserved`'s drift case, an over-release here
+  // **is** user-reachable — a Cancel RPC may carry a wrong quantity — so it is a
+  // typed `STOCK_RESULT_NEGATIVE` (409) the filter maps, never a 500. Bumps
+  // `version`.
+  public releaseAllocated(quantity: number): void {
+    StockLevel.requirePositiveDelta(quantity, 'releaseAllocated');
+    if (quantity > this._quantityAllocated) {
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
+        `StockLevel.releaseAllocated: cannot release ${quantity} allocated of variant ${this.variantId} @ ` +
+          `${this.stockLocationId} — only ${this._quantityAllocated} allocated`,
+      );
+    }
+    this._quantityAllocated -= quantity;
+    this._version += 1;
+  }
+
+  private static requirePositiveDelta(value: number, op: string): void {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`StockLevel.${op}: quantity must be a positive integer, got ${value}`);
+    }
   }
 
   // Zeroed level for a freshly seen `(variantId, stockLocationId)` pair — used

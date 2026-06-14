@@ -5,3 +5,5 @@ export * from './variant-stock.view';
 export * from './variant-stock-get.payload';
 export * from './stock-receive.payload';
 export * from './stock-adjust.payload';
+export * from './stock-transfer.payload';
+export * from './stock-transfer.result';

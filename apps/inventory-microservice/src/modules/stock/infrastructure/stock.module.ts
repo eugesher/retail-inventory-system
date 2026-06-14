@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
@@ -8,25 +9,38 @@ import {
 } from '@retail-inventory-system/messaging';
 
 import {
+  RESERVATION_REPOSITORY,
+  RESERVATION_TTL_MINUTES,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
+  STOCK_MOVEMENT_REPOSITORY,
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../application/ports';
 import {
   AdjustStockUseCase,
+  AllocateStockUseCase,
   AutoInitStockLevelUseCase,
+  CancelAllocationUseCase,
   ListLocationsUseCase,
+  ListStockMovementsUseCase,
   QueryAvailabilityUseCase,
   ReceiveStockUseCase,
+  ReleaseReservationUseCase,
+  ReserveStockUseCase,
+  TransferStockUseCase,
 } from '../application/use-cases';
 import { InventoryRpcExceptionFilter, StockController } from '../presentation';
 import { StockCache } from './cache';
 import { CatalogEventsConsumer } from './consumers';
 import { StockRabbitmqPublisher } from './messaging';
 import {
+  ReservationEntity,
+  ReservationTypeormRepository,
   StockLevelEntity,
   StockLocationEntity,
+  StockMovementEntity,
+  StockMovementTypeormRepository,
   StockTypeormRepository,
   TypeormTransactionAdapter,
 } from './persistence';
@@ -40,12 +54,16 @@ import {
 // Two messaging clients are imported: `MicroserviceClientNotificationModule` for
 // `inventory.stock.low`, and `MicroserviceClientInventoryModule` so the publisher
 // can emit `inventory.stock-level.initialized` onto this service's own queue. The
-// transaction adapter is retained for the write operations later inventory
-// capabilities add; the `inventory.order.confirm` deprecation stub stays on the
-// controller.
+// transaction adapter backs the Receive/Adjust write path and the optimistic
+// writes the inventory-reservation capability adds.
 @Module({
   imports: [
-    DatabaseModule.forFeature([StockLocationEntity, StockLevelEntity]),
+    DatabaseModule.forFeature([
+      StockLocationEntity,
+      StockLevelEntity,
+      ReservationEntity,
+      StockMovementEntity,
+    ]),
     MicroserviceClientNotificationModule,
     MicroserviceClientInventoryModule,
   ],
@@ -53,6 +71,29 @@ import {
   providers: [
     StockTypeormRepository,
     { provide: STOCK_REPOSITORY, useExisting: StockTypeormRepository },
+
+    // The reservation aggregate's repository (ADR-030), consumed by the Reserve /
+    // Release / Allocate use cases below (Cancel-Allocation touches no holds).
+    ReservationTypeormRepository,
+    { provide: RESERVATION_REPOSITORY, useExisting: ReservationTypeormRepository },
+
+    // The append-only stock-movement audit ledger's repository (ADR-030 §2).
+    // Every counter-changing operation appends here: Receive (`receipt`), Adjust
+    // (signed `adjustment`), Reserve/Release/Cancel (`release`), Allocate
+    // (`allocation`), and Transfer (a paired `adjustment` per leg). The audit read
+    // path (`ListStockMovementsUseCase`) reads it back via `listByVariant`.
+    StockMovementTypeormRepository,
+    { provide: STOCK_MOVEMENT_REPOSITORY, useExisting: StockMovementTypeormRepository },
+
+    // The reservation hold lifetime (minutes), resolved from `RESERVATION_TTL_MINUTES`
+    // (Joi default 15) so the Reserve use case injects a plain number rather than
+    // reading env (the catalog `CATALOG_DEFAULT_CURRENCY` precedent; ADR-030 §4).
+    {
+      provide: RESERVATION_TTL_MINUTES,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('RESERVATION_TTL_MINUTES') ?? 15,
+      inject: [ConfigService],
+    },
 
     StockCache,
     { provide: STOCK_CACHE, useExisting: StockCache },
@@ -66,8 +107,14 @@ import {
     AutoInitStockLevelUseCase,
     QueryAvailabilityUseCase,
     ListLocationsUseCase,
+    ListStockMovementsUseCase,
     ReceiveStockUseCase,
     AdjustStockUseCase,
+    ReserveStockUseCase,
+    ReleaseReservationUseCase,
+    AllocateStockUseCase,
+    CancelAllocationUseCase,
+    TransferStockUseCase,
 
     // Terminates `InventoryDomainException` into the `{ statusCode, message, code }`
     // wire shape the gateway maps (ADR-027). Registered via APP_FILTER so it

@@ -1,8 +1,11 @@
 import {
   StockAdjustedEvent,
+  StockAllocatedEvent,
   StockLevelInitializedEvent,
   StockLowEvent,
+  StockMovement,
   StockReceivedEvent,
+  StockReleasedEvent,
   StockReservedEvent,
 } from '../../domain';
 
@@ -15,7 +18,6 @@ export interface IStockEventsPublisherPort {
   // service's queue); everything else here is a reserved surface on the
   // inventory service's own `inventory_queue` (no cross-service consumer yet).
   publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void>;
-  publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void>;
   // Emitted by the Receive Stock operation onto `inventory_queue`.
   publishStockReceived(event: StockReceivedEvent, correlationId?: string): Promise<void>;
   // Emitted by the Adjust Stock operation onto `inventory_queue`.
@@ -27,4 +29,19 @@ export interface IStockEventsPublisherPort {
     event: StockLevelInitializedEvent,
     correlationId?: string,
   ): Promise<void>;
+  // Emitted by the Reserve operation onto `inventory_queue` (reserved surface).
+  publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void>;
+  // Emitted by the Allocate operation onto `inventory_queue` (reserved surface),
+  // one per allocated line.
+  publishStockAllocated(event: StockAllocatedEvent, correlationId?: string): Promise<void>;
+  // Emitted by the Release + Cancel-Allocation operations onto `inventory_queue`
+  // (reserved surface).
+  publishStockReleased(event: StockReleasedEvent, correlationId?: string): Promise<void>;
+  // Emitted for EVERY ledger insert (high-volume). It takes the domain
+  // `StockMovement` record directly — a deliberate divergence from the other
+  // methods (which take a `DomainEvent`): a dedicated wrapper event class would
+  // only duplicate the row's fields, so the publisher maps the record straight to
+  // the wire `IInventoryStockMovementRecordedEvent`. Reserved surface on
+  // `inventory_queue`.
+  publishStockMovementRecorded(movement: StockMovement, correlationId?: string): Promise<void>;
 }

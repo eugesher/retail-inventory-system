@@ -103,7 +103,11 @@ Content-Type: application/json
 
 # @name placeOrder
 # POST /api/cart/:cartId/place  (Bearer + owner-check)
-# Converts the cart one-shot into an Order, snapshots the addresses, authorizes
+# Converts the cart one-shot into an Order, snapshots the addresses, ALLOCATES the
+# cart's stock holds into the order inside the conversion transaction (after the
+# cart-conversion CAS, via inventory.reservation.allocate — so the inventory
+# microservice must be running; an unallocatable line rolls the whole place back
+# with 409 INVENTORY_OUT_OF_STOCK, no order row, cart stays active), authorizes
 # payment inline, and returns the OrderView. The `Idempotency-Key` header is accepted
 # + logged but NOT deduped. Body (PlaceOrderRequestDto):
 #   shippingAddress, billingAddress: { recipientName, line1, line2?, city, region,

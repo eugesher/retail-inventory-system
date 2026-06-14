@@ -1,13 +1,49 @@
 export const ROUTING_KEYS = {
-  INVENTORY_ORDER_CONFIRM: 'inventory.order.confirm',
   INVENTORY_STOCK_LOW: 'inventory.stock.low',
   INVENTORY_STOCK_RECEIVED: 'inventory.stock.received',
   INVENTORY_STOCK_ADJUSTED: 'inventory.stock.adjusted',
   INVENTORY_STOCK_LEVEL_GET: 'inventory.stock-level.get',
   INVENTORY_STOCK_LEVEL_RECEIVE: 'inventory.stock-level.receive',
   INVENTORY_STOCK_LEVEL_ADJUST: 'inventory.stock-level.adjust',
+  // `inventory.stock-level.transfer` → `TransferStockUseCase` (RPC, Gateway →
+  // Inventory): moves on-hand between two locations of one variant atomically —
+  // two `StockLevel` writes + two paired `adjustment` movements (sharing a
+  // `transfer` reference id) in one transaction (ADR-030). The `stock-level`
+  // aggregate noun matches the receive/adjust keys.
+  INVENTORY_STOCK_LEVEL_TRANSFER: 'inventory.stock-level.transfer',
   INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized',
   INVENTORY_LOCATION_LIST: 'inventory.location.list',
+  // `inventory.stock-movement.list` → `ListStockMovementsUseCase` (RPC, Gateway →
+  // Inventory): the paginated, filterable, newest-first audit read of one variant's
+  // `stock_movement` ledger rows → `IPage<StockMovementView>`. Backs the operator
+  // audit endpoint `GET /api/inventory/variants/:variantId/movements` (ADR-030 §2/§5).
+  INVENTORY_STOCK_MOVEMENT_LIST: 'inventory.stock-movement.list',
+  // Reservation RPC commands (Gateway / Retail → Inventory on `inventory_queue`,
+  // each served by a `@MessagePattern` handler on the inventory stock controller):
+  // `inventory.reservation.reserve` → `ReserveStockUseCase` → `ReservationView`,
+  // `inventory.reservation.release` → `ReleaseReservationUseCase` →
+  // `IReservationReleaseResult` (ADR-030 §5).
+  INVENTORY_RESERVATION_RESERVE: 'inventory.reservation.reserve',
+  INVENTORY_RESERVATION_RELEASE: 'inventory.reservation.release',
+  // `inventory.reservation.allocate` → `AllocateStockUseCase` → `IAllocationResult`
+  // (converts a cart's holds into an order's allocations at place-time, with a
+  // direct-allocation fallback) and `inventory.allocation.cancel` →
+  // `CancelAllocationUseCase` (reverses an order's allocation — the later
+  // order-cancel flow + the place-failure compensation). NOTE: `allocation` is an
+  // RPC-subject noun (the counters + ledger rows the operation acts on), not a
+  // persisted aggregate — the pseudo-aggregate naming precedent (ADR-030 §5).
+  INVENTORY_RESERVATION_ALLOCATE: 'inventory.reservation.allocate',
+  INVENTORY_ALLOCATION_CANCEL: 'inventory.allocation.cancel',
+  // Reservation + ledger events — reserved surfaces on `inventory_queue` (no
+  // cross-service consumer yet; the intended consumer is a future event-store
+  // capability — the `inventory.stock.{received,adjusted}` precedent).
+  // `inventory.stock.reserved` (Reserve) / `inventory.stock.allocated` (Allocate) /
+  // `inventory.stock.released` (Release + Cancel-Allocation) and the high-volume
+  // `inventory.stock-movement.recorded` (every ledger insert).
+  INVENTORY_STOCK_RESERVED: 'inventory.stock.reserved',
+  INVENTORY_STOCK_ALLOCATED: 'inventory.stock.allocated',
+  INVENTORY_STOCK_RELEASED: 'inventory.stock.released',
+  INVENTORY_STOCK_MOVEMENT_RECORDED: 'inventory.stock-movement.recorded',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',
   CATALOG_PRODUCT_PUBLISH: 'catalog.product.publish',
   CATALOG_PRODUCT_ARCHIVE: 'catalog.product.archive',

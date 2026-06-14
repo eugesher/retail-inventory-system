@@ -4,6 +4,7 @@ import { APP_FILTER } from '@nestjs/core';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import {
   MicroserviceClientCatalogModule,
+  MicroserviceClientInventoryModule,
   MicroserviceClientNotificationModule,
   MicroserviceClientRetailModule,
 } from '@retail-inventory-system/messaging';
@@ -13,6 +14,7 @@ import {
   ORDER_CART_READER,
   ORDER_CATALOG_GATEWAY,
   ORDER_EVENTS_PUBLISHER,
+  ORDER_INVENTORY_GATEWAY,
   ORDER_REPOSITORY,
   PAYMENT_GATEWAY,
   PAYMENT_REPOSITORY,
@@ -25,7 +27,11 @@ import {
   ListMyOrdersUseCase,
   PlaceOrderUseCase,
 } from '../application/use-cases';
-import { OrderCatalogRabbitmqAdapter, OrderRabbitmqPublisher } from './messaging';
+import {
+  OrderCatalogRabbitmqAdapter,
+  OrderInventoryRabbitmqAdapter,
+  OrderRabbitmqPublisher,
+} from './messaging';
 import {
   AddressEntity,
   AddressTypeormRepository,
@@ -48,12 +54,15 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 // `retail.cart.place` / `retail.order.get` / `retail.order.list` /
 // `retail.payment.capture` RPC controller.
 //
-// Three messaging clients are imported: `MicroserviceClientCatalogModule` so Place
+// Four messaging clients are imported: `MicroserviceClientCatalogModule` so Place
 // Order can snapshot from `catalog.variant.get` / `catalog.price.select` on
-// `catalog_queue`; `MicroserviceClientNotificationModule` so `retail.order.placed`
-// lands on `notification_events` (the consumer's queue); and
-// `MicroserviceClientRetailModule` so the reserved `retail.payment.authorized` event
-// lands on the service's own `retail_queue`. `useExisting` shares each adapter
+// `catalog_queue`; `MicroserviceClientInventoryModule` so Place Order can allocate
+// (and compensate-cancel) the cart's stock holds via `inventory.reservation.allocate`
+// / `inventory.allocation.cancel` on `inventory_queue` (ADR-030 §4);
+// `MicroserviceClientNotificationModule` so `retail.order.placed` lands on
+// `notification_events` (the consumer's queue); and `MicroserviceClientRetailModule`
+// so the reserved `retail.payment.authorized` event lands on the service's own
+// `retail_queue`. `useExisting` shares each adapter
 // instance with code that injects the concrete class while use cases depend on the
 // port symbols (the `cart.module.ts` / `stock.module.ts` pattern). The
 // `OrdersRpcExceptionFilter` is registered via `APP_FILTER` so every order
@@ -67,6 +76,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
   imports: [
     DatabaseModule.forFeature([OrderEntity, OrderLineEntity, AddressEntity, PaymentEntity]),
     MicroserviceClientCatalogModule,
+    MicroserviceClientInventoryModule,
     MicroserviceClientNotificationModule,
     MicroserviceClientRetailModule,
   ],
@@ -87,6 +97,8 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 
     OrderCatalogRabbitmqAdapter,
     { provide: ORDER_CATALOG_GATEWAY, useExisting: OrderCatalogRabbitmqAdapter },
+    OrderInventoryRabbitmqAdapter,
+    { provide: ORDER_INVENTORY_GATEWAY, useExisting: OrderInventoryRabbitmqAdapter },
     OrderRabbitmqPublisher,
     { provide: ORDER_EVENTS_PUBLISHER, useExisting: OrderRabbitmqPublisher },
 

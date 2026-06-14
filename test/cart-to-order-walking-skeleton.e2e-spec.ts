@@ -5,6 +5,7 @@ import * as supertest from 'supertest';
 
 import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
 import { AppModule as CatalogMicroserviceAppModule } from '@retail-inventory-system/apps/catalog-microservice';
+import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
@@ -74,6 +75,9 @@ describe('Cart → Order walking skeleton (e2e)', () => {
   let apiGatewayApp: INestApplication;
   let retailMicroservice: INestMicroservice;
   let catalogMicroservice: INestMicroservice;
+  // Add-to-Cart reserves and Place Order allocates, so the inventory microservice
+  // must be up to serve `inventory.reservation.*` on inventory_queue.
+  let inventoryMicroservice: INestMicroservice;
 
   let orderPlacedSpy: jest.SpyInstance;
   let paymentAuthorizedSpy: jest.SpyInstance;
@@ -129,6 +133,20 @@ describe('Cart → Order walking skeleton (e2e)', () => {
     );
     await catalogMicroservice.listen();
 
+    inventoryMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
+      InventoryMicroserviceAppModule,
+      {
+        logger: false,
+        transport: Transport.RMQ,
+        options: {
+          urls: [rmqUrl],
+          queue: MicroserviceQueueEnum.INVENTORY_QUEUE,
+          queueOptions: { durable: true },
+        },
+      },
+    );
+    await inventoryMicroservice.listen();
+
     apiGatewayApp = await NestFactory.create(ApiGatewayAppModule, { logger: false });
     apiGatewayApp.setGlobalPrefix('api');
     apiGatewayApp.useGlobalPipes(
@@ -151,6 +169,7 @@ describe('Cart → Order walking skeleton (e2e)', () => {
     await apiGatewayApp?.close();
     await retailMicroservice?.close();
     await catalogMicroservice?.close();
+    await inventoryMicroservice?.close();
   });
 
   describe('place an order from a two-line cart', () => {

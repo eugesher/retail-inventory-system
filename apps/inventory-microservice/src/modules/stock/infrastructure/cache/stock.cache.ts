@@ -16,9 +16,10 @@ import {
 
 // Domain-shaped cache over the generic `ICachePort` (ADR-006): the use cases
 // depend on `IStockCachePort` and never see a key string. The cached value is a
-// per-variant `VariantStockView` projection keyed on `variantId` under the `v2`
-// key shape (ADR-027) — the shape change from the old per-product SUM aggregate
-// is what forced the `v1 → v2` bump.
+// per-variant `VariantStockView` projection keyed on `variantId` under the `v3`
+// key shape — bumped `v1 → v2` when the value reshaped from the old per-product
+// SUM aggregate (ADR-027), then `v2 → v3` when TTL'd reservations started moving
+// `quantityReserved` so the same field set carries a new meaning (ADR-030 §7).
 //
 // Audit closures: CACHE-001/004 by ADR-021 (single-flight + jitter),
 // CACHE-003/009 by ADR-022 (schema-version + opt-in tenant segments),
@@ -147,8 +148,9 @@ export class StockCache implements IStockCachePort {
     const { tenantId, correlationId } = opts ?? {};
     const variantIds = [...new Set(items.map((i) => i.variantId))];
 
-    // ADR-022 / ADR-027 transition window — four prefixes per variantId:
-    //   * v2 current (tenanted, CACHE-003 / CACHE-009)
+    // ADR-022 / ADR-027 / ADR-030 transition window — five prefixes per variantId:
+    //   * v3 current (tenanted, CACHE-003 / CACHE-009)
+    //   * v2 pre-bump (single-tenant — the `v2 → v3` reservation-semantics bump, ADR-030 §7)
     //   * v1 pre-bump (single-tenant — keyed the old productId axis; wiped by id)
     //   * pre-v1 post-ADR-016 (single-tenant — never carried a tenant segment)
     //   * pre-ADR-016 legacy (single-tenant by construction)
@@ -157,6 +159,7 @@ export class StockCache implements IStockCachePort {
       const counts = await Promise.all(
         variantIds.flatMap((variantId) => [
           this.cache.delByPrefix(CACHE_KEYS.inventoryStockPrefix(variantId, { tenantId })),
+          this.cache.delByPrefix(CACHE_KEYS.inventoryStockLegacyPrefixV2(variantId)),
           this.cache.delByPrefix(CACHE_KEYS.inventoryStockLegacyPrefixV1(variantId)),
           this.cache.delByPrefix(CACHE_KEYS.inventoryStockLegacyPrefix(variantId)),
           this.cache.delByPrefix(CACHE_KEYS.productStockPrefix(variantId)),

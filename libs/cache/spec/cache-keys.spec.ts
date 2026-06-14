@@ -1,17 +1,19 @@
 import { CACHE_KEYS } from '../cache-keys';
 
 // Locks in the production cache-key contract. For the inventory stock aggregate
-// four transition layers coexist and each has its own assertion block:
+// five transition layers coexist and each has its own assertion block:
 //
-//   * Current convention (ADR-022 / ADR-027 `v2`) —
+//   * Current convention (ADR-022 / ADR-027 / ADR-030 `v3`) —
 //     `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]`. For
 //     stock the `<id>` axis is the `variantId` and the facet is a sorted
 //     stock-location set. Carries the schema-version segment (CACHE-003 fix) and
 //     the opt-in tenant segment (CACHE-009 fix) alongside the pre-existing
 //     CACHE-010 (localeCompare sort) and CACHE-011 (non-glob `__all__` sentinel) fixes.
+//   * Pre-v3 (v2) shape — `ris:inventory:stock:v2:<id>:` — retained as
+//     `inventoryStockLegacyPrefixV2` for the rolling-deploy transition window
+//     that adopts v3 (ADR-030 §7, the reservation-semantics bump).
 //   * Pre-v2 (v1) shape — `ris:inventory:stock:v1:<id>:` — retained as
-//     `inventoryStockLegacyPrefixV1` for the rolling-deploy transition window
-//     that adopts v2 (ADR-027).
+//     `inventoryStockLegacyPrefixV1` for the v1→v2 transition (ADR-027).
 //   * Pre-v1 (post-ADR-016) shape — `ris:<service>:<aggregate>:<id>:` —
 //     retained as `inventoryStockLegacyPrefix` for the original v1 transition.
 //   * Pre-ADR-016 legacy shape — `stock:<productId>:*` — retained for the
@@ -19,14 +21,15 @@ import { CACHE_KEYS } from '../cache-keys';
 //     wire format, including the deliberately-preserved `charCodeAt` sort
 //     bug.
 describe('CACHE_KEYS', () => {
-  describe('inventoryStock (current convention — v2, keyed on variantId)', () => {
-    it('embeds the v2 schema-version segment in the single-tenant prefix', () => {
+  describe('inventoryStock (current convention — v3, keyed on variantId)', () => {
+    it('embeds the v3 schema-version segment in the single-tenant prefix', () => {
       // CACHE-003 fix: a breaking DTO shape change bumps the constant in
       // cache-keys.ts and the pre-bump entries become unreachable on deploy.
-      // ADR-027 bumped v1 → v2 when the cached value changed shape (per-product
-      // SUM aggregate → per-variant VariantStockView projection).
-      expect(CACHE_KEYS.inventoryStockPrefix(42)).toBe('ris:inventory:stock:v2:42:');
-      expect(CACHE_KEYS.inventoryStock(42)).toBe('ris:inventory:stock:v2:42:__all__');
+      // ADR-027 bumped v1 → v2 (value reshaped to a per-variant VariantStockView);
+      // ADR-030 bumped v2 → v3 (same field set, new meaning once reservations move
+      // quantityReserved).
+      expect(CACHE_KEYS.inventoryStockPrefix(42)).toBe('ris:inventory:stock:v3:42:');
+      expect(CACHE_KEYS.inventoryStock(42)).toBe('ris:inventory:stock:v3:42:__all__');
     });
 
     it('omits the tenant segment entirely when no tenantId is supplied', () => {
@@ -41,10 +44,10 @@ describe('CACHE_KEYS', () => {
       // Segment order is tenant-near-root so SCAN-by-tenant is a tight
       // prefix wipe (ADR-022 §"Segment order").
       expect(CACHE_KEYS.inventoryStockPrefix(42, { tenantId: 'store-7' })).toBe(
-        'ris:t:store-7:inventory:stock:v2:42:',
+        'ris:t:store-7:inventory:stock:v3:42:',
       );
       expect(CACHE_KEYS.inventoryStock(42, undefined, { tenantId: 'store-7' })).toBe(
-        'ris:t:store-7:inventory:stock:v2:42:__all__',
+        'ris:t:store-7:inventory:stock:v3:42:__all__',
       );
     });
 
@@ -73,19 +76,19 @@ describe('CACHE_KEYS', () => {
       // CACHE-011 fix: the literal `*` could be confused with a glob; the
       // sentinel is unambiguous.
       expect(CACHE_KEYS.inventoryStock(42)).not.toMatch(/\*/);
-      expect(CACHE_KEYS.inventoryStock(42)).toBe('ris:inventory:stock:v2:42:__all__');
+      expect(CACHE_KEYS.inventoryStock(42)).toBe('ris:inventory:stock:v3:42:__all__');
     });
 
     it('uses the __all__ sentinel when stockLocationIds is an empty array', () => {
-      expect(CACHE_KEYS.inventoryStock(42, [])).toBe('ris:inventory:stock:v2:42:__all__');
+      expect(CACHE_KEYS.inventoryStock(42, [])).toBe('ris:inventory:stock:v3:42:__all__');
     });
 
     it('joins sorted stockLocationIds with localeCompare', () => {
       // CACHE-010 fix: previously the comparator only inspected charCodeAt(0),
       // so ["ab", "aa"] sorted differently from ["aa", "ab"]. With localeCompare
       // the two inputs collapse to the same key.
-      expect(CACHE_KEYS.inventoryStock(1, ['ab', 'aa'])).toBe('ris:inventory:stock:v2:1:aa,ab');
-      expect(CACHE_KEYS.inventoryStock(1, ['aa', 'ab'])).toBe('ris:inventory:stock:v2:1:aa,ab');
+      expect(CACHE_KEYS.inventoryStock(1, ['ab', 'aa'])).toBe('ris:inventory:stock:v3:1:aa,ab');
+      expect(CACHE_KEYS.inventoryStock(1, ['aa', 'ab'])).toBe('ris:inventory:stock:v3:1:aa,ab');
     });
 
     it('does not mutate the caller-supplied array', () => {
@@ -95,11 +98,21 @@ describe('CACHE_KEYS', () => {
     });
   });
 
-  describe('inventoryStockLegacyPrefixV1 (pre-v2 — invalidate-only)', () => {
-    it('returns the retired v1 shape so the v2 deploy can wipe in-flight v1 entries', () => {
+  describe('inventoryStockLegacyPrefixV2 (pre-v3 — invalidate-only)', () => {
+    it('returns the retired v2 shape so the v3 deploy can wipe in-flight v2 entries', () => {
       // The invalidate path uses this to wipe in-flight entries written under
-      // the previous v1 shape during the rolling deploy that adopts v2. Reads
-      // and writes MUST go through `inventoryStockPrefix` (the v2 builder above).
+      // the previous v2 shape during the rolling deploy that adopts v3 (ADR-030
+      // §7). Reads and writes MUST go through `inventoryStockPrefix` (the v3
+      // builder above).
+      expect(CACHE_KEYS.inventoryStockLegacyPrefixV2(42)).toBe('ris:inventory:stock:v2:42:');
+    });
+  });
+
+  describe('inventoryStockLegacyPrefixV1 (pre-v2 — invalidate-only)', () => {
+    it('returns the retired v1 shape so a later deploy can wipe in-flight v1 entries', () => {
+      // The invalidate path uses this to wipe in-flight entries written under
+      // the v1 shape during a rolling deploy. Reads and writes MUST go through
+      // `inventoryStockPrefix` (the v3 builder above).
       expect(CACHE_KEYS.inventoryStockLegacyPrefixV1(42)).toBe('ris:inventory:stock:v1:42:');
     });
   });
@@ -109,7 +122,7 @@ describe('CACHE_KEYS', () => {
       // The invalidate path uses this to wipe in-flight entries written
       // under the post-ADR-016 / pre-ADR-022 shape during the rolling
       // deploy. Reads and writes MUST go through `inventoryStockPrefix`
-      // (the v2 builder above).
+      // (the v3 builder above).
       expect(CACHE_KEYS.inventoryStockLegacyPrefix(42)).toBe('ris:inventory:stock:42:');
     });
   });

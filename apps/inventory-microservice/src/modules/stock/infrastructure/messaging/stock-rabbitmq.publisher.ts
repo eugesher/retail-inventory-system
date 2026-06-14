@@ -4,17 +4,24 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   IInventoryStockAdjustedEvent,
+  IInventoryStockAllocatedEvent,
   IInventoryStockLevelInitializedEvent,
   IInventoryStockLowEvent,
+  IInventoryStockMovementRecordedEvent,
   IInventoryStockReceivedEvent,
+  IInventoryStockReleasedEvent,
+  IInventoryStockReservedEvent,
 } from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import {
   StockAdjustedEvent,
+  StockAllocatedEvent,
   StockLevelInitializedEvent,
   StockLowEvent,
+  StockMovement,
   StockReceivedEvent,
+  StockReleasedEvent,
   StockReservedEvent,
 } from '../../domain';
 import { IStockEventsPublisherPort } from '../../application/ports';
@@ -57,15 +64,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
-  }
-
-  public publishStockReserved(event: StockReservedEvent, correlationId?: string): Promise<void> {
-    // Intentional no-op rather than a `not implemented` throw — no
-    // cross-service consumer today, but the port stays callable so emit
-    // sites do not have to guard the call.
-    void event;
-    void correlationId;
-    return Promise.resolve();
   }
 
   public async publishStockReceived(
@@ -137,6 +135,117 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockLevelInitializedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED,
+        wire,
+      ),
+    );
+  }
+
+  public async publishStockReserved(
+    event: StockReservedEvent,
+    correlationId?: string,
+  ): Promise<void> {
+    const wire: IInventoryStockReservedEvent = {
+      reservationId: event.reservationId,
+      variantId: event.aggregateId,
+      stockLocationId: event.stockLocationId,
+      quantity: event.quantity,
+      cartId: event.cartId,
+      expiresAt: event.expiresAt.toISOString(),
+      eventVersion: 'v1',
+      occurredAt: event.occurredAt.toISOString(),
+      correlationId: correlationId ?? '',
+    };
+
+    // Reserved surface on `inventory_queue` (no handler bound yet).
+    await firstValueFrom(
+      this.inventoryClient.emit<void, IInventoryStockReservedEvent>(
+        ROUTING_KEYS.INVENTORY_STOCK_RESERVED,
+        wire,
+      ),
+    );
+  }
+
+  public async publishStockAllocated(
+    event: StockAllocatedEvent,
+    correlationId?: string,
+  ): Promise<void> {
+    const wire: IInventoryStockAllocatedEvent = {
+      variantId: event.aggregateId,
+      stockLocationId: event.stockLocationId,
+      quantity: event.quantity,
+      orderId: event.orderId,
+      reservationId: event.reservationId,
+      eventVersion: 'v1',
+      occurredAt: event.occurredAt.toISOString(),
+      correlationId: correlationId ?? '',
+    };
+
+    // Reserved surface on `inventory_queue` (no handler bound yet).
+    await firstValueFrom(
+      this.inventoryClient.emit<void, IInventoryStockAllocatedEvent>(
+        ROUTING_KEYS.INVENTORY_STOCK_ALLOCATED,
+        wire,
+      ),
+    );
+  }
+
+  public async publishStockReleased(
+    event: StockReleasedEvent,
+    correlationId?: string,
+  ): Promise<void> {
+    const wire: IInventoryStockReleasedEvent = {
+      reservationId: event.reservationId,
+      variantId: event.aggregateId,
+      stockLocationId: event.stockLocationId,
+      quantity: event.quantity,
+      cartId: event.cartId,
+      reason: event.reason,
+      eventVersion: 'v1',
+      occurredAt: event.occurredAt.toISOString(),
+      correlationId: correlationId ?? '',
+    };
+
+    // Reserved surface on `inventory_queue` (no handler bound yet).
+    await firstValueFrom(
+      this.inventoryClient.emit<void, IInventoryStockReleasedEvent>(
+        ROUTING_KEYS.INVENTORY_STOCK_RELEASED,
+        wire,
+      ),
+    );
+  }
+
+  // Maps the domain `StockMovement` record straight to the wire event (no wrapper
+  // event class — see the port comment). The record is always the just-appended
+  // one, so its DB-assigned `id` is concrete; a null id here is an internal bug
+  // (calling publish before append), surfaced as a plain `Error` the best-effort
+  // caller warn-swallows.
+  public async publishStockMovementRecorded(
+    movement: StockMovement,
+    correlationId?: string,
+  ): Promise<void> {
+    if (movement.id === null) {
+      throw new Error('publishStockMovementRecorded: movement id is null (not yet appended)');
+    }
+
+    const wire: IInventoryStockMovementRecordedEvent = {
+      movementId: movement.id,
+      variantId: movement.variantId,
+      stockLocationId: movement.stockLocationId,
+      type: movement.type,
+      quantity: movement.quantity,
+      reasonCode: movement.reasonCode,
+      referenceType: movement.referenceType,
+      referenceId: movement.referenceId,
+      actorId: movement.actorId,
+      eventVersion: 'v1',
+      occurredAt: movement.occurredAt.toISOString(),
+      correlationId: correlationId ?? '',
+    };
+
+    // Reserved surface on `inventory_queue` (no handler bound yet).
+    await firstValueFrom(
+      this.inventoryClient.emit<void, IInventoryStockMovementRecordedEvent>(
+        ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_RECORDED,
         wire,
       ),
     );
