@@ -4,7 +4,6 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import {
   IAllocationResult,
   IAllocationResultEntry,
-  INVENTORY_DEFAULT_STOCK_LOCATION,
   IReservationAllocatePayload,
   StockMovementTypeEnum,
 } from '@retail-inventory-system/contracts';
@@ -20,7 +19,6 @@ import {
 } from '../../domain';
 import {
   IReservationRepositoryPort,
-  IStockCacheInvalidateItem,
   IStockCachePort,
   IStockEventsPublisherPort,
   IStockMovementRepositoryPort,
@@ -35,29 +33,21 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { emitMovementRecorded } from './movement-recorded.emitter';
+import {
+  INormalizedReservationLine,
+  levelKey,
+  loadDistinctLevels,
+  normalizeReservationLines,
+  reservationExpiresAt,
+} from './reservation-mutation';
 import { runWithStockWriteRetry } from './stock-mutation';
-
-const MS_PER_MINUTE = 60_000;
-
-// A line normalized at the edge — the optional location resolved to the default.
-interface INormalizedLine {
-  variantId: number;
-  stockLocationId: string;
-  quantity: number;
-}
 
 // One allocated line + the ledger row that records it, carried out of the
 // transaction so the post-commit emits fire per line (result order preserved).
 interface IAllocatedLine {
   entry: IAllocationResultEntry;
   movement: StockMovement;
-}
-
-// A distinct `(variantId, stockLocationId)` level loaded once per attempt, with the
-// optimistic token captured BEFORE any mutation. Several lines may share it.
-interface ILoadedLevel {
-  level: StockLevel;
-  expectedVersion: number | null;
 }
 
 // Allocate Stock converts a cart's active holds into an order's firm allocations at
@@ -105,7 +95,7 @@ export class AllocateStockUseCase {
       'Received RPC: allocate stock',
     );
 
-    const lines = this.normalizeLines(payload.lines);
+    const lines = normalizeReservationLines(payload.lines, 'Allocate');
 
     const allocated = await this.stockCache.withInvalidation(
       () =>
@@ -114,7 +104,13 @@ export class AllocateStockUseCase {
           (scope) => this.allocateOnce(scope, cartId, orderId, lines),
           { correlationId },
         ),
-      (rows) => this.distinctItems(rows),
+      // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
+      // covering every location facet, so the raw per-line items are enough.
+      (rows) =>
+        rows.map((row) => ({
+          variantId: row.entry.variantId,
+          stockLocationId: row.entry.stockLocationId,
+        })),
       { correlationId },
     );
 
@@ -129,31 +125,6 @@ export class AllocateStockUseCase {
     return { allocated: allocated.map((row) => row.entry) };
   }
 
-  // Backstop for the directly-reachable RMQ path: a non-empty line list, each with
-  // a positive-integer quantity, and the optional location resolved to the default.
-  private normalizeLines(lines: IReservationAllocatePayload['lines']): INormalizedLine[] {
-    if (!Array.isArray(lines) || lines.length === 0) {
-      throw new InventoryDomainException(
-        InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
-        'Allocate requires a non-empty lines array',
-      );
-    }
-
-    return lines.map((line) => {
-      if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
-        throw new InventoryDomainException(
-          InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
-          `Allocate line quantity must be a positive integer, got ${line.quantity}`,
-        );
-      }
-      return {
-        variantId: line.variantId,
-        stockLocationId: line.stockLocationId ?? INVENTORY_DEFAULT_STOCK_LOCATION,
-        quantity: line.quantity,
-      };
-    });
-  }
-
   // One transactional attempt: compute every line in memory first (so a rejection
   // leaves nothing persisted for ANY line), then write all. Re-reads each level +
   // hold fresh under the scope so a retried attempt never double-applies.
@@ -161,29 +132,14 @@ export class AllocateStockUseCase {
     scope: ITransactionScope,
     cartId: string,
     orderId: number,
-    lines: INormalizedLine[],
+    lines: INormalizedReservationLine[],
   ): Promise<IAllocatedLine[]> {
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.ttlMinutes * MS_PER_MINUTE);
+    const expiresAt = reservationExpiresAt(now, this.ttlMinutes);
 
-    // Phase 1 — load each distinct (variantId, location) level exactly once and
-    // capture its optimistic token before any counter moves; lines sharing a level
-    // mutate the one in-memory instance and it persists with a single version bump.
-    const levels = new Map<string, ILoadedLevel>();
-    for (const line of lines) {
-      const key = this.levelKey(line.variantId, line.stockLocationId);
-      if (!levels.has(key)) {
-        const existing = await this.repository.findStockLevel(
-          line.variantId,
-          line.stockLocationId,
-          scope,
-        );
-        levels.set(key, {
-          level: existing ?? StockLevel.initialAt(line.variantId, line.stockLocationId),
-          expectedVersion: existing ? existing.version : null,
-        });
-      }
-    }
+    // Phase 1 — load each distinct (variantId, location) level exactly once,
+    // capturing its optimistic token before any counter moves.
+    const levels = await loadDistinctLevels(this.repository, lines, scope);
 
     // Phase 2 — compute per line (in-memory only). Any OUT_OF_STOCK / state
     // rejection throws here, before a single write below.
@@ -191,7 +147,7 @@ export class AllocateStockUseCase {
     const reservationsToSave: Reservation[] = [];
 
     for (const line of lines) {
-      const loaded = levels.get(this.levelKey(line.variantId, line.stockLocationId));
+      const loaded = levels.get(levelKey(line.variantId, line.stockLocationId));
       // Unreachable: phase 1 inserted a level for every line's key.
       if (loaded === undefined) {
         throw new Error(
@@ -259,7 +215,7 @@ export class AllocateStockUseCase {
   private applyLineCounters(
     level: StockLevel,
     held: Reservation | null,
-    line: INormalizedLine,
+    line: INormalizedReservationLine,
     now: Date,
     expiresAt: Date,
   ): string | null {
@@ -301,23 +257,6 @@ export class AllocateStockUseCase {
     return held.id;
   }
 
-  private distinctItems(rows: IAllocatedLine[]): IStockCacheInvalidateItem[] {
-    const seen = new Set<string>();
-    const items: IStockCacheInvalidateItem[] = [];
-    for (const { entry } of rows) {
-      const key = this.levelKey(entry.variantId, entry.stockLocationId);
-      if (!seen.has(key)) {
-        seen.add(key);
-        items.push({ variantId: entry.variantId, stockLocationId: entry.stockLocationId });
-      }
-    }
-    return items;
-  }
-
-  private levelKey(variantId: number, stockLocationId: string): string {
-    return `${variantId}:${stockLocationId}`;
-  }
-
   private async emitAllocated(
     row: IAllocatedLine,
     orderId: number,
@@ -343,13 +282,6 @@ export class AllocateStockUseCase {
       );
     }
 
-    try {
-      await this.publisher.publishStockMovementRecorded(movement, correlationId);
-    } catch (error) {
-      this.logger.warn(
-        { err: error as Error, correlationId, variantId: entry.variantId },
-        'Failed to publish inventory.stock-movement.recorded (allocation already committed)',
-      );
-    }
+    await emitMovementRecorded(this.publisher, this.logger, movement, correlationId);
   }
 }

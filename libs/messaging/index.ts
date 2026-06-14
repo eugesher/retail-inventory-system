@@ -7,6 +7,7 @@ export * from './microservice-client-retail.module';
 export * from './microservice-client.configuration';
 export * from './rabbitmq.client.factory';
 export * from './routing-keys.constants';
+export * from './rpc-passthrough';
 
 // Re-exports of transport identifiers from `libs/contracts`. `libs/messaging`
 // is the consumer; `libs/contracts` remains the source of truth for queue

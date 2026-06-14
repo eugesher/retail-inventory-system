@@ -13,20 +13,7 @@ import {
   STOCK_EVENTS_PUBLISHER,
   STOCK_REPOSITORY,
 } from '../ports';
-
-// MySQL's "duplicate entry for key" error number / code. A `saveStockLevel`
-// INSERT that loses the race to a concurrent auto-init surfaces a driver error
-// carrying these — the UNIQUE `(variant_id, stock_location_id)` backstop firing.
-// Duck-typed (not `instanceof QueryFailedError`) because the application layer
-// must not import `typeorm` (ADR-017 denylist); the shape is the contract.
-const MYSQL_ER_DUP_ENTRY_ERRNO = 1062;
-const MYSQL_ER_DUP_ENTRY_CODE = 'ER_DUP_ENTRY';
-
-interface IMysqlDriverError {
-  errno?: number;
-  code?: string;
-  driverError?: { errno?: number; code?: string };
-}
+import { isDuplicateEntryError } from './mysql-error.util';
 
 // Auto-init turns a catalog `variant.created` event into a zeroed `stock_level`
 // row for the new variant at the default warehouse, so the inventory read path
@@ -78,7 +65,7 @@ export class AutoInitStockLevelUseCase {
     } catch (error) {
       // Backstop idempotency: a concurrent event won the INSERT; the UNIQUE
       // constraint rejected ours. Treat as the already-exists no-op — no event.
-      if (AutoInitStockLevelUseCase.isUniqueViolation(error)) {
+      if (isDuplicateEntryError(error)) {
         this.logger.debug(
           { correlationId, variantId, stockLocationId },
           'Stock level created concurrently (unique violation) — no-op',
@@ -101,14 +88,5 @@ export class AutoInitStockLevelUseCase {
       new StockLevelInitializedEvent({ variantId, stockLocationId }),
       correlationId,
     );
-  }
-
-  private static isUniqueViolation(error: unknown): boolean {
-    if (typeof error !== 'object' || error === null) {
-      return false;
-    }
-    const candidate = error as IMysqlDriverError;
-    const driver = candidate.driverError ?? candidate;
-    return driver.errno === MYSQL_ER_DUP_ENTRY_ERRNO || driver.code === MYSQL_ER_DUP_ENTRY_CODE;
   }
 }

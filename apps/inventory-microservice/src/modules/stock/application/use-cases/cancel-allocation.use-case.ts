@@ -3,19 +3,11 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import {
   IAllocationCancelPayload,
-  INVENTORY_DEFAULT_STOCK_LOCATION,
   StockMovementTypeEnum,
 } from '@retail-inventory-system/contracts';
 
+import { StockMovement, StockReleasedEvent } from '../../domain';
 import {
-  InventoryDomainException,
-  InventoryErrorCodeEnum,
-  StockLevel,
-  StockMovement,
-  StockReleasedEvent,
-} from '../../domain';
-import {
-  IStockCacheInvalidateItem,
   IStockCachePort,
   IStockEventsPublisherPort,
   IStockMovementRepositoryPort,
@@ -28,6 +20,13 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { emitMovementRecorded } from './movement-recorded.emitter';
+import {
+  INormalizedReservationLine,
+  levelKey,
+  loadDistinctLevels,
+  normalizeReservationLines,
+} from './reservation-mutation';
 import { runWithStockWriteRetry } from './stock-mutation';
 
 const DEFAULT_CANCEL_REASON = 'order-cancelled';
@@ -38,13 +37,6 @@ const DEFAULT_CANCEL_REASON = 'order-cancelled';
 // movement's `reason_code`, not the typed event reason.
 const CANCEL_EVENT_REASON = 'order-cancelled' as const;
 
-// A line normalized at the edge — the optional location resolved to the default.
-interface INormalizedLine {
-  variantId: number;
-  stockLocationId: string;
-  quantity: number;
-}
-
 // One cancelled line + the ledger row that records it, carried out of the
 // transaction so the post-commit emits fire per line.
 interface ICancelledLine {
@@ -52,12 +44,6 @@ interface ICancelledLine {
   stockLocationId: string;
   quantity: number;
   movement: StockMovement;
-}
-
-// A distinct `(variantId, stockLocationId)` level loaded once per attempt.
-interface ILoadedLevel {
-  level: StockLevel;
-  expectedVersion: number | null;
 }
 
 // Cancel Allocation reverses an order's allocation (ADR-030 §4): per line it
@@ -101,7 +87,7 @@ export class CancelAllocationUseCase {
       'Received RPC: cancel allocation',
     );
 
-    const lines = this.normalizeLines(payload.lines);
+    const lines = normalizeReservationLines(payload.lines, 'Cancel allocation');
 
     const cancelled = await this.stockCache.withInvalidation(
       () =>
@@ -110,7 +96,10 @@ export class CancelAllocationUseCase {
           (scope) => this.cancelOnce(scope, orderId, lines, reasonCode, actorId),
           { correlationId },
         ),
-      (rows) => this.distinctItems(rows),
+      // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
+      // covering every location facet, so the raw per-line items are enough.
+      (rows) =>
+        rows.map((row) => ({ variantId: row.variantId, stockLocationId: row.stockLocationId })),
       { correlationId },
     );
 
@@ -125,63 +114,24 @@ export class CancelAllocationUseCase {
     return { cancelled: cancelled.length };
   }
 
-  // Backstop for the directly-reachable RMQ path: a non-empty line list, each with
-  // a positive-integer quantity, and the optional location resolved to the default.
-  private normalizeLines(lines: IAllocationCancelPayload['lines']): INormalizedLine[] {
-    if (!Array.isArray(lines) || lines.length === 0) {
-      throw new InventoryDomainException(
-        InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
-        'Cancel allocation requires a non-empty lines array',
-      );
-    }
-
-    return lines.map((line) => {
-      if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
-        throw new InventoryDomainException(
-          InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
-          `Cancel line quantity must be a positive integer, got ${line.quantity}`,
-        );
-      }
-      return {
-        variantId: line.variantId,
-        stockLocationId: line.stockLocationId ?? INVENTORY_DEFAULT_STOCK_LOCATION,
-        quantity: line.quantity,
-      };
-    });
-  }
-
   // One transactional attempt: compute every line in memory first (so an over-cancel
   // leaves nothing persisted for ANY line), then write all. Re-reads each level fresh
   // under the scope so a retried attempt never double-applies.
   private async cancelOnce(
     scope: ITransactionScope,
     orderId: number,
-    lines: INormalizedLine[],
+    lines: INormalizedReservationLine[],
     reasonCode: string,
     actorId: string | null,
   ): Promise<ICancelledLine[]> {
     // Phase 1 — load each distinct level once, capturing its optimistic token.
-    const levels = new Map<string, ILoadedLevel>();
-    for (const line of lines) {
-      const key = this.levelKey(line.variantId, line.stockLocationId);
-      if (!levels.has(key)) {
-        const existing = await this.repository.findStockLevel(
-          line.variantId,
-          line.stockLocationId,
-          scope,
-        );
-        levels.set(key, {
-          level: existing ?? StockLevel.initialAt(line.variantId, line.stockLocationId),
-          expectedVersion: existing ? existing.version : null,
-        });
-      }
-    }
+    const levels = await loadDistinctLevels(this.repository, lines, scope);
 
     // Phase 2 — compute per line (in-memory). `releaseAllocated` throws
     // STOCK_RESULT_NEGATIVE on an over-cancel here, before any write below.
-    const computed: { line: INormalizedLine; movement: StockMovement }[] = [];
+    const computed: { line: INormalizedReservationLine; movement: StockMovement }[] = [];
     for (const line of lines) {
-      const loaded = levels.get(this.levelKey(line.variantId, line.stockLocationId));
+      const loaded = levels.get(levelKey(line.variantId, line.stockLocationId));
       // Unreachable: phase 1 inserted a level for every line's key.
       if (loaded === undefined) {
         throw new Error(`Cancel: level for ${line.variantId} @ ${line.stockLocationId} not loaded`);
@@ -222,23 +172,6 @@ export class CancelAllocationUseCase {
     return cancelled;
   }
 
-  private distinctItems(rows: ICancelledLine[]): IStockCacheInvalidateItem[] {
-    const seen = new Set<string>();
-    const items: IStockCacheInvalidateItem[] = [];
-    for (const row of rows) {
-      const key = this.levelKey(row.variantId, row.stockLocationId);
-      if (!seen.has(key)) {
-        seen.add(key);
-        items.push({ variantId: row.variantId, stockLocationId: row.stockLocationId });
-      }
-    }
-    return items;
-  }
-
-  private levelKey(variantId: number, stockLocationId: string): string {
-    return `${variantId}:${stockLocationId}`;
-  }
-
   private async emitReleased(row: ICancelledLine, correlationId: string): Promise<void> {
     try {
       await this.publisher.publishStockReleased(
@@ -261,13 +194,6 @@ export class CancelAllocationUseCase {
       );
     }
 
-    try {
-      await this.publisher.publishStockMovementRecorded(row.movement, correlationId);
-    } catch (error) {
-      this.logger.warn(
-        { err: error as Error, correlationId, variantId: row.variantId },
-        'Failed to publish inventory.stock-movement.recorded (cancel already committed)',
-      );
-    }
+    await emitMovementRecorded(this.publisher, this.logger, row.movement, correlationId);
   }
 }

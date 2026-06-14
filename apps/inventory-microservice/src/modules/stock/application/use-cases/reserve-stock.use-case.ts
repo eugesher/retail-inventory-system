@@ -29,11 +29,10 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { reservationExpiresAt } from './reservation-mutation';
 import { toReservationView } from './reservation-view.factory';
 import { requireActiveLocation } from './stock-location.guard';
 import { runWithStockWriteRetry } from './stock-mutation';
-
-const MS_PER_MINUTE = 60_000;
 
 // Reserve Stock holds units for a cart against the no-oversell invariant
 // (ADR-030). It is **idempotent-by-absolute-quantity** on the all-statuses UNIQUE
@@ -136,7 +135,7 @@ export class ReserveStockUseCase {
       stockLocationId,
       scope,
     );
-    const expiresAt = new Date(Date.now() + this.ttlMinutes * MS_PER_MINUTE);
+    const expiresAt = reservationExpiresAt(new Date(), this.ttlMinutes);
 
     let reservation: Reservation;
     let counterMoved = false;
