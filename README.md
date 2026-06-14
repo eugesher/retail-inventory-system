@@ -378,6 +378,8 @@ yarn start:dev
 | `yarn test:infra:reload` | Tear down then recreate test infra, run migrations, and seed the database. |
 | `yarn test:seed` | Seed the database with deterministic fixtures from `scripts/test-db-seed.ts`. |
 
+The reservation + stock-movement capability is locked end-to-end by four gateway suites: `test/cart-reserve-release.e2e-spec.ts` (reserve on add/change, release on remove, the out-of-stock `409`), `test/place-order-allocates.e2e-spec.ts` (place converts holds to one `allocation` ledger row per order line), `test/inventory-movements-audit.e2e-spec.ts` (the ledger timeline, filters, paging, permission gates), and the canonical **`test/concurrent-oversell.e2e-spec.ts`** — two carts race for the last unit, exactly one wins, the loser gets `409 INVENTORY_OUT_OF_STOCK` with `available: 0`, and the final stock state is consistent down to the ledger. The concurrency proof is winner-agnostic and must stay green across 5 consecutive runs; the exact run + 5× stability commands and how to read the assertions are in [docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md](docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md).
+
 ### Architecture lint
 
 The per-module hexagonal layout (`domain` → `application` → `infrastructure`/`presentation`, plus the `libs/*` boundaries documented in [ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)) is enforced by `eslint-plugin-boundaries`. The rules live in `eslint.config.mjs` and are the **source of truth for where a file should live** — when in doubt, run `yarn lint` and let the plugin answer.
