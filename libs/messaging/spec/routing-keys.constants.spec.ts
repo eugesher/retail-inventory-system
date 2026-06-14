@@ -35,6 +35,9 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_LOCATION_LIST).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_LOCATION_LIST,
     );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_LIST).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_MOVEMENT_LIST,
+    );
     expect(ROUTING_KEYS.INVENTORY_RESERVATION_RESERVE).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_RESERVE,
     );

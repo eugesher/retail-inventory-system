@@ -13,6 +13,11 @@ export const ROUTING_KEYS = {
   INVENTORY_STOCK_LEVEL_TRANSFER: 'inventory.stock-level.transfer',
   INVENTORY_STOCK_LEVEL_INITIALIZED: 'inventory.stock-level.initialized',
   INVENTORY_LOCATION_LIST: 'inventory.location.list',
+  // `inventory.stock-movement.list` → `ListStockMovementsUseCase` (RPC, Gateway →
+  // Inventory): the paginated, filterable, newest-first audit read of one variant's
+  // `stock_movement` ledger rows → `IPage<StockMovementView>`. Backs the operator
+  // audit endpoint `GET /api/inventory/variants/:variantId/movements` (ADR-030 §2/§5).
+  INVENTORY_STOCK_MOVEMENT_LIST: 'inventory.stock-movement.list',
   // Reservation RPC commands (Gateway / Retail → Inventory on `inventory_queue`,
   // each served by a `@MessagePattern` handler on the inventory stock controller):
   // `inventory.reservation.reserve` → `ReserveStockUseCase` → `ReservationView`,

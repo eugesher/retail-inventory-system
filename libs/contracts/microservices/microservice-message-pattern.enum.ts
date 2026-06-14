@@ -11,6 +11,7 @@ export enum MicroserviceMessagePatternEnum {
   INVENTORY_STOCK_LEVEL_TRANSFER = 'inventory.stock-level.transfer',
   INVENTORY_STOCK_LEVEL_INITIALIZED = 'inventory.stock-level.initialized',
   INVENTORY_LOCATION_LIST = 'inventory.location.list',
+  INVENTORY_STOCK_MOVEMENT_LIST = 'inventory.stock-movement.list',
   INVENTORY_RESERVATION_RESERVE = 'inventory.reservation.reserve',
   INVENTORY_RESERVATION_RELEASE = 'inventory.reservation.release',
   INVENTORY_RESERVATION_ALLOCATE = 'inventory.reservation.allocate',

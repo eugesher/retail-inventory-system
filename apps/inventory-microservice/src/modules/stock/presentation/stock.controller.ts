@@ -4,12 +4,14 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 import {
   IAllocationCancelPayload,
   IAllocationResult,
+  IPage,
   IReservationAllocatePayload,
   IReservationReleasePayload,
   IReservationReleaseResult,
   IReservationReservePayload,
   IStockAdjustPayload,
   IStockLocationsListPayload,
+  IStockMovementListPayload,
   IStockReceivePayload,
   IStockTransferPayload,
   IStockTransferResult,
@@ -17,6 +19,7 @@ import {
   ReservationView,
   StockLevelView,
   StockLocationView,
+  StockMovementView,
   VariantStockView,
 } from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
@@ -26,6 +29,7 @@ import {
   AllocateStockUseCase,
   CancelAllocationUseCase,
   ListLocationsUseCase,
+  ListStockMovementsUseCase,
   QueryAvailabilityUseCase,
   ReceiveStockUseCase,
   ReleaseReservationUseCase,
@@ -45,6 +49,7 @@ export class StockController {
     private readonly allocateStock: AllocateStockUseCase,
     private readonly cancelAllocation: CancelAllocationUseCase,
     private readonly transferStock: TransferStockUseCase,
+    private readonly listStockMovements: ListStockMovementsUseCase,
   ) {}
 
   // Read path on the new model (ADR-027): per-variant availability across the
@@ -62,6 +67,17 @@ export class StockController {
     @Payload() payload: IStockLocationsListPayload,
   ): Promise<StockLocationView[]> {
     return this.listLocations.execute(payload);
+  }
+
+  // Audit read (ADR-030 §2): the paginated, filterable, newest-first timeline of
+  // one variant's `stock_movement` ledger rows. An unknown variant (or one with no
+  // movements) is an empty page, not a 404 — the public-read zero-answer
+  // convention. Uncached (an operator-driven audit query).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_LIST)
+  public handleStockMovementList(
+    @Payload() payload: IStockMovementListPayload,
+  ): Promise<IPage<StockMovementView>> {
+    return this.listStockMovements.execute(payload);
   }
 
   // Receive Stock write path (ADR-027): raises on-hand by a positive quantity.

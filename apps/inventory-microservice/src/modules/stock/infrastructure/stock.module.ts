@@ -23,6 +23,7 @@ import {
   AutoInitStockLevelUseCase,
   CancelAllocationUseCase,
   ListLocationsUseCase,
+  ListStockMovementsUseCase,
   QueryAvailabilityUseCase,
   ReceiveStockUseCase,
   ReleaseReservationUseCase,
@@ -80,7 +81,7 @@ import {
     // Every counter-changing operation appends here: Receive (`receipt`), Adjust
     // (signed `adjustment`), Reserve/Release/Cancel (`release`), Allocate
     // (`allocation`), and Transfer (a paired `adjustment` per leg). The audit read
-    // RPC lands in a later session.
+    // path (`ListStockMovementsUseCase`) reads it back via `listByVariant`.
     StockMovementTypeormRepository,
     { provide: STOCK_MOVEMENT_REPOSITORY, useExisting: StockMovementTypeormRepository },
 
@@ -106,6 +107,7 @@ import {
     AutoInitStockLevelUseCase,
     QueryAvailabilityUseCase,
     ListLocationsUseCase,
+    ListStockMovementsUseCase,
     ReceiveStockUseCase,
     AdjustStockUseCase,
     ReserveStockUseCase,

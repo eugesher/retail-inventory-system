@@ -1,7 +1,12 @@
 import {
+  IPage,
+  IReservationReleasePayload,
+  IReservationReleaseResult,
+  IStockMovementListPayload,
   IStockTransferResult,
   StockLevelView,
   StockLocationView,
+  StockMovementView,
   VariantStockView,
 } from '@retail-inventory-system/contracts';
 
@@ -80,4 +85,20 @@ export interface IInventoryGatewayPort {
     command: ITransferStockCommand,
     correlationId: string,
   ): Promise<IStockTransferResult>;
+
+  // Audit read: a paginated, newest-first page of one variant's `stock_movement`
+  // ledger rows, optionally filtered by `type` + an inclusive `occurredAt` window.
+  // Unlike the other reads, this takes the full RPC payload (it carries the
+  // REQUIRED `correlationId` of `ICorrelationPayload`, assembled at the controller
+  // edge), so the adapter passes it through verbatim. An unknown variant is an
+  // empty page, not a 404.
+  listVariantMovements(payload: IStockMovementListPayload): Promise<IPage<StockMovementView>>;
+
+  // Manual reservation release: frees a hold by `reservationId` (the ops/debug
+  // path), returning the flipped `ReservationView`. The controller folds
+  // `reason: 'manual'` + the staff `actorId` into the payload. An unknown id is a
+  // 404 and a non-active row a 409, surfaced by the inventory service's domain
+  // filter. Like the audit read, it takes the full payload (REQUIRED
+  // `correlationId`).
+  releaseReservation(payload: IReservationReleasePayload): Promise<IReservationReleaseResult>;
 }
