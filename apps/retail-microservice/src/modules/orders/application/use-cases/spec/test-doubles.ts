@@ -12,9 +12,10 @@ import {
   VariantWithProductView,
 } from '@retail-inventory-system/contracts';
 
-import { Address, Order, OrderLine, Payment } from '../../../domain';
+import { Address, Fulfillment, FulfillmentLine, Order, OrderLine, Payment } from '../../../domain';
 import {
   IAddressRepositoryPort,
+  IFulfillmentRepositoryPort,
   IOrderCartReaderPort,
   IOrderCartSnapshot,
   IOrderCatalogGatewayPort,
@@ -356,6 +357,7 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public readonly placed: unknown[] = [];
   public readonly authorized: unknown[] = [];
   public readonly captured: unknown[] = [];
+  public readonly fulfillmentCreated: unknown[] = [];
 
   public publishOrderPlaced(event: unknown): Promise<void> {
     this.placed.push(event);
@@ -370,6 +372,73 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public publishPaymentCaptured(event: unknown): Promise<void> {
     this.captured.push(event);
     return Promise.resolve();
+  }
+
+  public publishFulfillmentCreated(event: unknown): Promise<void> {
+    this.fulfillmentCreated.push(event);
+    return Promise.resolve();
+  }
+}
+
+// An in-memory fulfillment store that assigns BIGINT ids to the root + each line on
+// save, and serves `listByOrderId` newest-first (`shipped_at DESC, id DESC`, mirroring
+// the real repo's ordering). Enough to exercise the create cross-fulfillment math + the
+// list ordering without a test DB (the module's pure-unit-doubles convention).
+export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
+  public saveCount = 0;
+  private seq = 0;
+  private lineSeq = 0;
+  private readonly byId = new Map<number, Fulfillment>();
+
+  public save(fulfillment: Fulfillment): Promise<Fulfillment> {
+    this.saveCount += 1;
+    const id = fulfillment.id ?? ++this.seq;
+    const stored = this.rebuild(fulfillment, id);
+    this.byId.set(id, stored);
+    return Promise.resolve(this.rebuild(stored, id));
+  }
+
+  public findById(id: number): Promise<Fulfillment | null> {
+    const fulfillment = this.byId.get(id);
+    return Promise.resolve(fulfillment ? this.rebuild(fulfillment, id) : null);
+  }
+
+  public listByOrderId(orderId: number): Promise<Fulfillment[]> {
+    const ordered = [...this.byId.values()]
+      .filter((fulfillment) => fulfillment.orderId === orderId)
+      .sort((a, b) => {
+        const byShipped = (b.shippedAt?.getTime() ?? 0) - (a.shippedAt?.getTime() ?? 0);
+        return byShipped !== 0 ? byShipped : (b.id ?? 0) - (a.id ?? 0);
+      });
+    return Promise.resolve(
+      ordered.map((fulfillment) => this.rebuild(fulfillment, fulfillment.id!)),
+    );
+  }
+
+  // Re-reads the saved graph the way the real repo does: concrete root id + concrete
+  // line ids. A line that already carries an id (a re-read of a stored row) keeps it;
+  // a freshly built line (id null) gets the next BIGINT.
+  private rebuild(fulfillment: Fulfillment, id: number): Fulfillment {
+    return Fulfillment.reconstitute({
+      id,
+      orderId: fulfillment.orderId,
+      stockLocationId: fulfillment.stockLocationId,
+      status: fulfillment.status,
+      trackingNumber: fulfillment.trackingNumber,
+      carrier: fulfillment.carrier,
+      shippedAt: fulfillment.shippedAt,
+      deliveredAt: fulfillment.deliveredAt,
+      lines: fulfillment.lines.map(
+        (line) =>
+          new FulfillmentLine({
+            id: line.id ?? ++this.lineSeq,
+            fulfillmentId: id,
+            orderLineId: line.orderLineId,
+            quantity: line.quantity,
+          }),
+      ),
+      version: fulfillment.version,
+    });
   }
 }
 
@@ -454,6 +523,59 @@ export const buildOrderFixture = (
     placedAt,
     version: 2,
   });
+
+// A persisted-order fixture with explicit line ids + quantities and tunable
+// lifecycle/payment statuses — the Create/List Fulfillment specs need multi-line
+// orders with known order-line ids to exercise the cross-fulfillment quantity math and
+// the fulfillable-state preconditions (the single-line `buildOrderFixture` is too thin
+// for that). Each line is priced at `unitPriceMinor` so the header totals reconcile.
+export const buildOrderWithLinesFixture = (
+  id: number,
+  customerId: string | null,
+  lines: { orderLineId: number; quantity: number }[],
+  opts: {
+    status?: OrderStatusEnum;
+    paymentStatus?: OrderPaymentStatusEnum;
+    unitPriceMinor?: number;
+  } = {},
+): Order => {
+  const unitPriceMinor = opts.unitPriceMinor ?? 1000;
+  const orderLines = lines.map(
+    (line) =>
+      new OrderLine({
+        id: line.orderLineId,
+        variantId: line.orderLineId,
+        sku: `SKU-${line.orderLineId}`,
+        nameSnapshot: `Item ${line.orderLineId}`,
+        quantity: line.quantity,
+        unitPriceMinor,
+        taxAmountMinor: 0,
+        discountAmountMinor: 0,
+        status: OrderLineStatusEnum.ALLOCATED,
+      }),
+  );
+  const subtotalMinor = orderLines.reduce((sum, line) => sum + line.lineTotalMinor, 0);
+  return Order.reconstitute({
+    id,
+    orderNumber: `ORD-2026-${String(id).padStart(8, '0')}`,
+    customerId,
+    currency: 'USD',
+    status: opts.status ?? OrderStatusEnum.PENDING,
+    paymentStatus: opts.paymentStatus ?? OrderPaymentStatusEnum.AUTHORIZED,
+    fulfillmentStatus: OrderFulfillmentStatusEnum.UNFULFILLED,
+    lines: orderLines,
+    subtotalMinor,
+    taxTotalMinor: 0,
+    discountTotalMinor: 0,
+    shippingTotalMinor: 0,
+    grandTotalMinor: subtotalMinor,
+    billingAddressId: null,
+    shippingAddressId: null,
+    sourceCartId: `cart-${id}`,
+    placedAt: new Date('2026-06-10T00:00:00.000Z'),
+    version: 2,
+  });
+};
 
 // A persisted-payment fixture (via `Payment.reconstitute`) for the read/capture specs.
 export const buildPaymentFixture = (

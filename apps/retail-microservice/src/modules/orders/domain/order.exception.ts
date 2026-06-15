@@ -124,6 +124,14 @@ export enum OrderErrorCodeEnum {
   // shipment `shipped` (the configurable default policy, ADR-031) — 400.
   FULFILLMENT_TRACKING_REQUIRED = 'FULFILLMENT_TRACKING_REQUIRED',
 
+  // The order cannot be fulfilled in its current state — its lifecycle is not
+  // `pending`/`confirmed` (a cancelled/shipped/delivered order), or its payment is
+  // neither `authorized` nor `captured` (nothing was authorized to pay for the
+  // shipment). An order-level precondition the Create Fulfillment use case checks
+  // before any `Fulfillment` exists — distinct from a `Fulfillment` status-transition
+  // breach (ADR-031) — 409.
+  ORDER_NOT_FULFILLABLE = 'ORDER_NOT_FULFILLABLE',
+
   // --- Cancel Order / Cancel Line flow (ADR-031, drivers land later) ---
   // The order cannot be cancelled in its current state — it has a `shipped`/
   // `delivered` fulfillment, so cancellation would strand physically-shipped stock
