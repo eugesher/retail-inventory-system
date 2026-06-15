@@ -11,6 +11,7 @@ import {
 
 import {
   ADDRESS_REPOSITORY,
+  FULFILLMENT_REPOSITORY,
   ORDER_CART_READER,
   ORDER_CATALOG_GATEWAY,
   ORDER_EVENTS_PUBLISHER,
@@ -36,6 +37,9 @@ import {
   AddressEntity,
   AddressTypeormRepository,
   CartReaderTypeormAdapter,
+  FulfillmentEntity,
+  FulfillmentLineEntity,
+  FulfillmentTypeormRepository,
   OrderEntity,
   OrderLineEntity,
   OrderTypeormRepository,
@@ -74,7 +78,14 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 // isolation line, ADR-017); it never imports the cart module.
 @Module({
   imports: [
-    DatabaseModule.forFeature([OrderEntity, OrderLineEntity, AddressEntity, PaymentEntity]),
+    DatabaseModule.forFeature([
+      OrderEntity,
+      OrderLineEntity,
+      AddressEntity,
+      PaymentEntity,
+      FulfillmentEntity,
+      FulfillmentLineEntity,
+    ]),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
     MicroserviceClientNotificationModule,
@@ -89,6 +100,8 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     PaymentTypeormRepository,
     { provide: PAYMENT_REPOSITORY, useExisting: PaymentTypeormRepository },
     { provide: PAYMENT_GATEWAY, useClass: FakePaymentGatewayAdapter },
+    FulfillmentTypeormRepository,
+    { provide: FULFILLMENT_REPOSITORY, useExisting: FulfillmentTypeormRepository },
 
     TypeormTransactionAdapter,
     { provide: TRANSACTION_PORT, useExisting: TypeormTransactionAdapter },

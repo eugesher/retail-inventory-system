@@ -11,7 +11,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // to `0`/false (no payment has yet been flagged). `synchronize` stays off
 // (docs/adr/019-typeorm-and-mysql-for-persistence.md); this hand-authored migration
 // is the source of truth.
-export class AddFlaggedForRefundToPayment1781340000000 implements MigrationInterface {
+export class AddFlaggedForRefundToPayment1781487934305 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       'ALTER TABLE payment ADD COLUMN flagged_for_refund TINYINT(1) NOT NULL DEFAULT 0;',
