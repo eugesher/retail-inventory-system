@@ -44,6 +44,16 @@ export const ROUTING_KEYS = {
   INVENTORY_STOCK_ALLOCATED: 'inventory.stock.allocated',
   INVENTORY_STOCK_RELEASED: 'inventory.stock.released',
   INVENTORY_STOCK_MOVEMENT_RECORDED: 'inventory.stock-movement.recorded',
+  // `inventory.stock.commit-sale` → `CommitSaleUseCase` (RPC, Retail ship flow →
+  // Inventory): physically ships an order's allocated stock at fulfillment time —
+  // per line it decrements BOTH `quantity_on_hand` and `quantity_allocated` in one
+  // `StockLevel.commitSale` and appends one strictly-negative `sale` movement
+  // referencing the fulfillment. All-lines-atomic + idempotent on `fulfillmentId`
+  // (ADR-031). `inventory.stock.committed` is the past-tense reserved-surface event
+  // it emits per committed line onto `inventory_queue` (no consumer yet — the
+  // `inventory.stock.{reserved,allocated,released}` precedent).
+  INVENTORY_STOCK_COMMIT_SALE: 'inventory.stock.commit-sale',
+  INVENTORY_STOCK_COMMITTED: 'inventory.stock.committed',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',
   CATALOG_PRODUCT_PUBLISH: 'catalog.product.publish',
   CATALOG_PRODUCT_ARCHIVE: 'catalog.product.archive',

@@ -62,6 +62,12 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_RECORDED).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_STOCK_MOVEMENT_RECORDED,
     );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_COMMIT_SALE).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_COMMIT_SALE,
+    );
+    expect(ROUTING_KEYS.INVENTORY_STOCK_COMMITTED).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_STOCK_COMMITTED,
+    );
     expect(ROUTING_KEYS.CATALOG_PRODUCT_REGISTER).toBe(
       MicroserviceMessagePatternEnum.CATALOG_PRODUCT_REGISTER,
     );

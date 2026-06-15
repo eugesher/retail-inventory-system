@@ -198,6 +198,41 @@ export class StockLevel {
     this._version += 1;
   }
 
+  // Ships allocated stock at fulfillment time: the units physically leave on-hand
+  // AND clear from the allocated pool (they are no longer merely promised — they are
+  // gone). Decrements BOTH counters in ONE mutation (a single `version` bump) so the
+  // optimistic write persists it with one version-checked UPDATE.
+  //
+  // `available = onHand − allocated − reserved` is UNCHANGED by a commit-sale (both
+  // decremented counters subtract from it) — exactly right: shipping promised stock
+  // neither frees nor consumes availability. `quantityReserved` is never touched.
+  public commitSale(quantity: number): void {
+    StockLevel.requirePositiveDelta(quantity, 'commitSale');
+    // Over-committing more than is allocated is a counter drift — the fulfillment
+    // lines were built from the order's own allocation, so this can only happen on an
+    // internal bug, not user input. A plain `Error` (surfaces as a 500), the
+    // `allocateFromReserved` drift precedent.
+    if (quantity > this._quantityAllocated) {
+      throw new Error(
+        `StockLevel.commitSale: cannot ship ${quantity}; only ${this._quantityAllocated} allocated`,
+      );
+    }
+    // If physical on-hand fell below the allocated amount (a prior negative Adjust),
+    // shipping would drive on-hand negative. Unlike the allocated drift above, that is
+    // an operator-reachable condition, so it is the typed `STOCK_RESULT_NEGATIVE` (409)
+    // the presentation filter maps — never a 500.
+    if (quantity > this._quantityOnHand) {
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
+        `StockLevel.commitSale: shipping ${quantity} of variant ${this.variantId} @ ` +
+          `${this.stockLocationId} would drive on-hand negative (only ${this._quantityOnHand} on hand)`,
+      );
+    }
+    this._quantityOnHand -= quantity;
+    this._quantityAllocated -= quantity;
+    this._version += 1;
+  }
+
   private static requirePositiveDelta(value: number, op: string): void {
     if (!Number.isInteger(value) || value <= 0) {
       throw new Error(`StockLevel.${op}: quantity must be a positive integer, got ${value}`);
