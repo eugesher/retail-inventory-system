@@ -104,6 +104,34 @@ export enum OrderErrorCodeEnum {
   // `capture()` was called on a payment that is not `authorized` — a well-formed
   // request the resource state forbids, 409.
   PAYMENT_INVALID_STATUS_TRANSITION = 'PAYMENT_INVALID_STATUS_TRANSITION',
+
+  // --- Fulfillment / shipment flow (ADR-031) ---
+  // The fulfillment being read/operated on does not exist — 404.
+  FULFILLMENT_NOT_FOUND = 'FULFILLMENT_NOT_FOUND',
+  // A fulfillment must carry at least one line — 400.
+  FULFILLMENT_NO_LINES = 'FULFILLMENT_NO_LINES',
+  // A fulfillment line quantity must be a positive integer — 400.
+  FULFILLMENT_LINE_QUANTITY_INVALID = 'FULFILLMENT_LINE_QUANTITY_INVALID',
+  // The requested per-`OrderLine` quantity would push the total shipped over the
+  // ordered quantity (the cross-fulfillment sum invariant the Create use case
+  // enforces — the aggregate cannot see sibling shipments) — 409.
+  FULFILLMENT_QUANTITY_EXCEEDS_REMAINING = 'FULFILLMENT_QUANTITY_EXCEEDS_REMAINING',
+  // A fulfillment status mutator was called from a state that does not allow it
+  // (`ship` off non-`pending`, `markDelivered` off non-`shipped`, `cancel` off
+  // non-`pending`) — a well-formed request the resource state forbids, 409.
+  FULFILLMENT_INVALID_STATUS_TRANSITION = 'FULFILLMENT_INVALID_STATUS_TRANSITION',
+  // `ship` was called without a tracking number — tracking is required to mark a
+  // shipment `shipped` (the configurable default policy, ADR-031) — 400.
+  FULFILLMENT_TRACKING_REQUIRED = 'FULFILLMENT_TRACKING_REQUIRED',
+
+  // --- Cancel Order / Cancel Line flow (ADR-031, drivers land later) ---
+  // The order cannot be cancelled in its current state — it has a `shipped`/
+  // `delivered` fulfillment, so cancellation would strand physically-shipped stock
+  // — 409.
+  ORDER_NOT_CANCELLABLE = 'ORDER_NOT_CANCELLABLE',
+  // The order line referenced by a cancel-line request does not exist on the order
+  // — 404.
+  ORDER_LINE_NOT_FOUND = 'ORDER_LINE_NOT_FOUND',
 }
 
 // One concrete throwable for the orders bounded context, carrying a typed `code`
