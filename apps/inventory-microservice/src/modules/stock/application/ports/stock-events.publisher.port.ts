@@ -1,6 +1,7 @@
 import {
   StockAdjustedEvent,
   StockAllocatedEvent,
+  StockCommittedEvent,
   StockLevelInitializedEvent,
   StockLowEvent,
   StockMovement,
@@ -37,6 +38,9 @@ export interface IStockEventsPublisherPort {
   // Emitted by the Release + Cancel-Allocation operations onto `inventory_queue`
   // (reserved surface).
   publishStockReleased(event: StockReleasedEvent, correlationId?: string): Promise<void>;
+  // Emitted by the Commit Sale operation onto `inventory_queue` (reserved surface),
+  // one per shipped line.
+  publishStockCommitted(event: StockCommittedEvent, correlationId?: string): Promise<void>;
   // Emitted for EVERY ledger insert (high-volume). It takes the domain
   // `StockMovement` record directly — a deliberate divergence from the other
   // methods (which take a `DomainEvent`): a dedicated wrapper event class would

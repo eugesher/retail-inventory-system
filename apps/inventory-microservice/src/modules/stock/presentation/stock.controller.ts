@@ -4,6 +4,8 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 import {
   IAllocationCancelPayload,
   IAllocationResult,
+  ICommitSalePayload,
+  ICommitSaleResult,
   IPage,
   IReservationAllocatePayload,
   IReservationReleasePayload,
@@ -28,6 +30,7 @@ import {
   AdjustStockUseCase,
   AllocateStockUseCase,
   CancelAllocationUseCase,
+  CommitSaleUseCase,
   ListLocationsUseCase,
   ListStockMovementsUseCase,
   QueryAvailabilityUseCase,
@@ -48,6 +51,7 @@ export class StockController {
     private readonly releaseReservation: ReleaseReservationUseCase,
     private readonly allocateStock: AllocateStockUseCase,
     private readonly cancelAllocation: CancelAllocationUseCase,
+    private readonly commitSale: CommitSaleUseCase,
     private readonly transferStock: TransferStockUseCase,
     private readonly listStockMovements: ListStockMovementsUseCase,
   ) {}
@@ -149,5 +153,17 @@ export class StockController {
     @Payload() payload: IAllocationCancelPayload,
   ): Promise<{ cancelled: number }> {
     return this.cancelAllocation.execute(payload);
+  }
+
+  // Commit Sale (ADR-031): physically ships an order's allocated stock at
+  // fulfillment time — per line it decrements BOTH on-hand and allocated in one
+  // `StockLevel.commitSale` and appends one strictly-negative `sale` movement
+  // referencing the fulfillment. All-lines-atomic; idempotent on `fulfillmentId`
+  // (a replay decrements nothing and re-returns). An on-hand shortfall is a 409
+  // `STOCK_RESULT_NEGATIVE` (mapped by the `InventoryRpcExceptionFilter`). Driven
+  // retail→inventory over RMQ after the local ship commit (no gateway HTTP route).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_COMMIT_SALE)
+  public handleCommitSale(@Payload() payload: ICommitSalePayload): Promise<ICommitSaleResult> {
+    return this.commitSale.execute(payload);
   }
 }

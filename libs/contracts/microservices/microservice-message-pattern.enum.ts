@@ -20,6 +20,8 @@ export enum MicroserviceMessagePatternEnum {
   INVENTORY_STOCK_ALLOCATED = 'inventory.stock.allocated',
   INVENTORY_STOCK_RELEASED = 'inventory.stock.released',
   INVENTORY_STOCK_MOVEMENT_RECORDED = 'inventory.stock-movement.recorded',
+  INVENTORY_STOCK_COMMIT_SALE = 'inventory.stock.commit-sale',
+  INVENTORY_STOCK_COMMITTED = 'inventory.stock.committed',
   CATALOG_PRODUCT_REGISTER = 'catalog.product.register',
   CATALOG_PRODUCT_PUBLISH = 'catalog.product.publish',
   CATALOG_PRODUCT_ARCHIVE = 'catalog.product.archive',

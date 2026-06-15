@@ -2,6 +2,7 @@ export * from './adjust-stock.use-case';
 export * from './allocate-stock.use-case';
 export * from './auto-init-stock-level.use-case';
 export * from './cancel-allocation.use-case';
+export * from './commit-sale.use-case';
 export * from './list-locations.use-case';
 export * from './list-stock-movements.use-case';
 export * from './low-stock.emitter';
