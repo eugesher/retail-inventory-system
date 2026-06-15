@@ -18,6 +18,7 @@ describe('Payment', () => {
 
       expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
       expect(payment.capturedAt).toBeNull();
+      expect(payment.flaggedForRefund).toBe(false);
       expect(payment.authorizedAt).toEqual(new Date('2026-06-10T00:00:00Z'));
       expect(payment.id).toBeNull();
       expect(payment.orderId).toBe(1);
@@ -112,6 +113,25 @@ describe('Payment', () => {
       expect(payment.id).toBe(9);
       expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
       expect(payment.capturedAt).toEqual(new Date('2026-06-11T09:30:00Z'));
+      // Omitting the flag on the load path defaults it false.
+      expect(payment.flaggedForRefund).toBe(false);
+    });
+
+    it('round-trips a flaggedForRefund payment from storage', () => {
+      const payment = Payment.reconstitute({
+        id: 9,
+        orderId: 1,
+        amountMinor: 5997,
+        currency: 'USD',
+        method: 'fake-card',
+        status: PaymentStatusEnum.CAPTURED,
+        gatewayReference: 'fake_abc123',
+        authorizedAt: new Date('2026-06-10T00:00:00Z'),
+        capturedAt: new Date('2026-06-11T09:30:00Z'),
+        flaggedForRefund: true,
+      });
+
+      expect(payment.flaggedForRefund).toBe(true);
     });
   });
 });

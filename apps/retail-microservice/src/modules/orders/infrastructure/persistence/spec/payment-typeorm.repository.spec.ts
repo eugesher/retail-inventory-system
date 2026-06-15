@@ -20,6 +20,7 @@ const paymentEntity = (overrides: Partial<PaymentEntity> = {}): PaymentEntity =>
     gatewayReference: 'fake_abc123',
     authorizedAt: new Date('2026-06-10T00:00:00Z'),
     capturedAt: null,
+    flaggedForRefund: false,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -34,6 +35,7 @@ describe('PaymentMapper', () => {
     expect(payment.orderId).toBe(1);
     expect(payment.amountMinor).toBe(5997);
     expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
+    expect(payment.flaggedForRefund).toBe(false);
   });
 
   it('omits a null id so TypeORM inserts a fresh authorize', () => {
@@ -51,6 +53,7 @@ describe('PaymentMapper', () => {
     expect('id' in partial).toBe(false);
     expect(partial.status).toBe(PaymentStatusEnum.AUTHORIZED);
     expect(partial.capturedAt).toBeNull();
+    expect(partial.flaggedForRefund).toBe(false);
   });
 });
 

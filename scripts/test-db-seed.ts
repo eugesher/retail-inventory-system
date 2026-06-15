@@ -75,6 +75,11 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     description: 'Capture authorized payments on orders',
   },
   {
+    id: '00000000-0000-4000-b000-00000000000f',
+    code: PermissionCodeEnum.ORDER_FULFILL,
+    description: 'Create and ship fulfillments on orders',
+  },
+  {
     id: '00000000-0000-4000-b000-000000000008',
     code: PermissionCodeEnum.ORDER_CANCEL,
     description: 'Cancel orders',
@@ -137,6 +142,10 @@ const ROLE_SEEDS: {
       PermissionCodeEnum.INVENTORY_READ,
       PermissionCodeEnum.INVENTORY_ADJUST,
       PermissionCodeEnum.INVENTORY_TRANSFER,
+      // Warehouse staff create and ship fulfillments, and may cancel an order
+      // that has not yet shipped.
+      PermissionCodeEnum.ORDER_FULFILL,
+      PermissionCodeEnum.ORDER_CANCEL,
     ],
   },
   {
@@ -146,6 +155,9 @@ const ROLE_SEEDS: {
     permissions: [
       PermissionCodeEnum.ORDER_READ,
       PermissionCodeEnum.ORDER_CAPTURE,
+      // Support already cancels/refunds; fulfillment authoring rounds out the
+      // order operations they may run.
+      PermissionCodeEnum.ORDER_FULFILL,
       PermissionCodeEnum.ORDER_CANCEL,
       PermissionCodeEnum.ORDER_REFUND,
     ],
