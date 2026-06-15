@@ -122,6 +122,15 @@ export const ROUTING_KEYS = {
   RETAIL_ORDER_GET: 'retail.order.get',
   RETAIL_ORDER_LIST: 'retail.order.list',
   RETAIL_PAYMENT_CAPTURE: 'retail.payment.capture',
+  // Fulfillment RPC command keys (API Gateway → Retail, served by the orders
+  // controller — a fulfillment is a sibling aggregate in the orders module, ADR-031).
+  // `retail.fulfillment.create` → `CreateFulfillmentUseCase` plans a shipment (one or
+  // more `OrderLine` quantities, owner-or-staff `order:fulfill`) and resolves a
+  // `FulfillmentView`; `retail.fulfillment.list` → `ListFulfillmentsUseCase` resolves
+  // an order's `FulfillmentView[]` newest-first (owner-or-staff `order:read`). The
+  // `fulfillment.*` aggregate noun is distinct from the order/payment keys.
+  RETAIL_FULFILLMENT_CREATE: 'retail.fulfillment.create',
+  RETAIL_FULFILLMENT_LIST: 'retail.fulfillment.list',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -141,6 +150,12 @@ export const ROUTING_KEYS = {
   // `retail.payment.captured` — emitted onto `retail_queue` after an explicit
   // capture succeeds. A reserved surface today, like `retail.payment.authorized`.
   RETAIL_PAYMENT_CAPTURED: 'retail.payment.captured',
+  // `retail.fulfillment.created` — emitted onto `retail_queue` (the producer's own
+  // queue) after a shipment is planned. The past-tense event paired with the
+  // imperative `retail.fulfillment.create` command (the `catalog.variant.create`/
+  // `.created` split, ADR-008). A reserved surface today, like the four
+  // `retail.cart.*` events.
+  RETAIL_FULFILLMENT_CREATED: 'retail.fulfillment.created',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

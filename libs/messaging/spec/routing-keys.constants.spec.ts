@@ -158,6 +158,15 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURE).toBe(
       MicroserviceMessagePatternEnum.RETAIL_PAYMENT_CAPTURE,
     );
+    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_CREATE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_CREATE,
+    );
+    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_LIST).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_LIST,
+    );
+    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_CREATED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_CREATED,
+    );
     expect(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_PAYMENT_CAPTURED,
     );

@@ -64,9 +64,11 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED]: HttpStatus.CONFLICT,
   // Fulfillment / cancel conflicts → 409: an illegal shipment-status transition, a
-  // create that would over-ship a line, or a cancel of an already-shipped order.
+  // create that would over-ship a line, an order not in a fulfillable state, or a
+  // cancel of an already-shipped order.
   [OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.FULFILLMENT_INVALID_STATUS_TRANSITION]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.ORDER_NOT_FULFILLABLE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE]: HttpStatus.CONFLICT,
 };
 

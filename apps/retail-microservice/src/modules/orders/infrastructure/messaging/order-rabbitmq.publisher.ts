@@ -3,6 +3,7 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
 import {
+  IRetailFulfillmentCreatedEvent,
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
   IRetailPaymentCapturedEvent,
@@ -55,6 +56,18 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
     await firstValueFrom(
       this.retailClient.emit<void, IRetailPaymentCapturedEvent>(
         ROUTING_KEYS.RETAIL_PAYMENT_CAPTURED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.fulfillment.created` rides the `RETAIL_MICROSERVICE` client onto
+  // `retail_queue` (the producer's own queue) — a reserved surface today, like the
+  // `retail.payment.*` events.
+  public async publishFulfillmentCreated(event: IRetailFulfillmentCreatedEvent): Promise<void> {
+    await firstValueFrom(
+      this.retailClient.emit<void, IRetailFulfillmentCreatedEvent>(
+        ROUTING_KEYS.RETAIL_FULFILLMENT_CREATED,
         event,
       ),
     );
