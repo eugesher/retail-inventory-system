@@ -39,3 +39,22 @@ export interface IRetailFulfillmentListPayload extends ICorrelationPayload {
   actorId: string;
   canReadAny: boolean;
 }
+
+// `retail.fulfillment.ship` — ships a `pending` fulfillment (owner-checked, or a staff
+// `order:fulfill` override via `isStaffFulfill`). The ship captures an authorized
+// payment inline (Q5 ship-triggered capture — blocked if the gateway declines),
+// advances the fulfillment → `shipped` (`trackingNumber` is required to mark it
+// shipped — the tracking-on-ship policy), the order's fulfillment axis + the shipped
+// `OrderLine` statuses, then calls `inventory.stock.commit-sale` after the local
+// commit (ADR-031). `trackingNumber` / `carrier` are the shipment metadata;
+// `idempotencyKey` is accepted + logged but not deduped (the cart-state idempotency
+// analogue — a non-`pending` re-ship is a 409). `actorId` is the resolved caller.
+export interface IRetailFulfillmentShipPayload extends ICorrelationPayload {
+  orderId: number;
+  fulfillmentId: number;
+  trackingNumber?: string;
+  carrier?: string;
+  idempotencyKey?: string;
+  actorId: string;
+  isStaffFulfill: boolean;
+}

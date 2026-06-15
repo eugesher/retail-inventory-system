@@ -223,6 +223,53 @@ describe('Order', () => {
     });
   });
 
+  describe('advanceFulfillment', () => {
+    it('moves unfulfilled → partially-shipped and bumps the version', () => {
+      const order = placeOrder();
+
+      order.advanceFulfillment(OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED);
+
+      expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED);
+      expect(order.version).toBe(1);
+    });
+
+    it('moves unfulfilled → shipped directly (a full single ship)', () => {
+      const order = placeOrder();
+
+      order.advanceFulfillment(OrderFulfillmentStatusEnum.SHIPPED);
+
+      expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.SHIPPED);
+    });
+
+    it('allows a forward move that stays partially-shipped (a further partial ship)', () => {
+      const order = placeOrder();
+      order.advanceFulfillment(OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED);
+
+      expect(() =>
+        order.advanceFulfillment(OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED),
+      ).not.toThrow();
+      expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED);
+    });
+
+    it('rejects a strictly-backward move (shipped → partially-shipped)', () => {
+      const order = placeOrder();
+      order.advanceFulfillment(OrderFulfillmentStatusEnum.SHIPPED);
+
+      expect(() => order.advanceFulfillment(OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED)).toThrow(
+        OrderDomainException,
+      );
+    });
+
+    it('touches only the fulfillment axis (lifecycle + payment unchanged)', () => {
+      const order = placeOrder();
+
+      order.advanceFulfillment(OrderFulfillmentStatusEnum.SHIPPED);
+
+      expect(order.status).toBe(OrderStatusEnum.PENDING);
+      expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.NONE);
+    });
+  });
+
   describe('lines', () => {
     it('exposes its lines, defaulting them to the ALLOCATED sentinel at place-time', () => {
       const order = placeOrder([makeLine(null, 7, 1000, 1)]);

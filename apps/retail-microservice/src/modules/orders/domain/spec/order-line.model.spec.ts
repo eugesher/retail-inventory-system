@@ -48,25 +48,58 @@ describe('OrderLine', () => {
   });
 
   describe('snapshot immutability', () => {
-    it('exposes sku / nameSnapshot / unitPriceMinor as getter-only (no setters)', () => {
+    it('keeps the money/identity snapshot intact across a status mutation', () => {
       const line = new OrderLine({ ...baseProps });
 
-      // The snapshot fields are `readonly` — assigning through them throws in strict
-      // mode and the value never changes; they are the buyer's contract, decoupled
-      // from any later catalog change.
-      expect(() => {
-        (line as unknown as { sku: string }).sku = 'SKU-X';
-      }).toThrow();
-      expect(() => {
-        (line as unknown as { nameSnapshot: string }).nameSnapshot = 'Renamed';
-      }).toThrow();
-      expect(() => {
-        (line as unknown as { unitPriceMinor: number }).unitPriceMinor = 9999;
-      }).toThrow();
+      // `status` is the only mutable field — advancing it must not disturb the
+      // place-time price/identity snapshot (the buyer's contract, decoupled from any
+      // later catalog change). The snapshot fields are `readonly` (compile-time
+      // immutable, no setter); only `markFulfillment` can move `status`.
+      line.markFulfillment(OrderLineStatusEnum.SHIPPED);
 
+      expect(line.status).toBe(OrderLineStatusEnum.SHIPPED);
       expect(line.sku).toBe('SKU-7');
       expect(line.nameSnapshot).toBe('Blue Widget');
       expect(line.unitPriceMinor).toBe(1500);
+      expect(line.lineTotalMinor).toBe(4500);
+    });
+  });
+
+  describe('markFulfillment', () => {
+    it('advances allocated → partially-shipped → shipped', () => {
+      const line = new OrderLine({ ...baseProps });
+
+      line.markFulfillment(OrderLineStatusEnum.PARTIALLY_SHIPPED);
+      expect(line.status).toBe(OrderLineStatusEnum.PARTIALLY_SHIPPED);
+
+      line.markFulfillment(OrderLineStatusEnum.SHIPPED);
+      expect(line.status).toBe(OrderLineStatusEnum.SHIPPED);
+    });
+
+    it('advances allocated → shipped directly (a full single ship)', () => {
+      const line = new OrderLine({ ...baseProps });
+      line.markFulfillment(OrderLineStatusEnum.SHIPPED);
+      expect(line.status).toBe(OrderLineStatusEnum.SHIPPED);
+    });
+
+    it('is an idempotent no-op when the status is unchanged', () => {
+      const line = new OrderLine({ ...baseProps });
+      line.markFulfillment(OrderLineStatusEnum.SHIPPED);
+      expect(() => line.markFulfillment(OrderLineStatusEnum.SHIPPED)).not.toThrow();
+      expect(line.status).toBe(OrderLineStatusEnum.SHIPPED);
+    });
+
+    it('rejects a strictly-backward move (shipped → partially-shipped)', () => {
+      const line = new OrderLine({ ...baseProps });
+      line.markFulfillment(OrderLineStatusEnum.SHIPPED);
+      // A backward move is an internal-invariant breach the use case never produces —
+      // a plain Error (500), not a typed domain rejection.
+      expect(() => line.markFulfillment(OrderLineStatusEnum.PARTIALLY_SHIPPED)).toThrow();
+    });
+
+    it('rejects a status outside the fulfillment-progress subset', () => {
+      const line = new OrderLine({ ...baseProps });
+      expect(() => line.markFulfillment(OrderLineStatusEnum.CANCELLED)).toThrow();
     });
   });
 

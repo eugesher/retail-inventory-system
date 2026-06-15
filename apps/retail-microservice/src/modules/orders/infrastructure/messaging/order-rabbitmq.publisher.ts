@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   IRetailFulfillmentCreatedEvent,
+  IRetailFulfillmentShippedEvent,
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
   IRetailPaymentCapturedEvent,
@@ -68,6 +69,18 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
     await firstValueFrom(
       this.retailClient.emit<void, IRetailFulfillmentCreatedEvent>(
         ROUTING_KEYS.RETAIL_FULFILLMENT_CREATED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.fulfillment.shipped` rides the `RETAIL_MICROSERVICE` client onto
+  // `retail_queue` (the producer's own queue), where the notification service binds a
+  // shipment-confirmation consumer.
+  public async publishFulfillmentShipped(event: IRetailFulfillmentShippedEvent): Promise<void> {
+    await firstValueFrom(
+      this.retailClient.emit<void, IRetailFulfillmentShippedEvent>(
+        ROUTING_KEYS.RETAIL_FULFILLMENT_SHIPPED,
         event,
       ),
     );

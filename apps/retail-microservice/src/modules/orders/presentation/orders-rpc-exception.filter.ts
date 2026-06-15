@@ -69,6 +69,7 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.FULFILLMENT_INVALID_STATUS_TRANSITION]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_NOT_FULFILLABLE]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.ORDER_INVALID_FULFILLMENT_TRANSITION]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE]: HttpStatus.CONFLICT,
 };
 

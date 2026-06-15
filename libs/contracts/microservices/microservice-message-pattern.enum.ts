@@ -62,6 +62,7 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_PAYMENT_CAPTURE = 'retail.payment.capture',
   RETAIL_FULFILLMENT_CREATE = 'retail.fulfillment.create',
   RETAIL_FULFILLMENT_LIST = 'retail.fulfillment.list',
+  RETAIL_FULFILLMENT_SHIP = 'retail.fulfillment.ship',
   RETAIL_CART_CREATED = 'retail.cart.created',
   RETAIL_CART_LINE_ADDED = 'retail.cart.line-added',
   RETAIL_CART_LINE_REMOVED = 'retail.cart.line-removed',
@@ -70,5 +71,6 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_PAYMENT_AUTHORIZED = 'retail.payment.authorized',
   RETAIL_PAYMENT_CAPTURED = 'retail.payment.captured',
   RETAIL_FULFILLMENT_CREATED = 'retail.fulfillment.created',
+  RETAIL_FULFILLMENT_SHIPPED = 'retail.fulfillment.shipped',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
 }

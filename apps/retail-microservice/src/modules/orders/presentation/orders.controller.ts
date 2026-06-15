@@ -7,6 +7,7 @@ import {
   IPlaceOrderPayload,
   IRetailFulfillmentCreatePayload,
   IRetailFulfillmentListPayload,
+  IRetailFulfillmentShipPayload,
   IRetailOrderGetPayload,
   IRetailOrderListPayload,
   IRetailPaymentCapturePayload,
@@ -21,6 +22,7 @@ import {
   ListFulfillmentsUseCase,
   ListMyOrdersUseCase,
   PlaceOrderUseCase,
+  ShipFulfillmentUseCase,
 } from '../application/use-cases';
 
 // RPC surface for the order operations (API Gateway → Retail over `retail_queue`).
@@ -41,6 +43,7 @@ export class OrdersController {
     private readonly capturePayment: CapturePaymentUseCase,
     private readonly createFulfillment: CreateFulfillmentUseCase,
     private readonly listFulfillments: ListFulfillmentsUseCase,
+    private readonly shipFulfillment: ShipFulfillmentUseCase,
   ) {}
 
   @MessagePattern(ROUTING_KEYS.RETAIL_CART_PLACE)
@@ -75,5 +78,12 @@ export class OrdersController {
     @Payload() payload: IRetailFulfillmentListPayload,
   ): Promise<FulfillmentView[]> {
     return this.listFulfillments.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_FULFILLMENT_SHIP)
+  public handleShipFulfillment(
+    @Payload() payload: IRetailFulfillmentShipPayload,
+  ): Promise<FulfillmentView> {
+    return this.shipFulfillment.execute(payload);
   }
 }
