@@ -13,6 +13,10 @@ export interface IPaymentProps {
   gatewayReference: string;
   authorizedAt: Date | null;
   capturedAt: Date | null;
+  // Set by Cancel Order on a captured payment (a later capability) to mark that a
+  // refund is owed; a refund capability consumes it. Optional on the load path and
+  // defaults `false` — a freshly authorized payment is never flagged.
+  flaggedForRefund?: boolean;
   createdAt?: Date | null;
   updatedAt?: Date | null;
 }
@@ -55,6 +59,7 @@ export class Payment extends AggregateRoot<number | null> {
   private readonly _gatewayReference: string;
   private readonly _authorizedAt: Date | null;
   private _capturedAt: Date | null;
+  private _flaggedForRefund: boolean;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
 
@@ -92,6 +97,7 @@ export class Payment extends AggregateRoot<number | null> {
     this._gatewayReference = props.gatewayReference;
     this._authorizedAt = props.authorizedAt;
     this._capturedAt = props.capturedAt;
+    this._flaggedForRefund = props.flaggedForRefund ?? false;
     this.createdAt = props.createdAt ?? null;
     this.updatedAt = props.updatedAt ?? null;
   }
@@ -111,6 +117,7 @@ export class Payment extends AggregateRoot<number | null> {
       gatewayReference: input.gatewayReference,
       authorizedAt: input.authorizedAt,
       capturedAt: null,
+      flaggedForRefund: false,
     });
   }
 
@@ -149,6 +156,13 @@ export class Payment extends AggregateRoot<number | null> {
 
   public get capturedAt(): Date | null {
     return this._capturedAt;
+  }
+
+  // True once Cancel Order flags a captured payment as owing a refund (a later
+  // capability writes it). `false` for every freshly authorized payment — the
+  // mutator that sets it ships with its consumer, not here.
+  public get flaggedForRefund(): boolean {
+    return this._flaggedForRefund;
   }
 
   // The **only** mutation: `AUTHORIZED → CAPTURED`, stamping `capturedAt`. Rejects
