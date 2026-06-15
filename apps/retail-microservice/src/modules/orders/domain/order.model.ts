@@ -305,6 +305,45 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
+  // Fulfillment axis: advances the order's **roll-up** fulfillment status along the
+  // forward chain `unfulfilled → partially-shipped → shipped → delivered`. Driven by
+  // the Ship operation (sets `partially-shipped` or `shipped`) and the Deliver
+  // operation (sets `delivered`); the use case computes the target from the order's
+  // fulfillments' shipped line quantities, so this mutator only guards the axis, not
+  // the arithmetic. A **strictly backward** move (e.g. `shipped → partially-shipped`)
+  // is rejected `ORDER_INVALID_FULFILLMENT_TRANSITION` (409); a forward-or-equal move
+  // is allowed (a single full ship goes `unfulfilled → shipped` directly, and a
+  // further partial ship that still does not complete the order stays
+  // `partially-shipped`). Bumps the OCC token. Touches **only** the fulfillment axis —
+  // the lifecycle and payment axes are untouched (orthogonality, ADR-028 §2).
+  public advanceFulfillment(next: OrderFulfillmentStatusEnum): void {
+    if (Order.fulfillmentRank(next) < Order.fulfillmentRank(this._fulfillmentStatus)) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_INVALID_FULFILLMENT_TRANSITION,
+        `Order.advanceFulfillment: cannot move the fulfillment axis backward from ${this._fulfillmentStatus} to ${next}`,
+      );
+    }
+    this._fulfillmentStatus = next;
+    this.bumpVersion();
+  }
+
+  // The forward ordinal of each fulfillment-axis value. A move is legal iff it does
+  // not decrease this rank — encoding the `unfulfilled → partially-shipped → shipped
+  // → delivered` chain without forbidding the legitimate "skip" of a full single
+  // ship (`unfulfilled → shipped`).
+  private static fulfillmentRank(status: OrderFulfillmentStatusEnum): number {
+    switch (status) {
+      case OrderFulfillmentStatusEnum.UNFULFILLED:
+        return 0;
+      case OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED:
+        return 1;
+      case OrderFulfillmentStatusEnum.SHIPPED:
+        return 2;
+      case OrderFulfillmentStatusEnum.DELIVERED:
+        return 3;
+    }
+  }
+
   private static requireNonNegativeMoney(value: number, field: string): void {
     if (!Number.isInteger(value) || value < 0) {
       throw new OrderDomainException(

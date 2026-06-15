@@ -7,3 +7,4 @@ export * from './list-fulfillments.use-case';
 export * from './list-my-orders.use-case';
 export * from './order-view.factory';
 export * from './place-order.use-case';
+export * from './ship-fulfillment.use-case';

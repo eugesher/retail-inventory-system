@@ -2,6 +2,8 @@ import {
   CartStatusEnum,
   IAllocationCancelPayload,
   IAllocationResult,
+  ICommitSalePayload,
+  ICommitSaleResult,
   IReservationAllocatePayload,
   OrderFulfillmentStatusEnum,
   OrderLineStatusEnum,
@@ -19,6 +21,7 @@ import {
   IOrderCartReaderPort,
   IOrderCartSnapshot,
   IOrderCatalogGatewayPort,
+  IOrderCommitSaleGatewayPort,
   IOrderEventsPublisherPort,
   IOrderInventoryGatewayPort,
   IOrderPage,
@@ -358,6 +361,7 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public readonly authorized: unknown[] = [];
   public readonly captured: unknown[] = [];
   public readonly fulfillmentCreated: unknown[] = [];
+  public readonly fulfillmentShipped: unknown[] = [];
 
   public publishOrderPlaced(event: unknown): Promise<void> {
     this.placed.push(event);
@@ -377,6 +381,36 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public publishFulfillmentCreated(event: unknown): Promise<void> {
     this.fulfillmentCreated.push(event);
     return Promise.resolve();
+  }
+
+  public publishFulfillmentShipped(event: unknown): Promise<void> {
+    this.fulfillmentShipped.push(event);
+    return Promise.resolve();
+  }
+}
+
+// In-memory order→inventory commit-sale gateway. Records every commitSale call so the
+// ship spec can assert the `{ orderId, fulfillmentId, lines }` passed, and exposes a
+// programmable rejection (`commitError`) to exercise the retry / log-and-replay path.
+// The default echoes each requested line back as committed.
+export class FakeOrderCommitSaleGateway implements IOrderCommitSaleGatewayPort {
+  public readonly calls: ICommitSalePayload[] = [];
+  // Use `makeWireError` to build a wire-shaped rejection. When set, every attempt
+  // rejects — exercising the bounded retry then the swallow-and-log poison path.
+  public commitError: Error | null = null;
+
+  public commitSale(payload: ICommitSalePayload): Promise<ICommitSaleResult> {
+    this.calls.push(payload);
+    if (this.commitError !== null) {
+      return Promise.reject(this.commitError);
+    }
+    return Promise.resolve({
+      committed: payload.lines.map((line) => ({
+        variantId: line.variantId,
+        stockLocationId: line.stockLocationId ?? 'default-warehouse',
+        quantity: line.quantity,
+      })),
+    });
   }
 }
 

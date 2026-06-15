@@ -141,6 +141,12 @@ export const ROUTING_KEYS = {
   // `fulfillment.*` aggregate noun is distinct from the order/payment keys.
   RETAIL_FULFILLMENT_CREATE: 'retail.fulfillment.create',
   RETAIL_FULFILLMENT_LIST: 'retail.fulfillment.list',
+  // `retail.fulfillment.ship` → `ShipFulfillmentUseCase` ships a pending fulfillment
+  // (owner-or-staff `order:fulfill`): it captures an authorized payment inline,
+  // advances the fulfillment → `shipped`, the order's fulfillment axis + the shipped
+  // `OrderLine` statuses, then calls `inventory.stock.commit-sale` after the local
+  // commit, and resolves the updated `FulfillmentView` (ADR-031).
+  RETAIL_FULFILLMENT_SHIP: 'retail.fulfillment.ship',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -166,6 +172,12 @@ export const ROUTING_KEYS = {
   // `.created` split, ADR-008). A reserved surface today, like the four
   // `retail.cart.*` events.
   RETAIL_FULFILLMENT_CREATED: 'retail.fulfillment.created',
+  // `retail.fulfillment.shipped` — emitted onto `retail_queue` (the producer's own
+  // queue) after a shipment ships. The past-tense event paired with the imperative
+  // `retail.fulfillment.ship` command. The notification service binds a consumer for
+  // it (a shipment-confirmation fan-out); for now the emit is best-effort post-commit
+  // (ADR-020).
+  RETAIL_FULFILLMENT_SHIPPED: 'retail.fulfillment.shipped',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

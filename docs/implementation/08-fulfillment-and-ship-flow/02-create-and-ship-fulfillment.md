@@ -4,8 +4,8 @@ This document describes the operations that act on the `Fulfillment` aggregate
 introduced in
 [01-fulfillment-aggregate-and-three-statuses.md](01-fulfillment-aggregate-and-three-statuses.md):
 planning a shipment (**Create Fulfillment**), reading an order's shipments (**List
-Fulfillments**), and — documented by the ship operation in a later section —
-**Ship Fulfillment**. All of them live in the retail `orders/` module, served by the
+Fulfillments**), and shipping one (**Ship Fulfillment**, §4). All of them live in the
+retail `orders/` module, served by the
 orders RPC controller, because a fulfillment is a sibling aggregate of `Order` /
 `Payment` / `Address` (see
 [ADR-031](../../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)).
@@ -156,13 +156,107 @@ order's shipments, and staff carrying `order:read` (folded into `canReadAny` at 
 gateway) can read any. The order is loaded purely to gate the read — the authorization
 rule lives on the order, and the fulfillments hang off it.
 
-## 4. Ship Fulfillment + tracking-number policy
+## 4. Ship Fulfillment
 
-> The **Ship Fulfillment** operation — which captures the order's payment, physically
-> decrements inventory through the cross-service Commit Sale RPC, advances the order's
-> fulfillment axis and each shipped line's status, and enforces the
-> tracking-number-required policy — is documented in this same file by the ship
-> operation. The `Fulfillment.ship` mutator and its tracking-on-ship rule already exist
-> on the aggregate (see
-> [01-fulfillment-aggregate-and-three-statuses.md](01-fulfillment-aggregate-and-three-statuses.md));
-> the operation that drives it is added here when it lands.
+**Ship Fulfillment is the operation that physically moves the stock and takes the
+money.** It is the single operation that advances three status axes at once and crosses
+the service boundary: it captures the order's payment (the payment axis), advances the
+order's fulfillment axis and each shipped line's status, and physically decrements
+inventory through the cross-service Commit Sale RPC.
+
+RPC: `retail.fulfillment.ship` → `ShipFulfillmentUseCase` → `FulfillmentView` (the
+updated shipment; the order's advanced statuses are observable via a follow-up
+`retail.order.get`). The imperative `ship` command is paired with the past-tense
+`retail.fulfillment.shipped` event the operation emits after committing.
+
+The **payment-capture half** of Ship — when it captures, what happens if the capture
+fails, and what happens if the inventory decrement fails after the commit — is its own
+topic, documented in
+[03-ship-triggered-capture-q5.md](03-ship-triggered-capture-q5.md). This section covers
+the fulfillment mechanics: authorization, preconditions, the tracking-number policy, and
+the partial-vs-full status roll-up.
+
+### Owner-or-staff authorization
+
+Ship is authorized **owner-or-staff `order:fulfill`**, the same gate as Create (§1) via
+`loadAuthorizedOrder(orderRepository, orderId, actorId, isStaffFulfill)`. Practically
+Ship is staff-run from the warehouse, but the owner-or-staff shape keeps the module's one
+authorization model.
+
+### Preconditions
+
+- **The fulfillment exists and belongs to the order.** `FULFILLMENT_REPOSITORY.findById`
+  resolves the shipment; a missing one, or one whose `orderId` does not match the
+  request, is `404` (`FULFILLMENT_NOT_FOUND`).
+- **The fulfillment is `pending`.** Only a planned-but-unshipped shipment can ship; a
+  `shipped` / `delivered` / `cancelled` one is `409`
+  (`FULFILLMENT_INVALID_STATUS_TRANSITION`). A repeated ship of the same fulfillment is
+  therefore rejected rather than silently re-run — the `Idempotency-Key` header is
+  accepted and logged but **not** deduped, and Commit Sale is independently idempotent on
+  `fulfillmentId` inventory-side, so a genuine retry never double-decrements stock.
+- **A tracking number is supplied** (the tracking-number policy, below).
+- **The order has a payment to capture.** A fulfillable order was authorized-on-place, so
+  a missing payment is an invariant breach (`409`).
+
+### The tracking-number policy
+
+**A tracking number is required to mark a shipment `shipped`** — the configurable default
+policy. A null or blank `trackingNumber` is rejected `FULFILLMENT_TRACKING_REQUIRED`
+(`400`). The rule has two enforcement points working together:
+
+- The **domain** `Fulfillment.ship({ trackingNumber, carrier, shippedAt })` mutator is
+  the authority — it refuses to leave `pending` without a non-blank tracking number (see
+  [01-fulfillment-aggregate-and-three-statuses.md](01-fulfillment-aggregate-and-three-statuses.md)).
+- The **use case** re-checks the same rule up front, *before* the out-of-process payment
+  capture. This ordering is deliberate: the capture is an irreversible side effect, so a
+  ship that would fail its own tracking precondition must fail **before** any money
+  moves, never after. (The same up-front-validation principle is why the capture decision
+  runs before the local transaction — see
+  [03-ship-triggered-capture-q5.md](03-ship-triggered-capture-q5.md).)
+
+`carrier` is optional shipment metadata that may stay null; only `trackingNumber` gates
+the transition. The policy is "configurable" in the sense that the requirement lives in
+one place (the domain mutator) and a future relaxation — e.g. allowing a tracking-less
+ship for a store pickup — changes exactly that guard.
+
+### Partial vs full ship: the status roll-up
+
+When a fulfillment ships, the operation advances **three** things, all derived from one
+source of truth — **the order's fulfillments' shipped line quantities**, not a stored
+flag:
+
+1. **Each shipped `OrderLine.status`.** For every order line, the use case sums the units
+   shipped across the order's `shipped`/`delivered` fulfillments (the just-shipped one is
+   now `shipped` and counted). A line whose cumulative shipped quantity reaches its
+   ordered quantity flips to `shipped`; a line with *some but not all* units shipped flips
+   to `partially-shipped`; a line with no shipped units stays `allocated`. The flip rides
+   `OrderLine.markFulfillment`, a forward-only mutator (`allocated → partially-shipped →
+   shipped`) — the only mutable field on the otherwise-immutable place-time line snapshot.
+2. **The order's roll-up `fulfillmentStatus`.** `Order.advanceFulfillment(next)` sets the
+   header axis to `shipped` **iff every** order line is now fully shipped, else
+   `partially-shipped`. The mutator guards the forward chain (`unfulfilled →
+   partially-shipped → shipped → delivered`) and rejects a strictly-backward move
+   (`ORDER_INVALID_FULFILLMENT_TRANSITION`, `409`); a single full ship legitimately skips
+   straight from `unfulfilled` to `shipped`. It touches **only** the fulfillment axis —
+   the lifecycle and payment axes are orthogonal (ADR-028 §2).
+3. **The `Fulfillment` itself** → `shipped`, stamped with `shippedAt` and the tracking
+   metadata.
+
+Why only `shipped`/`delivered` fulfillments count toward the roll-up — and not the
+already-fulfilled-including-`pending` sum that **Create** measures (§1) — is the crucial
+distinction: Create counts planned units to stop *over-planning* a line, but the roll-up
+status must reflect what has *physically shipped*. Counting a `pending` sibling would mark
+a line `shipped` before its second box ever left.
+
+A worked sequence for a single-line order, line ordered at quantity 10, planned as two
+fulfillments F1 (qty 4) and F2 (qty 6):
+
+| Step | Action | Line shipped | Line status | Order `fulfillmentStatus` |
+| --- | --- | --- | --- | --- |
+| 1 | ship F1 | 4 / 10 | `partially-shipped` | `partially-shipped` |
+| 2 | ship F2 | 10 / 10 | `shipped` | `shipped` |
+
+All of step 1–3's writes — the fulfillment transition, the payment capture record (when
+one happened), the line flips, and the order-axis advance — commit in **one local
+transaction**. The cross-service Commit Sale and the event emits run **after** that commit
+(see [03-ship-triggered-capture-q5.md](03-ship-triggered-capture-q5.md)).

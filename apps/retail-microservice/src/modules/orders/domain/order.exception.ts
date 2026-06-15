@@ -123,6 +123,13 @@ export enum OrderErrorCodeEnum {
   // `ship` was called without a tracking number — tracking is required to mark a
   // shipment `shipped` (the configurable default policy, ADR-031) — 400.
   FULFILLMENT_TRACKING_REQUIRED = 'FULFILLMENT_TRACKING_REQUIRED',
+  // `Order.advanceFulfillment` was asked to move the order's fulfillment axis
+  // strictly backward along `unfulfilled → partially-shipped → shipped → delivered`
+  // (e.g. `shipped → partially-shipped`) — a well-formed request the resource state
+  // forbids, distinct from a per-shipment `FULFILLMENT_INVALID_STATUS_TRANSITION`
+  // because this guards the *order header's* roll-up axis the Ship/Deliver operations
+  // advance (ADR-031) — 409.
+  ORDER_INVALID_FULFILLMENT_TRANSITION = 'ORDER_INVALID_FULFILLMENT_TRANSITION',
 
   // The order cannot be fulfilled in its current state — its lifecycle is not
   // `pending`/`confirmed` (a cancelled/shipped/delivered order), or its payment is

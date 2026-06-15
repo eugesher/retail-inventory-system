@@ -14,6 +14,7 @@ import {
   FULFILLMENT_REPOSITORY,
   ORDER_CART_READER,
   ORDER_CATALOG_GATEWAY,
+  ORDER_COMMIT_SALE_GATEWAY,
   ORDER_EVENTS_PUBLISHER,
   ORDER_INVENTORY_GATEWAY,
   ORDER_REPOSITORY,
@@ -29,9 +30,11 @@ import {
   ListFulfillmentsUseCase,
   ListMyOrdersUseCase,
   PlaceOrderUseCase,
+  ShipFulfillmentUseCase,
 } from '../application/use-cases';
 import {
   OrderCatalogRabbitmqAdapter,
+  OrderCommitSaleRabbitmqAdapter,
   OrderInventoryRabbitmqAdapter,
   OrderRabbitmqPublisher,
 } from './messaging';
@@ -55,18 +58,20 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 // The orders bounded-context module: the `Order` / `Address` / `Payment` /
 // `Fulfillment` repositories, the `PAYMENT_GATEWAY` seam (default
 // `FakePaymentGatewayAdapter`, ADR-028 §4), the transactional unit-of-work
-// (`TRANSACTION_PORT`), the two outbound seams (catalog snapshot reads + the
-// order/payment/fulfillment event emits), the Place Order + Authorize Payment +
-// Capture Payment + Get Order + List My Orders + Create Fulfillment + List Fulfillments
-// use cases, and the `retail.cart.place` / `retail.order.get` / `retail.order.list` /
-// `retail.payment.capture` / `retail.fulfillment.create` / `retail.fulfillment.list`
-// RPC controller.
+// (`TRANSACTION_PORT`), the outbound seams (catalog snapshot reads, the inventory
+// allocate/cancel + commit-sale seams, and the order/payment/fulfillment event emits),
+// the Place Order + Authorize Payment + Capture Payment + Get Order + List My Orders +
+// Create Fulfillment + List Fulfillments + Ship Fulfillment use cases, and the
+// `retail.cart.place` / `retail.order.get` / `retail.order.list` /
+// `retail.payment.capture` / `retail.fulfillment.create` / `retail.fulfillment.list` /
+// `retail.fulfillment.ship` RPC controller.
 //
 // Four messaging clients are imported: `MicroserviceClientCatalogModule` so Place
 // Order can snapshot from `catalog.variant.get` / `catalog.price.select` on
 // `catalog_queue`; `MicroserviceClientInventoryModule` so Place Order can allocate
 // (and compensate-cancel) the cart's stock holds via `inventory.reservation.allocate`
-// / `inventory.allocation.cancel` on `inventory_queue` (ADR-030 §4);
+// / `inventory.allocation.cancel` and Ship Fulfillment can decrement physical stock
+// via `inventory.stock.commit-sale` on `inventory_queue` (ADR-030 §4 / ADR-031);
 // `MicroserviceClientNotificationModule` so `retail.order.placed` lands on
 // `notification_events` (the consumer's queue); and `MicroserviceClientRetailModule`
 // so the reserved `retail.payment.authorized` event lands on the service's own
@@ -116,6 +121,8 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     { provide: ORDER_CATALOG_GATEWAY, useExisting: OrderCatalogRabbitmqAdapter },
     OrderInventoryRabbitmqAdapter,
     { provide: ORDER_INVENTORY_GATEWAY, useExisting: OrderInventoryRabbitmqAdapter },
+    OrderCommitSaleRabbitmqAdapter,
+    { provide: ORDER_COMMIT_SALE_GATEWAY, useExisting: OrderCommitSaleRabbitmqAdapter },
     OrderRabbitmqPublisher,
     { provide: ORDER_EVENTS_PUBLISHER, useExisting: OrderRabbitmqPublisher },
 
@@ -126,6 +133,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     CapturePaymentUseCase,
     CreateFulfillmentUseCase,
     ListFulfillmentsUseCase,
+    ShipFulfillmentUseCase,
 
     { provide: APP_FILTER, useClass: OrdersRpcExceptionFilter },
   ],
