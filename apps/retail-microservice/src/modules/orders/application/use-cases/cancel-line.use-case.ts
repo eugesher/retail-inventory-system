@@ -2,14 +2,13 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import {
-  FulfillmentStatusEnum,
   IAllocationCancelPayload,
   INVENTORY_DEFAULT_STOCK_LOCATION,
   IRetailOrderCancelLinePayload,
   OrderView,
 } from '@retail-inventory-system/contracts';
 
-import { Fulfillment, Order, OrderDomainException, OrderErrorCodeEnum } from '../../domain';
+import { Order, OrderDomainException, OrderErrorCodeEnum } from '../../domain';
 import {
   FULFILLMENT_REPOSITORY,
   IFulfillmentRepositoryPort,
@@ -21,6 +20,7 @@ import {
   PAYMENT_REPOSITORY,
 } from '../ports';
 import { releaseAllocationWithRetry } from './cancel-allocation-retry';
+import { countsTowardFulfilled, sumLineQuantitiesByOrderLine } from './fulfillment-quantities';
 import { toOrderView } from './order-view.factory';
 
 // Cancel Line cancels the **unshipped quantity of a single `OrderLine`** — a narrower
@@ -97,7 +97,8 @@ export class CancelLineUseCase {
     // The cancellable unshipped remainder = ordered − Σ (this line's quantity across the
     // order's non-`cancelled` fulfillments). An omitted `quantity` cancels all of it.
     const fulfillments = await this.fulfillmentRepository.listByOrderId(orderId);
-    const alreadyFulfilled = CancelLineUseCase.fulfilledQuantityForLine(fulfillments, orderLineId);
+    const alreadyFulfilled =
+      sumLineQuantitiesByOrderLine(fulfillments, countsTowardFulfilled).get(orderLineId) ?? 0;
     const remaining = line.quantity - alreadyFulfilled;
     const cancelQty = quantity ?? remaining;
     if (cancelQty <= 0 || cancelQty > remaining) {
@@ -126,28 +127,6 @@ export class CancelLineUseCase {
       'Order line cancelled',
     );
     return toOrderView(order, payment);
-  }
-
-  // Sums one order line's quantity across the order's non-`cancelled` fulfillments — the
-  // "already committed to a shipment" count a cancel-line cannot touch (only the free
-  // unshipped remainder is cancellable). A cancelled shipment is excluded (it freed its
-  // slice back), matching Create's remainder math.
-  private static fulfilledQuantityForLine(
-    fulfillments: Fulfillment[],
-    orderLineId: number,
-  ): number {
-    let total = 0;
-    for (const f of fulfillments) {
-      if (f.status === FulfillmentStatusEnum.CANCELLED) {
-        continue;
-      }
-      for (const fl of f.lines) {
-        if (fl.orderLineId === orderLineId) {
-          total += fl.quantity;
-        }
-      }
-    }
-    return total;
   }
 
   // The single-line cancel-allocation: the cancelled quantity of one variant at

@@ -34,8 +34,10 @@ import {
   PAYMENT_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { countsTowardShipped, sumLineQuantitiesByOrderLine } from './fulfillment-quantities';
 import { loadAuthorizedOrder } from './order-access';
 import { toFulfillmentView } from './fulfillment-view.factory';
+import { retryThenLogForReplay } from './retry-then-log-for-replay';
 
 // How many times Commit Sale is attempted after the local ship commit before the
 // failure is logged for operator replay. Commit Sale is idempotent on `fulfillmentId`
@@ -216,7 +218,7 @@ export class ShipFulfillmentUseCase {
         // included) — a `pending` sibling is planned but NOT shipped, so it must not
         // count toward the roll-up.
         const fulfillments = await this.fulfillmentRepository.listByOrderId(orderId, scope);
-        const shippedByLine = ShipFulfillmentUseCase.computeShippedByLine(fulfillments);
+        const shippedByLine = sumLineQuantitiesByOrderLine(fulfillments, countsTowardShipped);
 
         const next = ShipFulfillmentUseCase.advanceLinesAndRollUp(freshOrder, shippedByLine);
         freshOrder.advanceFulfillment(next);
@@ -286,28 +288,6 @@ export class ShipFulfillmentUseCase {
     return { didCapture: true, capturedAt: result.capturedAt };
   }
 
-  // Sums each `orderLineId`'s shipped quantity across the order's `shipped`/`delivered`
-  // fulfillments (a `pending`/`cancelled` shipment contributes nothing — only
-  // physically-shipped units count toward the roll-up).
-  private static computeShippedByLine(fulfillments: Fulfillment[]): Map<number, number> {
-    const shippedByLine = new Map<number, number>();
-    for (const f of fulfillments) {
-      if (
-        f.status !== FulfillmentStatusEnum.SHIPPED &&
-        f.status !== FulfillmentStatusEnum.DELIVERED
-      ) {
-        continue;
-      }
-      for (const line of f.lines) {
-        shippedByLine.set(
-          line.orderLineId,
-          (shippedByLine.get(line.orderLineId) ?? 0) + line.quantity,
-        );
-      }
-    }
-    return shippedByLine;
-  }
-
   // Flips each order line's status from its shipped-vs-ordered quantity and returns the
   // order-axis roll-up: `shipped` iff EVERY line is fully shipped, else
   // `partially-shipped`. A line with no shipped units stays `ALLOCATED` (its
@@ -371,30 +351,19 @@ export class ShipFulfillmentUseCase {
     payload: ICommitSalePayload,
     correlationId: string,
   ): Promise<void> {
-    for (let attempt = 1; attempt <= COMMIT_SALE_MAX_ATTEMPTS; attempt++) {
-      try {
-        await this.commitSaleGateway.commitSale(payload);
-        return;
-      } catch (error) {
-        if (attempt < COMMIT_SALE_MAX_ATTEMPTS) {
-          this.logger.warn(
-            { err: error as Error, correlationId, attempt, fulfillmentId: payload.fulfillmentId },
-            'Commit Sale failed — retrying',
-          );
-          continue;
-        }
-        this.logger.error(
-          {
-            err: error as Error,
-            correlationId,
-            orderId: payload.orderId,
-            fulfillmentId: payload.fulfillmentId,
-            lines: payload.lines,
-          },
-          'Commit Sale failed after retries; the ship is committed and the inventory decrement awaits operator replay (idempotent on fulfillmentId)',
-        );
-      }
-    }
+    await retryThenLogForReplay(() => this.commitSaleGateway.commitSale(payload), {
+      maxAttempts: COMMIT_SALE_MAX_ATTEMPTS,
+      logger: this.logger,
+      correlationId,
+      label: 'Commit Sale',
+      context: {
+        orderId: payload.orderId,
+        fulfillmentId: payload.fulfillmentId,
+        lines: payload.lines,
+      },
+      replayMessage:
+        'Commit Sale failed after retries; the ship is committed and the inventory decrement awaits operator replay (idempotent on fulfillmentId)',
+    });
   }
 
   // Best-effort, post-commit (ADR-020). The ship has already committed, so a publish
