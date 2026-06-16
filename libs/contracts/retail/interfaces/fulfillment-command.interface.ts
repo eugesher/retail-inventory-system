@@ -58,3 +58,15 @@ export interface IRetailFulfillmentShipPayload extends ICorrelationPayload {
   actorId: string;
   isStaffFulfill: boolean;
 }
+
+// `retail.fulfillment.deliver` — marks a `shipped` fulfillment `delivered`
+// (owner-checked, or a staff `order:fulfill` override via `isStaffFulfill`). Once
+// every non-`cancelled` fulfillment of the order is delivered the use case advances
+// the order's lifecycle + fulfillment axes to `delivered` too (the happy-path
+// terminal, ADR-031). `actorId` is the resolved caller.
+export interface IRetailFulfillmentDeliverPayload extends ICorrelationPayload {
+  orderId: number;
+  fulfillmentId: number;
+  actorId: string;
+  isStaffFulfill: boolean;
+}

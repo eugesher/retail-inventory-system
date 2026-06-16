@@ -147,6 +147,22 @@ export const ROUTING_KEYS = {
   // `OrderLine` statuses, then calls `inventory.stock.commit-sale` after the local
   // commit, and resolves the updated `FulfillmentView` (ADR-031).
   RETAIL_FULFILLMENT_SHIP: 'retail.fulfillment.ship',
+  // `retail.fulfillment.deliver` → `MarkDeliveredUseCase` marks a `shipped`
+  // fulfillment `delivered` (owner-or-staff `order:fulfill`); once every non-cancelled
+  // fulfillment of the order is delivered it advances the order's lifecycle +
+  // fulfillment axes to `delivered` too (the happy-path terminal, ADR-031). Resolves
+  // the updated `FulfillmentView`.
+  RETAIL_FULFILLMENT_DELIVER: 'retail.fulfillment.deliver',
+  // Order-cancellation RPC keys (API Gateway → Retail, served by the orders
+  // controller). `retail.order.cancel` → `CancelOrderUseCase` cancels a not-yet-shipped
+  // order (owner-or-staff `order:cancel`): it rejects an order with a `shipped`/
+  // `delivered` fulfillment, cancels any `pending` fulfillments, voids an authorized
+  // payment / flags a captured one for refund, and releases the order's stock
+  // allocation via `inventory.allocation.cancel` (ADR-031). `retail.order.cancel-line`
+  // → `CancelLineUseCase` cancels the unshipped quantity of a single `OrderLine` (staff
+  // `order:cancel`) with a proportional allocation release. Both resolve an `OrderView`.
+  RETAIL_ORDER_CANCEL: 'retail.order.cancel',
+  RETAIL_ORDER_CANCEL_LINE: 'retail.order.cancel-line',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -178,6 +194,18 @@ export const ROUTING_KEYS = {
   // it (a shipment-confirmation fan-out); for now the emit is best-effort post-commit
   // (ADR-020).
   RETAIL_FULFILLMENT_SHIPPED: 'retail.fulfillment.shipped',
+  // `retail.fulfillment.delivered` — emitted onto `retail_queue` (the producer's own
+  // queue) after a shipment is marked delivered. The past-tense event paired with the
+  // imperative `retail.fulfillment.deliver` command. A reserved surface today (no
+  // consumer bound yet), like `retail.fulfillment.created`.
+  RETAIL_FULFILLMENT_DELIVERED: 'retail.fulfillment.delivered',
+  // `retail.order.cancelled` — emitted onto `retail_queue` (the producer's own queue)
+  // after an order is cancelled. It carries `paymentFlaggedForRefund` so a downstream
+  // consumer can tell a captured-and-flagged cancellation (a refund is owed) from a
+  // simple voided-authorization one. NOTE: this key was *retired* by ADR-028 with the
+  // old order model; it is **re-introduced fresh here** with a live producer (Cancel
+  // Order), not resurrected from any stub. A reserved surface today (no consumer yet).
+  RETAIL_ORDER_CANCELLED: 'retail.order.cancelled',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

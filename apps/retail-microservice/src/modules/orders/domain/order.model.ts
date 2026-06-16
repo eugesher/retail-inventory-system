@@ -327,6 +327,56 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
+  // Lifecycle axis: `pending`/`confirmed → CANCELLED` (terminal). Driven by Cancel
+  // Order. Rejects an already-`cancelled` order and — crucially — a `shipped`/
+  // `delivered` one with `ORDER_NOT_CANCELLABLE` (409): an order whose lifecycle has
+  // advanced past placement can no longer be unwound here. (The Cancel Order use case
+  // ALSO guards on the presence of a `shipped`/`delivered` *fulfillment* before calling
+  // this — the lifecycle axis stays `pending` after a ship, so the fulfillment check is
+  // the real shipped-stock guard, and this mutator is the lifecycle backstop.) Bumps the
+  // OCC token. Touches **only** the lifecycle axis — the payment axis keeps its value
+  // (the `payment` row carries `voided`; the order's payment *axis* has no `voided`
+  // member, the deliberate orthogonality of ADR-028 §2), and the fulfillment axis is
+  // untouched.
+  public cancel(): void {
+    if (this._status !== OrderStatusEnum.PENDING && this._status !== OrderStatusEnum.CONFIRMED) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE,
+        `Order.cancel: can only cancel a pending or confirmed order (current: ${this._status})`,
+      );
+    }
+    this._status = OrderStatusEnum.CANCELLED;
+    this.bumpVersion();
+  }
+
+  // Delivery is the happy-path terminal: it advances **both** the lifecycle axis
+  // (`→ DELIVERED`) and the fulfillment axis (`→ DELIVERED`) in one mutation. Driven by
+  // Mark Delivered once every non-`cancelled` fulfillment of the order is delivered.
+  // Requires the order to be `shipped`-reachable — the fulfillment axis must be
+  // `partially-shipped` or `shipped` (something physically went out) and the lifecycle
+  // must not be `cancelled` — else `ORDER_INVALID_FULFILLMENT_TRANSITION` (409). Bumps
+  // the OCC token once.
+  public markDelivered(): void {
+    if (this._status === OrderStatusEnum.CANCELLED) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_INVALID_FULFILLMENT_TRANSITION,
+        'Order.markDelivered: a cancelled order cannot be delivered',
+      );
+    }
+    if (
+      this._fulfillmentStatus !== OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED &&
+      this._fulfillmentStatus !== OrderFulfillmentStatusEnum.SHIPPED
+    ) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_INVALID_FULFILLMENT_TRANSITION,
+        `Order.markDelivered: can only deliver a shipped order (fulfillment axis: ${this._fulfillmentStatus})`,
+      );
+    }
+    this._status = OrderStatusEnum.DELIVERED;
+    this._fulfillmentStatus = OrderFulfillmentStatusEnum.DELIVERED;
+    this.bumpVersion();
+  }
+
   // The forward ordinal of each fulfillment-axis value. A move is legal iff it does
   // not decrease this rank — encoding the `unfulfilled → partially-shipped → shipped
   // → delivered` chain without forbidding the legitimate "skip" of a full single

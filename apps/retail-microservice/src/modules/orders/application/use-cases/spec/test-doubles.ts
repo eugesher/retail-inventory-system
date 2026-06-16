@@ -319,6 +319,10 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
       gatewayReference: payment.gatewayReference,
       authorizedAt: payment.authorizedAt,
       capturedAt: payment.capturedAt,
+      // Preserve the refund flag across the save/re-read round-trip so the Cancel Order
+      // captured-payment path (`flagForRefund`) is observable in the re-read view (the
+      // real `PaymentMapper` round-trips it both directions).
+      flaggedForRefund: payment.flaggedForRefund,
     });
   }
 }
@@ -362,6 +366,8 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public readonly captured: unknown[] = [];
   public readonly fulfillmentCreated: unknown[] = [];
   public readonly fulfillmentShipped: unknown[] = [];
+  public readonly fulfillmentDelivered: unknown[] = [];
+  public readonly orderCancelled: unknown[] = [];
 
   public publishOrderPlaced(event: unknown): Promise<void> {
     this.placed.push(event);
@@ -385,6 +391,16 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
 
   public publishFulfillmentShipped(event: unknown): Promise<void> {
     this.fulfillmentShipped.push(event);
+    return Promise.resolve();
+  }
+
+  public publishFulfillmentDelivered(event: unknown): Promise<void> {
+    this.fulfillmentDelivered.push(event);
+    return Promise.resolve();
+  }
+
+  public publishOrderCancelled(event: unknown): Promise<void> {
+    this.orderCancelled.push(event);
     return Promise.resolve();
   }
 }
@@ -570,6 +586,7 @@ export const buildOrderWithLinesFixture = (
   opts: {
     status?: OrderStatusEnum;
     paymentStatus?: OrderPaymentStatusEnum;
+    fulfillmentStatus?: OrderFulfillmentStatusEnum;
     unitPriceMinor?: number;
   } = {},
 ): Order => {
@@ -596,7 +613,7 @@ export const buildOrderWithLinesFixture = (
     currency: 'USD',
     status: opts.status ?? OrderStatusEnum.PENDING,
     paymentStatus: opts.paymentStatus ?? OrderPaymentStatusEnum.AUTHORIZED,
-    fulfillmentStatus: OrderFulfillmentStatusEnum.UNFULFILLED,
+    fulfillmentStatus: opts.fulfillmentStatus ?? OrderFulfillmentStatusEnum.UNFULFILLED,
     lines: orderLines,
     subtotalMinor,
     taxTotalMinor: 0,

@@ -173,11 +173,26 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.RETAIL_FULFILLMENT_SHIP).toBe(
       MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_SHIP,
     );
+    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_DELIVER).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_DELIVER,
+    );
+    expect(ROUTING_KEYS.RETAIL_ORDER_CANCEL).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCEL,
+    );
+    expect(ROUTING_KEYS.RETAIL_ORDER_CANCEL_LINE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCEL_LINE,
+    );
     expect(ROUTING_KEYS.RETAIL_FULFILLMENT_CREATED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_CREATED,
     );
     expect(ROUTING_KEYS.RETAIL_FULFILLMENT_SHIPPED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_SHIPPED,
+    );
+    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_DELIVERED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_DELIVERED,
+    );
+    expect(ROUTING_KEYS.RETAIL_ORDER_CANCELLED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCELLED,
     );
     expect(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_PAYMENT_CAPTURED,
