@@ -172,7 +172,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — the mutable `Cart`/`CartLine` (`modules/cart/`) with **full cart operations** (create/get/add/change/remove/claim over six RPCs, fronted at `/api/cart`) and the immutable `Order`/`OrderLine` + polymorphic `Address` + `Payment` + the per-shipment `Fulfillment` (`modules/orders/`) with **Place Order** (authorize-on-place), **Capture Payment** (explicit), **Get Order**, **List My Orders**, and the full **Fulfillment** lifecycle (**Create**/**List**/**Ship**/**Deliver**) + **Cancel Order**/**Cancel Line** live (`PAYMENT_GATEWAY` → `FakePaymentGatewayAdapter`) |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
-| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low` and `retail.order.placed` to a notifier port |
+| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low`, `retail.order.placed`, and `retail.fulfillment.shipped` / `.delivered` to a notifier port |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, handles the category writes `catalog.category.create` / `catalog.category.reparent`, the category reads `catalog.category.list` / `catalog.category.get-tree` / `catalog.category.list-products`, the membership write `catalog.product.reclassify`, and the media operations `catalog.media.attach` / `catalog.media.reorder` / `catalog.media.detach` / `catalog.media.list`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
@@ -234,11 +234,13 @@ apps/notification-microservice/src/
     │   ├── ports/notifier.port.ts             # INotifierPort + NOTIFIER symbol
     │   └── use-cases/
     │       ├── send-low-stock-alert.use-case.ts
-    │       └── send-order-notification.use-case.ts
+    │       ├── send-order-notification.use-case.ts
+    │       └── send-shipment-notification.use-case.ts
     ├── infrastructure/
     │   ├── consumers/                          # RMQ @EventPattern subscribers
     │   │   ├── inventory-events.consumer.ts    # inventory.stock.low
-    │   │   └── order-events.consumer.ts        # retail.order.placed
+    │   │   ├── order-events.consumer.ts        # retail.order.placed
+    │   │   └── fulfillment-events.consumer.ts  # retail.fulfillment.shipped / .delivered
     │   ├── delivery/                           # NOTIFIER implementations
     │   │   ├── log.notifier.adapter.ts         # default
     │   │   ├── email.notifier.adapter.ts       # scaffold (TODO)
@@ -248,7 +250,7 @@ apps/notification-microservice/src/
         └── health.controller.ts                # @MessagePattern('notification.health.ping')
 ```
 
-The service fans out two cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`) and `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), both arriving on `notification_events`. `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
+The service fans out four cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`), `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), and `retail.fulfillment.shipped` / `retail.fulfillment.delivered` (via `FulfillmentEventsConsumer` → `SendShipmentNotificationUseCase.shipped`/`.delivered` — the shipment- and delivery-confirmation fan-out), all arriving on `notification_events`. The retail orders publisher emits the two fulfillment events through the `NOTIFICATION_MICROSERVICE` client so they land on the consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as `retail.order.placed` does. `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
 
 The inventory microservice exposes a single `stock` bounded context laid out the same way:
 
