@@ -10,8 +10,9 @@ shipment and Ship takes the money and moves the stock, these operations either c
 order out as delivered or unwind it (settling the payment the other way and releasing the
 stock back to `available`).
 
-All three live in the retail `orders/` module and are reached over RabbitMQ today; their
-gateway HTTP front (the admin-facing endpoints) lands with a later capability.
+All three live in the retail `orders/` module, served over RabbitMQ and fronted over HTTP
+under `/api/orders` by the gateway `modules/orders/` (see
+[07-fulfillment-http-files.md](07-fulfillment-http-files.md)).
 
 | Operation | Routing key | Use case | Returns |
 | --- | --- | --- | --- |
@@ -192,8 +193,9 @@ must be `partially-shipped` or `shipped` and the lifecycle must not be `cancelle
 `retail.order.get`); it emits `retail.fulfillment.delivered` best-effort onto `retail_queue`
 (a reserved surface today).
 
-Because there is no carrier-webhook integration, Mark Delivered is exposed (by the later
-gateway HTTP front) as an admin endpoint an operator drives manually.
+Because there is no carrier-webhook integration, Mark Delivered is exposed (by the gateway
+HTTP front, `POST /api/orders/:orderId/fulfillments/:fulfillmentId/deliver`) as an admin
+endpoint an operator drives manually.
 
 ## Cross-links
 

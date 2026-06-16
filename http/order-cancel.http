@@ -1,0 +1,281 @@
+# Order cancellation endpoints — the cancel-order + cancel-line cases
+#
+# These routes live on apps/api-gateway/src/modules/orders/presentation/
+# orders.controller.ts (@Controller('orders')) and front the retail microservice's
+# cancel RPCs over RabbitMQ (ADR-009 / ADR-031):
+#   - POST /api/orders/:orderId/cancel              (Bearer — owner OR order:cancel)
+#       Cancel a not-yet-shipped order. Voids an authorized / flags a captured payment,
+#       cancels any pending fulfillments, and releases the order's stock allocation.
+#       Rejected (409 ORDER_NOT_CANCELLABLE) once a fulfillment has shipped/delivered.
+#       Body { reason? }. Returns the cancelled OrderView (200).
+#   - POST /api/orders/:orderId/lines/:lineId/cancel  (Bearer — order:cancel, staff-only)
+#       Cancel one order line's UNSHIPPED quantity. Releases that quantity's allocation
+#       proportionally with no money-total change. Body { quantity? } (omit to cancel
+#       all the line's remaining unshipped quantity). Returns the updated OrderView (200).
+#
+# AUTHORIZATION. Cancel Order is owner-or-staff: the owning customer may cancel its own
+# pending order, OR staff with order:cancel may cancel any (no @RequiresPermission gate —
+# that would block the owner). Cancel Line is staff-only — line-level cancel is not an
+# owner operation (gated with order:cancel). A non-owner non-staff caller gets 403.
+#
+# All routes sit behind the global "api" prefix. With the default dev environment that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run `loginStaff` FIRST -> @accessToken (admin@example.com / admin1234; holds
+#      order:fulfill + order:cancel), then `loginCustomer` -> @customerToken
+#      (customer@example.com / customer1234; the order owner).
+#   3. CASE 1 (owner cancel, pre-fulfillment): `createCartA` -> `addLineA` ->
+#      `placeOrderA` -> `cancelOrderOwner`.
+#   4. CASE 2 (cancel a shipped order -> 409) + CASE 3 (cancel a line's remainder):
+#      `createCartB` -> `addLineB` -> `placeOrderB` -> `createFulfillmentB` ->
+#      `shipFulfillmentB` -> `cancelOrderShipped` (expect 409) -> `cancelLineB`.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name loginStaff
+# POST /api/auth/staff/login
+# Seeded admin login (order:fulfill + order:cancel).
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{loginStaff.response.body.$.accessToken}}
+
+###
+
+# @name loginCustomer
+# POST /api/auth/customer/login
+# Seeded customer login — the order owner.
+POST {{baseUrl}}/auth/customer/login
+Content-Type: application/json
+
+{
+  "email": "customer@example.com",
+  "password": "customer1234"
+}
+
+###
+@customerToken = {{loginCustomer.response.body.$.accessToken}}
+
+###
+# ===========================================================================
+# CASE 1 — owner cancels a pending, unfulfilled order (payment voided, stock released)
+# ===========================================================================
+
+# @name createCartA
+# POST /api/cart  (Bearer + owner-check)
+POST {{baseUrl}}/cart
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartIdA = {{createCartA.response.body.$.id}}
+
+###
+
+# @name addLineA
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 1 (USD 4999), quantity 1.
+POST {{baseUrl}}/cart/{{cartIdA}}/lines
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 1
+}
+
+###
+
+# @name placeOrderA
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Places the order (authorize-only). Response (201) is OrderView; capture @orderIdA.
+POST {{baseUrl}}/cart/{{cartIdA}}/place
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  }
+}
+
+###
+@orderIdA = {{placeOrderA.response.body.$.id}}
+
+###
+
+# @name cancelOrderOwner
+# POST /api/orders/:orderId/cancel  (Bearer — owner; the customer cancels its OWN order)
+# The owning customer cancels its pending order with the @customerToken (no permission
+# code — the owner-or-staff route). The authorized payment is voided and the order's
+# stock allocation is released. Response (200) is OrderView with status='cancelled'.
+POST {{baseUrl}}/orders/{{orderIdA}}/cancel
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "reason": "Customer changed their mind"
+}
+
+###
+# ===========================================================================
+# CASE 2 + 3 — a shipped order rejects cancel (409), then cancel its line's remainder
+# ===========================================================================
+
+# @name createCartB
+# POST /api/cart  (Bearer + owner-check)
+POST {{baseUrl}}/cart
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartIdB = {{createCartB.response.body.$.id}}
+
+###
+
+# @name addLineB
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 1 (USD 4999), quantity 2 — so one unit can ship and one remain.
+POST {{baseUrl}}/cart/{{cartIdB}}/lines
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 2
+}
+
+###
+
+# @name placeOrderB
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Places the order. Capture @orderIdB + the single line's id.
+POST {{baseUrl}}/cart/{{cartIdB}}/place
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  }
+}
+
+###
+@orderIdB = {{placeOrderB.response.body.$.id}}
+@lineBId = {{placeOrderB.response.body.$.lines[0].id}}
+
+###
+
+# @name createFulfillmentB
+# POST /api/orders/:orderId/fulfillments  (Bearer — order:fulfill)
+# Plans a PARTIAL shipment — 1 of the line's 2 ordered units — so 1 unit stays
+# unshipped for the cancel-line case. Capture @fulfillmentIdB.
+POST {{baseUrl}}/orders/{{orderIdB}}/fulfillments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "lines": [
+    { "orderLineId": {{lineBId}}, "quantity": 1 }
+  ]
+}
+
+###
+@fulfillmentIdB = {{createFulfillmentB.response.body.$.id}}
+
+###
+
+# @name shipFulfillmentB
+# POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+# Ships the partial fulfillment (captures the payment inline). The order's
+# fulfillmentStatus becomes 'partially-shipped'.
+POST {{baseUrl}}/orders/{{orderIdB}}/fulfillments/{{fulfillmentIdB}}/ship
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "trackingNumber": "1Z999AA10123456785",
+  "carrier": "UPS"
+}
+
+###
+
+# @name cancelOrderShipped
+# POST /api/orders/:orderId/cancel  (Bearer — staff order:cancel)
+# Attempts to cancel the whole order AFTER a fulfillment has shipped. EXPECT 409
+# ORDER_NOT_CANCELLABLE — the shipped-fulfillment-presence guard protects physically
+# shipped stock (the rejection is about order state, not authorization, hence a staff
+# token still gets 409). Body { statusCode:409, message, code:'ORDER_NOT_CANCELLABLE' }.
+POST {{baseUrl}}/orders/{{orderIdB}}/cancel
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Attempting to cancel a shipped order"
+}
+
+###
+
+# @name cancelLineB
+# POST /api/orders/:orderId/lines/:lineId/cancel  (Bearer — staff order:cancel)
+# Cancels the line's remaining UNSHIPPED quantity (1 unit — 2 ordered minus 1 shipped).
+# Releases that unit's allocation with no money-total change. Omitting `quantity` would
+# cancel the full remaining unshipped quantity. Response (200) is the updated OrderView.
+POST {{baseUrl}}/orders/{{orderIdB}}/lines/{{lineBId}}/cancel
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "quantity": 1
+}
