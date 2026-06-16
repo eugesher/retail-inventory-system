@@ -8,8 +8,9 @@ import { ICorrelationPayload } from '../../microservices';
 //
 // It is the past-tense counterpart of the imperative `retail.fulfillment.ship`
 // command (the `catalog.variant.create`/`.created` split, ADR-008). Emitted onto
-// `retail_queue` (the producer's own queue); the notification service binds a consumer
-// for it (a shipment-confirmation fan-out), so it is a best-effort post-commit emit
+// `notification_events` (the consumer's own queue — the producer-targets-consumer-queue
+// pattern `retail.order.placed` uses, ADR-008/020), where the notification service binds
+// a shipment-confirmation consumer for it, so it is a best-effort post-commit emit
 // (ADR-020). The payload carries the shipment header: `orderId` / `fulfillmentId`
 // identify the shipment, `trackingNumber` / `carrier` are the carrier metadata a
 // confirmation needs (`carrier` may be null), and `shippedAt` is the ship timestamp.
