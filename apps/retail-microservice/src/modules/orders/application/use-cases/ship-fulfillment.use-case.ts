@@ -176,14 +176,22 @@ export class ShipFulfillmentUseCase {
     // fulfillment so the post-commit steps run on concrete ids.
     const shippedFulfillment = await this.transactionPort.runInTransaction<Fulfillment>(
       async (scope) => {
-        const fresh = await this.fulfillmentRepository.findById(fulfillmentId, scope);
+        // Re-read the fulfillment under a pessimistic write lock — the first statement in
+        // the transaction, so a concurrent Cancel of the same order serialises here: if
+        // the Cancel committed first, this CURRENT read observes the now-`cancelled`
+        // fulfillment and `fresh.ship()` below rejects it (the
+        // single-writer-per-status-transition guard, ADR-031); if this Ship wins, the
+        // Cancel blocks on the lock until this commits and then sees the `shipped` status.
+        const fresh = await this.fulfillmentRepository.findByIdForUpdate(fulfillmentId, scope);
         if (!fresh) {
           throw new OrderDomainException(
             OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND,
             `Fulfillment ${fulfillmentId} vanished while shipping`,
           );
         }
-        // The domain enforces the state guard + tracking-on-ship (the authority).
+        // The domain enforces the state guard + tracking-on-ship (the authority); under
+        // the lock the guard now sees a concurrent transition (a non-`pending` status →
+        // FULFILLMENT_INVALID_STATUS_TRANSITION).
         fresh.ship({ trackingNumber, carrier: carrier ?? null, shippedAt });
         const shipped = await this.fulfillmentRepository.save(fresh, scope);
 

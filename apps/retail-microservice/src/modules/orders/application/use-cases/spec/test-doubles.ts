@@ -453,6 +453,13 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
     return Promise.resolve(fulfillment ? this.rebuild(fulfillment, id) : null);
   }
 
+  // The pessimistic-lock load path. In-memory there is no real row lock to take (a
+  // single-process unit test has no concurrent transaction), so it is just a current
+  // read — identical to `findById`. The real serialisation is exercised end-to-end.
+  public findByIdForUpdate(id: number): Promise<Fulfillment | null> {
+    return this.findById(id);
+  }
+
   public listByOrderId(orderId: number): Promise<Fulfillment[]> {
     const ordered = [...this.byId.values()]
       .filter((fulfillment) => fulfillment.orderId === orderId)

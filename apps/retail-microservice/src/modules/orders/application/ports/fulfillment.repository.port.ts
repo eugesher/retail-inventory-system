@@ -20,6 +20,15 @@ export const FULFILLMENT_REPOSITORY = Symbol('FULFILLMENT_REPOSITORY');
 //   the saved graph" idiom the order/payment repos follow).
 // - `findById` is the by-id load path (the ship/deliver/cancel preconditions resolve
 //   a fulfillment by id).
+// - `findByIdForUpdate` is the by-id load path **under a pessimistic write lock** — a
+//   current read (`SELECT … FOR UPDATE`) that serialises concurrent transitions of the
+//   same shipment. Ship and Cancel both re-read the contended fulfillment with it
+//   INSIDE their transaction, so the second writer blocks until the first commits and
+//   then observes the committed status — at which point its status precondition (Ship's
+//   `pending` guard / Cancel's no-`shipped` guard) rejects it. This is the
+//   single-writer-per-status-transition guard that makes the status precondition
+//   sufficient under contention; it MUST be called inside a transaction (the `scope` is
+//   required, not optional — a `FOR UPDATE` outside a transaction would lock nothing).
 // - `listByOrderId` lists an order's fulfillments newest-first (by `shipped_at` then
 //   `id` — the `(order_id, shipped_at)` index supports it). It backs the order's
 //   fulfillment roll-up (the cross-fulfillment sum the Create use case checks, and the
@@ -27,5 +36,6 @@ export const FULFILLMENT_REPOSITORY = Symbol('FULFILLMENT_REPOSITORY');
 export interface IFulfillmentRepositoryPort {
   save(fulfillment: Fulfillment, scope?: ITransactionScope): Promise<Fulfillment>;
   findById(id: number, scope?: ITransactionScope): Promise<Fulfillment | null>;
+  findByIdForUpdate(id: number, scope: ITransactionScope): Promise<Fulfillment | null>;
   listByOrderId(orderId: number, scope?: ITransactionScope): Promise<Fulfillment[]>;
 }

@@ -115,11 +115,37 @@ export class CancelOrderUseCase {
             `Order ${orderId} vanished while cancelling`,
           );
         }
+
+        // Re-acquire the order's fulfillments under a pessimistic write lock — a CURRENT
+        // read that serialises against a concurrent Ship of the same order. The
+        // pre-transaction `hasShippedFulfillment` check above is a fast fail for the
+        // uncontended path; this in-transaction re-check under the lock is the guard that
+        // holds under contention: a Ship that is committing now blocks this read until it
+        // commits, and the freshly-observed `shipped` status then rejects the cancel
+        // (`ORDER_NOT_CANCELLABLE`). Conversely a Ship that starts while this holds the
+        // lock blocks until this commits and then sees the `cancelled` fulfillment
+        // (the single-writer-per-status-transition guard, ADR-031).
+        const locked: Fulfillment[] = [];
+        for (const planned of await this.fulfillmentRepository.listByOrderId(orderId, scope)) {
+          const lockedFulfillment = await this.fulfillmentRepository.findByIdForUpdate(
+            planned.id!,
+            scope,
+          );
+          if (lockedFulfillment) {
+            locked.push(lockedFulfillment);
+          }
+        }
+        if (CancelOrderUseCase.hasShippedFulfillment(locked)) {
+          throw new OrderDomainException(
+            OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE,
+            `Order ${orderId} has a shipped or delivered fulfillment and cannot be cancelled`,
+          );
+        }
+
         freshOrder.cancel();
 
         // Cancel every `pending` fulfillment (a planned-but-not-shipped shipment).
-        const fresh = await this.fulfillmentRepository.listByOrderId(orderId, scope);
-        for (const fulfillment of fresh) {
+        for (const fulfillment of locked) {
           if (fulfillment.status === FulfillmentStatusEnum.PENDING) {
             fulfillment.cancel();
             await this.fulfillmentRepository.save(fulfillment, scope);
