@@ -80,6 +80,31 @@ export class FulfillmentTypeormRepository
     return entity ? FulfillmentMapper.toDomain(entity) : null;
   }
 
+  // The by-id load path under a pessimistic write lock (`SELECT … FOR UPDATE`). Unlike
+  // the non-locking `findById` — which, under InnoDB REPEATABLE READ, serves the
+  // transaction's snapshot and so cannot observe a concurrent committed transition —
+  // this is a CURRENT read: it reads the latest committed row and holds an exclusive
+  // lock on it until the transaction commits. Ship and Cancel both re-read the contended
+  // fulfillment with it inside their transaction, so a concurrent ship-vs-cancel
+  // serialises on the row lock: the loser blocks until the winner commits, then observes
+  // the committed status and its status precondition rejects it (the
+  // single-writer-per-status-transition guard, ADR-031). A `QueryBuilder` with an
+  // explicit `setLock` carries `FOR UPDATE` through the `lines` left join (MySQL locks
+  // the matched rows of every joined table); the lock requires an active transaction,
+  // hence the mandatory `scope`.
+  public async findByIdForUpdate(
+    id: number,
+    scope: ITransactionScope,
+  ): Promise<Fulfillment | null> {
+    const entity = await this.fulfillmentRepo(scope)
+      .createQueryBuilder('fulfillment')
+      .setLock('pessimistic_write')
+      .leftJoinAndSelect('fulfillment.lines', 'lines')
+      .where('fulfillment.id = :id', { id })
+      .getOne();
+    return entity ? FulfillmentMapper.toDomain(entity) : null;
+  }
+
   // An order's fulfillments, newest-first by `shipped_at` then `id` (the
   // `(order_id, shipped_at)` index supports it; a still-`pending` fulfillment has a
   // null `shipped_at`, which sorts last under `DESC`). Backs the order's fulfillment
