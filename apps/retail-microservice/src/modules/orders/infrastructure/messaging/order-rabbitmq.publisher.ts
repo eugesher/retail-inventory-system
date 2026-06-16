@@ -4,7 +4,9 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   IRetailFulfillmentCreatedEvent,
+  IRetailFulfillmentDeliveredEvent,
   IRetailFulfillmentShippedEvent,
+  IRetailOrderCancelledEvent,
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
   IRetailPaymentCapturedEvent,
@@ -81,6 +83,30 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
     await firstValueFrom(
       this.retailClient.emit<void, IRetailFulfillmentShippedEvent>(
         ROUTING_KEYS.RETAIL_FULFILLMENT_SHIPPED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.fulfillment.delivered` rides the `RETAIL_MICROSERVICE` client onto
+  // `retail_queue` (the producer's own queue) — a reserved surface today, like
+  // `retail.fulfillment.created`.
+  public async publishFulfillmentDelivered(event: IRetailFulfillmentDeliveredEvent): Promise<void> {
+    await firstValueFrom(
+      this.retailClient.emit<void, IRetailFulfillmentDeliveredEvent>(
+        ROUTING_KEYS.RETAIL_FULFILLMENT_DELIVERED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.order.cancelled` rides the `RETAIL_MICROSERVICE` client onto `retail_queue`
+  // (the producer's own queue) — a reserved surface today (the key, retired by ADR-028,
+  // is re-introduced fresh here with this live producer).
+  public async publishOrderCancelled(event: IRetailOrderCancelledEvent): Promise<void> {
+    await firstValueFrom(
+      this.retailClient.emit<void, IRetailOrderCancelledEvent>(
+        ROUTING_KEYS.RETAIL_ORDER_CANCELLED,
         event,
       ),
     );

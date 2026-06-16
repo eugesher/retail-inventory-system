@@ -46,3 +46,31 @@ export interface IRetailPaymentCapturePayload extends ICorrelationPayload {
   amountMinor?: number;
   idempotencyKey?: string;
 }
+
+// `retail.order.cancel` — cancels a not-yet-shipped order (owner-checked, or a staff
+// `order:cancel` override via `isStaffCancel` — a customer may cancel its own pending
+// order). The use case rejects an order with a `shipped`/`delivered` fulfillment,
+// cancels any `pending` fulfillments, voids an authorized / flags a captured payment,
+// and releases the order's stock allocation (ADR-031). `reason` is the optional
+// human-supplied cancellation reason (recorded on the `retail.order.cancelled` event +
+// the allocation-release movement). `actorId` is the resolved caller.
+export interface IRetailOrderCancelPayload extends ICorrelationPayload {
+  orderId: number;
+  reason?: string;
+  actorId: string;
+  isStaffCancel: boolean;
+}
+
+// `retail.order.cancel-line` — cancels the unshipped quantity of a single `OrderLine`
+// (**staff** `order:cancel` only — line-level cancel is not an owner operation). The
+// use case releases the cancelled quantity's stock allocation proportionally and makes
+// no money-total change (a credit/refund is the later refund capability). `quantity` is
+// optional — omit it to cancel all the line's remaining unshipped quantity; a value
+// exceeding that remainder is rejected. `actorId` is the resolved caller.
+export interface IRetailOrderCancelLinePayload extends ICorrelationPayload {
+  orderId: number;
+  orderLineId: number;
+  quantity?: number;
+  actorId: string;
+  isStaffCancel: boolean;
+}

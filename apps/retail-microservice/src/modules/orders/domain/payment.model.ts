@@ -180,6 +180,33 @@ export class Payment extends AggregateRoot<number | null> {
     this._capturedAt = at;
   }
 
+  // `AUTHORIZED → VOIDED`. Driven by Cancel Order when it cancels an order whose
+  // payment was authorized-but-not-captured: voiding releases the held authorization so
+  // no money is ever taken. Rejects any non-`authorized` start (a captured payment is
+  // flagged for refund instead — `flagForRefund` — and a voided/failed one is already
+  // terminal) with `PAYMENT_INVALID_STATUS_TRANSITION` (409). The in-process fake
+  // gateway has no `void` call (it never reserved real funds); a real gateway would
+  // void the authorization here — out of scope for this capability.
+  public void(): void {
+    if (this._status !== PaymentStatusEnum.AUTHORIZED) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
+        `Payment.void: can only void an authorized payment (current: ${this._status})`,
+      );
+    }
+    this._status = PaymentStatusEnum.VOIDED;
+  }
+
+  // Marks that this payment owes a refund. Driven by Cancel Order when it cancels an
+  // order whose payment was already **captured** — the money is gone, so cancellation
+  // cannot simply void it; it flags the row and a later refund capability issues the
+  // actual refund. **Idempotent** — flagging an already-flagged payment is a no-op, not
+  // an error. The flag is orthogonal to `status` (a captured payment stays `captured`
+  // while flagged); only a refund moves the status (a later capability, ADR-028 §6).
+  public flagForRefund(): void {
+    this._flaggedForRefund = true;
+  }
+
   private static requireNonEmpty(value: string, code: OrderErrorCodeEnum, field: string): void {
     if (typeof value !== 'string' || value.trim().length === 0) {
       throw new OrderDomainException(code, `Payment.${field} must be a non-empty string`);

@@ -24,11 +24,14 @@ import {
 } from '../application/ports';
 import {
   AuthorizePaymentUseCase,
+  CancelLineUseCase,
+  CancelOrderUseCase,
   CapturePaymentUseCase,
   CreateFulfillmentUseCase,
   GetOrderUseCase,
   ListFulfillmentsUseCase,
   ListMyOrdersUseCase,
+  MarkDeliveredUseCase,
   PlaceOrderUseCase,
   ShipFulfillmentUseCase,
 } from '../application/use-cases';
@@ -61,10 +64,12 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 // (`TRANSACTION_PORT`), the outbound seams (catalog snapshot reads, the inventory
 // allocate/cancel + commit-sale seams, and the order/payment/fulfillment event emits),
 // the Place Order + Authorize Payment + Capture Payment + Get Order + List My Orders +
-// Create Fulfillment + List Fulfillments + Ship Fulfillment use cases, and the
-// `retail.cart.place` / `retail.order.get` / `retail.order.list` /
-// `retail.payment.capture` / `retail.fulfillment.create` / `retail.fulfillment.list` /
-// `retail.fulfillment.ship` RPC controller.
+// Create Fulfillment + List Fulfillments + Ship Fulfillment + Mark Delivered +
+// Cancel Order + Cancel Line use cases, and the `retail.cart.place` /
+// `retail.order.get` / `retail.order.list` / `retail.payment.capture` /
+// `retail.fulfillment.create` / `retail.fulfillment.list` / `retail.fulfillment.ship` /
+// `retail.fulfillment.deliver` / `retail.order.cancel` / `retail.order.cancel-line` RPC
+// controller.
 //
 // Four messaging clients are imported: `MicroserviceClientCatalogModule` so Place
 // Order can snapshot from `catalog.variant.get` / `catalog.price.select` on
@@ -134,6 +139,9 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     CreateFulfillmentUseCase,
     ListFulfillmentsUseCase,
     ShipFulfillmentUseCase,
+    MarkDeliveredUseCase,
+    CancelOrderUseCase,
+    CancelLineUseCase,
 
     { provide: APP_FILTER, useClass: OrdersRpcExceptionFilter },
   ],

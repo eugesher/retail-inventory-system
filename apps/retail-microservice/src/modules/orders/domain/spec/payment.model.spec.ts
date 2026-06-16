@@ -96,6 +96,55 @@ describe('Payment', () => {
     });
   });
 
+  describe('void', () => {
+    it('transitions authorized → voided', () => {
+      const payment = Payment.authorized(authorizedInput());
+
+      payment.void();
+
+      expect(payment.status).toBe(PaymentStatusEnum.VOIDED);
+      // Voiding does not stamp capturedAt (no money was ever taken).
+      expect(payment.capturedAt).toBeNull();
+    });
+
+    it('rejects voiding a captured payment', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.capture(new Date());
+
+      expect(() => payment.void()).toThrow(OrderDomainException);
+    });
+
+    it('rejects voiding an already-voided payment', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.void();
+
+      expect(() => payment.void()).toThrow(OrderDomainException);
+    });
+  });
+
+  describe('flagForRefund', () => {
+    it('sets the refund flag on a captured payment', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.capture(new Date());
+
+      payment.flagForRefund();
+
+      expect(payment.flaggedForRefund).toBe(true);
+      // The flag is orthogonal to status — a flagged payment stays captured.
+      expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
+    });
+
+    it('is idempotent (flagging twice is a no-op, not an error)', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.capture(new Date());
+
+      payment.flagForRefund();
+      expect(() => payment.flagForRefund()).not.toThrow();
+
+      expect(payment.flaggedForRefund).toBe(true);
+    });
+  });
+
   describe('reconstitute', () => {
     it('rebuilds a captured payment from storage', () => {
       const payment = Payment.reconstitute({

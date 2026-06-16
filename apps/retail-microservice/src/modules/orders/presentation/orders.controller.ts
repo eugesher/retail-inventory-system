@@ -6,8 +6,11 @@ import {
   IPage,
   IPlaceOrderPayload,
   IRetailFulfillmentCreatePayload,
+  IRetailFulfillmentDeliverPayload,
   IRetailFulfillmentListPayload,
   IRetailFulfillmentShipPayload,
+  IRetailOrderCancelLinePayload,
+  IRetailOrderCancelPayload,
   IRetailOrderGetPayload,
   IRetailOrderListPayload,
   IRetailPaymentCapturePayload,
@@ -16,11 +19,14 @@ import {
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import {
+  CancelLineUseCase,
+  CancelOrderUseCase,
   CapturePaymentUseCase,
   CreateFulfillmentUseCase,
   GetOrderUseCase,
   ListFulfillmentsUseCase,
   ListMyOrdersUseCase,
+  MarkDeliveredUseCase,
   PlaceOrderUseCase,
   ShipFulfillmentUseCase,
 } from '../application/use-cases';
@@ -30,10 +36,12 @@ import {
 // orders controller, because the operation produces an immutable `Order` (ADR-028
 // §1). `retail.order.get` / `retail.order.list` / `retail.payment.capture` are the
 // read + capture keys (ADR-028 §3/§7). `retail.fulfillment.create` /
-// `retail.fulfillment.list` are the fulfillment keys — a fulfillment is a sibling
-// aggregate in the orders module (ADR-031), so its RPCs are served here too. Each
-// handler is a thin delegate; an `OrderDomainException` is terminated by the
-// `OrdersRpcExceptionFilter` into the `{ statusCode, ... }` wire shape the gateway maps.
+// `retail.fulfillment.list` / `retail.fulfillment.ship` / `retail.fulfillment.deliver`
+// are the fulfillment keys, and `retail.order.cancel` / `retail.order.cancel-line` the
+// order-cancellation keys — a fulfillment is a sibling aggregate in the orders module
+// (ADR-031), so all are served here too. Each handler is a thin delegate; an
+// `OrderDomainException` is terminated by the `OrdersRpcExceptionFilter` into the
+// `{ statusCode, ... }` wire shape the gateway maps.
 @Controller()
 export class OrdersController {
   constructor(
@@ -44,6 +52,9 @@ export class OrdersController {
     private readonly createFulfillment: CreateFulfillmentUseCase,
     private readonly listFulfillments: ListFulfillmentsUseCase,
     private readonly shipFulfillment: ShipFulfillmentUseCase,
+    private readonly markDelivered: MarkDeliveredUseCase,
+    private readonly cancelOrder: CancelOrderUseCase,
+    private readonly cancelLine: CancelLineUseCase,
   ) {}
 
   @MessagePattern(ROUTING_KEYS.RETAIL_CART_PLACE)
@@ -85,5 +96,22 @@ export class OrdersController {
     @Payload() payload: IRetailFulfillmentShipPayload,
   ): Promise<FulfillmentView> {
     return this.shipFulfillment.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_FULFILLMENT_DELIVER)
+  public handleDeliverFulfillment(
+    @Payload() payload: IRetailFulfillmentDeliverPayload,
+  ): Promise<FulfillmentView> {
+    return this.markDelivered.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_CANCEL)
+  public handleCancelOrder(@Payload() payload: IRetailOrderCancelPayload): Promise<OrderView> {
+    return this.cancelOrder.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_CANCEL_LINE)
+  public handleCancelLine(@Payload() payload: IRetailOrderCancelLinePayload): Promise<OrderView> {
+    return this.cancelLine.execute(payload);
   }
 }
