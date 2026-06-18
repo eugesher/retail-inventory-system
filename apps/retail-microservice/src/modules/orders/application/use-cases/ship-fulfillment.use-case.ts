@@ -46,12 +46,12 @@ import { retryThenLogForReplay } from './retry-then-log-for-replay';
 // unit tests; the realistic failure is a transient RMQ hiccup the broker recovers from.
 const COMMIT_SALE_MAX_ATTEMPTS = 3;
 
-// The outcome of the ship-triggered capture decision (Q5). `didCapture` says whether
+// The outcome of the ship-triggered capture decision (Q5). A non-null `capturedAt` says
 // THIS ship took the money (an `authorized` payment) — driving the in-transaction
 // `payment.capture` + `order.markPaymentCaptured` and the post-commit
-// `retail.payment.captured` emit — vs. skipped it (an already-`captured` payment).
+// `retail.payment.captured` emit; `null` means it was skipped (an already-`captured`
+// payment). One nullable field carries the decision — no redundant boolean, no `!`.
 interface ICaptureOutcome {
-  didCapture: boolean;
   capturedAt: Date | null;
 }
 
@@ -197,8 +197,8 @@ export class ShipFulfillmentUseCase {
         fresh.ship({ trackingNumber, carrier: carrier ?? null, shippedAt });
         const shipped = await this.fulfillmentRepository.save(fresh, scope);
 
-        if (capture.didCapture) {
-          payment.capture(capture.capturedAt!);
+        if (capture.capturedAt) {
+          payment.capture(capture.capturedAt);
           await this.paymentRepository.save(payment, scope);
         }
 
@@ -209,7 +209,7 @@ export class ShipFulfillmentUseCase {
             `Order ${orderId} vanished while shipping`,
           );
         }
-        if (capture.didCapture) {
+        if (capture.capturedAt) {
           freshOrder.markPaymentCaptured();
         }
 
@@ -238,12 +238,12 @@ export class ShipFulfillmentUseCase {
     // Best-effort post-commit emits (ADR-020): always the shipped event, plus the
     // captured event only when THIS ship took the money.
     await this.emitShipped(shippedFulfillment, correlationId);
-    if (capture.didCapture) {
+    if (capture.capturedAt) {
       await this.emitCaptured(order, payment, idempotencyKey, correlationId);
     }
 
     this.logger.info(
-      { correlationId, orderId, fulfillmentId, didCapture: capture.didCapture },
+      { correlationId, orderId, fulfillmentId, didCapture: capture.capturedAt !== null },
       'Fulfillment shipped',
     );
     return toFulfillmentView(shippedFulfillment);
@@ -263,7 +263,7 @@ export class ShipFulfillmentUseCase {
         { correlationId, orderId, paymentId: payment.id },
         'Payment already captured — skipping the gateway capture on ship',
       );
-      return { didCapture: false, capturedAt: null };
+      return { capturedAt: null };
     }
     if (payment.status !== PaymentStatusEnum.AUTHORIZED) {
       throw new OrderDomainException(
@@ -285,7 +285,7 @@ export class ShipFulfillmentUseCase {
         `Payment capture was declined for order ${orderId}; the ship is blocked until payment succeeds`,
       );
     }
-    return { didCapture: true, capturedAt: result.capturedAt };
+    return { capturedAt: result.capturedAt };
   }
 
   // Flips each order line's status from its shipped-vs-ordered quantity and returns the
