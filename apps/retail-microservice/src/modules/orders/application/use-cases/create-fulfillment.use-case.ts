@@ -2,7 +2,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import {
-  FulfillmentStatusEnum,
   FulfillmentView,
   INVENTORY_DEFAULT_STOCK_LOCATION,
   IRetailFulfillmentCreatePayload,
@@ -19,6 +18,7 @@ import {
   ORDER_EVENTS_PUBLISHER,
   ORDER_REPOSITORY,
 } from '../ports';
+import { countsTowardFulfilled, sumLineQuantitiesByOrderLine } from './fulfillment-quantities';
 import { loadAuthorizedOrder } from './order-access';
 import { toFulfillmentView } from './fulfillment-view.factory';
 
@@ -148,15 +148,7 @@ export class CreateFulfillmentUseCase {
     }
 
     const existing = await this.fulfillmentRepository.listByOrderId(orderId);
-    const alreadyByLine = new Map<number, number>();
-    for (const f of existing) {
-      if (f.status === FulfillmentStatusEnum.CANCELLED) {
-        continue;
-      }
-      for (const fl of f.lines) {
-        alreadyByLine.set(fl.orderLineId, (alreadyByLine.get(fl.orderLineId) ?? 0) + fl.quantity);
-      }
-    }
+    const alreadyByLine = sumLineQuantitiesByOrderLine(existing, countsTowardFulfilled);
 
     // Aggregate the request by `orderLineId` first, so two entries for the same line in
     // one request are summed before the comparison — otherwise each entry would be

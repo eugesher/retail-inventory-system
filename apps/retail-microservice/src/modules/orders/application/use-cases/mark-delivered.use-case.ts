@@ -83,7 +83,13 @@ export class MarkDeliveredUseCase {
     // one — roll the order up to `delivered` on both axes, atomically. Returns the
     // delivered fulfillment so the post-commit emit runs on the concrete graph.
     const delivered = await this.transactionPort.runInTransaction<Fulfillment>(async (scope) => {
-      const fresh = await this.fulfillmentRepository.findById(fulfillmentId, scope);
+      // Re-read under a pessimistic write lock — the same single-writer-per-status-
+      // transition guard Ship and Cancel take (ADR-031). A concurrent Deliver of the
+      // same fulfillment serialises here: the loser blocks until the winner commits,
+      // then observes the now-`delivered` status and `fresh.markDelivered()` below
+      // rejects it (a non-`shipped` status → FULFILLMENT_INVALID_STATUS_TRANSITION), so
+      // the order roll-up never runs twice and no duplicate `delivered` event fires.
+      const fresh = await this.fulfillmentRepository.findByIdForUpdate(fulfillmentId, scope);
       if (!fresh) {
         throw new OrderDomainException(
           OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND,

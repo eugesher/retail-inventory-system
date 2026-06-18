@@ -87,18 +87,18 @@ The system handles order lifecycle management and product stock tracking across 
 ┌──────────────▼─────────┐  ┌─────────────────▼─────────────┐
 │  Retail Microservice   │  │    Inventory Microservice     │
 │  Cart: 6 RPCs + place  │  │  RPC: stock-level.get,        │
-│  + 4 cart events.      │  │  location.list, receive,      │
-│  Orders: get/list/cap  │  │  adjust, transfer,            │
-│  fulfill/ship/cancel.  │  │  stock-movement.list,         │
-│  PAYMENT_GATEWAY ->    │  │  reservation.reserve/         │
-│  FakePaymentGateway.   │  │  release/allocate,            │
-│  Calls inventory       │  │  allocation.cancel            │
-│  reserve/release/      │  │  Aggregates: StockLevel,      │
-│  allocate (RPC).       │  │  StockLocation, Reservation,  │
-│  Emits order.placed    │  │  StockMovement (ledger)       │
-│  -> notification.      │  │  Consumes: variant.created    │
+│  Orders: get/list/cap. │  │  location.list, receive,      │
+│  Fulfillment/Line:     │  │  adjust, transfer,            │
+│  create/ship/deliver/  │  │  stock-movement.list,         │
+│  cancel order + line.  │  │  reservation.reserve/release/ │
+│  Ship captures payment │  │  allocate, allocation.cancel, │
+│  + commit-sale -> inv. │  │  stock.commit-sale            │
+│  Calls inv reserve/    │  │  Aggregates: StockLevel,      │
+│  release/allocate.     │  │  StockLocation, Reservation,  │
+│  Emits order.placed +  │  │  StockMovement (ledger)       │
+│  fulfillment.* events. │  │  Consumes: variant.created    │
 └──────────────┬─────────┘  │  Emits: reserved/allocated/   │
-               │            │  released, movement.recorded  │
+               │            │  released/committed           │
                │            │  + stock.low ─────────────────┼─┐
                │            │  ┌────────────┐               │ │
                │            │  │   Redis    │◄──cache-aside─┤ │
@@ -124,7 +124,8 @@ The system handles order lifecycle management and product stock tracking across 
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
 │              Notification Microservice (RMQ)                  │
-│  Listens: inventory.stock.low + retail.order.placed           │
+│  Listens: inventory.stock.low, retail.order.placed,           │
+│  retail.fulfillment.shipped / .delivered                      │
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
@@ -293,7 +294,7 @@ apps/inventory-microservice/src/
     │   ├── messaging/stock-rabbitmq.publisher.ts # STOCK_EVENTS_PUBLISHER adapter (inventory_queue + notification_events)
     │   └── stock.module.ts                    # binds the port symbols → adapters; APP_FILTER → InventoryRpcExceptionFilter
     └── presentation/
-        ├── stock.controller.ts                # 10 @MessagePattern: stock-level.get/receive/adjust/transfer, location.list, stock-movement.list, reservation.reserve/release/allocate, allocation.cancel
+        ├── stock.controller.ts                # 11 @MessagePattern: stock-level.get/receive/adjust/transfer, location.list, stock-movement.list, reservation.reserve/release/allocate, allocation.cancel, stock.commit-sale
         └── inventory-rpc-exception.filter.ts  # maps InventoryErrorCodeEnum → HTTP status
 ```
 
@@ -410,6 +411,8 @@ yarn start:dev
 
 The reservation + stock-movement capability is locked end-to-end by four gateway suites: `test/cart-reserve-release.e2e-spec.ts` (reserve on add/change, release on remove, the out-of-stock `409`), `test/place-order-allocates.e2e-spec.ts` (place converts holds to one `allocation` ledger row per order line), `test/inventory-movements-audit.e2e-spec.ts` (the ledger timeline, filters, paging, permission gates), and the canonical **`test/concurrent-oversell.e2e-spec.ts`** — two carts race for the last unit, exactly one wins, the loser gets `409 INVENTORY_OUT_OF_STOCK` with `available: 0`, and the final stock state is consistent down to the ledger. The concurrency proof is winner-agnostic and must stay green across 5 consecutive runs; the exact run + 5× stability commands and how to read the assertions are in [docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md](docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md).
 
+The fulfillment + ship + cancel capability is locked by six more gateway suites that drive the HTTP surface (login → place → fulfill → ship → deliver / cancel) and assert through **public state** (order `GET`, the public stock read, the uncached movements ledger — never event spies): `test/fulfillment-happy-path.e2e-spec.ts` (all four status axes advance, one `sale` movement per shipped line, on-hand **and** allocated both decrement), `test/fulfillment-partial-ship.e2e-spec.ts` (two fulfillments → `partially-shipped` then `shipped` roll-up), `test/cancel-order-pre-fulfillment.e2e-spec.ts` (cancel → payment voided + allocation released), `test/cancel-order-blocked-after-ship.e2e-spec.ts` (`409 ORDER_NOT_CANCELLABLE` once shipped), `test/ship-triggers-capture.e2e-spec.ts` (place leaves `authorized`, ship auto-captures), and the **`test/concurrent-ship-cancel.e2e-spec.ts`** ship-vs-cancel race (winner-agnostic, 5×-stable — the `findByIdForUpdate` row-lock guard). All six self-provision disjoint variants so they never contend with the seed or each other.
+
 ### Architecture lint
 
 The per-module hexagonal layout (`domain` → `application` → `infrastructure`/`presentation`, plus the `libs/*` boundaries documented in [ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)) is enforced by `eslint-plugin-boundaries`. The rules live in `eslint.config.mjs` and are the **source of truth for where a file should live** — when in doubt, run `yarn lint` and let the plugin answer.
@@ -519,6 +522,16 @@ Three guarantees hold across every inventory operation; the [ADR-030](docs/adr/0
 **Reservation TTL.** A `Reservation` is a time-bounded hold: every Reserve write (re)sets `expiresAt = now + RESERVATION_TTL_MINUTES` (default `15`), so an active line keeps refreshing its lease as the shopper edits the cart. Placing an order **commits** the hold inside the place transaction (reserved → allocated; a wall-clock-stale-but-still-held hold is refreshed-then-committed rather than rejected, since its counter is still occupied and therefore oversell-safe). A hold returns to `available` three ways: the cart Remove route **releases** it, Place **allocates** it (after which it is the order's allocation, freed only by a cancel-allocation), or an operator **manually releases** it by id (`POST /api/inventory/reservations/:reservationId/release`). There is **no expiry sweeper yet** — `Reservation.expire()` has no caller — so until that capability lands the manual release is the only tool that reclaims a hold whose owner walked away; a stranded hold over-holds stock but is never lost (the next Reserve on the same triple reuses the row, and a future sweeper will reclaim it).
 
 **Audit, not balance.** The `stock_movement` ledger is an **append-only audit trail, never the balance authority** ([ADR-027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md)). The running totals on `stock_level` are the source of truth; the ledger only records *what happened* (one fixed-sign row per counter change — `receipt`/`adjustment`/`allocation`/`release`, etc.), and **summing ledger rows never reconstructs on-hand**. The append is inexpressible as an update or delete (the `STOCK_MOVEMENT_REPOSITORY` port exposes only `append` + `listByVariant`) and runs *after* the version-checked persist in the same transaction, so a lost optimistic-write race leaves no orphan row and a retry appends exactly once. Every counter-changing operation — Receive, Adjust, Transfer, Reserve's Release, Allocate, Cancel — leaves its movement, giving the audit read (`GET /api/inventory/variants/:variantId/movements`) a complete, ordered history.
+
+### Fulfillment flow
+
+A placed order walks to `delivered` through per-shipment `Fulfillment` records ([ADR-031](docs/adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)); these notes describe the happy path and the two cancel paths the way the [inventory invariants](#inventory-invariants) describe the stock guarantees.
+
+**Place → fulfill → ship → deliver.** Placing an order authorizes payment and allocates stock, leaving it `status=pending` / `paymentStatus=authorized` / `fulfillmentStatus=unfulfilled`. An operator then **creates** one or more `Fulfillment`s — each a `pending` shipment of some `OrderLine` quantities from one stock location, with the cross-fulfillment sum per line capped at the ordered quantity. **Shipping** a fulfillment is the pivot that moves money and stock together: it **captures the payment inline** (ship-triggered capture, Q5 — an `authorized` payment is captured through the gateway *before* the local commit, and a decline blocks the ship with `409 ORDER_PAYMENT_NOT_CAPTURED` so nothing is written), advances the fulfillment to `shipped`, flips each shipped line and the order's roll-up `fulfillmentStatus` (`shipped` iff every line is fully shipped, else `partially-shipped`), and **after** the commit calls the cross-service `inventory.stock.commit-sale` to physically decrement on-hand **and** allocated (retried-then-logged, never rolled back; idempotent on `fulfillmentId`, so a replay is safe). **Delivering** the last outstanding fulfillment rolls the order up to `delivered` on both the lifecycle and fulfillment axes.
+
+**Cancel pre-ship voids/releases; cancel post-capture flags for refund.** **Cancel Order** is refused once any fulfillment is `shipped`/`delivered` (`409 ORDER_NOT_CANCELLABLE` — the real shipped-stock guard, since the lifecycle axis stays `pending` after a ship). When it is allowed it cancels the order and its `pending` fulfillments, settles the payment — an `authorized` payment is **voided**, a `captured` one is **flagged for refund** (`flagged_for_refund = true`, consumed by a later refund capability) — and releases the order's stock allocation through `inventory.allocation.cancel` (best-effort, retried-then-logged). **Cancel Line** (staff-only) cancels a single line's **unshipped** quantity and releases just that slice of the allocation, with no money-total change and no event.
+
+**Ship-vs-cancel is serialized by a row lock.** A concurrent ship and cancel of the same order would otherwise both succeed and invert state (`cancelled` + `shipped` at once). Both operations re-read the contended `fulfillment` row `FOR UPDATE` inside their transaction, so the loser blocks until the winner commits and then fails its own precondition — the ship's `pending` guard or the cancel's re-checked no-`shipped`-fulfillment guard. Exactly one wins; strict per-aggregate optimistic-concurrency enforcement on the order is a later hardening. This is locked by `test/concurrent-ship-cancel.e2e-spec.ts`, winner-agnostic and green across 5 consecutive runs.
 
 ### Auth
 

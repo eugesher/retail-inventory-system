@@ -34,8 +34,10 @@ import {
   PAYMENT_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { countsTowardShipped, sumLineQuantitiesByOrderLine } from './fulfillment-quantities';
 import { loadAuthorizedOrder } from './order-access';
 import { toFulfillmentView } from './fulfillment-view.factory';
+import { retryThenLogForReplay } from './retry-then-log-for-replay';
 
 // How many times Commit Sale is attempted after the local ship commit before the
 // failure is logged for operator replay. Commit Sale is idempotent on `fulfillmentId`
@@ -44,12 +46,12 @@ import { toFulfillmentView } from './fulfillment-view.factory';
 // unit tests; the realistic failure is a transient RMQ hiccup the broker recovers from.
 const COMMIT_SALE_MAX_ATTEMPTS = 3;
 
-// The outcome of the ship-triggered capture decision (Q5). `didCapture` says whether
+// The outcome of the ship-triggered capture decision (Q5). A non-null `capturedAt` says
 // THIS ship took the money (an `authorized` payment) — driving the in-transaction
 // `payment.capture` + `order.markPaymentCaptured` and the post-commit
-// `retail.payment.captured` emit — vs. skipped it (an already-`captured` payment).
+// `retail.payment.captured` emit; `null` means it was skipped (an already-`captured`
+// payment). One nullable field carries the decision — no redundant boolean, no `!`.
 interface ICaptureOutcome {
-  didCapture: boolean;
   capturedAt: Date | null;
 }
 
@@ -195,8 +197,8 @@ export class ShipFulfillmentUseCase {
         fresh.ship({ trackingNumber, carrier: carrier ?? null, shippedAt });
         const shipped = await this.fulfillmentRepository.save(fresh, scope);
 
-        if (capture.didCapture) {
-          payment.capture(capture.capturedAt!);
+        if (capture.capturedAt) {
+          payment.capture(capture.capturedAt);
           await this.paymentRepository.save(payment, scope);
         }
 
@@ -207,7 +209,7 @@ export class ShipFulfillmentUseCase {
             `Order ${orderId} vanished while shipping`,
           );
         }
-        if (capture.didCapture) {
+        if (capture.capturedAt) {
           freshOrder.markPaymentCaptured();
         }
 
@@ -216,7 +218,7 @@ export class ShipFulfillmentUseCase {
         // included) — a `pending` sibling is planned but NOT shipped, so it must not
         // count toward the roll-up.
         const fulfillments = await this.fulfillmentRepository.listByOrderId(orderId, scope);
-        const shippedByLine = ShipFulfillmentUseCase.computeShippedByLine(fulfillments);
+        const shippedByLine = sumLineQuantitiesByOrderLine(fulfillments, countsTowardShipped);
 
         const next = ShipFulfillmentUseCase.advanceLinesAndRollUp(freshOrder, shippedByLine);
         freshOrder.advanceFulfillment(next);
@@ -236,12 +238,12 @@ export class ShipFulfillmentUseCase {
     // Best-effort post-commit emits (ADR-020): always the shipped event, plus the
     // captured event only when THIS ship took the money.
     await this.emitShipped(shippedFulfillment, correlationId);
-    if (capture.didCapture) {
+    if (capture.capturedAt) {
       await this.emitCaptured(order, payment, idempotencyKey, correlationId);
     }
 
     this.logger.info(
-      { correlationId, orderId, fulfillmentId, didCapture: capture.didCapture },
+      { correlationId, orderId, fulfillmentId, didCapture: capture.capturedAt !== null },
       'Fulfillment shipped',
     );
     return toFulfillmentView(shippedFulfillment);
@@ -261,7 +263,7 @@ export class ShipFulfillmentUseCase {
         { correlationId, orderId, paymentId: payment.id },
         'Payment already captured — skipping the gateway capture on ship',
       );
-      return { didCapture: false, capturedAt: null };
+      return { capturedAt: null };
     }
     if (payment.status !== PaymentStatusEnum.AUTHORIZED) {
       throw new OrderDomainException(
@@ -283,29 +285,7 @@ export class ShipFulfillmentUseCase {
         `Payment capture was declined for order ${orderId}; the ship is blocked until payment succeeds`,
       );
     }
-    return { didCapture: true, capturedAt: result.capturedAt };
-  }
-
-  // Sums each `orderLineId`'s shipped quantity across the order's `shipped`/`delivered`
-  // fulfillments (a `pending`/`cancelled` shipment contributes nothing — only
-  // physically-shipped units count toward the roll-up).
-  private static computeShippedByLine(fulfillments: Fulfillment[]): Map<number, number> {
-    const shippedByLine = new Map<number, number>();
-    for (const f of fulfillments) {
-      if (
-        f.status !== FulfillmentStatusEnum.SHIPPED &&
-        f.status !== FulfillmentStatusEnum.DELIVERED
-      ) {
-        continue;
-      }
-      for (const line of f.lines) {
-        shippedByLine.set(
-          line.orderLineId,
-          (shippedByLine.get(line.orderLineId) ?? 0) + line.quantity,
-        );
-      }
-    }
-    return shippedByLine;
+    return { capturedAt: result.capturedAt };
   }
 
   // Flips each order line's status from its shipped-vs-ordered quantity and returns the
@@ -371,30 +351,19 @@ export class ShipFulfillmentUseCase {
     payload: ICommitSalePayload,
     correlationId: string,
   ): Promise<void> {
-    for (let attempt = 1; attempt <= COMMIT_SALE_MAX_ATTEMPTS; attempt++) {
-      try {
-        await this.commitSaleGateway.commitSale(payload);
-        return;
-      } catch (error) {
-        if (attempt < COMMIT_SALE_MAX_ATTEMPTS) {
-          this.logger.warn(
-            { err: error as Error, correlationId, attempt, fulfillmentId: payload.fulfillmentId },
-            'Commit Sale failed — retrying',
-          );
-          continue;
-        }
-        this.logger.error(
-          {
-            err: error as Error,
-            correlationId,
-            orderId: payload.orderId,
-            fulfillmentId: payload.fulfillmentId,
-            lines: payload.lines,
-          },
-          'Commit Sale failed after retries; the ship is committed and the inventory decrement awaits operator replay (idempotent on fulfillmentId)',
-        );
-      }
-    }
+    await retryThenLogForReplay(() => this.commitSaleGateway.commitSale(payload), {
+      maxAttempts: COMMIT_SALE_MAX_ATTEMPTS,
+      logger: this.logger,
+      correlationId,
+      label: 'Commit Sale',
+      context: {
+        orderId: payload.orderId,
+        fulfillmentId: payload.fulfillmentId,
+        lines: payload.lines,
+      },
+      replayMessage:
+        'Commit Sale failed after retries; the ship is committed and the inventory decrement awaits operator replay (idempotent on fulfillmentId)',
+    });
   }
 
   // Best-effort, post-commit (ADR-020). The ship has already committed, so a publish
