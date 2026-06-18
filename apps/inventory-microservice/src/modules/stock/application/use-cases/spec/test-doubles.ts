@@ -5,6 +5,7 @@ import {
   ReservationStatusEnum,
   StockAdjustedEvent,
   StockAllocatedEvent,
+  StockCommittedEvent,
   StockLevel,
   StockLevelInitializedEvent,
   StockLocation,
@@ -231,6 +232,7 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
   public readonly reserved: { event: StockReservedEvent; correlationId?: string }[] = [];
   public readonly allocated: { event: StockAllocatedEvent; correlationId?: string }[] = [];
   public readonly released: { event: StockReleasedEvent; correlationId?: string }[] = [];
+  public readonly committed: { event: StockCommittedEvent; correlationId?: string }[] = [];
   public readonly movementsRecorded: { movement: StockMovement; correlationId?: string }[] = [];
 
   public publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void> {
@@ -268,6 +270,11 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
 
   public publishStockReleased(event: StockReleasedEvent, correlationId?: string): Promise<void> {
     this.released.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockCommitted(event: StockCommittedEvent, correlationId?: string): Promise<void> {
+    this.committed.push({ event, correlationId });
     return Promise.resolve();
   }
 
@@ -393,5 +400,14 @@ export class InMemoryStockMovementRepository implements IStockMovementRepository
       items: matching.slice(start, start + query.size),
       total: matching.length,
     });
+  }
+
+  public existsByReference(referenceType: string, referenceId: string): Promise<boolean> {
+    return Promise.resolve(
+      this.appended.some(
+        (movement) =>
+          movement.referenceType === referenceType && movement.referenceId === referenceId,
+      ),
+    );
   }
 }

@@ -87,6 +87,18 @@ export class StockMovementTypeormRepository implements IStockMovementRepositoryP
     };
   }
 
+  public async existsByReference(
+    referenceType: string,
+    referenceId: string,
+    scope?: ITransactionScope,
+  ): Promise<boolean> {
+    // `SELECT 1 … WHERE reference_type = ? AND reference_id = ? LIMIT 1` — TypeORM's
+    // `exist` compiles to exactly that, served by the
+    // `IDX_STOCK_MOVEMENT_REFERENCE (reference_type, reference_id)` index. A read, so
+    // the append-only invariant is untouched.
+    return this.repo(scope).exist({ where: { referenceType, referenceId } });
+  }
+
   // Resolves the repository bound to the caller's transaction when a `scope` is
   // supplied (downcast back to the `EntityManager` the adapter brand-wraps — the
   // one place that downcast is allowed, ADR-017 §6), else the default-manager

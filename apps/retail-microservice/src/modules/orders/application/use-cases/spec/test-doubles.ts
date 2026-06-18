@@ -2,6 +2,8 @@ import {
   CartStatusEnum,
   IAllocationCancelPayload,
   IAllocationResult,
+  ICommitSalePayload,
+  ICommitSaleResult,
   IReservationAllocatePayload,
   OrderFulfillmentStatusEnum,
   OrderLineStatusEnum,
@@ -12,12 +14,14 @@ import {
   VariantWithProductView,
 } from '@retail-inventory-system/contracts';
 
-import { Address, Order, OrderLine, Payment } from '../../../domain';
+import { Address, Fulfillment, FulfillmentLine, Order, OrderLine, Payment } from '../../../domain';
 import {
   IAddressRepositoryPort,
+  IFulfillmentRepositoryPort,
   IOrderCartReaderPort,
   IOrderCartSnapshot,
   IOrderCatalogGatewayPort,
+  IOrderCommitSaleGatewayPort,
   IOrderEventsPublisherPort,
   IOrderInventoryGatewayPort,
   IOrderPage,
@@ -315,6 +319,10 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
       gatewayReference: payment.gatewayReference,
       authorizedAt: payment.authorizedAt,
       capturedAt: payment.capturedAt,
+      // Preserve the refund flag across the save/re-read round-trip so the Cancel Order
+      // captured-payment path (`flagForRefund`) is observable in the re-read view (the
+      // real `PaymentMapper` round-trips it both directions).
+      flaggedForRefund: payment.flaggedForRefund,
     });
   }
 }
@@ -356,6 +364,10 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public readonly placed: unknown[] = [];
   public readonly authorized: unknown[] = [];
   public readonly captured: unknown[] = [];
+  public readonly fulfillmentCreated: unknown[] = [];
+  public readonly fulfillmentShipped: unknown[] = [];
+  public readonly fulfillmentDelivered: unknown[] = [];
+  public readonly orderCancelled: unknown[] = [];
 
   public publishOrderPlaced(event: unknown): Promise<void> {
     this.placed.push(event);
@@ -370,6 +382,120 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public publishPaymentCaptured(event: unknown): Promise<void> {
     this.captured.push(event);
     return Promise.resolve();
+  }
+
+  public publishFulfillmentCreated(event: unknown): Promise<void> {
+    this.fulfillmentCreated.push(event);
+    return Promise.resolve();
+  }
+
+  public publishFulfillmentShipped(event: unknown): Promise<void> {
+    this.fulfillmentShipped.push(event);
+    return Promise.resolve();
+  }
+
+  public publishFulfillmentDelivered(event: unknown): Promise<void> {
+    this.fulfillmentDelivered.push(event);
+    return Promise.resolve();
+  }
+
+  public publishOrderCancelled(event: unknown): Promise<void> {
+    this.orderCancelled.push(event);
+    return Promise.resolve();
+  }
+}
+
+// In-memory order→inventory commit-sale gateway. Records every commitSale call so the
+// ship spec can assert the `{ orderId, fulfillmentId, lines }` passed, and exposes a
+// programmable rejection (`commitError`) to exercise the retry / log-and-replay path.
+// The default echoes each requested line back as committed.
+export class FakeOrderCommitSaleGateway implements IOrderCommitSaleGatewayPort {
+  public readonly calls: ICommitSalePayload[] = [];
+  // Use `makeWireError` to build a wire-shaped rejection. When set, every attempt
+  // rejects — exercising the bounded retry then the swallow-and-log poison path.
+  public commitError: Error | null = null;
+
+  public commitSale(payload: ICommitSalePayload): Promise<ICommitSaleResult> {
+    this.calls.push(payload);
+    if (this.commitError !== null) {
+      return Promise.reject(this.commitError);
+    }
+    return Promise.resolve({
+      committed: payload.lines.map((line) => ({
+        variantId: line.variantId,
+        stockLocationId: line.stockLocationId ?? 'default-warehouse',
+        quantity: line.quantity,
+      })),
+    });
+  }
+}
+
+// An in-memory fulfillment store that assigns BIGINT ids to the root + each line on
+// save, and serves `listByOrderId` newest-first (`shipped_at DESC, id DESC`, mirroring
+// the real repo's ordering). Enough to exercise the create cross-fulfillment math + the
+// list ordering without a test DB (the module's pure-unit-doubles convention).
+export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
+  public saveCount = 0;
+  private seq = 0;
+  private lineSeq = 0;
+  private readonly byId = new Map<number, Fulfillment>();
+
+  public save(fulfillment: Fulfillment): Promise<Fulfillment> {
+    this.saveCount += 1;
+    const id = fulfillment.id ?? ++this.seq;
+    const stored = this.rebuild(fulfillment, id);
+    this.byId.set(id, stored);
+    return Promise.resolve(this.rebuild(stored, id));
+  }
+
+  public findById(id: number): Promise<Fulfillment | null> {
+    const fulfillment = this.byId.get(id);
+    return Promise.resolve(fulfillment ? this.rebuild(fulfillment, id) : null);
+  }
+
+  // The pessimistic-lock load path. In-memory there is no real row lock to take (a
+  // single-process unit test has no concurrent transaction), so it is just a current
+  // read — identical to `findById`. The real serialisation is exercised end-to-end.
+  public findByIdForUpdate(id: number): Promise<Fulfillment | null> {
+    return this.findById(id);
+  }
+
+  public listByOrderId(orderId: number): Promise<Fulfillment[]> {
+    const ordered = [...this.byId.values()]
+      .filter((fulfillment) => fulfillment.orderId === orderId)
+      .sort((a, b) => {
+        const byShipped = (b.shippedAt?.getTime() ?? 0) - (a.shippedAt?.getTime() ?? 0);
+        return byShipped !== 0 ? byShipped : (b.id ?? 0) - (a.id ?? 0);
+      });
+    return Promise.resolve(
+      ordered.map((fulfillment) => this.rebuild(fulfillment, fulfillment.id!)),
+    );
+  }
+
+  // Re-reads the saved graph the way the real repo does: concrete root id + concrete
+  // line ids. A line that already carries an id (a re-read of a stored row) keeps it;
+  // a freshly built line (id null) gets the next BIGINT.
+  private rebuild(fulfillment: Fulfillment, id: number): Fulfillment {
+    return Fulfillment.reconstitute({
+      id,
+      orderId: fulfillment.orderId,
+      stockLocationId: fulfillment.stockLocationId,
+      status: fulfillment.status,
+      trackingNumber: fulfillment.trackingNumber,
+      carrier: fulfillment.carrier,
+      shippedAt: fulfillment.shippedAt,
+      deliveredAt: fulfillment.deliveredAt,
+      lines: fulfillment.lines.map(
+        (line) =>
+          new FulfillmentLine({
+            id: line.id ?? ++this.lineSeq,
+            fulfillmentId: id,
+            orderLineId: line.orderLineId,
+            quantity: line.quantity,
+          }),
+      ),
+      version: fulfillment.version,
+    });
   }
 }
 
@@ -454,6 +580,60 @@ export const buildOrderFixture = (
     placedAt,
     version: 2,
   });
+
+// A persisted-order fixture with explicit line ids + quantities and tunable
+// lifecycle/payment statuses — the Create/List Fulfillment specs need multi-line
+// orders with known order-line ids to exercise the cross-fulfillment quantity math and
+// the fulfillable-state preconditions (the single-line `buildOrderFixture` is too thin
+// for that). Each line is priced at `unitPriceMinor` so the header totals reconcile.
+export const buildOrderWithLinesFixture = (
+  id: number,
+  customerId: string | null,
+  lines: { orderLineId: number; quantity: number }[],
+  opts: {
+    status?: OrderStatusEnum;
+    paymentStatus?: OrderPaymentStatusEnum;
+    fulfillmentStatus?: OrderFulfillmentStatusEnum;
+    unitPriceMinor?: number;
+  } = {},
+): Order => {
+  const unitPriceMinor = opts.unitPriceMinor ?? 1000;
+  const orderLines = lines.map(
+    (line) =>
+      new OrderLine({
+        id: line.orderLineId,
+        variantId: line.orderLineId,
+        sku: `SKU-${line.orderLineId}`,
+        nameSnapshot: `Item ${line.orderLineId}`,
+        quantity: line.quantity,
+        unitPriceMinor,
+        taxAmountMinor: 0,
+        discountAmountMinor: 0,
+        status: OrderLineStatusEnum.ALLOCATED,
+      }),
+  );
+  const subtotalMinor = orderLines.reduce((sum, line) => sum + line.lineTotalMinor, 0);
+  return Order.reconstitute({
+    id,
+    orderNumber: `ORD-2026-${String(id).padStart(8, '0')}`,
+    customerId,
+    currency: 'USD',
+    status: opts.status ?? OrderStatusEnum.PENDING,
+    paymentStatus: opts.paymentStatus ?? OrderPaymentStatusEnum.AUTHORIZED,
+    fulfillmentStatus: opts.fulfillmentStatus ?? OrderFulfillmentStatusEnum.UNFULFILLED,
+    lines: orderLines,
+    subtotalMinor,
+    taxTotalMinor: 0,
+    discountTotalMinor: 0,
+    shippingTotalMinor: 0,
+    grandTotalMinor: subtotalMinor,
+    billingAddressId: null,
+    shippingAddressId: null,
+    sourceCartId: `cart-${id}`,
+    placedAt: new Date('2026-06-10T00:00:00.000Z'),
+    version: 2,
+  });
+};
 
 // A persisted-payment fixture (via `Payment.reconstitute`) for the read/capture specs.
 export const buildPaymentFixture = (

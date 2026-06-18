@@ -292,6 +292,73 @@ describe('StockLevel', () => {
     });
   });
 
+  describe('commitSale', () => {
+    it('decrements on-hand AND allocated in one version bump, leaving available unchanged', () => {
+      // onHand 10, allocated 2, reserved 3 → available 5.
+      const level = new StockLevel(makeProps({ version: 0 }));
+      level.commitSale(2);
+      expect(level.quantityOnHand).toBe(8);
+      expect(level.quantityAllocated).toBe(0);
+      expect(level.quantityReserved).toBe(3);
+      // Both decremented counters subtract from available, so it is unchanged: a
+      // commit-sale neither frees nor consumes sellable stock.
+      expect(level.available).toBe(5);
+      // ONE mutation despite two counters moving.
+      expect(level.version).toBe(1);
+    });
+
+    it('ships exactly the allocated amount (the boundary) without throwing', () => {
+      const level = new StockLevel(
+        makeProps({ quantityOnHand: 10, quantityAllocated: 4, quantityReserved: 0 }),
+      );
+      expect(() => level.commitSale(4)).not.toThrow();
+      expect(level.quantityOnHand).toBe(6);
+      expect(level.quantityAllocated).toBe(0);
+    });
+
+    it('throws a plain Error (allocated drift) when shipping more than is allocated', () => {
+      const level = new StockLevel(
+        makeProps({ quantityOnHand: 10, quantityAllocated: 2, quantityReserved: 0, version: 4 }),
+      );
+      expect(() => level.commitSale(3)).toThrow('only 2 allocated');
+      // Drift is an invariant breach (a 500), not a typed client-facing exception.
+      expect(() => level.commitSale(3)).not.toThrow(InventoryDomainException);
+      expect(level.quantityOnHand).toBe(10);
+      expect(level.quantityAllocated).toBe(2);
+      expect(level.version).toBe(4);
+    });
+
+    it('throws STOCK_RESULT_NEGATIVE (a user-reachable 409) when on-hand fell below allocated', () => {
+      // A prior negative adjust drove on-hand below the allocated amount.
+      const level = new StockLevel(
+        makeProps({ quantityOnHand: 1, quantityAllocated: 3, quantityReserved: 0, version: 2 }),
+      );
+      let caught: unknown;
+      try {
+        level.commitSale(3); // allocated allows it, but on-hand (1) does not
+      } catch (error) {
+        caught = error;
+      }
+      // The allocated guard passes (3 ≤ 3); the on-hand guard rejects — and because an
+      // operator can reach this via a prior adjust, it is a typed 409, not a 500.
+      expect(caught).toBeInstanceOf(InventoryDomainException);
+      expect((caught as InventoryDomainException).code).toBe(
+        InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
+      );
+      // No partial mutation.
+      expect(level.quantityOnHand).toBe(1);
+      expect(level.quantityAllocated).toBe(3);
+      expect(level.version).toBe(2);
+    });
+
+    it.each([0, -1, 1.5])('rejects a non-positive / non-integer quantity (%p)', (quantity) => {
+      const level = new StockLevel(makeProps());
+      expect(() => level.commitSale(quantity)).toThrow('positive integer');
+      // A plain Error, not a typed domain exception (internal caller bug).
+      expect(() => level.commitSale(quantity)).not.toThrow(InventoryDomainException);
+    });
+  });
+
   describe('initialAt', () => {
     it('yields a zeroed level at version 0', () => {
       const level = StockLevel.initialAt(42, 'default-warehouse');

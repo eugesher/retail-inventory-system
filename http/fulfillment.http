@@ -1,0 +1,243 @@
+# Fulfillment endpoints — the happy create -> ship -> deliver flow
+#
+# These routes live on apps/api-gateway/src/modules/orders/presentation/
+# orders.controller.ts (@Controller('orders')) and front the retail microservice's
+# fulfillment RPCs over RabbitMQ (ADR-009 / ADR-031):
+#   - POST /api/orders/:orderId/fulfillments                     (Bearer — order:fulfill)
+#       Plan a shipment. Body { stockLocationId?, lines:[{ orderLineId, quantity }] }.
+#       Returns the created (pending) FulfillmentView (201).
+#   - GET  /api/orders/:orderId/fulfillments                     (Bearer — owner OR order:read)
+#       List the order's fulfillments newest-first. Returns FulfillmentView[].
+#   - POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship (Bearer — order:fulfill)
+#       Ship a pending fulfillment. Captures the order's authorized payment INLINE
+#       (block-ship-until-payment-succeeds on a decline), advances the order +
+#       line statuses, then commits the sale to inventory. `trackingNumber` is
+#       required to mark it shipped. Returns the shipped FulfillmentView (200).
+#   - POST /api/orders/:orderId/fulfillments/:fulfillmentId/deliver (Bearer — order:fulfill)
+#       Mark a shipped fulfillment delivered. Once every non-cancelled fulfillment
+#       is delivered the order rolls up to `delivered`. Returns FulfillmentView (200).
+#
+# AUTHORIZATION. Create / Ship / Deliver are staff-only — gated with order:fulfill (a
+# customer cannot fulfill a shipment). List fulfillments is owner-or-staff (the owning
+# customer, OR staff with order:read). A staff token resolves the staff override at the
+# gateway; the retail service is the single enforcement point. A non-owner non-staff
+# caller gets 403; an unauthenticated caller 401.
+#
+# The `Idempotency-Key` header on Ship is ACCEPTED + LOGGED but NOT deduped; a
+# non-pending re-ship is a 409. Typed upstream codes (FULFILLMENT_* / ORDER_*) surface
+# as 400/404/409.
+#
+# All routes sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With the
+# default dev environment that resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run `loginStaff` FIRST — it captures the seeded admin's bearer token into
+#      @accessToken (admin@example.com / admin1234). Admin holds order:fulfill AND
+#      order:read, so the same operator token can create/ship/deliver AND list/read.
+#      (warehouse@example.com / warehouse1234 also holds order:fulfill but lacks
+#      order:read, so it could not run the list/read steps below.)
+#   3. Run `loginCustomer` — it captures the seeded customer's token into
+#      @customerToken (customer@example.com / customer1234), used to place the order.
+#   4. Run `createCart` -> `addLineOne` -> `addLineTwo` -> `placeOrder` to obtain an
+#      @orderId plus the two order line ids. Then `createFulfillment` (captures
+#      @fulfillmentId), `listFulfillments`, `shipFulfillment`, `markDelivered`, and
+#      finally `getOrder` to observe all three advanced statuses.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name loginStaff
+# POST /api/auth/staff/login
+# Seeded admin login (order:fulfill + order:read + order:cancel + order:capture).
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{loginStaff.response.body.$.accessToken}}
+
+###
+
+# @name loginCustomer
+# POST /api/auth/customer/login
+# Seeded customer login — the order owner.
+POST {{baseUrl}}/auth/customer/login
+Content-Type: application/json
+
+{
+  "email": "customer@example.com",
+  "password": "customer1234"
+}
+
+###
+@customerToken = {{loginCustomer.response.body.$.accessToken}}
+
+###
+
+# @name createCart
+# POST /api/cart  (Bearer — owner is the authenticated customer)
+# Opens a new active cart. Response is CartView; capture @cartId.
+POST {{baseUrl}}/cart
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartId = {{createCart.response.body.$.id}}
+
+###
+
+# @name addLineOne
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 1 (USD 4999), quantity 2.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 2
+}
+
+###
+
+# @name addLineTwo
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 3 (USD 19999), quantity 1.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "variantId": 3,
+  "quantity": 1
+}
+
+###
+
+# @name placeOrder
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Converts the cart into an Order, allocates the stock holds, and authorizes payment
+# inline. Response (201) is OrderView with status='pending', paymentStatus='authorized',
+# fulfillmentStatus='unfulfilled', and a lines[] array. Capture @orderId plus each
+# line's id + ordered quantity so the fulfillment can reference them.
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "line2": "Suite 400",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US",
+    "phone": "+1-415-555-0100"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "paymentMethod": "tok_visa"
+}
+
+###
+@orderId = {{placeOrder.response.body.$.id}}
+@lineOneId = {{placeOrder.response.body.$.lines[0].id}}
+@lineOneQty = {{placeOrder.response.body.$.lines[0].quantity}}
+@lineTwoId = {{placeOrder.response.body.$.lines[1].id}}
+@lineTwoQty = {{placeOrder.response.body.$.lines[1].quantity}}
+
+###
+
+# @name createFulfillment
+# POST /api/orders/:orderId/fulfillments  (Bearer — order:fulfill)
+# Plans ONE shipment covering both order lines in full, so a single ship + deliver
+# rolls the whole order to `delivered`. stockLocationId is optional (defaults to
+# default-warehouse). Response (201) is the pending FulfillmentView; capture
+# @fulfillmentId.
+POST {{baseUrl}}/orders/{{orderId}}/fulfillments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "stockLocationId": "default-warehouse",
+  "lines": [
+    { "orderLineId": {{lineOneId}}, "quantity": {{lineOneQty}} },
+    { "orderLineId": {{lineTwoId}}, "quantity": {{lineTwoQty}} }
+  ]
+}
+
+###
+@fulfillmentId = {{createFulfillment.response.body.$.id}}
+
+###
+
+# @name listFulfillments
+# GET /api/orders/:orderId/fulfillments  (Bearer — owner OR order:read)
+# Lists the order's fulfillments newest-first. The admin token uses the order:read
+# staff override; the owning customer could list its own with @customerToken. Response
+# (200) is FulfillmentView[] — the just-created pending fulfillment.
+GET {{baseUrl}}/orders/{{orderId}}/fulfillments
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name shipFulfillment
+# POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+# Ships the pending fulfillment. trackingNumber is required to mark it shipped; carrier
+# is free-text metadata. This CAPTURES the order's authorized payment inline (so the
+# inventory + retail services must be running), advances the order's fulfillment axis to
+# `shipped` and each line's status, then commits the sale to inventory. The
+# `Idempotency-Key` header is accepted + logged but NOT deduped. Response (200) is the
+# shipped FulfillmentView (status='shipped', trackingNumber + shippedAt stamped).
+POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "trackingNumber": "1Z999AA10123456784",
+  "carrier": "UPS"
+}
+
+###
+
+# @name markDelivered
+# POST /api/orders/:orderId/fulfillments/:fulfillmentId/deliver  (Bearer — order:fulfill)
+# Marks the shipped fulfillment delivered. Because it is the order's only fulfillment
+# and it covers every line, the order rolls up to lifecycle='delivered' +
+# fulfillmentStatus='delivered'. Response (200) is the delivered FulfillmentView
+# (status='delivered', deliveredAt stamped).
+POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/deliver
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name getOrder
+# GET /api/orders/:orderId  (Bearer; owner OR order:read)
+# Reads the order back to observe all three advanced status axes after the flow:
+# status='delivered', paymentStatus='captured' (captured at ship time),
+# fulfillmentStatus='delivered'. Response (200) is OrderView.
+GET {{baseUrl}}/orders/{{orderId}}
+Authorization: Bearer {{accessToken}}

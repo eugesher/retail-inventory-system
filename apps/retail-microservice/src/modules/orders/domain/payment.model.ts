@@ -13,6 +13,10 @@ export interface IPaymentProps {
   gatewayReference: string;
   authorizedAt: Date | null;
   capturedAt: Date | null;
+  // Set by Cancel Order on a captured payment (a later capability) to mark that a
+  // refund is owed; a refund capability consumes it. Optional on the load path and
+  // defaults `false` — a freshly authorized payment is never flagged.
+  flaggedForRefund?: boolean;
   createdAt?: Date | null;
   updatedAt?: Date | null;
 }
@@ -55,6 +59,7 @@ export class Payment extends AggregateRoot<number | null> {
   private readonly _gatewayReference: string;
   private readonly _authorizedAt: Date | null;
   private _capturedAt: Date | null;
+  private _flaggedForRefund: boolean;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
 
@@ -92,6 +97,7 @@ export class Payment extends AggregateRoot<number | null> {
     this._gatewayReference = props.gatewayReference;
     this._authorizedAt = props.authorizedAt;
     this._capturedAt = props.capturedAt;
+    this._flaggedForRefund = props.flaggedForRefund ?? false;
     this.createdAt = props.createdAt ?? null;
     this.updatedAt = props.updatedAt ?? null;
   }
@@ -111,6 +117,7 @@ export class Payment extends AggregateRoot<number | null> {
       gatewayReference: input.gatewayReference,
       authorizedAt: input.authorizedAt,
       capturedAt: null,
+      flaggedForRefund: false,
     });
   }
 
@@ -151,6 +158,13 @@ export class Payment extends AggregateRoot<number | null> {
     return this._capturedAt;
   }
 
+  // True once Cancel Order flags a captured payment as owing a refund (a later
+  // capability writes it). `false` for every freshly authorized payment — the
+  // mutator that sets it ships with its consumer, not here.
+  public get flaggedForRefund(): boolean {
+    return this._flaggedForRefund;
+  }
+
   // The **only** mutation: `AUTHORIZED → CAPTURED`, stamping `capturedAt`. Rejects
   // any non-`authorized` start (double-capture or capture of a voided/failed
   // payment). Void / refund / fail land with later capabilities — deliberately
@@ -164,6 +178,33 @@ export class Payment extends AggregateRoot<number | null> {
     }
     this._status = PaymentStatusEnum.CAPTURED;
     this._capturedAt = at;
+  }
+
+  // `AUTHORIZED → VOIDED`. Driven by Cancel Order when it cancels an order whose
+  // payment was authorized-but-not-captured: voiding releases the held authorization so
+  // no money is ever taken. Rejects any non-`authorized` start (a captured payment is
+  // flagged for refund instead — `flagForRefund` — and a voided/failed one is already
+  // terminal) with `PAYMENT_INVALID_STATUS_TRANSITION` (409). The in-process fake
+  // gateway has no `void` call (it never reserved real funds); a real gateway would
+  // void the authorization here — out of scope for this capability.
+  public void(): void {
+    if (this._status !== PaymentStatusEnum.AUTHORIZED) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
+        `Payment.void: can only void an authorized payment (current: ${this._status})`,
+      );
+    }
+    this._status = PaymentStatusEnum.VOIDED;
+  }
+
+  // Marks that this payment owes a refund. Driven by Cancel Order when it cancels an
+  // order whose payment was already **captured** — the money is gone, so cancellation
+  // cannot simply void it; it flags the row and a later refund capability issues the
+  // actual refund. **Idempotent** — flagging an already-flagged payment is a no-op, not
+  // an error. The flag is orthogonal to `status` (a captured payment stays `captured`
+  // while flagged); only a refund moves the status (a later capability, ADR-028 §6).
+  public flagForRefund(): void {
+    this._flaggedForRefund = true;
   }
 
   private static requireNonEmpty(value: string, code: OrderErrorCodeEnum, field: string): void {

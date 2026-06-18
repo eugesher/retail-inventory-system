@@ -39,4 +39,16 @@ export interface IStockMovementRepositoryPort {
   // audit read RPC + HTTP endpoint (a later capability); the method ships now so
   // the seam is complete.
   listByVariant(query: IStockMovementListQuery): Promise<IStockMovementPage>;
+  // Reference-based existence probe — the idempotency lookup for the Commit Sale
+  // RPC (ADR-031): a `sale` movement already referencing a fulfillment means the
+  // commit already happened, so a re-delivery must NOT decrement again. Backed by a
+  // `SELECT 1 … WHERE reference_type = ? AND reference_id = ? LIMIT 1` against the
+  // existing `IDX_STOCK_MOVEMENT_REFERENCE (reference_type, reference_id)` index. It
+  // is a READ — the append-only invariant (no save/update/delete) is preserved.
+  // Scope-aware so the probe can join the same unit of work as the write when needed.
+  existsByReference(
+    referenceType: string,
+    referenceId: string,
+    scope?: ITransactionScope,
+  ): Promise<boolean>;
 }

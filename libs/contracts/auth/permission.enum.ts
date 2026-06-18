@@ -11,6 +11,7 @@ export enum PermissionCodeEnum {
   INVENTORY_TRANSFER = 'inventory:transfer',
   ORDER_READ = 'order:read',
   ORDER_CAPTURE = 'order:capture',
+  ORDER_FULFILL = 'order:fulfill',
   ORDER_CANCEL = 'order:cancel',
   ORDER_REFUND = 'order:refund',
   IAM_ASSIGN = 'iam:assign',

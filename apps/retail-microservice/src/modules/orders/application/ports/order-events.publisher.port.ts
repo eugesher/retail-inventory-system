@@ -1,4 +1,8 @@
 import {
+  IRetailFulfillmentCreatedEvent,
+  IRetailFulfillmentDeliveredEvent,
+  IRetailFulfillmentShippedEvent,
+  IRetailOrderCancelledEvent,
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
   IRetailPaymentCapturedEvent,
@@ -11,15 +15,23 @@ export const ORDER_EVENTS_PUBLISHER = Symbol('ORDER_EVENTS_PUBLISHER');
 // Domain/contract types only — no `@nestjs/microservices` here (ADR-009); the
 // concrete `OrderRabbitmqPublisher` holds the two `ClientProxy`s.
 //
-// `publishOrderPlaced` emits `retail.order.placed` onto `notification_events` (the
-// consumer's queue — the producer-targets-consumer-queue pattern of ADR-008/020);
-// `publishPaymentAuthorized` / `publishPaymentCaptured` emit `retail.payment.authorized`
-// / `retail.payment.captured` onto `retail_queue` (reserved surfaces, like the
-// `retail.cart.*` events). Each is a best-effort post-commit emit — the write has
-// already committed, so a publish failure is warn-logged and swallowed by the caller
-// (ADR-020).
+// Two destinations, by the producer-targets-consumer-queue pattern (ADR-008/020):
+// `publishOrderPlaced` / `publishFulfillmentShipped` / `publishFulfillmentDelivered`
+// emit `retail.order.placed` / `retail.fulfillment.shipped` /
+// `retail.fulfillment.delivered` onto `notification_events` (the notification service's
+// own queue — it consumes all three for its order/shipment fan-out);
+// `publishPaymentAuthorized` / `publishPaymentCaptured` / `publishFulfillmentCreated` /
+// `publishOrderCancelled` emit `retail.payment.authorized` / `retail.payment.captured` /
+// `retail.fulfillment.created` / `retail.order.cancelled` onto `retail_queue` (the
+// producer's own queue — reserved surfaces today, no consumer). Each is a best-effort
+// post-commit emit — the write has already committed, so a publish failure is
+// warn-logged and swallowed by the caller (ADR-020).
 export interface IOrderEventsPublisherPort {
   publishOrderPlaced(event: IRetailOrderPlacedEvent): Promise<void>;
   publishPaymentAuthorized(event: IRetailPaymentAuthorizedEvent): Promise<void>;
   publishPaymentCaptured(event: IRetailPaymentCapturedEvent): Promise<void>;
+  publishFulfillmentCreated(event: IRetailFulfillmentCreatedEvent): Promise<void>;
+  publishFulfillmentShipped(event: IRetailFulfillmentShippedEvent): Promise<void>;
+  publishFulfillmentDelivered(event: IRetailFulfillmentDeliveredEvent): Promise<void>;
+  publishOrderCancelled(event: IRetailOrderCancelledEvent): Promise<void>;
 }

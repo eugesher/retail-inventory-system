@@ -29,11 +29,15 @@ export interface IOrderLineProps {
 // the retail domain MUST NOT import the catalog `ProductVariant`; the only coupling
 // is the FK in persistence (ADR-004 / ADR-017 / ADR-025).
 //
-// Every field is a **snapshot taken at place-time** and is immutable for the life
-// of the line — `sku`, `nameSnapshot`, and `unitPriceMinor` are the identity/price
-// as they stood at purchase, the buyer's contract, decoupled from any later catalog
-// or pricing change (ADR-028 §1). The line carries no setters at all: an order is
-// an immutable record, so a line never changes once placed.
+// Every **money/identity** field is a snapshot taken at place-time and is immutable
+// for the life of the line — `sku`, `nameSnapshot`, and `unitPriceMinor` are the
+// identity/price as they stood at purchase, the buyer's contract, decoupled from any
+// later catalog or pricing change (ADR-028 §1). The only mutable field is `status`:
+// the line's fulfillment progress advances as shipments go out (the Ship operation
+// flips it `allocated → partially-shipped → shipped`, ADR-031). So the line is **not**
+// `Object.freeze`d — that would freeze `status` too — but every snapshot field stays
+// `readonly` (compile-time immutable) and carries no setter; only `markFulfillment`
+// can move `status`, and only forward.
 export class OrderLine extends Entity<number | null> {
   public readonly variantId: number;
   public readonly sku: string;
@@ -43,7 +47,7 @@ export class OrderLine extends Entity<number | null> {
   public readonly taxAmountMinor: number;
   public readonly discountAmountMinor: number;
   public readonly lineTotalMinor: number;
-  public readonly status: OrderLineStatusEnum;
+  private _status: OrderLineStatusEnum;
 
   constructor(props: IOrderLineProps) {
     if (!Number.isInteger(props.variantId) || props.variantId <= 0) {
@@ -102,14 +106,53 @@ export class OrderLine extends Entity<number | null> {
     this.lineTotalMinor = expected;
     // A line starts `ALLOCATED` at place-time — a forward-compatible sentinel; real
     // allocation lands with the inventory-reservation capability.
-    this.status = props.status ?? OrderLineStatusEnum.ALLOCATED;
+    this._status = props.status ?? OrderLineStatusEnum.ALLOCATED;
+  }
 
-    // The line is a fully immutable place-time snapshot — an order is an immutable
-    // record, so a line never changes once placed. `readonly` is a compile-time-only
-    // guard, so freezing makes the immutability real at runtime: any write throws in
-    // strict mode. (`OrderLine extends Entity`, not `AggregateRoot`, so there is no
-    // `pullDomainEvents()` mutation to break — unlike `Order` / `Address`.)
-    Object.freeze(this);
+  public get status(): OrderLineStatusEnum {
+    return this._status;
+  }
+
+  // Advances the line's fulfillment progress along `allocated → partially-shipped →
+  // shipped` as the Ship operation moves units out (ADR-031). The use case computes
+  // the target from the line's shipped-vs-ordered quantity across the order's
+  // fulfillments, so this mutator only guards the axis. A move to the same status is
+  // an idempotent no-op (the Ship recompute touches every order line, including ones a
+  // prior shipment already fully shipped). A **strictly backward** move, or a move to a
+  // status outside this fulfillment-progress subset (`cancelled`/`returned` belong to
+  // later capabilities), is an internal-invariant breach the use case never produces —
+  // a plain `Error` (500), the `OrderLine`-other-guards style. Carries no money
+  // mutation, so the place-time snapshot stays intact.
+  public markFulfillment(next: OrderLineStatusEnum): void {
+    const target = OrderLine.fulfillmentRank(next);
+    const current = OrderLine.fulfillmentRank(this._status);
+    if (target === null || current === null) {
+      throw new Error(
+        `OrderLine.markFulfillment: ${next} is not a fulfillment-progress status (line ${this.id})`,
+      );
+    }
+    if (target < current) {
+      throw new Error(
+        `OrderLine.markFulfillment: cannot move line ${this.id} backward from ${this._status} to ${next}`,
+      );
+    }
+    this._status = next;
+  }
+
+  // The forward ordinal of the fulfillment-progress subset; `null` for the
+  // `cancelled`/`returned` values that belong to later capabilities, so a stray call
+  // with one of them is rejected rather than silently ranked.
+  private static fulfillmentRank(status: OrderLineStatusEnum): number | null {
+    switch (status) {
+      case OrderLineStatusEnum.ALLOCATED:
+        return 0;
+      case OrderLineStatusEnum.PARTIALLY_SHIPPED:
+        return 1;
+      case OrderLineStatusEnum.SHIPPED:
+        return 2;
+      default:
+        return null;
+    }
   }
 
   private static requireNonNegativeMoney(value: number, field: string): void {

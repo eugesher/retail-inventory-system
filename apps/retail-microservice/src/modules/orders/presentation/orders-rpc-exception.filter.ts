@@ -36,10 +36,16 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.PAYMENT_CURRENCY_REQUIRED]: HttpStatus.BAD_REQUEST,
   [OrderErrorCodeEnum.PAYMENT_METHOD_REQUIRED]: HttpStatus.BAD_REQUEST,
   [OrderErrorCodeEnum.PAYMENT_GATEWAY_REFERENCE_REQUIRED]: HttpStatus.BAD_REQUEST,
+  // Fulfillment shape invariants → 400.
+  [OrderErrorCodeEnum.FULFILLMENT_NO_LINES]: HttpStatus.BAD_REQUEST,
+  [OrderErrorCodeEnum.FULFILLMENT_LINE_QUANTITY_INVALID]: HttpStatus.BAD_REQUEST,
+  [OrderErrorCodeEnum.FULFILLMENT_TRACKING_REQUIRED]: HttpStatus.BAD_REQUEST,
 
   // Lookup misses → 404.
   [OrderErrorCodeEnum.ORDER_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [OrderErrorCodeEnum.ORDER_CART_NOT_FOUND]: HttpStatus.NOT_FOUND,
+  [OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND]: HttpStatus.NOT_FOUND,
+  [OrderErrorCodeEnum.ORDER_LINE_NOT_FOUND]: HttpStatus.NOT_FOUND,
 
   // Ownership failure → 403: the caller is not the cart's owner (place), nor the
   // order's owner / a staff override (read + capture) — the retail-side half of the
@@ -57,6 +63,14 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_LINE_NO_PRICE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED]: HttpStatus.CONFLICT,
+  // Fulfillment / cancel conflicts → 409: an illegal shipment-status transition, a
+  // create that would over-ship a line, an order not in a fulfillable state, or a
+  // cancel of an already-shipped order.
+  [OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.FULFILLMENT_INVALID_STATUS_TRANSITION]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.ORDER_NOT_FULFILLABLE]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.ORDER_INVALID_FULFILLMENT_TRANSITION]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE]: HttpStatus.CONFLICT,
 };
 
 // Terminates an `OrderDomainException` into the wire error shape the gateway's

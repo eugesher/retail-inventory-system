@@ -44,6 +44,16 @@ export const ROUTING_KEYS = {
   INVENTORY_STOCK_ALLOCATED: 'inventory.stock.allocated',
   INVENTORY_STOCK_RELEASED: 'inventory.stock.released',
   INVENTORY_STOCK_MOVEMENT_RECORDED: 'inventory.stock-movement.recorded',
+  // `inventory.stock.commit-sale` → `CommitSaleUseCase` (RPC, Retail ship flow →
+  // Inventory): physically ships an order's allocated stock at fulfillment time —
+  // per line it decrements BOTH `quantity_on_hand` and `quantity_allocated` in one
+  // `StockLevel.commitSale` and appends one strictly-negative `sale` movement
+  // referencing the fulfillment. All-lines-atomic + idempotent on `fulfillmentId`
+  // (ADR-031). `inventory.stock.committed` is the past-tense reserved-surface event
+  // it emits per committed line onto `inventory_queue` (no consumer yet — the
+  // `inventory.stock.{reserved,allocated,released}` precedent).
+  INVENTORY_STOCK_COMMIT_SALE: 'inventory.stock.commit-sale',
+  INVENTORY_STOCK_COMMITTED: 'inventory.stock.committed',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',
   CATALOG_PRODUCT_PUBLISH: 'catalog.product.publish',
   CATALOG_PRODUCT_ARCHIVE: 'catalog.product.archive',
@@ -122,6 +132,37 @@ export const ROUTING_KEYS = {
   RETAIL_ORDER_GET: 'retail.order.get',
   RETAIL_ORDER_LIST: 'retail.order.list',
   RETAIL_PAYMENT_CAPTURE: 'retail.payment.capture',
+  // Fulfillment RPC command keys (API Gateway → Retail, served by the orders
+  // controller — a fulfillment is a sibling aggregate in the orders module, ADR-031).
+  // `retail.fulfillment.create` → `CreateFulfillmentUseCase` plans a shipment (one or
+  // more `OrderLine` quantities, owner-or-staff `order:fulfill`) and resolves a
+  // `FulfillmentView`; `retail.fulfillment.list` → `ListFulfillmentsUseCase` resolves
+  // an order's `FulfillmentView[]` newest-first (owner-or-staff `order:read`). The
+  // `fulfillment.*` aggregate noun is distinct from the order/payment keys.
+  RETAIL_FULFILLMENT_CREATE: 'retail.fulfillment.create',
+  RETAIL_FULFILLMENT_LIST: 'retail.fulfillment.list',
+  // `retail.fulfillment.ship` → `ShipFulfillmentUseCase` ships a pending fulfillment
+  // (owner-or-staff `order:fulfill`): it captures an authorized payment inline,
+  // advances the fulfillment → `shipped`, the order's fulfillment axis + the shipped
+  // `OrderLine` statuses, then calls `inventory.stock.commit-sale` after the local
+  // commit, and resolves the updated `FulfillmentView` (ADR-031).
+  RETAIL_FULFILLMENT_SHIP: 'retail.fulfillment.ship',
+  // `retail.fulfillment.deliver` → `MarkDeliveredUseCase` marks a `shipped`
+  // fulfillment `delivered` (owner-or-staff `order:fulfill`); once every non-cancelled
+  // fulfillment of the order is delivered it advances the order's lifecycle +
+  // fulfillment axes to `delivered` too (the happy-path terminal, ADR-031). Resolves
+  // the updated `FulfillmentView`.
+  RETAIL_FULFILLMENT_DELIVER: 'retail.fulfillment.deliver',
+  // Order-cancellation RPC keys (API Gateway → Retail, served by the orders
+  // controller). `retail.order.cancel` → `CancelOrderUseCase` cancels a not-yet-shipped
+  // order (owner-or-staff `order:cancel`): it rejects an order with a `shipped`/
+  // `delivered` fulfillment, cancels any `pending` fulfillments, voids an authorized
+  // payment / flags a captured one for refund, and releases the order's stock
+  // allocation via `inventory.allocation.cancel` (ADR-031). `retail.order.cancel-line`
+  // → `CancelLineUseCase` cancels the unshipped quantity of a single `OrderLine` (staff
+  // `order:cancel`) with a proportional allocation release. Both resolve an `OrderView`.
+  RETAIL_ORDER_CANCEL: 'retail.order.cancel',
+  RETAIL_ORDER_CANCEL_LINE: 'retail.order.cancel-line',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -141,6 +182,30 @@ export const ROUTING_KEYS = {
   // `retail.payment.captured` — emitted onto `retail_queue` after an explicit
   // capture succeeds. A reserved surface today, like `retail.payment.authorized`.
   RETAIL_PAYMENT_CAPTURED: 'retail.payment.captured',
+  // `retail.fulfillment.created` — emitted onto `retail_queue` (the producer's own
+  // queue) after a shipment is planned. The past-tense event paired with the
+  // imperative `retail.fulfillment.create` command (the `catalog.variant.create`/
+  // `.created` split, ADR-008). A reserved surface today, like the four
+  // `retail.cart.*` events.
+  RETAIL_FULFILLMENT_CREATED: 'retail.fulfillment.created',
+  // `retail.fulfillment.shipped` — emitted onto `retail_queue` (the producer's own
+  // queue) after a shipment ships. The past-tense event paired with the imperative
+  // `retail.fulfillment.ship` command. The notification service binds a consumer for
+  // it (a shipment-confirmation fan-out); for now the emit is best-effort post-commit
+  // (ADR-020).
+  RETAIL_FULFILLMENT_SHIPPED: 'retail.fulfillment.shipped',
+  // `retail.fulfillment.delivered` — emitted onto `retail_queue` (the producer's own
+  // queue) after a shipment is marked delivered. The past-tense event paired with the
+  // imperative `retail.fulfillment.deliver` command. A reserved surface today (no
+  // consumer bound yet), like `retail.fulfillment.created`.
+  RETAIL_FULFILLMENT_DELIVERED: 'retail.fulfillment.delivered',
+  // `retail.order.cancelled` — emitted onto `retail_queue` (the producer's own queue)
+  // after an order is cancelled. It carries `paymentFlaggedForRefund` so a downstream
+  // consumer can tell a captured-and-flagged cancellation (a refund is owed) from a
+  // simple voided-authorization one. NOTE: this key was *retired* by ADR-028 with the
+  // old order model; it is **re-introduced fresh here** with a live producer (Cancel
+  // Order), not resurrected from any stub. A reserved surface today (no consumer yet).
+  RETAIL_ORDER_CANCELLED: 'retail.order.cancelled',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

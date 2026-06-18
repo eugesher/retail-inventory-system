@@ -18,6 +18,7 @@ describe('Payment', () => {
 
       expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
       expect(payment.capturedAt).toBeNull();
+      expect(payment.flaggedForRefund).toBe(false);
       expect(payment.authorizedAt).toEqual(new Date('2026-06-10T00:00:00Z'));
       expect(payment.id).toBeNull();
       expect(payment.orderId).toBe(1);
@@ -95,6 +96,55 @@ describe('Payment', () => {
     });
   });
 
+  describe('void', () => {
+    it('transitions authorized → voided', () => {
+      const payment = Payment.authorized(authorizedInput());
+
+      payment.void();
+
+      expect(payment.status).toBe(PaymentStatusEnum.VOIDED);
+      // Voiding does not stamp capturedAt (no money was ever taken).
+      expect(payment.capturedAt).toBeNull();
+    });
+
+    it('rejects voiding a captured payment', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.capture(new Date());
+
+      expect(() => payment.void()).toThrow(OrderDomainException);
+    });
+
+    it('rejects voiding an already-voided payment', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.void();
+
+      expect(() => payment.void()).toThrow(OrderDomainException);
+    });
+  });
+
+  describe('flagForRefund', () => {
+    it('sets the refund flag on a captured payment', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.capture(new Date());
+
+      payment.flagForRefund();
+
+      expect(payment.flaggedForRefund).toBe(true);
+      // The flag is orthogonal to status — a flagged payment stays captured.
+      expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
+    });
+
+    it('is idempotent (flagging twice is a no-op, not an error)', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.capture(new Date());
+
+      payment.flagForRefund();
+      expect(() => payment.flagForRefund()).not.toThrow();
+
+      expect(payment.flaggedForRefund).toBe(true);
+    });
+  });
+
   describe('reconstitute', () => {
     it('rebuilds a captured payment from storage', () => {
       const payment = Payment.reconstitute({
@@ -112,6 +162,25 @@ describe('Payment', () => {
       expect(payment.id).toBe(9);
       expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
       expect(payment.capturedAt).toEqual(new Date('2026-06-11T09:30:00Z'));
+      // Omitting the flag on the load path defaults it false.
+      expect(payment.flaggedForRefund).toBe(false);
+    });
+
+    it('round-trips a flaggedForRefund payment from storage', () => {
+      const payment = Payment.reconstitute({
+        id: 9,
+        orderId: 1,
+        amountMinor: 5997,
+        currency: 'USD',
+        method: 'fake-card',
+        status: PaymentStatusEnum.CAPTURED,
+        gatewayReference: 'fake_abc123',
+        authorizedAt: new Date('2026-06-10T00:00:00Z'),
+        capturedAt: new Date('2026-06-11T09:30:00Z'),
+        flaggedForRefund: true,
+      });
+
+      expect(payment.flaggedForRefund).toBe(true);
     });
   });
 });

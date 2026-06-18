@@ -16,6 +16,7 @@ export class PaymentMapper {
       gatewayReference: domain.gatewayReference,
       authorizedAt: domain.authorizedAt,
       capturedAt: domain.capturedAt,
+      flaggedForRefund: domain.flaggedForRefund,
     };
 
     if (domain.id !== null) {
@@ -39,6 +40,7 @@ export class PaymentMapper {
       gatewayReference: entity.gatewayReference,
       authorizedAt: entity.authorizedAt ?? null,
       capturedAt: entity.capturedAt ?? null,
+      flaggedForRefund: entity.flaggedForRefund ?? false,
       createdAt: entity.createdAt ?? null,
       updatedAt: entity.updatedAt ?? null,
     });

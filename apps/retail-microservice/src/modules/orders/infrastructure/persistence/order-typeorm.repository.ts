@@ -140,8 +140,10 @@ export class OrderTypeormRepository
   // insert with a guaranteed-unique provisional token, read the generated id, then
   // finalize the real number and UPDATE. The provisional never commits (it is
   // overwritten before the transaction closes). On a re-save (a payment-status /
-  // version bump) `order_number` is immutable and the lines never change, so update
-  // the root without touching `order_number`.
+  // fulfillment-status / version bump) `order_number` is immutable, so update the root
+  // without touching `order_number`; the lines are re-persisted too because a line's
+  // `status` advances as shipments go out (the Ship operation, ADR-031), so a re-save
+  // is no longer guaranteed to leave the lines untouched.
   private async persistGraph(manager: EntityManager, order: Order): Promise<number> {
     const orderRepo = manager.getRepository(OrderEntity);
     const lineRepo = manager.getRepository(OrderLineEntity);
@@ -166,9 +168,12 @@ export class OrderTypeormRepository
     delete rootPartial.orderNumber;
     await orderRepo.save({ ...rootPartial, id: existingId });
 
-    // The lines are immutable place-time snapshots (no domain mutator touches
-    // them), so a re-save — a payment-status / version bump — updates the root
-    // only; rewriting N unchanged line rows would be pure waste.
+    // The line money/identity columns are immutable place-time snapshots, but a
+    // line's `status` advances as the order ships (`OrderLine.markFulfillment`, the
+    // Ship operation — ADR-031). Each line already carries its concrete id, so
+    // re-persisting upserts in place (a status-column UPDATE) without inserting
+    // duplicates — the price snapshot is re-written with identical values.
+    await this.persistLines(lineRepo, order, existingId);
     this.logger.debug({ orderId: existingId }, 'Order updated');
     return existingId;
   }

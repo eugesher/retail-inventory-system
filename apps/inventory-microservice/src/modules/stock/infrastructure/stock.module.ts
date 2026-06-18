@@ -22,6 +22,7 @@ import {
   AllocateStockUseCase,
   AutoInitStockLevelUseCase,
   CancelAllocationUseCase,
+  CommitSaleUseCase,
   ListLocationsUseCase,
   ListStockMovementsUseCase,
   QueryAvailabilityUseCase,
@@ -114,6 +115,7 @@ import {
     ReleaseReservationUseCase,
     AllocateStockUseCase,
     CancelAllocationUseCase,
+    CommitSaleUseCase,
     TransferStockUseCase,
 
     // Terminates `InventoryDomainException` into the `{ statusCode, message, code }`

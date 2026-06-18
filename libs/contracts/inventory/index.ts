@@ -1,3 +1,4 @@
+export * from './commit-sale';
 export * from './enums';
 export * from './events';
 export * from './reservation';

@@ -3,6 +3,10 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
 import {
+  IRetailFulfillmentCreatedEvent,
+  IRetailFulfillmentDeliveredEvent,
+  IRetailFulfillmentShippedEvent,
+  IRetailOrderCancelledEvent,
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
   IRetailPaymentCapturedEvent,
@@ -55,6 +59,55 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
     await firstValueFrom(
       this.retailClient.emit<void, IRetailPaymentCapturedEvent>(
         ROUTING_KEYS.RETAIL_PAYMENT_CAPTURED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.fulfillment.created` rides the `RETAIL_MICROSERVICE` client onto
+  // `retail_queue` (the producer's own queue) — a reserved surface today, like the
+  // `retail.payment.*` events.
+  public async publishFulfillmentCreated(event: IRetailFulfillmentCreatedEvent): Promise<void> {
+    await firstValueFrom(
+      this.retailClient.emit<void, IRetailFulfillmentCreatedEvent>(
+        ROUTING_KEYS.RETAIL_FULFILLMENT_CREATED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.fulfillment.shipped` is emitted through the `NOTIFICATION_MICROSERVICE`
+  // client so it lands on `notification_events` — the consumer's own queue, the
+  // producer-targets-consumer-queue pattern (ADR-008/020) that `retail.order.placed`
+  // uses. The notification service binds a shipment-confirmation consumer for it.
+  public async publishFulfillmentShipped(event: IRetailFulfillmentShippedEvent): Promise<void> {
+    await firstValueFrom(
+      this.notificationClient.emit<void, IRetailFulfillmentShippedEvent>(
+        ROUTING_KEYS.RETAIL_FULFILLMENT_SHIPPED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.fulfillment.delivered` is emitted through the `NOTIFICATION_MICROSERVICE`
+  // client onto `notification_events` (the consumer's own queue), where the
+  // notification service binds a delivery-confirmation consumer beside the shipped one.
+  public async publishFulfillmentDelivered(event: IRetailFulfillmentDeliveredEvent): Promise<void> {
+    await firstValueFrom(
+      this.notificationClient.emit<void, IRetailFulfillmentDeliveredEvent>(
+        ROUTING_KEYS.RETAIL_FULFILLMENT_DELIVERED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.order.cancelled` rides the `RETAIL_MICROSERVICE` client onto `retail_queue`
+  // (the producer's own queue) — a reserved surface today (the key, retired by ADR-028,
+  // is re-introduced fresh here with this live producer).
+  public async publishOrderCancelled(event: IRetailOrderCancelledEvent): Promise<void> {
+    await firstValueFrom(
+      this.retailClient.emit<void, IRetailOrderCancelledEvent>(
+        ROUTING_KEYS.RETAIL_ORDER_CANCELLED,
         event,
       ),
     );
