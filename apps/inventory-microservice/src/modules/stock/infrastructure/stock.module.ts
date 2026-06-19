@@ -29,6 +29,7 @@ import {
   ReceiveStockUseCase,
   ReleaseReservationUseCase,
   ReserveStockUseCase,
+  RestockFromReturnUseCase,
   TransferStockUseCase,
 } from '../application/use-cases';
 import { InventoryRpcExceptionFilter, StockController } from '../presentation';
@@ -116,6 +117,7 @@ import {
     AllocateStockUseCase,
     CancelAllocationUseCase,
     CommitSaleUseCase,
+    RestockFromReturnUseCase,
     TransferStockUseCase,
 
     // Terminates `InventoryDomainException` into the `{ statusCode, message, code }`

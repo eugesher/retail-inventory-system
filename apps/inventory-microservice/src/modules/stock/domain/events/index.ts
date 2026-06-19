@@ -6,3 +6,4 @@ export * from './stock-reserved.event';
 export * from './stock-released.event';
 export * from './stock-allocated.event';
 export * from './stock-committed.event';
+export * from './stock-returned.event';
