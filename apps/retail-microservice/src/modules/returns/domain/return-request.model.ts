@@ -71,7 +71,10 @@ export class ReturnRequest extends AggregateRoot<number | null> {
   private readonly _customerId: string;
   private _status: ReturnStatusEnum;
   private readonly _reasonCategory: ReturnReasonCategoryEnum;
-  private readonly _notes: string | null;
+  // Not `readonly`: the buyer's note is fixed at Open, but `reject(at, reason)` appends
+  // the staff rejection reason here so it is persisted without a dedicated column
+  // (ADR-032). Every other write path leaves it untouched.
+  private _notes: string | null;
   private readonly _requestedAt: Date;
   private _authorizedAt: Date | null;
   private _closedAt: Date | null;
@@ -200,11 +203,18 @@ export class ReturnRequest extends AggregateRoot<number | null> {
   }
 
   // `REQUESTED → REJECTED` (staff `order:return-authorize`). Rejection is terminal, so
-  // it stamps `closedAt` (the RMA never reaches the warehouse). Bumps the OCC token.
-  public reject(at: Date): void {
+  // it stamps `closedAt` (the RMA never reaches the warehouse). An optional `reason` is
+  // appended to `notes` so the rejection rationale is persisted without a dedicated column
+  // (ADR-032) — the buyer's original note is preserved, the reason appended after it.
+  // Bumps the OCC token.
+  public reject(at: Date, reason?: string | null): void {
     this.assertStatus(ReturnStatusEnum.REQUESTED, 'reject', `current: ${this._status}`);
     this._status = ReturnStatusEnum.REJECTED;
     this._closedAt = at;
+    if (reason && reason.trim().length > 0) {
+      const trimmed = reason.trim();
+      this._notes = this._notes ? `${this._notes}\nRejected: ${trimmed}` : `Rejected: ${trimmed}`;
+    }
     this.bumpVersion();
   }
 

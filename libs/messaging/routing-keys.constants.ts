@@ -163,6 +163,26 @@ export const ROUTING_KEYS = {
   // `order:cancel`) with a proportional allocation release. Both resolve an `OrderView`.
   RETAIL_ORDER_CANCEL: 'retail.order.cancel',
   RETAIL_ORDER_CANCEL_LINE: 'retail.order.cancel-line',
+  // Return (RMA) RPC command + read keys (API Gateway → Retail, served by the returns
+  // controller — the returns bounded context is its own module, ADR-032). Each is the
+  // imperative command for one RMA lifecycle transition (the `catalog.variant.create`/
+  // `.created` split, ADR-008):
+  // `retail.return.open` → `OpenReturnRequestUseCase` (owner-or-staff; runs the return
+  // window + returnable-quantity checks and finalizes an `RMA-<year>-…` number) →
+  // `ReturnRequestView`; `retail.return.authorize`/`.reject`/`.receive`/`.close` walk the
+  // status machine (staff `order:return-authorize` for authorize/reject/close, warehouse
+  // `inventory:receive-return` for receive); `retail.return.get` resolves one
+  // `ReturnRequestView` (owner-or-staff `order:read`); `retail.return.list` resolves an
+  // order's `ReturnRequestView[]` newest-first (owner-or-staff `order:read`).
+  // (`retail.return.inspect` — the warehouse condition/disposition step that triggers the
+  // cross-service restock — arrives with the inspect capability, ADR-032.)
+  RETAIL_RETURN_OPEN: 'retail.return.open',
+  RETAIL_RETURN_AUTHORIZE: 'retail.return.authorize',
+  RETAIL_RETURN_REJECT: 'retail.return.reject',
+  RETAIL_RETURN_RECEIVE: 'retail.return.receive',
+  RETAIL_RETURN_CLOSE: 'retail.return.close',
+  RETAIL_RETURN_GET: 'retail.return.get',
+  RETAIL_RETURN_LIST: 'retail.return.list',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -206,6 +226,19 @@ export const ROUTING_KEYS = {
   // old order model; it is **re-introduced fresh here** with a live producer (Cancel
   // Order), not resurrected from any stub. A reserved surface today (no consumer yet).
   RETAIL_ORDER_CANCELLED: 'retail.order.cancelled',
+  // Return (RMA) lifecycle events — the past-tense surfaces paired with the imperative
+  // `retail.return.*` commands (ADR-032). Two destinations by the
+  // producer-targets-consumer-queue pattern (ADR-008/020): `retail.return.requested` /
+  // `.authorized` / `.received` are the buyer-facing ones, emitted onto
+  // `notification_events` (the notification service's own queue — it binds a returns
+  // fan-out consumer for them); `retail.return.rejected` / `.closed` are emitted onto
+  // `retail_queue` (the producer's own queue — reserved surfaces today, no consumer).
+  // (`retail.return.inspected` arrives with the inspect capability, ADR-032.)
+  RETAIL_RETURN_REQUESTED: 'retail.return.requested',
+  RETAIL_RETURN_AUTHORIZED: 'retail.return.authorized',
+  RETAIL_RETURN_REJECTED: 'retail.return.rejected',
+  RETAIL_RETURN_RECEIVED: 'retail.return.received',
+  RETAIL_RETURN_CLOSED: 'retail.return.closed',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

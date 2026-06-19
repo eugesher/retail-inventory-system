@@ -9,3 +9,8 @@ export * from './order-cancelled.event';
 export * from './order-placed.event';
 export * from './payment-authorized.event';
 export * from './payment-captured.event';
+export * from './return-requested.event';
+export * from './return-authorized.event';
+export * from './return-rejected.event';
+export * from './return-received.event';
+export * from './return-closed.event';
