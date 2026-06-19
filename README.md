@@ -120,6 +120,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  cart / cart_line                                         │ │
 │  order / order_line / address / payment                   │ │
 │  fulfillment / fulfillment_line                           │ │
+│  return_request / return_line                             │ │
 └───────────────────────────────────────────────────────────┘ │
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
@@ -322,9 +323,11 @@ The **`Fulfillment` aggregate** and its **Create / List / Ship / Deliver + Cance
 
 **The gateway HTTP front for the whole fulfillment + cancel surface is live** — six new routes under `/api/orders`, fronted by the gateway `modules/orders/` over the retail RPCs ([ADR-009](docs/adr/009-port-adapter-at-the-gateway.md)): `POST /api/orders/:orderId/fulfillments` (Create → `FulfillmentView` 201), `GET /api/orders/:orderId/fulfillments` (List → `FulfillmentView[]`), `POST …/fulfillments/:fulfillmentId/ship` (Ship → `FulfillmentView` 200, an `Idempotency-Key` header accepted-not-deduped), `POST …/fulfillments/:fulfillmentId/deliver` (Mark Delivered → `FulfillmentView` 200), `POST /api/orders/:orderId/cancel` (Cancel Order → `OrderView` 200), and `POST /api/orders/:orderId/lines/:lineId/cancel` (Cancel Line → `OrderView` 200). Two authorization shapes coexist ([ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md) / [ADR-028](docs/adr/028-cart-order-payment-and-address-chain.md) §7): **List fulfillments** (owner-or-staff `order:read`) and **Cancel Order** (owner-or-staff `order:cancel` — a customer may cancel its own pending order) carry **no `@RequiresPermission`** so the owning customer is never blocked, with the staff override computed at the gateway from `@CurrentUser().permissions` and the owner-check enforced retail-side; **Create / Ship / Deliver** (`order:fulfill`) and **Cancel Line** (`order:cancel`) are staff-only operations and are gated with `@RequiresPermission` directly. Typed upstream codes (`FULFILLMENT_*` / `ORDER_*`) surface as 400/404/409 through `throwRpcError` (the typed `code` + any `details` forwarded). `OrdersRabbitmqAdapter` stays the module's sole `ClientProxy` holder. The two Kulala files [`http/fulfillment.http`](http/fulfillment.http) (the create → ship → deliver happy flow) and [`http/order-cancel.http`](http/order-cancel.http) (owner-cancel, shipped-order `409`, cancel-line) document the surface end-to-end.
 
+The retail service also hosts a new **`returns` bounded context** ([ADR-032](docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)) — the **data + domain foundation** of the returns-and-refunds capability, with no operations wired yet. A `ReturnRequest` (a DB-assigned `BIGINT` id, owning its `ReturnLine` children) is the RMA (Return Merchandise Authorization) record that drives a delivered or shipped order's return through a **six-state lifecycle** — `requested → authorized → received → inspected → closed`, with `requested → rejected` as the early-rejection branch (`rejected` and `closed` terminal). It is a **new module** rather than a sibling in `orders/`, because the lifecycle is a substantial state machine with warehouse-facing operations (Receive, Inspect) distinct from order placement; it gets its own `ReturnDomainException`. Each `ReturnLine` says which `OrderLine` quantity is coming back; its `condition` / `disposition` / `lineRefundAmountMinor` are recorded later at inspection (null until then). `rmaNumber` is a human-facing `RMA-<year>-<8-digit>` finalized from the generated id (the `order_number` idiom), and `customer_id` is the gateway customer's `CHAR(36)` UUID (the buyer, copied from the order). The aggregate is append-only — rejection and closure are status transitions, never deletes. This foundation ships the model, the `return_request` / `return_line` tables, the `ReturnRequestTypeormRepository` (`RETURN_REQUEST_REPOSITORY`), the four wire enums + `ReturnRequestView` / `ReturnLineView`, and a providers-only `ReturnsModule`; the operations (Open / Authorize / Reject / Receive / Inspect / Close), the `Refund` sibling aggregate in `orders/`, Restock from Return, and the gateway endpoints follow.
+
 ```
 apps/retail-microservice/src/
-├── app/app.module.ts                          # ConfigModule + LoggerModule + DatabaseModule.forRoot([...cartEntities, ...orderEntities]) + CartModule + OrdersModule
+├── app/app.module.ts                          # ConfigModule + LoggerModule + DatabaseModule.forRoot([...cartEntities, ...orderEntities, ...returnEntities]) + CartModule + OrdersModule + ReturnsModule
 ├── modules/cart/
 │   ├── domain/                                # Cart + CartLine aggregate, events, CartDomainException
 │   ├── application/
@@ -342,6 +345,12 @@ apps/retail-microservice/src/
 │       ├── persistence/                       # order/order_line/address/payment entities, mappers, Order/Address/Payment TypeormRepository
 │       ├── payment-gateway/                   # FakePaymentGatewayAdapter (default PAYMENT_GATEWAY — always approves, fake tokens)
 │       └── orders.module.ts                   # DatabaseModule.forFeature + the three repository bindings + PAYMENT_GATEWAY → FakePaymentGatewayAdapter
+├── modules/returns/                           # the RMA bounded context (ADR-032) — foundation only, no operations yet
+│   ├── domain/                                # ReturnRequest + ReturnLine aggregate, ReturnDomainException + ReturnErrorCodeEnum
+│   ├── application/ports/                     # RETURN_REQUEST_REPOSITORY (IReturnRequestRepositoryPort) + ITransactionScope
+│   └── infrastructure/
+│       ├── persistence/                       # return_request/return_line entities, mappers, ReturnRequestTypeormRepository
+│       └── returns.module.ts                  # DatabaseModule.forFeature + RETURN_REQUEST_REPOSITORY binding (providers-only)
 └── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 ```
 
