@@ -182,6 +182,36 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.RETAIL_ORDER_CANCEL_LINE).toBe(
       MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCEL_LINE,
     );
+    expect(ROUTING_KEYS.RETAIL_RETURN_OPEN).toBe(MicroserviceMessagePatternEnum.RETAIL_RETURN_OPEN);
+    expect(ROUTING_KEYS.RETAIL_RETURN_AUTHORIZE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_AUTHORIZE,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_REJECT).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_REJECT,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_RECEIVE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_RECEIVE,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_CLOSE).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_CLOSE,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_RETURN_GET);
+    expect(ROUTING_KEYS.RETAIL_RETURN_LIST).toBe(MicroserviceMessagePatternEnum.RETAIL_RETURN_LIST);
+    expect(ROUTING_KEYS.RETAIL_RETURN_REQUESTED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_REQUESTED,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_AUTHORIZED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_AUTHORIZED,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_REJECTED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_REJECTED,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_RECEIVED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_RECEIVED,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_CLOSED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_CLOSED,
+    );
     expect(ROUTING_KEYS.RETAIL_FULFILLMENT_CREATED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_CREATED,
     );

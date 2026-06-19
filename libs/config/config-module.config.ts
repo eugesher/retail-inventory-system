@@ -32,6 +32,12 @@ export const configModuleConfig = {
     // Defaulted, so a missing var never fails boot.
     RESERVATION_TTL_MINUTES: Joi.number().integer().positive().default(15),
 
+    // Return-eligibility window (days) — a `shipped` order is returnable only within
+    // `RETURN_WINDOW_DAYS` of its ship date; a `delivered` order is always returnable
+    // (ADR-032). The Open return use case reads it. Defaulted, so a missing var never
+    // fails boot (the `RESERVATION_TTL_MINUTES` precedent).
+    RETURN_WINDOW_DAYS: Joi.number().integer().positive().default(30),
+
     JWT_ACCESS_SECRET: Joi.string().min(32).required(),
     JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
     JWT_REFRESH_SECRET: Joi.string()
