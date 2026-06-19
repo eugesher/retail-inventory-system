@@ -1,18 +1,20 @@
-# Return-line disposition and restock — the inventory side
+# Return-line disposition and restock
 
-This document covers the **inventory side** of the returns flow: the
-`inventory.stock.restock-from-return` RPC that puts a returned item's stock back on the
-shelf. When a warehouse inspects received returns and dispositions a line as `restock`
-(the goods are resellable), the returned units must re-enter sellable inventory — their
-`quantity_on_hand` raised and an audit row written. This is the cross-service operation
-that makes that happen.
+This document covers both halves of how a returned item gets back onto the shelf:
 
-The retail-side trigger — the warehouse **Inspect & Disposition** step that records each
-line's condition/disposition and decides which lines to restock, then calls this RPC — is
-documented in the disposition half of this flow (the retail companion section). This half
-describes only the inventory operation it invokes.
+- the **retail Inspect & Disposition** step (§6–§8) — the warehouse records each return
+  line's condition + disposition + refund amount, walks the RMA `received → inspected`,
+  and for every `restock`-disposition line triggers the cross-service restock;
+- the **inventory `inventory.stock.restock-from-return` RPC** (§1–§5) — it raises the
+  variant's `quantity_on_hand` at its location and writes a positive `return` audit row.
 
-It is reached **retail → inventory over RabbitMQ** (no gateway HTTP route — an operator
+When a warehouse inspects received returns and dispositions a line as `restock` (the goods
+are resellable), the returned units must re-enter sellable inventory — their
+`quantity_on_hand` raised and an audit row written. The retail Inspect step decides *which*
+lines come back and *with what variant/location*; the inventory RPC does the physical
+restock.
+
+The inventory RPC is reached **retail → inventory over RabbitMQ** (no gateway HTTP route — an operator
 never calls restock directly; it is a consequence of an inspection). It honors
 [ADR-032](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md) (the returns
 capability) and reuses the entire stock-movement machinery
@@ -174,18 +176,86 @@ There is likewise **no inventory cache key-version bump**. Restock changes the
 post-commit `withInvalidation` fan-out, exactly as every other counter-changing operation
 does.
 
-## 6. Related documents
+## 6. Disposition semantics — what each outcome does
+
+Inspect records two enums plus a refund amount per `ReturnLine`. The **condition**
+(`new` / `damaged` / `used`) describes how the goods arrived; the **disposition**
+(`restock` / `scrap` / `quarantine`) decides what happens to them. Only the disposition
+drives inventory:
+
+| Disposition  | Meaning                          | Inventory effect                          |
+| ------------ | -------------------------------- | ----------------------------------------- |
+| `restock`    | Fit for resale                   | Back to `StockLevel` (`+quantity_on_hand`, one positive `return` movement) |
+| `scrap`      | Discard (destroyed)              | **None** — no stock movement              |
+| `quarantine` | Hold aside for review            | **None** — no stock movement today        |
+
+So the inspect step partitions the lines: the `restock`-disposition lines are gathered into
+**one** restock RPC; `scrap` and `quarantine` lines are recorded on the RMA (their
+`condition` / `disposition` / `lineRefundAmountMinor` are persisted for the audit and the
+refund) but trigger **no** cross-service call. A return with no `restock` line makes no
+inventory call at all. `quarantine` is deliberately a no-op on inventory for now — a future
+capability may move quarantined goods to a held location, but that is out of scope here.
+
+## 7. The cross-service trigger — record locally, then restock
+
+Inspect & Disposition is the returns context's single cross-service operation, and it
+follows the **after-commit, idempotent-replay** ordering that Ship → Commit Sale
+established ([ADR-031](../../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)):
+
+1. **Locally, in one transaction** (`TRANSACTION_PORT`): each line's `inspect(...)` records
+   its condition/disposition/refund amount, and `ReturnRequest.markInspected()` walks the
+   RMA `received → inspected`. These commit as one unit of work — an `inspected` RMA never
+   has a half-inspected line. The use case requires the payload to cover **every** RMA line
+   (an unknown line is `RETURN_LINE_NOT_FOUND` 404, an incomplete set
+   `RETURN_INSPECTION_INVALID` 400), so a complete inspection is the only thing that
+   commits.
+2. **After that commit**, for the `restock`-disposition lines, the use case resolves each
+   line's `variantId` (a `ReturnLine` carries only `orderLineId`, so the variant comes from
+   the order through the raw-SQL `RETURN_ORDER_READER` — the returns module never imports
+   the orders module) and a receiving `stockLocationId` (the default warehouse; a per-line
+   override is out of scope — a return arrives at the warehouse), and calls
+   `inventory.stock.restock-from-return` through the module-prefixed
+   `INVENTORY_RESTOCK_GATEWAY` port. The call is **bounded-retried then logged for operator
+   replay**; a remote inventory failure does **not** roll the inspection back.
+
+**Why not inside the inspection transaction.** Restocking synchronously inside the local
+transaction would couple a committed local DB write to a remote RPC: a transient inventory
+failure (or a slow broker) would roll back a physical inspection the warehouse has already
+performed. Instead the inspection is the source of truth, committed first; the restock is an
+eventual-consistency consequence, made safe by the RPC's `returnRequestId` idempotency (§3)
+— a redelivered or operator-replayed restock credits nothing twice. This is the exact
+trade-off Ship → Commit Sale makes for the inventory *decrement*; restock is its mirror for
+the *increment*.
+
+## 8. Per-line refund amount — recorded here, issued elsewhere
+
+Each inspected line carries a `lineRefundAmountMinor` (minor units, non-negative integer),
+recorded on the `ReturnLine` at inspection. **Inspect does not issue a refund.** A refund is
+a distinct, explicit operation against the order's captured `Payment`, modeled as its own
+`Refund` aggregate — see
+[`03-refund-as-distinct-entity.md`](03-refund-as-distinct-entity.md). The Issue Refund
+operation is the consumer of these per-line amounts: it sums them to decide how much to
+refund. Keeping the two steps separate means a return can be inspected (and its goods
+restocked) without a refund being forced in the same breath — the refund decision (full vs
+partial, manual vs automatic) belongs to the order/payment side, not the warehouse
+inspection. The `retail.return.inspected` event carries a `restockedLineCount` so a
+downstream can tell a refund-only inspection (0 restocked) from one that returned goods to
+the shelf.
+
+## 9. Related documents
 
 - [ADR-032 — Returns and refunds: the RMA lifecycle and restock](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)
   — the decision this work implements (restock as an inventory operation, the `return`
-  movement as the `sale` mirror, idempotency on `returnRequestId`).
+  movement as the `sale` mirror, idempotency on `returnRequestId`, Refund as a distinct
+  entity, the after-commit restock trigger).
 - [ADR-030 — Reservation TTL aggregate and the stock-movement ledger](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md)
   — the typed append-only ledger, the fixed-sign-per-type table, `existsByReference`, the
   bounded optimistic write protocol, and post-commit cache invalidation that restock reuses.
 - [ADR-027 — `StockLevel` running totals](../../adr/027-stocklevel-running-totals-and-stocklocation.md)
   — why the running totals are the balance authority and the ledger is only an audit trail.
-- The disposition half of this flow (the retail Inspect & Disposition companion) — how a
-  warehouse inspection records each line's condition/disposition and decides which lines to
-  send on this RPC.
+- [`01-rma-lifecycle.md`](01-rma-lifecycle.md) — the six-state RMA lifecycle whose
+  `received → inspected` transition this disposition step drives.
+- [`03-refund-as-distinct-entity.md`](03-refund-as-distinct-entity.md) — the `Refund`
+  aggregate that consumes the per-line `lineRefundAmountMinor` recorded here.
 - [`03-stock-movement-typed-ledger.md`](../07-inventory-reservation-and-stock-movement/03-stock-movement-typed-ledger.md)
   — the ledger that gained the `return` producer here.

@@ -1,6 +1,9 @@
 import {
+  IRestockFromReturnPayload,
+  IRestockFromReturnResult,
   IRetailReturnAuthorizedEvent,
   IRetailReturnClosedEvent,
+  IRetailReturnInspectedEvent,
   IRetailReturnReceivedEvent,
   IRetailReturnRejectedEvent,
   IRetailReturnRequestedEvent,
@@ -12,10 +15,13 @@ import {
 
 import { ReturnLine, ReturnRequest } from '../../../domain';
 import {
+  IInventoryRestockGatewayPort,
   IReturnEventsPublisherPort,
   IReturnOrderReaderPort,
   IReturnOrderSnapshot,
   IReturnRequestRepositoryPort,
+  ITransactionPort,
+  ITransactionScope,
 } from '../../ports';
 
 // Re-reconstitutes a return request with a concrete id (and concrete line ids), the way a
@@ -123,6 +129,7 @@ export class SpyReturnEventsPublisher implements IReturnEventsPublisherPort {
   public readonly authorized: IRetailReturnAuthorizedEvent[] = [];
   public readonly rejected: IRetailReturnRejectedEvent[] = [];
   public readonly received: IRetailReturnReceivedEvent[] = [];
+  public readonly inspected: IRetailReturnInspectedEvent[] = [];
   public readonly closed: IRetailReturnClosedEvent[] = [];
 
   public publishReturnRequested(event: IRetailReturnRequestedEvent): Promise<void> {
@@ -141,9 +148,50 @@ export class SpyReturnEventsPublisher implements IReturnEventsPublisherPort {
     this.received.push(event);
     return Promise.resolve();
   }
+  public publishReturnInspected(event: IRetailReturnInspectedEvent): Promise<void> {
+    this.inspected.push(event);
+    return Promise.resolve();
+  }
   public publishReturnClosed(event: IRetailReturnClosedEvent): Promise<void> {
     this.closed.push(event);
     return Promise.resolve();
+  }
+}
+
+// A throwaway brand value — the fakes ignore the scope (they share no real transaction),
+// so any object satisfies the opaque `ITransactionScope` here (the orders test-doubles
+// precedent).
+export const FAKE_SCOPE = {} as unknown as ITransactionScope;
+
+// Runs the work immediately with the throwaway scope — no real transaction. Good enough
+// for the use-case unit tests, which assert orchestration, not atomicity.
+export class FakeTransactionPort implements ITransactionPort {
+  public runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
+    return work(FAKE_SCOPE);
+  }
+}
+
+// In-memory `INVENTORY_RESTOCK_GATEWAY` double. Records every `restockFromReturn` call so a
+// spec can assert it fired exactly once with the right `{ returnRequestId, lines }`; can be
+// armed to reject (the after-commit retry-then-log posture — the inspection must still
+// succeed). The recording-gateway / `FakeOrderCommitSaleGateway` precedent.
+export class FakeInventoryRestockGateway implements IInventoryRestockGatewayPort {
+  public readonly calls: IRestockFromReturnPayload[] = [];
+  constructor(private readonly failure: Error | null = null) {}
+
+  public restockFromReturn(payload: IRestockFromReturnPayload): Promise<IRestockFromReturnResult> {
+    this.calls.push(payload);
+    if (this.failure) {
+      return Promise.reject(this.failure);
+    }
+    return Promise.resolve({
+      restocked: payload.lines.map((line) => ({
+        returnLineId: line.returnLineId,
+        variantId: line.variantId,
+        stockLocationId: line.stockLocationId,
+        quantity: line.quantity,
+      })),
+    });
   }
 }
 
