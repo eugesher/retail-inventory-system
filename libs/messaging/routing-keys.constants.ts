@@ -54,6 +54,18 @@ export const ROUTING_KEYS = {
   // `inventory.stock.{reserved,allocated,released}` precedent).
   INVENTORY_STOCK_COMMIT_SALE: 'inventory.stock.commit-sale',
   INVENTORY_STOCK_COMMITTED: 'inventory.stock.committed',
+  // `inventory.stock.restock-from-return` → `RestockFromReturnUseCase` (RPC, Retail
+  // Inspect & Disposition flow → Inventory): physically returns a return request's
+  // `restock`-disposition stock to sellable inventory — per line it increments
+  // `quantity_on_hand` (one `StockLevel.changeOnHand(+quantity)`) and appends one
+  // strictly-positive `return` movement referencing the return request. All-lines-
+  // atomic + idempotent on `returnRequestId` (ADR-032). `inventory.stock.returned`
+  // is the past-tense reserved-surface event it emits per restocked line onto
+  // `inventory_queue` (no consumer yet — the typed alias for the `return`-type
+  // movement, exposed as its own key for downstream filtering; the
+  // `inventory.stock.{allocated,committed}` precedent).
+  INVENTORY_STOCK_RESTOCK_FROM_RETURN: 'inventory.stock.restock-from-return',
+  INVENTORY_STOCK_RETURNED: 'inventory.stock.returned',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',
   CATALOG_PRODUCT_PUBLISH: 'catalog.product.publish',
   CATALOG_PRODUCT_ARCHIVE: 'catalog.product.archive',

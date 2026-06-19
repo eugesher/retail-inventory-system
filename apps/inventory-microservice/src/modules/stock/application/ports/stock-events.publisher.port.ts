@@ -8,6 +8,7 @@ import {
   StockReceivedEvent,
   StockReleasedEvent,
   StockReservedEvent,
+  StockReturnedEvent,
 } from '../../domain';
 
 export const STOCK_EVENTS_PUBLISHER = Symbol('STOCK_EVENTS_PUBLISHER');
@@ -41,6 +42,10 @@ export interface IStockEventsPublisherPort {
   // Emitted by the Commit Sale operation onto `inventory_queue` (reserved surface),
   // one per shipped line.
   publishStockCommitted(event: StockCommittedEvent, correlationId?: string): Promise<void>;
+  // Emitted by the Restock from Return operation onto `inventory_queue` (reserved
+  // surface), one per restocked line. The typed alias for the positive `return`
+  // movement, exposed as its own key for downstream filtering convenience (ADR-032).
+  publishStockReturned(event: StockReturnedEvent, correlationId?: string): Promise<void>;
   // Emitted for EVERY ledger insert (high-volume). It takes the domain
   // `StockMovement` record directly — a deliberate divergence from the other
   // methods (which take a `DomainEvent`): a dedicated wrapper event class would
