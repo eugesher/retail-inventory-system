@@ -147,6 +147,34 @@ export enum OrderErrorCodeEnum {
   // The order line referenced by a cancel-line request does not exist on the order
   // — 404.
   ORDER_LINE_NOT_FOUND = 'ORDER_LINE_NOT_FOUND',
+
+  // --- Refund flow (ADR-032; drivers land with Issue Refund) ---
+  // A refund `amountMinor` must be a **strictly positive** integer (minor units) — a
+  // zero/negative refund is meaningless, unlike `Payment.amountMinor` which allows 0,
+  // so this is a refund-specific code rather than `PAYMENT_AMOUNT_INVALID` — 400.
+  REFUND_AMOUNT_INVALID = 'REFUND_AMOUNT_INVALID',
+  // A refund `reason` must be a non-empty string — 400.
+  REFUND_REASON_REQUIRED = 'REFUND_REASON_REQUIRED',
+  // A refund status mutator was called from a state that does not allow it
+  // (`markIssued` / `markFailed` off non-`pending`) — a well-formed request the
+  // resource state forbids, 409.
+  REFUND_INVALID_STATUS_TRANSITION = 'REFUND_INVALID_STATUS_TRANSITION',
+  // The refund being read/operated on does not exist — 404 (Issue Refund / the refund
+  // reads, later capabilities).
+  REFUND_NOT_FOUND = 'REFUND_NOT_FOUND',
+  // The requested refund amount would push the cumulative refunded total past the
+  // payment's captured amount (`amount > Payment.amountMinor −
+  // Payment.refundedAmountMinor`) — the over-refund ceiling the Issue Refund use case
+  // enforces (the aggregate cannot see `Payment`), 409.
+  REFUND_EXCEEDS_REFUNDABLE = 'REFUND_EXCEEDS_REFUNDABLE',
+  // A refund was requested against a payment that is not `captured`, so there is
+  // nothing taken to refund — the Issue Refund precondition (a later capability), 409.
+  REFUND_PAYMENT_NOT_CAPTURED = 'REFUND_PAYMENT_NOT_CAPTURED',
+  // The authenticated caller is neither the refunded order's owner nor a staff
+  // override on a refund read — the retail-side half of the owner-or-staff check on
+  // the refund reads (a later capability), 403. Distinct from `ORDER_ACCESS_FORBIDDEN`
+  // so the refund surface carries its own messaging.
+  REFUND_ACCESS_FORBIDDEN = 'REFUND_ACCESS_FORBIDDEN',
 }
 
 // One concrete throwable for the orders bounded context, carrying a typed `code`

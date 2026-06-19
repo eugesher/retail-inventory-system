@@ -20,6 +20,7 @@ import {
   ORDER_REPOSITORY,
   PAYMENT_GATEWAY,
   PAYMENT_REPOSITORY,
+  REFUND_REPOSITORY,
   TRANSACTION_PORT,
 } from '../application/ports';
 import {
@@ -53,6 +54,8 @@ import {
   OrderTypeormRepository,
   PaymentEntity,
   PaymentTypeormRepository,
+  RefundEntity,
+  RefundTypeormRepository,
   TypeormTransactionAdapter,
 } from './persistence';
 import { FakePaymentGatewayAdapter } from './payment-gateway';
@@ -99,6 +102,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
       PaymentEntity,
       FulfillmentEntity,
       FulfillmentLineEntity,
+      RefundEntity,
     ]),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
@@ -116,6 +120,8 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     { provide: PAYMENT_GATEWAY, useClass: FakePaymentGatewayAdapter },
     FulfillmentTypeormRepository,
     { provide: FULFILLMENT_REPOSITORY, useExisting: FulfillmentTypeormRepository },
+    RefundTypeormRepository,
+    { provide: REFUND_REPOSITORY, useExisting: RefundTypeormRepository },
 
     TypeormTransactionAdapter,
     { provide: TRANSACTION_PORT, useExisting: TypeormTransactionAdapter },
