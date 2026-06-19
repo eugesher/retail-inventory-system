@@ -8,4 +8,5 @@ export * from './order-inventory.gateway.port';
 export * from './order-events.publisher.port';
 export * from './payment-gateway.port';
 export * from './payment.repository.port';
+export * from './refund.repository.port';
 export * from './transaction.port';
