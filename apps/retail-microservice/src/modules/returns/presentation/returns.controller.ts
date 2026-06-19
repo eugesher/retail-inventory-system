@@ -5,6 +5,7 @@ import {
   IRetailReturnAuthorizePayload,
   IRetailReturnClosePayload,
   IRetailReturnGetPayload,
+  IRetailReturnInspectPayload,
   IRetailReturnListPayload,
   IRetailReturnOpenPayload,
   IRetailReturnReceivePayload,
@@ -17,6 +18,7 @@ import {
   AuthorizeReturnUseCase,
   CloseReturnUseCase,
   GetReturnUseCase,
+  InspectAndDispositionUseCase,
   ListReturnsForOrderUseCase,
   OpenReturnRequestUseCase,
   ReceiveReturnUseCase,
@@ -24,7 +26,7 @@ import {
 } from '../application/use-cases';
 
 // RPC surface for the return (RMA) operations (API Gateway → Retail over `retail_queue`).
-// The returns bounded context is its own module (ADR-032), so its seven `@MessagePattern`
+// The returns bounded context is its own module (ADR-032), so its eight `@MessagePattern`
 // handlers live on their own controller (the one-aggregate-shaped controller convention).
 // Each handler is a thin delegate; a `ReturnDomainException` is terminated by the
 // `ReturnRpcExceptionFilter` into the `{ statusCode, message, code }` wire shape the
@@ -32,8 +34,8 @@ import {
 // cases (ADR-011 — `PinoLogger.assign` would throw outside request scope).
 //
 // `retail.return.open` is owner-or-staff; `retail.return.authorize` / `.reject` /
-// `.close` are staff `order:return-authorize`; `retail.return.receive` is warehouse
-// `inventory:receive-return`; `retail.return.get` / `.list` are owner-or-staff
+// `.close` are staff `order:return-authorize`; `retail.return.receive` / `.inspect` are
+// warehouse `inventory:receive-return`; `retail.return.get` / `.list` are owner-or-staff
 // `order:read` (all gated at the gateway — the use cases trust the resolved flag).
 @Controller()
 export class ReturnsController {
@@ -42,6 +44,7 @@ export class ReturnsController {
     private readonly authorizeReturn: AuthorizeReturnUseCase,
     private readonly rejectReturn: RejectReturnUseCase,
     private readonly receiveReturn: ReceiveReturnUseCase,
+    private readonly inspectAndDisposition: InspectAndDispositionUseCase,
     private readonly closeReturn: CloseReturnUseCase,
     private readonly getReturn: GetReturnUseCase,
     private readonly listReturns: ListReturnsForOrderUseCase,
@@ -69,6 +72,13 @@ export class ReturnsController {
     @Payload() payload: IRetailReturnReceivePayload,
   ): Promise<ReturnRequestView> {
     return this.receiveReturn.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_RETURN_INSPECT)
+  public handleInspect(
+    @Payload() payload: IRetailReturnInspectPayload,
+  ): Promise<ReturnRequestView> {
+    return this.inspectAndDisposition.execute(payload);
   }
 
   @MessagePattern(ROUTING_KEYS.RETAIL_RETURN_CLOSE)

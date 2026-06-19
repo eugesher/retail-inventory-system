@@ -186,12 +186,15 @@ export const ROUTING_KEYS = {
   // `inventory:receive-return` for receive); `retail.return.get` resolves one
   // `ReturnRequestView` (owner-or-staff `order:read`); `retail.return.list` resolves an
   // order's `ReturnRequestView[]` newest-first (owner-or-staff `order:read`).
-  // (`retail.return.inspect` — the warehouse condition/disposition step that triggers the
-  // cross-service restock — arrives with the inspect capability, ADR-032.)
+  // `retail.return.inspect` is the warehouse condition/disposition step
+  // (`inventory:receive-return`): it records each line's outcome, walks the RMA
+  // `received -> inspected`, and triggers the cross-service restock for `restock`-
+  // disposition lines via `inventory.stock.restock-from-return` (ADR-032).
   RETAIL_RETURN_OPEN: 'retail.return.open',
   RETAIL_RETURN_AUTHORIZE: 'retail.return.authorize',
   RETAIL_RETURN_REJECT: 'retail.return.reject',
   RETAIL_RETURN_RECEIVE: 'retail.return.receive',
+  RETAIL_RETURN_INSPECT: 'retail.return.inspect',
   RETAIL_RETURN_CLOSE: 'retail.return.close',
   RETAIL_RETURN_GET: 'retail.return.get',
   RETAIL_RETURN_LIST: 'retail.return.list',
@@ -245,11 +248,15 @@ export const ROUTING_KEYS = {
   // `notification_events` (the notification service's own queue — it binds a returns
   // fan-out consumer for them); `retail.return.rejected` / `.closed` are emitted onto
   // `retail_queue` (the producer's own queue — reserved surfaces today, no consumer).
-  // (`retail.return.inspected` arrives with the inspect capability, ADR-032.)
+  // `retail.return.inspected` is the buyer-facing past-tense of `retail.return.inspect`,
+  // emitted onto `notification_events` (the notification service binds a returns consumer
+  // for it); it carries `restockedLineCount` so a downstream can tell how many lines went
+  // back to stock (ADR-032).
   RETAIL_RETURN_REQUESTED: 'retail.return.requested',
   RETAIL_RETURN_AUTHORIZED: 'retail.return.authorized',
   RETAIL_RETURN_REJECTED: 'retail.return.rejected',
   RETAIL_RETURN_RECEIVED: 'retail.return.received',
+  RETAIL_RETURN_INSPECTED: 'retail.return.inspected',
   RETAIL_RETURN_CLOSED: 'retail.return.closed',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;

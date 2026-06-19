@@ -171,19 +171,22 @@ BIGINT `order_id` / `order_line_id` FKs have no collation concern.)
 
 ## 6. The operations
 
-The lifecycle is driven by six retail RPCs (a seventh, `retail.return.inspect`, lands with
-the inspect capability). Each is served by the returns controller off `retail_queue`, maps
-to one use case, walks at most one status transition, and resolves a `ReturnRequestView`.
+The lifecycle is driven by eight retail RPCs. Each is served by the returns controller off
+`retail_queue`, maps to one use case, walks at most one status transition, and resolves a
+`ReturnRequestView`. `retail.return.inspect` additionally drives the cross-service restock
+of fit-for-resale goods — see
+[`02-return-line-disposition-and-restock.md`](02-return-line-disposition-and-restock.md).
 
-| RPC                        | Use case                     | Actor / permission                   | Transition            | Event                       |
-| -------------------------- | ---------------------------- | ------------------------------------ | --------------------- | --------------------------- |
-| `retail.return.open`       | `OpenReturnRequestUseCase`   | owner **or** staff `order:return-authorize` | → `requested`  | `retail.return.requested`   |
-| `retail.return.authorize`  | `AuthorizeReturnUseCase`     | staff `order:return-authorize`       | `requested → authorized` | `retail.return.authorized`  |
-| `retail.return.reject`     | `RejectReturnUseCase`        | staff `order:return-authorize`       | `requested → rejected`   | `retail.return.rejected`    |
-| `retail.return.receive`    | `ReceiveReturnUseCase`       | warehouse `inventory:receive-return` | `authorized → received`  | `retail.return.received`    |
-| `retail.return.close`      | `CloseReturnUseCase`         | staff `order:return-authorize`       | `inspected → closed`     | `retail.return.closed`      |
-| `retail.return.get`        | `GetReturnUseCase`           | owner **or** staff `order:read`      | — (read)              | —                           |
-| `retail.return.list`       | `ListReturnsForOrderUseCase` | owner **or** staff `order:read`      | — (read)              | —                           |
+| RPC                        | Use case                       | Actor / permission                   | Transition            | Event                       |
+| -------------------------- | ------------------------------ | ------------------------------------ | --------------------- | --------------------------- |
+| `retail.return.open`       | `OpenReturnRequestUseCase`     | owner **or** staff `order:return-authorize` | → `requested`  | `retail.return.requested`   |
+| `retail.return.authorize`  | `AuthorizeReturnUseCase`       | staff `order:return-authorize`       | `requested → authorized` | `retail.return.authorized`  |
+| `retail.return.reject`     | `RejectReturnUseCase`          | staff `order:return-authorize`       | `requested → rejected`   | `retail.return.rejected`    |
+| `retail.return.receive`    | `ReceiveReturnUseCase`         | warehouse `inventory:receive-return` | `authorized → received`  | `retail.return.received`    |
+| `retail.return.inspect`    | `InspectAndDispositionUseCase` | warehouse `inventory:receive-return` | `received → inspected`   | `retail.return.inspected`   |
+| `retail.return.close`      | `CloseReturnUseCase`           | staff `order:return-authorize`       | `inspected → closed`     | `retail.return.closed`      |
+| `retail.return.get`        | `GetReturnUseCase`             | owner **or** staff `order:read`      | — (read)              | —                           |
+| `retail.return.list`       | `ListReturnsForOrderUseCase`   | owner **or** staff `order:read`      | — (read)              | —                           |
 
 **Open** is the only operation that runs the policy gates the aggregate cannot enforce for
 itself (it can see neither the order nor sibling RMAs): it resolves the order through the
@@ -271,15 +274,16 @@ An unknown `orderLineId` → `RETURN_ORDER_LINE_NOT_FOUND` (404); an over-reques
 
 ## 9. Eventing
 
-The five lifecycle events split across two queues by the **producer-targets-consumer-queue**
+The six lifecycle events split across two queues by the **producer-targets-consumer-queue**
 pattern (ADR-008 / ADR-020), emitted best-effort post-commit (a publish failure is
 warn-logged and swallowed — the transition has already committed) through the returns
-context's sole `ClientProxy` holder, `ReturnRabbitmqPublisher` (two clients, the
-`OrderRabbitmqPublisher` precedent):
+context's events `ClientProxy` holder, `ReturnRabbitmqPublisher` (two clients, the
+`OrderRabbitmqPublisher` precedent — the cross-service restock RPC rides a separate
+`INVENTORY_RESTOCK_GATEWAY` adapter, see §6):
 
-- **`retail.return.requested` / `.authorized` / `.received`** — the buyer-facing events —
-  are emitted onto **`notification_events`** (the notification service's own queue) so they
-  land where its returns fan-out consumer will bind them.
+- **`retail.return.requested` / `.authorized` / `.received` / `.inspected`** — the
+  buyer-facing events — are emitted onto **`notification_events`** (the notification service's
+  own queue) so they land where its returns fan-out consumer will bind them.
 - **`retail.return.rejected` / `.closed`** — the internal-status events — are emitted onto
   **`retail_queue`** (the producer's own queue) as reserved surfaces (no consumer today; the
   later refund capability is the natural consumer of `.closed`, since a closed RMA with money

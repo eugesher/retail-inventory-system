@@ -198,6 +198,9 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.RETAIL_RETURN_RECEIVE).toBe(
       MicroserviceMessagePatternEnum.RETAIL_RETURN_RECEIVE,
     );
+    expect(ROUTING_KEYS.RETAIL_RETURN_INSPECT).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_INSPECT,
+    );
     expect(ROUTING_KEYS.RETAIL_RETURN_CLOSE).toBe(
       MicroserviceMessagePatternEnum.RETAIL_RETURN_CLOSE,
     );
@@ -214,6 +217,9 @@ describe('ROUTING_KEYS', () => {
     );
     expect(ROUTING_KEYS.RETAIL_RETURN_RECEIVED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_RETURN_RECEIVED,
+    );
+    expect(ROUTING_KEYS.RETAIL_RETURN_INSPECTED).toBe(
+      MicroserviceMessagePatternEnum.RETAIL_RETURN_INSPECTED,
     );
     expect(ROUTING_KEYS.RETAIL_RETURN_CLOSED).toBe(
       MicroserviceMessagePatternEnum.RETAIL_RETURN_CLOSED,

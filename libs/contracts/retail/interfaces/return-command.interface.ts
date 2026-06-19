@@ -1,5 +1,5 @@
 import { ICorrelationPayload } from '../../microservices';
-import { ReturnReasonCategoryEnum } from '../enums';
+import { ReturnDispositionEnum, ReturnLineConditionEnum, ReturnReasonCategoryEnum } from '../enums';
 
 // Wire-format command payloads for the return (RMA) RPCs (API Gateway → Retail, served
 // by the returns controller — the returns bounded context is its own module, ADR-032).
@@ -58,6 +58,26 @@ export interface IRetailReturnRejectPayload extends ICorrelationPayload {
 export interface IRetailReturnReceivePayload extends ICorrelationPayload {
   rmaId: number;
   actorId: string;
+}
+
+// `retail.return.inspect` — walks a `received` RMA → `inspected` (warehouse
+// `inventory:receive-return` records the per-line outcome). Staff-gated at the gateway, so
+// it carries no owner-check flag; `actorId` is the resolved caller (the warehouse staff who
+// inspected — it rides the restock RPC's `actorId` for the inventory audit row). `lines`
+// carries one entry per RMA line: the `condition` the goods arrived in, the `disposition`
+// (`restock`/`scrap`/`quarantine`), and the `lineRefundAmountMinor` this line earns (minor
+// units, non-negative). Every RMA line must appear — the use case requires a complete
+// inspection, so an `inspected` RMA never has a half-inspected line. Only the `restock`-
+// disposition lines re-enter sellable inventory (`inventory.stock.restock-from-return`).
+export interface IRetailReturnInspectPayload extends ICorrelationPayload {
+  rmaId: number;
+  actorId: string;
+  lines: {
+    returnLineId: number;
+    condition: ReturnLineConditionEnum;
+    disposition: ReturnDispositionEnum;
+    lineRefundAmountMinor: number;
+  }[];
 }
 
 // `retail.return.close` — walks an `inspected` RMA → `closed` (staff

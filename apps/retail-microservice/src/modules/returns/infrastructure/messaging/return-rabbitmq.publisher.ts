@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import {
   IRetailReturnAuthorizedEvent,
   IRetailReturnClosedEvent,
+  IRetailReturnInspectedEvent,
   IRetailReturnReceivedEvent,
   IRetailReturnRejectedEvent,
   IRetailReturnRequestedEvent,
@@ -58,6 +59,18 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
     await firstValueFrom(
       this.notificationClient.emit<void, IRetailReturnReceivedEvent>(
         ROUTING_KEYS.RETAIL_RETURN_RECEIVED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.return.inspected` rides the `NOTIFICATION_MICROSERVICE` client onto
+  // `notification_events` (the buyer-facing inspection-complete fan-out, the consumer's
+  // own queue).
+  public async publishReturnInspected(event: IRetailReturnInspectedEvent): Promise<void> {
+    await firstValueFrom(
+      this.notificationClient.emit<void, IRetailReturnInspectedEvent>(
+        ROUTING_KEYS.RETAIL_RETURN_INSPECTED,
         event,
       ),
     );

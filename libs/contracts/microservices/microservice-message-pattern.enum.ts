@@ -72,6 +72,7 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_RETURN_AUTHORIZE = 'retail.return.authorize',
   RETAIL_RETURN_REJECT = 'retail.return.reject',
   RETAIL_RETURN_RECEIVE = 'retail.return.receive',
+  RETAIL_RETURN_INSPECT = 'retail.return.inspect',
   RETAIL_RETURN_CLOSE = 'retail.return.close',
   RETAIL_RETURN_GET = 'retail.return.get',
   RETAIL_RETURN_LIST = 'retail.return.list',
@@ -90,6 +91,7 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_RETURN_AUTHORIZED = 'retail.return.authorized',
   RETAIL_RETURN_REJECTED = 'retail.return.rejected',
   RETAIL_RETURN_RECEIVED = 'retail.return.received',
+  RETAIL_RETURN_INSPECTED = 'retail.return.inspected',
   RETAIL_RETURN_CLOSED = 'retail.return.closed',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
 }
