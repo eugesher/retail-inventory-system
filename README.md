@@ -632,8 +632,8 @@ Roles are stored relationally in the `role` table and bound to permission codes 
 | --- | --- |
 | `admin` | every code |
 | `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish`, `pricing:write` |
-| `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer`, `order:fulfill`, `order:cancel` |
-| `order-support` | `order:read`, `order:capture`, `order:fulfill`, `order:cancel`, `order:refund` |
+| `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer`, `inventory:receive-return`, `order:fulfill`, `order:cancel` |
+| `order-support` | `order:read`, `order:capture`, `order:fulfill`, `order:cancel`, `order:refund`, `order:return-authorize` |
 
 Guard a controller method on a precise code with `@RequiresPermission()` from `@retail-inventory-system/auth`:
 
@@ -657,11 +657,13 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `inventory:read` | `admin`, `warehouse-staff` |
 | `inventory:adjust` | `admin`, `warehouse-staff` |
 | `inventory:transfer` | `admin`, `warehouse-staff` |
+| `inventory:receive-return` | `admin`, `warehouse-staff` |
 | `order:read` | `admin`, `order-support` |
 | `order:capture` | `admin`, `order-support` |
 | `order:fulfill` | `admin`, `warehouse-staff`, `order-support` |
 | `order:cancel` | `admin`, `warehouse-staff`, `order-support` |
 | `order:refund` | `admin`, `order-support` |
+| `order:return-authorize` | `admin`, `order-support` |
 | `iam:assign` | `admin` |
 | `iam:role-edit` | `admin` |
 | `audit:read` | `admin` |

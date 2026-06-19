@@ -19,6 +19,8 @@ describe('Payment', () => {
       expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
       expect(payment.capturedAt).toBeNull();
       expect(payment.flaggedForRefund).toBe(false);
+      // A freshly authorized payment has refunded nothing; the writer ships later.
+      expect(payment.refundedAmountMinor).toBe(0);
       expect(payment.authorizedAt).toEqual(new Date('2026-06-10T00:00:00Z'));
       expect(payment.id).toBeNull();
       expect(payment.orderId).toBe(1);
@@ -164,6 +166,8 @@ describe('Payment', () => {
       expect(payment.capturedAt).toEqual(new Date('2026-06-11T09:30:00Z'));
       // Omitting the flag on the load path defaults it false.
       expect(payment.flaggedForRefund).toBe(false);
+      // Omitting the refunded total on the load path defaults it 0.
+      expect(payment.refundedAmountMinor).toBe(0);
     });
 
     it('round-trips a flaggedForRefund payment from storage', () => {
@@ -181,6 +185,44 @@ describe('Payment', () => {
       });
 
       expect(payment.flaggedForRefund).toBe(true);
+    });
+
+    it('round-trips a partially refunded total from storage', () => {
+      const payment = Payment.reconstitute({
+        id: 9,
+        orderId: 1,
+        amountMinor: 5997,
+        currency: 'USD',
+        method: 'fake-card',
+        status: PaymentStatusEnum.CAPTURED,
+        gatewayReference: 'fake_abc123',
+        authorizedAt: new Date('2026-06-10T00:00:00Z'),
+        capturedAt: new Date('2026-06-11T09:30:00Z'),
+        flaggedForRefund: true,
+        refundedAmountMinor: 1000,
+      });
+
+      expect(payment.refundedAmountMinor).toBe(1000);
+    });
+
+    it.each([
+      ['negative', -1],
+      ['fractional', 12.5],
+    ])('rejects a %s refundedAmountMinor on the load path', (_label, refundedAmountMinor) => {
+      expect(() =>
+        Payment.reconstitute({
+          id: 9,
+          orderId: 1,
+          amountMinor: 5997,
+          currency: 'USD',
+          method: 'fake-card',
+          status: PaymentStatusEnum.CAPTURED,
+          gatewayReference: 'fake_abc123',
+          authorizedAt: new Date('2026-06-10T00:00:00Z'),
+          capturedAt: new Date('2026-06-11T09:30:00Z'),
+          refundedAmountMinor,
+        }),
+      ).toThrow(OrderDomainException);
     });
   });
 });

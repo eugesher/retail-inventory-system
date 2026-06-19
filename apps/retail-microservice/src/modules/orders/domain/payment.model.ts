@@ -17,6 +17,10 @@ export interface IPaymentProps {
   // refund is owed; a refund capability consumes it. Optional on the load path and
   // defaults `false` — a freshly authorized payment is never flagged.
   flaggedForRefund?: boolean;
+  // Cumulative refunded total in minor units; the refund operation increments it and
+  // the partial-vs-full decision reads it against `amountMinor`. Optional on the load
+  // path and defaults `0` — a freshly authorized payment has refunded nothing.
+  refundedAmountMinor?: number;
   createdAt?: Date | null;
   updatedAt?: Date | null;
 }
@@ -60,6 +64,7 @@ export class Payment extends AggregateRoot<number | null> {
   private readonly _authorizedAt: Date | null;
   private _capturedAt: Date | null;
   private _flaggedForRefund: boolean;
+  private _refundedAmountMinor: number;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
 
@@ -74,6 +79,13 @@ export class Payment extends AggregateRoot<number | null> {
       throw new OrderDomainException(
         OrderErrorCodeEnum.PAYMENT_AMOUNT_INVALID,
         `Payment.amountMinor must be a non-negative integer (minor units), got ${props.amountMinor}`,
+      );
+    }
+    const refundedAmountMinor = props.refundedAmountMinor ?? 0;
+    if (!Number.isInteger(refundedAmountMinor) || refundedAmountMinor < 0) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_AMOUNT_INVALID,
+        `Payment.refundedAmountMinor must be a non-negative integer (minor units), got ${refundedAmountMinor}`,
       );
     }
     Payment.requireNonEmpty(
@@ -98,6 +110,7 @@ export class Payment extends AggregateRoot<number | null> {
     this._authorizedAt = props.authorizedAt;
     this._capturedAt = props.capturedAt;
     this._flaggedForRefund = props.flaggedForRefund ?? false;
+    this._refundedAmountMinor = refundedAmountMinor;
     this.createdAt = props.createdAt ?? null;
     this.updatedAt = props.updatedAt ?? null;
   }
@@ -118,6 +131,7 @@ export class Payment extends AggregateRoot<number | null> {
       authorizedAt: input.authorizedAt,
       capturedAt: null,
       flaggedForRefund: false,
+      refundedAmountMinor: 0,
     });
   }
 
@@ -163,6 +177,15 @@ export class Payment extends AggregateRoot<number | null> {
   // mutator that sets it ships with its consumer, not here.
   public get flaggedForRefund(): boolean {
     return this._flaggedForRefund;
+  }
+
+  // The cumulative amount refunded against this payment, in minor units. `0` for
+  // every freshly authorized payment — the `refund()` mutator that increments it
+  // ships with its consumer (the issue-refund capability), not here. The column +
+  // field + getter ship now so no later schema migration is needed (the
+  // `flagged_for_refund`-ships-now precedent, ADR-028 §6).
+  public get refundedAmountMinor(): number {
+    return this._refundedAmountMinor;
   }
 
   // The **only** mutation: `AUTHORIZED → CAPTURED`, stamping `capturedAt`. Rejects

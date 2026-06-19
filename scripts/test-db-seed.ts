@@ -65,6 +65,11 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     description: 'Transfer inventory between storages',
   },
   {
+    id: '00000000-0000-4000-b000-000000000011',
+    code: PermissionCodeEnum.INVENTORY_RECEIVE_RETURN,
+    description: 'Receive and inspect returned goods at the warehouse',
+  },
+  {
     id: '00000000-0000-4000-b000-000000000007',
     code: PermissionCodeEnum.ORDER_READ,
     description: 'Read orders',
@@ -88,6 +93,11 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     id: '00000000-0000-4000-b000-000000000009',
     code: PermissionCodeEnum.ORDER_REFUND,
     description: 'Refund orders',
+  },
+  {
+    id: '00000000-0000-4000-b000-000000000010',
+    code: PermissionCodeEnum.ORDER_RETURN_AUTHORIZE,
+    description: 'Authorize, reject, and close return requests',
   },
   {
     id: '00000000-0000-4000-b000-00000000000a',
@@ -142,6 +152,8 @@ const ROLE_SEEDS: {
       PermissionCodeEnum.INVENTORY_READ,
       PermissionCodeEnum.INVENTORY_ADJUST,
       PermissionCodeEnum.INVENTORY_TRANSFER,
+      // Warehouse staff receive and inspect returned goods at the warehouse.
+      PermissionCodeEnum.INVENTORY_RECEIVE_RETURN,
       // Warehouse staff create and ship fulfillments, and may cancel an order
       // that has not yet shipped.
       PermissionCodeEnum.ORDER_FULFILL,
@@ -160,6 +172,8 @@ const ROLE_SEEDS: {
       PermissionCodeEnum.ORDER_FULFILL,
       PermissionCodeEnum.ORDER_CANCEL,
       PermissionCodeEnum.ORDER_REFUND,
+      // Support authorizes, rejects, and closes customer return requests.
+      PermissionCodeEnum.ORDER_RETURN_AUTHORIZE,
     ],
   },
 ];
