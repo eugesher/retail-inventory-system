@@ -1,0 +1,318 @@
+# Returns endpoints — the full RMA lifecycle (open -> authorize -> receive -> inspect -> close)
+#
+# These routes front the retail microservice's return (RMA) RPCs over RabbitMQ
+# (ADR-009 / ADR-032). The lifecycle routes live on apps/api-gateway/src/modules/returns/
+# presentation/returns.controller.ts (@Controller() — no prefix, so it serves both the
+# order-scoped and the rma-scoped paths); they sit alongside the order routes without a
+# clash because Nest resolves by full path:
+#   - POST /api/orders/:orderId/returns          (Bearer — owner OR order:return-authorize)
+#       Open a return request for an order. Body { reasonCategory, notes?, lines:[{
+#       orderLineId, quantity }] }. The retail service enforces the return-window +
+#       returnable-quantity invariants. Returns the requested ReturnRequestView (201).
+#   - POST /api/returns/:rmaId/authorize         (Bearer — order:return-authorize)
+#       Walk a `requested` RMA -> `authorized`. Returns ReturnRequestView (200).
+#   - POST /api/returns/:rmaId/reject            (Bearer — order:return-authorize)
+#       Walk a `requested` RMA -> `rejected`. Body { reason }. (Not exercised below — the
+#       happy path authorizes; see the commented `rejectReturn` for the shape.)
+#   - POST /api/returns/:rmaId/receive           (Bearer — inventory:receive-return)
+#       Walk an `authorized` RMA -> `received` (the warehouse logs the goods in).
+#   - POST /api/returns/:rmaId/inspect           (Bearer — inventory:receive-return)
+#       Walk a `received` RMA -> `inspected`. Body { lines:[{ returnLineId, condition,
+#       disposition, lineRefundAmountMinor }] } — one entry per RMA line. A `restock`
+#       disposition re-enters the goods into sellable inventory (the cross-service
+#       inventory.stock.restock-from-return RPC fires after the inspect commit).
+#   - POST /api/returns/:rmaId/close             (Bearer — order:return-authorize)
+#       Walk an `inspected` RMA -> `closed` (settle the RMA).
+#   - GET  /api/returns/:rmaId                   (Bearer — owner OR order:read)
+#       Read one RMA by id. Returns ReturnRequestView (200).
+#   - GET  /api/orders/:orderId/returns          (Bearer — owner OR order:read)
+#       List an order's RMAs newest-first. Returns ReturnRequestView[] (200).
+#
+# AUTHORIZATION (two shapes, ADR-024 / ADR-028 §7). Open + the two reads are
+# owner-or-staff: the owning customer may open/read its own returns, OR staff with the
+# right override. They carry NO permission gate (that would block the owner) — the
+# owner-check is enforced retail-side, the staff override resolved at the gateway. The
+# status-walk routes are staff-only — gated directly with @RequiresPermission: authorize /
+# reject / close need order:return-authorize (order support); receive / inspect need
+# inventory:receive-return (warehouse staff). A non-owner non-staff caller gets 403.
+#
+# Typed upstream codes (RETURN_*) surface as 400/403/404/409 via throwRpcError. All routes
+# sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With the default dev
+# environment that resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run `loginStaff` FIRST -> @accessToken (admin@example.com / admin1234). The seeded
+#      admin holds EVERY permission, so one operator token drives every staff step below.
+#      In production the steps split across two roles: order-support (support@example.com /
+#      support1234) holds order:return-authorize for authorize/reject/close, and
+#      warehouse-staff (warehouse@example.com / warehouse1234) holds inventory:receive-return
+#      for receive/inspect — neither holds both, so the admin superset keeps the demo runnable.
+#   3. Run `loginCustomer` -> @customerToken (customer@example.com / customer1234; the order
+#      owner who opens the return).
+#   4. Build a DELIVERED order so it is returnable: `createCart` -> `addLine` -> `placeOrder`
+#      -> `createFulfillment` -> `shipFulfillment` -> `markDelivered`.
+#   5. Run the RMA chain: `openReturn` (captures @rmaId + @returnLineId) -> `authorizeReturn`
+#      -> `receiveReturn` -> `inspectReturn` (restock) -> `closeReturn`, then `getReturn` +
+#      `listOrderReturns` to read it back.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name loginStaff
+# POST /api/auth/staff/login
+# Seeded admin login — holds order:fulfill + order:read + order:return-authorize +
+# inventory:receive-return (the full returns operator set).
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{loginStaff.response.body.$.accessToken}}
+
+###
+
+# @name loginCustomer
+# POST /api/auth/customer/login
+# Seeded customer login — the order owner who opens the return.
+POST {{baseUrl}}/auth/customer/login
+Content-Type: application/json
+
+{
+  "email": "customer@example.com",
+  "password": "customer1234"
+}
+
+###
+@customerToken = {{loginCustomer.response.body.$.accessToken}}
+
+###
+
+# @name createCart
+# POST /api/cart  (Bearer — owner is the authenticated customer)
+# Opens a new active cart. Response is CartView; capture @cartId.
+POST {{baseUrl}}/cart
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartId = {{createCart.response.body.$.id}}
+
+###
+
+# @name addLine
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 1 (USD 4999), quantity 2 — so one unit can be returned later.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 2
+}
+
+###
+
+# @name placeOrder
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Converts the cart into an Order, allocates stock, authorizes payment. Response (201) is
+# OrderView. Capture @orderId plus the single line's id + ordered quantity.
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "paymentMethod": "tok_visa"
+}
+
+###
+@orderId = {{placeOrder.response.body.$.id}}
+@orderLineId = {{placeOrder.response.body.$.lines[0].id}}
+@orderLineQty = {{placeOrder.response.body.$.lines[0].quantity}}
+
+###
+
+# @name createFulfillment
+# POST /api/orders/:orderId/fulfillments  (Bearer — order:fulfill)
+# Plans ONE shipment covering the whole line, so a single ship + deliver rolls the order to
+# `delivered` (a delivered order is always returnable). Capture @fulfillmentId.
+POST {{baseUrl}}/orders/{{orderId}}/fulfillments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "stockLocationId": "default-warehouse",
+  "lines": [{ "orderLineId": {{orderLineId}}, "quantity": {{orderLineQty}} }]
+}
+
+###
+@fulfillmentId = {{createFulfillment.response.body.$.id}}
+
+###
+
+# @name shipFulfillment
+# POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+# Ships the fulfillment (captures the authorized payment inline). The order's
+# fulfillmentStatus becomes `shipped`.
+POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "trackingNumber": "1Z999AA10123456790",
+  "carrier": "UPS"
+}
+
+###
+
+# @name markDelivered
+# POST /api/orders/:orderId/fulfillments/:fulfillmentId/deliver  (Bearer — order:fulfill)
+# Marks the fulfillment delivered, rolling the order up to `delivered` — so the return
+# window is satisfied (a delivered order is always returnable).
+POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/deliver
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name openReturn
+# POST /api/orders/:orderId/returns  (Bearer — owner; the customer opens its OWN return)
+# The owning customer opens the return with @customerToken (no permission code — the
+# owner-or-staff route). Returns 1 of the 2 ordered units. The retail service enforces the
+# return-window + returnable-quantity invariants. Response (201) is ReturnRequestView with
+# status='requested' and an rmaNumber (RMA-<year>-<pad8(id)>). Capture @rmaId plus the RMA
+# line id (returnLineId) for the inspection step.
+POST {{baseUrl}}/orders/{{orderId}}/returns
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "reasonCategory": "defective",
+  "notes": "One unit arrived with a cracked screen",
+  "lines": [{ "orderLineId": {{orderLineId}}, "quantity": 1 }]
+}
+
+###
+@rmaId = {{openReturn.response.body.$.id}}
+@returnLineId = {{openReturn.response.body.$.lines[0].id}}
+
+###
+
+# @name authorizeReturn
+# POST /api/returns/:rmaId/authorize  (Bearer — staff order:return-authorize)
+# Order support authorizes the requested return -> `authorized`. Response (200) is the
+# ReturnRequestView with status='authorized' and authorizedAt stamped.
+POST {{baseUrl}}/returns/{{rmaId}}/authorize
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name receiveReturn
+# POST /api/returns/:rmaId/receive  (Bearer — staff inventory:receive-return)
+# The warehouse logs the returned goods in -> `received`. (In production a
+# warehouse-staff token, not order-support — admin holds both here.) Response (200) is the
+# ReturnRequestView with status='received'.
+POST {{baseUrl}}/returns/{{rmaId}}/receive
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name inspectReturn
+# POST /api/returns/:rmaId/inspect  (Bearer — staff inventory:receive-return)
+# Records the per-line outcome and walks `received` -> `inspected`. ONE entry per RMA line
+# is required. A `restock` disposition re-enters the unit into sellable inventory: the
+# cross-service inventory.stock.restock-from-return RPC fires AFTER the inspect commit
+# (idempotent on the RMA id), adding the unit back to quantity_on_hand at default-warehouse
+# and writing a positive `return` StockMovement. `lineRefundAmountMinor` (4999) is recorded
+# for the later refund but issues NO refund here. Response (200) is the inspected
+# ReturnRequestView (the line now carries condition/disposition/lineRefundAmountMinor).
+POST {{baseUrl}}/returns/{{rmaId}}/inspect
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "lines": [
+    {
+      "returnLineId": {{returnLineId}},
+      "condition": "new",
+      "disposition": "restock",
+      "lineRefundAmountMinor": 4999
+    }
+  ]
+}
+
+###
+
+# @name closeReturn
+# POST /api/returns/:rmaId/close  (Bearer — staff order:return-authorize)
+# Settles the inspected RMA -> `closed` (terminal). Closing does not itself issue a refund —
+# Issue Refund (see refunds.http) is a distinct, explicit step. Response (200) is the
+# ReturnRequestView with status='closed' and closedAt stamped.
+POST {{baseUrl}}/returns/{{rmaId}}/close
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name getReturn
+# GET /api/returns/:rmaId  (Bearer — owner OR order:read)
+# Reads the RMA back to observe the final state. The admin token uses the order:read staff
+# override; the owning customer could read its own with @customerToken. Response (200) is
+# the closed ReturnRequestView.
+GET {{baseUrl}}/returns/{{rmaId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name listOrderReturns
+# GET /api/orders/:orderId/returns  (Bearer — owner OR order:read)
+# Lists the order's RMAs newest-first. Response (200) is ReturnRequestView[] — the one RMA
+# just walked through its lifecycle.
+GET {{baseUrl}}/orders/{{orderId}}/returns
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name rejectReturnShape
+# POST /api/returns/:rmaId/reject  (Bearer — staff order:return-authorize)
+# Shape-only reference (NOT part of the happy chain above — the RMA is already closed). A
+# reject walks a `requested` RMA -> `rejected` (terminal) with the supplied reason appended
+# to the RMA notes. To exercise it, open a SECOND return and send this against its rmaId
+# before authorizing.
+POST {{baseUrl}}/returns/{{rmaId}}/reject
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Outside the return window"
+}
