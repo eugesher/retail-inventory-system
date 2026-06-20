@@ -4,9 +4,10 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import {
   IRetailFulfillmentDeliveredEvent,
   IRetailFulfillmentShippedEvent,
+  NotificationChannelEnum,
 } from '@retail-inventory-system/contracts';
 
-import { Notification, NotificationChannelEnum } from '../../domain';
+import { Notification } from '../../domain';
 import { INotifierPort, NOTIFIER } from '../ports';
 
 // Fans the two fulfillment lifecycle events — `retail.fulfillment.shipped` and
@@ -34,7 +35,7 @@ export class SendShipmentNotificationUseCase {
 
     const notification = new Notification({
       recipient: `order:${event.orderId}`,
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Shipment shipped for order ${event.orderId}`,
       body:
         `Fulfillment ${event.fulfillmentId} for order ${event.orderId} shipped via ` +
@@ -66,7 +67,7 @@ export class SendShipmentNotificationUseCase {
   public async delivered(event: IRetailFulfillmentDeliveredEvent): Promise<void> {
     const notification = new Notification({
       recipient: `order:${event.orderId}`,
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Shipment delivered for order ${event.orderId}`,
       body:
         `Fulfillment ${event.fulfillmentId} for order ${event.orderId} was delivered ` +

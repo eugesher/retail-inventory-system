@@ -711,6 +711,8 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `order:cancel` | `admin`, `warehouse-staff`, `order-support` |
 | `order:refund` | `admin`, `order-support` |
 | `order:return-authorize` | `admin`, `order-support` |
+| `notifications:read` | `admin` |
+| `notifications:write` | `admin` |
 | `iam:assign` | `admin` |
 | `iam:role-edit` | `admin` |
 | `audit:read` | `admin` |
@@ -727,6 +729,14 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `AUTH_ARGON2_MEMORY_COST` | `19456` (kib) | OWASP 2024 minimum for argon2id. |
 | `AUTH_ARGON2_TIME_COST` | `2` | Iteration count. |
 | `AUTH_ARGON2_PARALLELISM` | `1` | Threads. |
+
+The notification microservice reads three further defaulted variables (all Joi-validated, so a missing value never fails boot):
+
+| Variable | Default | Notes |
+| -------- | ------- | ----- |
+| `OPS_NOTIFICATIONS_EMAIL` | `ops@example.com` | Ops mailbox for system-only notifications with no customer recipient (e.g. the inventory low-stock alert). |
+| `MAX_DELIVERY_ATTEMPTS` | `3` | Max attempts before a notification delivery is abandoned and `notifications.delivery.failed` is emitted. |
+| `RETENTION_DELIVERY_DAYS` | `90` | Retention window (days) for delivery rows; the purge worker is a future capability. |
 
 ### Local development
 

@@ -1,9 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { IRetailRefundIssuedEvent } from '@retail-inventory-system/contracts';
+import {
+  IRetailRefundIssuedEvent,
+  NotificationChannelEnum,
+} from '@retail-inventory-system/contracts';
 
-import { Notification, NotificationChannelEnum } from '../../domain';
+import { Notification } from '../../domain';
 import { INotifierPort, NOTIFIER } from '../ports';
 
 // Fans the `retail.refund.issued` event out through the notifier — the buyer-facing
@@ -30,7 +33,7 @@ export class SendRefundNotificationUseCase {
   public async issued(event: IRetailRefundIssuedEvent): Promise<void> {
     const notification = new Notification({
       recipient: `order:${event.orderId}`,
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Refund issued for order ${event.orderId}`,
       body:
         `Refund ${event.refundId} of ${event.amountMinor} ${event.currency} (minor units) was ` +

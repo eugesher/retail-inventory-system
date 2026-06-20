@@ -5,9 +5,9 @@ import {
   IRetailReturnInspectedEvent,
   IRetailReturnReceivedEvent,
   IRetailReturnRequestedEvent,
+  NotificationChannelEnum,
 } from '@retail-inventory-system/contracts';
 
-import { NotificationChannelEnum } from '../../../domain';
 import { SendReturnNotificationUseCase } from '../send-return-notification.use-case';
 import { FakeLogger, InMemoryNotifier } from './test-doubles';
 
@@ -90,7 +90,7 @@ describe('SendReturnNotificationUseCase', () => {
       const sent = notifier.sent[0];
 
       expect(sent.recipient).toBe(`customer:${customerId}`);
-      expect(sent.channel).toBe(NotificationChannelEnum.LOG);
+      expect(sent.channel).toBe(NotificationChannelEnum.EMAIL);
       expect(sent.subject).toContain('RMA-2026-00000055');
       expect(sent.subject).toContain('4242');
       expect(sent.body).toContain('RMA-2026-00000055');
@@ -122,7 +122,7 @@ describe('SendReturnNotificationUseCase', () => {
       const sent = notifier.sent[0];
 
       expect(sent.recipient).toBe(`customer:${customerId}`);
-      expect(sent.channel).toBe(NotificationChannelEnum.LOG);
+      expect(sent.channel).toBe(NotificationChannelEnum.EMAIL);
       expect(sent.subject).toContain('authorized');
       expect(sent.subject).toContain('RMA-2026-00000055');
       expect(sent.body).toContain('2026-06-18T11:00:00.000Z');
@@ -151,7 +151,7 @@ describe('SendReturnNotificationUseCase', () => {
       const sent = notifier.sent[0];
 
       expect(sent.recipient).toBe(`customer:${customerId}`);
-      expect(sent.channel).toBe(NotificationChannelEnum.LOG);
+      expect(sent.channel).toBe(NotificationChannelEnum.EMAIL);
       expect(sent.subject).toContain('received');
       expect(sent.subject).toContain('RMA-2026-00000055');
       expect(sent.body).toContain('2026-06-19T09:00:00.000Z');
@@ -180,7 +180,7 @@ describe('SendReturnNotificationUseCase', () => {
       const sent = notifier.sent[0];
 
       expect(sent.recipient).toBe(`customer:${customerId}`);
-      expect(sent.channel).toBe(NotificationChannelEnum.LOG);
+      expect(sent.channel).toBe(NotificationChannelEnum.EMAIL);
       expect(sent.subject).toContain('inspected');
       expect(sent.subject).toContain('RMA-2026-00000055');
       expect(sent.body).toContain('2026-06-19T14:00:00.000Z');

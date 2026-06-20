@@ -1,8 +1,10 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { IInventoryStockLowEvent } from '@retail-inventory-system/contracts';
+import {
+  IInventoryStockLowEvent,
+  NotificationChannelEnum,
+} from '@retail-inventory-system/contracts';
 
-import { NotificationChannelEnum } from '../../../domain';
 import { SendLowStockAlertUseCase } from '../send-low-stock-alert.use-case';
 import { FakeLogger, InMemoryNotifier } from './test-doubles';
 
@@ -37,7 +39,7 @@ describe('SendLowStockAlertUseCase', () => {
     const sent = notifier.sent[0];
 
     expect(sent.recipient).toBe('ops:inventory');
-    expect(sent.channel).toBe(NotificationChannelEnum.LOG);
+    expect(sent.channel).toBe(NotificationChannelEnum.EMAIL);
     expect(sent.subject).toContain('variant 11');
     expect(sent.subject).toContain('head-warehouse');
     expect(sent.body).toContain('1 units');

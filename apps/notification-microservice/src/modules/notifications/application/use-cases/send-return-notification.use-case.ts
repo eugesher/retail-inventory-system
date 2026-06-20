@@ -6,9 +6,10 @@ import {
   IRetailReturnInspectedEvent,
   IRetailReturnReceivedEvent,
   IRetailReturnRequestedEvent,
+  NotificationChannelEnum,
 } from '@retail-inventory-system/contracts';
 
-import { Notification, NotificationChannelEnum } from '../../domain';
+import { Notification } from '../../domain';
 import { INotifierPort, NOTIFIER } from '../ports';
 
 // Fans the four buyer-facing return lifecycle events — `retail.return.requested`,
@@ -39,7 +40,7 @@ export class SendReturnNotificationUseCase {
   public async requested(event: IRetailReturnRequestedEvent): Promise<void> {
     const notification = new Notification({
       recipient: `customer:${event.customerId}`,
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Return request ${event.rmaNumber} received for order ${event.orderId}`,
       body:
         `Return ${event.rmaNumber} (RMA ${event.rmaId}) for order ${event.orderId} was ` +
@@ -72,7 +73,7 @@ export class SendReturnNotificationUseCase {
   public async authorized(event: IRetailReturnAuthorizedEvent): Promise<void> {
     const notification = new Notification({
       recipient: `customer:${event.customerId}`,
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Return ${event.rmaNumber} authorized for order ${event.orderId}`,
       body:
         `Return ${event.rmaNumber} (RMA ${event.rmaId}) for order ${event.orderId} was ` +
@@ -104,7 +105,7 @@ export class SendReturnNotificationUseCase {
   public async received(event: IRetailReturnReceivedEvent): Promise<void> {
     const notification = new Notification({
       recipient: `customer:${event.customerId}`,
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Return ${event.rmaNumber} received for order ${event.orderId}`,
       body:
         `We've received the items for return ${event.rmaNumber} (RMA ${event.rmaId}) on ` +
@@ -136,7 +137,7 @@ export class SendReturnNotificationUseCase {
   public async inspected(event: IRetailReturnInspectedEvent): Promise<void> {
     const notification = new Notification({
       recipient: `customer:${event.customerId}`,
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Return ${event.rmaNumber} inspected for order ${event.orderId}`,
       body:
         `Return ${event.rmaNumber} (RMA ${event.rmaId}) for order ${event.orderId} was ` +
