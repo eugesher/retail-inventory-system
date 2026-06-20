@@ -1,4 +1,4 @@
-import { FulfillmentView, IPage, OrderView } from '@retail-inventory-system/contracts';
+import { FulfillmentView, IPage, OrderView, RefundView } from '@retail-inventory-system/contracts';
 
 export const ORDERS_GATEWAY_PORT = Symbol('ORDERS_GATEWAY_PORT');
 
@@ -107,13 +107,44 @@ export interface IOrderLineCancelCommand {
   isStaffCancel: boolean;
 }
 
+// --- Refund commands (ADR-032) ---------------------------------------------
+//
+// The refund routes are order-scoped (`/api/orders/:orderId/refunds`), so they extend the
+// orders gateway port. Issue Refund is **staff-only** (`order:refund`), gated with
+// `@RequiresPermission` at the route, so its command carries only the resolved `actorId`
+// (the staff caller's id, always a real string from the manual endpoint — the
+// system-null actor is a retail consumer-only path) + the accepted-but-not-deduped
+// `idempotencyKey`. List Refunds is **owner-or-staff** `order:read`: it carries the
+// `isStaff` override (resolved from `order:read`) instead of a permission gate.
+
+// `retail.refund.issue` — issue a refund against a captured payment (staff `order:refund`).
+// `amountMinor` is the refund amount in integer minor units; the retail use case validates
+// it against the refundable ceiling. `reason` is the required human-supplied reason.
+export interface IRefundIssueCommand {
+  orderId: number;
+  paymentId: number;
+  amountMinor: number;
+  reason: string;
+  actorId: string;
+  idempotencyKey?: string;
+}
+
+// `retail.refund.list` — list an order's refunds newest-first (owner-or-staff `order:read`
+// via `isStaff`). A non-owner non-staff caller is `REFUND_ACCESS_FORBIDDEN` (403).
+export interface IRefundListQuery {
+  orderId: number;
+  actorId: string;
+  isStaff: boolean;
+}
+
 // The gateway-side seam onto the retail microservice's order read + capture +
-// fulfillment + cancel RPCs. The concrete implementation (`OrdersRabbitmqAdapter`) is
-// the only holder of a `ClientProxy`; use cases and the controller depend on this
+// fulfillment + cancel + refund RPCs. The concrete implementation (`OrdersRabbitmqAdapter`)
+// is the only holder of a `ClientProxy`; use cases and the controllers depend on this
 // interface (ADR-009). `getOrder` / `capturePayment` / `cancelOrder` / `cancelLine`
 // resolve the retail `OrderView`; `listMyOrders` an `IPage<OrderView>`;
 // `createFulfillment` / `shipFulfillment` / `markDelivered` a single `FulfillmentView`;
-// `listFulfillments` a `FulfillmentView[]`. All are surfaced over HTTP unchanged.
+// `listFulfillments` a `FulfillmentView[]`; `issueRefund` a single `RefundView`;
+// `listRefunds` a `RefundView[]`. All are surfaced over HTTP unchanged.
 export interface IOrdersGatewayPort {
   getOrder(query: IOrderGetQuery, correlationId: string): Promise<OrderView>;
   listMyOrders(query: IOrderListQuery, correlationId: string): Promise<IPage<OrderView>>;
@@ -133,4 +164,6 @@ export interface IOrdersGatewayPort {
   listFulfillments(query: IFulfillmentListQuery, correlationId: string): Promise<FulfillmentView[]>;
   cancelOrder(command: IOrderCancelCommand, correlationId: string): Promise<OrderView>;
   cancelLine(command: IOrderLineCancelCommand, correlationId: string): Promise<OrderView>;
+  issueRefund(command: IRefundIssueCommand, correlationId: string): Promise<RefundView>;
+  listRefunds(query: IRefundListQuery, correlationId: string): Promise<RefundView[]>;
 }

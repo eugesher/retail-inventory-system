@@ -14,7 +14,10 @@ import {
   IRetailOrderGetPayload,
   IRetailOrderListPayload,
   IRetailPaymentCapturePayload,
+  IRetailRefundIssuePayload,
+  IRetailRefundListPayload,
   OrderView,
+  RefundView,
 } from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
@@ -29,6 +32,8 @@ import {
   IOrderListQuery,
   IOrdersGatewayPort,
   IPaymentCaptureCommand,
+  IRefundIssueCommand,
+  IRefundListQuery,
 } from '../../application/ports';
 
 // The single `ClientProxy` holder for the gateway orders module (ADR-009 /
@@ -149,6 +154,27 @@ export class OrdersRabbitmqAdapter implements IOrdersGatewayPort {
         ROUTING_KEYS.RETAIL_ORDER_CANCEL_LINE,
         { ...command, correlationId },
       ),
+    );
+  }
+
+  public async issueRefund(
+    command: IRefundIssueCommand,
+    correlationId: string,
+  ): Promise<RefundView> {
+    return firstValueFrom(
+      this.client.send<RefundView, IRetailRefundIssuePayload>(ROUTING_KEYS.RETAIL_REFUND_ISSUE, {
+        ...command,
+        correlationId,
+      }),
+    );
+  }
+
+  public async listRefunds(query: IRefundListQuery, correlationId: string): Promise<RefundView[]> {
+    return firstValueFrom(
+      this.client.send<RefundView[], IRetailRefundListPayload>(ROUTING_KEYS.RETAIL_REFUND_LIST, {
+        ...query,
+        correlationId,
+      }),
     );
   }
 }

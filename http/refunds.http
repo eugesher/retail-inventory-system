@@ -1,0 +1,300 @@
+# Refund endpoints — the manual (goodwill) refund + the auto-refund-from-cancel trace
+#
+# These routes are order-scoped, so they live on apps/api-gateway/src/modules/orders/
+# presentation/refunds.controller.ts (@Controller('orders') — a second controller on the
+# orders prefix, next to capture/cancel) and front the retail microservice's refund RPCs
+# over RabbitMQ (ADR-009 / ADR-032):
+#   - POST /api/orders/:orderId/refunds   (Bearer — order:refund, staff-only)
+#       Issue a refund against the order's CAPTURED payment. Body { paymentId, amountMinor,
+#       reason } + an `Idempotency-Key` header (accepted + logged, NOT deduped). The retail
+#       service validates the captured precondition + the refundable ceiling
+#       (payment.amountMinor - payment.refundedAmountMinor) and reverses the payment via the
+#       (fake) gateway. Returns the issued RefundView (201; a partial refund leaves the
+#       payment `captured`, a full one flips it `refunded`).
+#   - GET  /api/orders/:orderId/refunds   (Bearer — owner OR order:read)
+#       List the order's refunds newest-first. Returns RefundView[] (200).
+#
+# AUTHORIZATION (two shapes, ADR-024 / ADR-028 §7). Issue Refund is STAFF-ONLY — gated
+# @RequiresPermission(order:refund); a customer cannot refund itself. List Refunds is
+# owner-or-staff (the owning customer, OR staff with order:read) and carries NO permission
+# gate (that would block the owner) — the owner-check is retail-side, the staff override
+# resolved at the gateway. A non-owner non-staff caller gets 403 (REFUND_ACCESS_FORBIDDEN).
+#
+# Typed upstream codes (REFUND_* / ORDER_*) surface as 400/403/404/409 via throwRpcError.
+# All routes sit behind the global "api" prefix. With the default dev environment that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run `loginStaff` FIRST -> @accessToken (admin@example.com / admin1234; holds
+#      order:capture + order:cancel + order:refund + order:read). In production order-support
+#      (support@example.com / support1234) holds the same order:* set.
+#   3. Run `loginCustomer` -> @customerToken (customer@example.com / customer1234; the owner).
+#   4. CASE 1 (manual goodwill refund, no return): `createCart` -> `addLine` -> `placeOrder`
+#      -> `capturePayment` (captures @paymentId) -> `issueRefund` (partial) ->
+#      `listRefunds`.
+#   5. CASE 2 (auto-refund-from-cancel): `createCartB` -> `addLineB` -> `placeOrderB` ->
+#      `capturePaymentB` (capture WITHOUT shipping) -> `cancelOrderB`. Cancel flags the
+#      captured payment for refund and emits retail.order.cancelled; the retail
+#      OrderCancelledConsumer reacts INLINE and issues the full refund (no HTTP call). Then
+#      `listRefundsB` shows the auto-issued refund.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name loginStaff
+# POST /api/auth/staff/login
+# Seeded admin login (order:capture + order:cancel + order:refund + order:read).
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{loginStaff.response.body.$.accessToken}}
+
+###
+
+# @name loginCustomer
+# POST /api/auth/customer/login
+# Seeded customer login — the order owner.
+POST {{baseUrl}}/auth/customer/login
+Content-Type: application/json
+
+{
+  "email": "customer@example.com",
+  "password": "customer1234"
+}
+
+###
+@customerToken = {{loginCustomer.response.body.$.accessToken}}
+
+###
+# ===========================================================================
+# CASE 1 — manual goodwill refund against a captured payment (no return)
+# ===========================================================================
+
+# @name createCart
+# POST /api/cart  (Bearer + owner-check)
+POST {{baseUrl}}/cart
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartId = {{createCart.response.body.$.id}}
+
+###
+
+# @name addLine
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 1 (USD 4999), quantity 1 — order grand total 4999.
+POST {{baseUrl}}/cart/{{cartId}}/lines
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 1
+}
+
+###
+
+# @name placeOrder
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Places the order (authorize-only). Response (201) is OrderView; capture @orderId.
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "paymentMethod": "tok_visa"
+}
+
+###
+@orderId = {{placeOrder.response.body.$.id}}
+
+###
+
+# @name capturePayment
+# POST /api/orders/:orderId/payments/capture  (Bearer — owner OR order:capture)
+# Captures the authorized payment (authorized -> captured) so it becomes refundable.
+# Response (200) is OrderView with paymentStatus='captured'; capture the payment id from
+# the embedded payment row.
+POST {{baseUrl}}/orders/{{orderId}}/payments/capture
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{}
+
+###
+@paymentId = {{capturePayment.response.body.$.payment.id}}
+
+###
+
+# @name issueRefund
+# POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
+# Issues a PARTIAL goodwill refund (1000 of the 4999 captured) — no return involved. The
+# retail service checks the captured precondition + the refundable ceiling, reverses the
+# amount via the (fake) gateway, accumulates payment.refunded_amount_minor, and (since this
+# is partial) leaves the payment `captured`. The `Idempotency-Key` is accepted + logged but
+# NOT deduped — the refundable-amount ceiling is what prevents an over-refund on replay.
+# Response (201) is RefundView with status='issued' and a gatewayReference.
+POST {{baseUrl}}/orders/{{orderId}}/refunds
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "paymentId": {{paymentId}},
+  "amountMinor": 1000,
+  "reason": "Goodwill price adjustment"
+}
+
+###
+
+# @name listRefunds
+# GET /api/orders/:orderId/refunds  (Bearer — owner OR order:read)
+# Lists the order's refunds newest-first. The owning customer could list its own with
+# @customerToken; staff use the order:read override. Response (200) is RefundView[] — the
+# one goodwill refund.
+GET {{baseUrl}}/orders/{{orderId}}/refunds
+Authorization: Bearer {{accessToken}}
+
+###
+# ===========================================================================
+# CASE 2 — auto-refund-from-cancel (place -> capture -> cancel; the consumer refunds)
+# ===========================================================================
+
+# @name createCartB
+# POST /api/cart  (Bearer + owner-check)
+POST {{baseUrl}}/cart
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD"
+}
+
+###
+@cartIdB = {{createCartB.response.body.$.id}}
+
+###
+
+# @name addLineB
+# POST /api/cart/:cartId/lines  (Bearer + owner-check)
+# Adds seeded variant 1 (USD 4999), quantity 1.
+POST {{baseUrl}}/cart/{{cartIdB}}/lines
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "variantId": 1,
+  "quantity": 1
+}
+
+###
+
+# @name placeOrderB
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# Places the order (authorize-only). Capture @orderIdB.
+POST {{baseUrl}}/cart/{{cartIdB}}/place
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "paymentMethod": "tok_visa"
+}
+
+###
+@orderIdB = {{placeOrderB.response.body.$.id}}
+
+###
+
+# @name capturePaymentB
+# POST /api/orders/:orderId/payments/capture  (Bearer — owner OR order:capture)
+# Captures the payment WITHOUT shipping. A captured-but-unshipped order is the only state
+# where Cancel Order flags the payment for refund (cancel-after-ship is blocked; a
+# never-captured cancel just voids the authorization). Response (200) is OrderView with
+# paymentStatus='captured'.
+POST {{baseUrl}}/orders/{{orderIdB}}/payments/capture
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{}
+
+###
+
+# @name cancelOrderB
+# POST /api/orders/:orderId/cancel  (Bearer — owner OR order:cancel)
+# Cancels the captured-but-unshipped order. Cancel flags the captured payment for refund
+# (payment.flagged_for_refund = true), releases the stock allocation, and emits
+# retail.order.cancelled with paymentFlaggedForRefund=true. The retail OrderCancelledConsumer
+# consumes that event and issues the FULL refund INLINE (no HTTP call here) — the payment
+# goes `refunded`, the flag clears, and a refund row is written. Response (200) is the
+# cancelled OrderView.
+POST {{baseUrl}}/orders/{{orderIdB}}/cancel
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Customer cancelled after capture"
+}
+
+###
+
+# @name listRefundsB
+# GET /api/orders/:orderId/refunds  (Bearer — owner OR order:read)
+# Lists the order's refunds. Run a moment after `cancelOrderB` so the asynchronous
+# auto-refund consumer has processed retail.order.cancelled. Response (200) is RefundView[]
+# with the one auto-issued full refund (status='issued', reason='order-cancelled'). Re-running
+# the cancel event is idempotent — the refundable remainder is 0, so no second refund issues.
+GET {{baseUrl}}/orders/{{orderIdB}}/refunds
+Authorization: Bearer {{accessToken}}
