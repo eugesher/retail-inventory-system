@@ -1,9 +1,12 @@
+import { IPaymentGatewayPort } from '../../../application/ports';
 import { FakePaymentGatewayAdapter } from '../fake-payment-gateway.adapter';
 
 // Adapter **contract conformance**: these assertions pin the `IPaymentGatewayPort`
-// shape the fake must satisfy, so a real adapter later can be held to the same bar.
+// shape the fake must satisfy, so a real adapter later can be held to the same bar. The
+// adapter is held through the port type so the calls exercise the contract signatures
+// (e.g. `refund(req)`) rather than the fake's narrowed implementation arity.
 describe('FakePaymentGatewayAdapter', () => {
-  let adapter: FakePaymentGatewayAdapter;
+  let adapter: IPaymentGatewayPort;
 
   beforeEach(() => {
     adapter = new FakePaymentGatewayAdapter();
@@ -60,6 +63,44 @@ describe('FakePaymentGatewayAdapter', () => {
       expect(result.captured).toBe(true);
       expect(result.gatewayReference).toBe(gatewayReference);
       expect(result.capturedAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('refund', () => {
+    it('always refunds with a fresh fake_refund_ reference and a refundedAt Date', async () => {
+      const { gatewayReference } = await adapter.authorize({
+        orderId: 1,
+        amountMinor: 100,
+        currency: 'USD',
+      });
+
+      const result = await adapter.refund({
+        gatewayReference,
+        amountMinor: 100,
+        currency: 'USD',
+      });
+
+      expect(result.refunded).toBe(true);
+      expect(typeof result.gatewayReference).toBe('string');
+      // The refund reference is fresh — distinct from the charge reference it reverses.
+      expect(result.gatewayReference.startsWith('fake_refund_')).toBe(true);
+      expect(result.gatewayReference).not.toBe(gatewayReference);
+      expect(result.refundedAt).toBeInstanceOf(Date);
+    });
+
+    it('mints a distinct refund reference per call', async () => {
+      const first = await adapter.refund({
+        gatewayReference: 'fake_charge',
+        amountMinor: 100,
+        currency: 'USD',
+      });
+      const second = await adapter.refund({
+        gatewayReference: 'fake_charge',
+        amountMinor: 100,
+        currency: 'USD',
+      });
+
+      expect(first.gatewayReference).not.toBe(second.gatewayReference);
     });
   });
 });

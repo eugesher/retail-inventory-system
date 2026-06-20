@@ -76,6 +76,8 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_RETURN_CLOSE = 'retail.return.close',
   RETAIL_RETURN_GET = 'retail.return.get',
   RETAIL_RETURN_LIST = 'retail.return.list',
+  RETAIL_REFUND_ISSUE = 'retail.refund.issue',
+  RETAIL_REFUND_LIST = 'retail.refund.list',
   RETAIL_CART_CREATED = 'retail.cart.created',
   RETAIL_CART_LINE_ADDED = 'retail.cart.line-added',
   RETAIL_CART_LINE_REMOVED = 'retail.cart.line-removed',
@@ -93,5 +95,7 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_RETURN_RECEIVED = 'retail.return.received',
   RETAIL_RETURN_INSPECTED = 'retail.return.inspected',
   RETAIL_RETURN_CLOSED = 'retail.return.closed',
+  RETAIL_REFUND_ISSUED = 'retail.refund.issued',
+  RETAIL_REFUND_FAILED = 'retail.refund.failed',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
 }

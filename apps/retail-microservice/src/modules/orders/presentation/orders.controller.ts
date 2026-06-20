@@ -14,7 +14,10 @@ import {
   IRetailOrderGetPayload,
   IRetailOrderListPayload,
   IRetailPaymentCapturePayload,
+  IRetailRefundIssuePayload,
+  IRetailRefundListPayload,
   OrderView,
+  RefundView,
 } from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
@@ -24,8 +27,10 @@ import {
   CapturePaymentUseCase,
   CreateFulfillmentUseCase,
   GetOrderUseCase,
+  IssueRefundUseCase,
   ListFulfillmentsUseCase,
   ListMyOrdersUseCase,
+  ListRefundsForOrderUseCase,
   MarkDeliveredUseCase,
   PlaceOrderUseCase,
   ShipFulfillmentUseCase,
@@ -55,6 +60,8 @@ export class OrdersController {
     private readonly markDelivered: MarkDeliveredUseCase,
     private readonly cancelOrder: CancelOrderUseCase,
     private readonly cancelLine: CancelLineUseCase,
+    private readonly issueRefund: IssueRefundUseCase,
+    private readonly listRefunds: ListRefundsForOrderUseCase,
   ) {}
 
   @MessagePattern(ROUTING_KEYS.RETAIL_CART_PLACE)
@@ -108,6 +115,16 @@ export class OrdersController {
   @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_CANCEL)
   public handleCancelOrder(@Payload() payload: IRetailOrderCancelPayload): Promise<OrderView> {
     return this.cancelOrder.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_REFUND_ISSUE)
+  public handleIssueRefund(@Payload() payload: IRetailRefundIssuePayload): Promise<RefundView> {
+    return this.issueRefund.execute(payload);
+  }
+
+  @MessagePattern(ROUTING_KEYS.RETAIL_REFUND_LIST)
+  public handleListRefunds(@Payload() payload: IRetailRefundListPayload): Promise<RefundView[]> {
+    return this.listRefunds.execute(payload);
   }
 
   @MessagePattern(ROUTING_KEYS.RETAIL_ORDER_CANCEL_LINE)

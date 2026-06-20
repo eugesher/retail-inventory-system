@@ -6,6 +6,8 @@ import {
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
   IRetailPaymentCapturedEvent,
+  IRetailRefundFailedEvent,
+  IRetailRefundIssuedEvent,
 } from '@retail-inventory-system/contracts';
 
 export const ORDER_EVENTS_PUBLISHER = Symbol('ORDER_EVENTS_PUBLISHER');
@@ -21,11 +23,13 @@ export const ORDER_EVENTS_PUBLISHER = Symbol('ORDER_EVENTS_PUBLISHER');
 // `retail.fulfillment.delivered` onto `notification_events` (the notification service's
 // own queue — it consumes all three for its order/shipment fan-out);
 // `publishPaymentAuthorized` / `publishPaymentCaptured` / `publishFulfillmentCreated` /
-// `publishOrderCancelled` emit `retail.payment.authorized` / `retail.payment.captured` /
-// `retail.fulfillment.created` / `retail.order.cancelled` onto `retail_queue` (the
-// producer's own queue — reserved surfaces today, no consumer). Each is a best-effort
-// post-commit emit — the write has already committed, so a publish failure is
-// warn-logged and swallowed by the caller (ADR-020).
+// `publishOrderCancelled` / `publishRefundFailed` emit `retail.payment.authorized` /
+// `retail.payment.captured` / `retail.fulfillment.created` / `retail.order.cancelled` /
+// `retail.refund.failed` onto `retail_queue` (the producer's own queue — reserved
+// surfaces today, no consumer). `publishRefundIssued` emits `retail.refund.issued` onto
+// `notification_events` (the buyer-facing refund-confirmation surface, joining the order/
+// shipment events). Each is a best-effort post-commit emit — the write has already
+// committed, so a publish failure is warn-logged and swallowed by the caller (ADR-020).
 export interface IOrderEventsPublisherPort {
   publishOrderPlaced(event: IRetailOrderPlacedEvent): Promise<void>;
   publishPaymentAuthorized(event: IRetailPaymentAuthorizedEvent): Promise<void>;
@@ -34,4 +38,6 @@ export interface IOrderEventsPublisherPort {
   publishFulfillmentShipped(event: IRetailFulfillmentShippedEvent): Promise<void>;
   publishFulfillmentDelivered(event: IRetailFulfillmentDeliveredEvent): Promise<void>;
   publishOrderCancelled(event: IRetailOrderCancelledEvent): Promise<void>;
+  publishRefundIssued(event: IRetailRefundIssuedEvent): Promise<void>;
+  publishRefundFailed(event: IRetailRefundFailedEvent): Promise<void>;
 }
