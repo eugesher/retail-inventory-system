@@ -7,3 +7,5 @@ export * from './mark-delivered.use-case';
 export * from './list-fulfillments.use-case';
 export * from './cancel-order.use-case';
 export * from './cancel-line.use-case';
+export * from './issue-refund.use-case';
+export * from './list-refunds.use-case';

@@ -12,6 +12,7 @@ import {
   IInventoryStockReceivedEvent,
   IInventoryStockReleasedEvent,
   IInventoryStockReservedEvent,
+  IInventoryStockReturnedEvent,
 } from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
@@ -25,6 +26,7 @@ import {
   StockReceivedEvent,
   StockReleasedEvent,
   StockReservedEvent,
+  StockReturnedEvent,
 } from '../../domain';
 import { IStockEventsPublisherPort } from '../../application/ports';
 
@@ -235,6 +237,30 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockCommittedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_COMMITTED,
+        wire,
+      ),
+    );
+  }
+
+  public async publishStockReturned(
+    event: StockReturnedEvent,
+    correlationId?: string,
+  ): Promise<void> {
+    const wire: IInventoryStockReturnedEvent = {
+      variantId: event.aggregateId,
+      stockLocationId: event.stockLocationId,
+      quantity: event.quantity,
+      returnRequestId: event.returnRequestId,
+      returnLineId: event.returnLineId,
+      eventVersion: 'v1',
+      occurredAt: event.occurredAt.toISOString(),
+      correlationId: correlationId ?? '',
+    };
+
+    // Reserved surface on `inventory_queue` (no handler bound yet).
+    await firstValueFrom(
+      this.inventoryClient.emit<void, IInventoryStockReturnedEvent>(
+        ROUTING_KEYS.INVENTORY_STOCK_RETURNED,
         wire,
       ),
     );

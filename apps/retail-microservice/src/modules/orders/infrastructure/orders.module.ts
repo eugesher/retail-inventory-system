@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
+import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
 import {
   MicroserviceClientCatalogModule,
@@ -20,6 +21,7 @@ import {
   ORDER_REPOSITORY,
   PAYMENT_GATEWAY,
   PAYMENT_REPOSITORY,
+  REFUND_REPOSITORY,
   TRANSACTION_PORT,
 } from '../application/ports';
 import {
@@ -29,12 +31,15 @@ import {
   CapturePaymentUseCase,
   CreateFulfillmentUseCase,
   GetOrderUseCase,
+  IssueRefundUseCase,
   ListFulfillmentsUseCase,
   ListMyOrdersUseCase,
+  ListRefundsForOrderUseCase,
   MarkDeliveredUseCase,
   PlaceOrderUseCase,
   ShipFulfillmentUseCase,
 } from '../application/use-cases';
+import { OrderCancelledConsumer } from './consumers';
 import {
   OrderCatalogRabbitmqAdapter,
   OrderCommitSaleRabbitmqAdapter,
@@ -53,23 +58,32 @@ import {
   OrderTypeormRepository,
   PaymentEntity,
   PaymentTypeormRepository,
+  RefundEntity,
+  RefundTypeormRepository,
   TypeormTransactionAdapter,
 } from './persistence';
 import { FakePaymentGatewayAdapter } from './payment-gateway';
+import { NoOpAuditLogPublisher } from './audit';
 import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 
 // The orders bounded-context module: the `Order` / `Address` / `Payment` /
-// `Fulfillment` repositories, the `PAYMENT_GATEWAY` seam (default
-// `FakePaymentGatewayAdapter`, ADR-028 §4), the transactional unit-of-work
-// (`TRANSACTION_PORT`), the outbound seams (catalog snapshot reads, the inventory
-// allocate/cancel + commit-sale seams, and the order/payment/fulfillment event emits),
-// the Place Order + Authorize Payment + Capture Payment + Get Order + List My Orders +
-// Create Fulfillment + List Fulfillments + Ship Fulfillment + Mark Delivered +
-// Cancel Order + Cancel Line use cases, and the `retail.cart.place` /
-// `retail.order.get` / `retail.order.list` / `retail.payment.capture` /
-// `retail.fulfillment.create` / `retail.fulfillment.list` / `retail.fulfillment.ship` /
-// `retail.fulfillment.deliver` / `retail.order.cancel` / `retail.order.cancel-line` RPC
-// controller.
+// `Fulfillment` / `Refund` repositories, the `PAYMENT_GATEWAY` seam (default
+// `FakePaymentGatewayAdapter`, ADR-028 §4), the `AUDIT_LOG_PUBLISHER` seam (default
+// `NoOpAuditLogPublisher`, the always-audit money-movement rule, ADR-032), the
+// transactional unit-of-work (`TRANSACTION_PORT`), the outbound seams (catalog snapshot
+// reads, the inventory allocate/cancel + commit-sale seams, and the
+// order/payment/fulfillment/refund event emits), the Place Order + Authorize Payment +
+// Capture Payment + Get Order + List My Orders + Create Fulfillment + List Fulfillments +
+// Ship Fulfillment + Mark Delivered + Cancel Order + Cancel Line + Issue Refund +
+// List Refunds use cases, and the `retail.cart.place` / `retail.order.get` /
+// `retail.order.list` / `retail.payment.capture` / `retail.fulfillment.create` /
+// `retail.fulfillment.list` / `retail.fulfillment.ship` / `retail.fulfillment.deliver` /
+// `retail.order.cancel` / `retail.order.cancel-line` / `retail.refund.issue` /
+// `retail.refund.list` RPC controller. It also registers the `OrderCancelledConsumer`
+// (`@EventPattern retail.order.cancelled`) — the auto-refund-from-cancel subscriber that
+// listens to retail's **own** cancel event on `retail_queue` and, when
+// `paymentFlaggedForRefund=true`, issues a full refund inline via `IssueRefundUseCase`
+// (ADR-032).
 //
 // Four messaging clients are imported: `MicroserviceClientCatalogModule` so Place
 // Order can snapshot from `catalog.variant.get` / `catalog.price.select` on
@@ -99,13 +113,14 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
       PaymentEntity,
       FulfillmentEntity,
       FulfillmentLineEntity,
+      RefundEntity,
     ]),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
     MicroserviceClientNotificationModule,
     MicroserviceClientRetailModule,
   ],
-  controllers: [OrdersController],
+  controllers: [OrdersController, OrderCancelledConsumer],
   providers: [
     OrderTypeormRepository,
     { provide: ORDER_REPOSITORY, useExisting: OrderTypeormRepository },
@@ -116,6 +131,8 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     { provide: PAYMENT_GATEWAY, useClass: FakePaymentGatewayAdapter },
     FulfillmentTypeormRepository,
     { provide: FULFILLMENT_REPOSITORY, useExisting: FulfillmentTypeormRepository },
+    RefundTypeormRepository,
+    { provide: REFUND_REPOSITORY, useExisting: RefundTypeormRepository },
 
     TypeormTransactionAdapter,
     { provide: TRANSACTION_PORT, useExisting: TypeormTransactionAdapter },
@@ -130,6 +147,10 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     { provide: ORDER_COMMIT_SALE_GATEWAY, useExisting: OrderCommitSaleRabbitmqAdapter },
     OrderRabbitmqPublisher,
     { provide: ORDER_EVENTS_PUBLISHER, useExisting: OrderRabbitmqPublisher },
+    // The always-audit seam for refund money movements (ADR-032). Default is the
+    // log-only `NoOpAuditLogPublisher`; a real audit sink swaps in by rebinding.
+    NoOpAuditLogPublisher,
+    { provide: AUDIT_LOG_PUBLISHER, useExisting: NoOpAuditLogPublisher },
 
     AuthorizePaymentUseCase,
     PlaceOrderUseCase,
@@ -142,6 +163,8 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     MarkDeliveredUseCase,
     CancelOrderUseCase,
     CancelLineUseCase,
+    IssueRefundUseCase,
+    ListRefundsForOrderUseCase,
 
     { provide: APP_FILTER, useClass: OrdersRpcExceptionFilter },
   ],

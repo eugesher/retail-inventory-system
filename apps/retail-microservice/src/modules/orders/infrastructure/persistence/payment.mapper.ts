@@ -17,6 +17,7 @@ export class PaymentMapper {
       authorizedAt: domain.authorizedAt,
       capturedAt: domain.capturedAt,
       flaggedForRefund: domain.flaggedForRefund,
+      refundedAmountMinor: domain.refundedAmountMinor,
     };
 
     if (domain.id !== null) {
@@ -41,6 +42,9 @@ export class PaymentMapper {
       authorizedAt: entity.authorizedAt ?? null,
       capturedAt: entity.capturedAt ?? null,
       flaggedForRefund: entity.flaggedForRefund ?? false,
+      // The BIGINT `refunded_amount_minor` comes back as a string; coerce like
+      // `amount_minor` above (mysql2 returns non-PK BIGINTs as strings).
+      refundedAmountMinor: Number(entity.refundedAmountMinor ?? 0),
       createdAt: entity.createdAt ?? null,
       updatedAt: entity.updatedAt ?? null,
     });

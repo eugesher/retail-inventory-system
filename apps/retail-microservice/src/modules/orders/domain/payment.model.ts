@@ -17,6 +17,10 @@ export interface IPaymentProps {
   // refund is owed; a refund capability consumes it. Optional on the load path and
   // defaults `false` — a freshly authorized payment is never flagged.
   flaggedForRefund?: boolean;
+  // Cumulative refunded total in minor units; the refund operation increments it and
+  // the partial-vs-full decision reads it against `amountMinor`. Optional on the load
+  // path and defaults `0` — a freshly authorized payment has refunded nothing.
+  refundedAmountMinor?: number;
   createdAt?: Date | null;
   updatedAt?: Date | null;
 }
@@ -60,6 +64,7 @@ export class Payment extends AggregateRoot<number | null> {
   private readonly _authorizedAt: Date | null;
   private _capturedAt: Date | null;
   private _flaggedForRefund: boolean;
+  private _refundedAmountMinor: number;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
 
@@ -74,6 +79,13 @@ export class Payment extends AggregateRoot<number | null> {
       throw new OrderDomainException(
         OrderErrorCodeEnum.PAYMENT_AMOUNT_INVALID,
         `Payment.amountMinor must be a non-negative integer (minor units), got ${props.amountMinor}`,
+      );
+    }
+    const refundedAmountMinor = props.refundedAmountMinor ?? 0;
+    if (!Number.isInteger(refundedAmountMinor) || refundedAmountMinor < 0) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_AMOUNT_INVALID,
+        `Payment.refundedAmountMinor must be a non-negative integer (minor units), got ${refundedAmountMinor}`,
       );
     }
     Payment.requireNonEmpty(
@@ -98,6 +110,7 @@ export class Payment extends AggregateRoot<number | null> {
     this._authorizedAt = props.authorizedAt;
     this._capturedAt = props.capturedAt;
     this._flaggedForRefund = props.flaggedForRefund ?? false;
+    this._refundedAmountMinor = refundedAmountMinor;
     this.createdAt = props.createdAt ?? null;
     this.updatedAt = props.updatedAt ?? null;
   }
@@ -118,6 +131,7 @@ export class Payment extends AggregateRoot<number | null> {
       authorizedAt: input.authorizedAt,
       capturedAt: null,
       flaggedForRefund: false,
+      refundedAmountMinor: 0,
     });
   }
 
@@ -165,6 +179,15 @@ export class Payment extends AggregateRoot<number | null> {
     return this._flaggedForRefund;
   }
 
+  // The cumulative amount refunded against this payment, in minor units. `0` for
+  // every freshly authorized payment — the `refund()` mutator that increments it
+  // ships with its consumer (the issue-refund capability), not here. The column +
+  // field + getter ship now so no later schema migration is needed (the
+  // `flagged_for_refund`-ships-now precedent, ADR-028 §6).
+  public get refundedAmountMinor(): number {
+    return this._refundedAmountMinor;
+  }
+
   // The **only** mutation: `AUTHORIZED → CAPTURED`, stamping `capturedAt`. Rejects
   // any non-`authorized` start (double-capture or capture of a voided/failed
   // payment). Void / refund / fail land with later capabilities — deliberately
@@ -199,12 +222,59 @@ export class Payment extends AggregateRoot<number | null> {
 
   // Marks that this payment owes a refund. Driven by Cancel Order when it cancels an
   // order whose payment was already **captured** — the money is gone, so cancellation
-  // cannot simply void it; it flags the row and a later refund capability issues the
+  // cannot simply void it; it flags the row and the refund capability issues the
   // actual refund. **Idempotent** — flagging an already-flagged payment is a no-op, not
   // an error. The flag is orthogonal to `status` (a captured payment stays `captured`
-  // while flagged); only a refund moves the status (a later capability, ADR-028 §6).
+  // while flagged); only a refund moves the status (`refund()` below, ADR-028 §6).
   public flagForRefund(): void {
     this._flaggedForRefund = true;
+  }
+
+  // Records a refund of `amountMinor` against this captured payment — the writer of the
+  // `refunded_amount_minor` counter that shipped ahead of its consumer (ADR-028 §6).
+  // Driven by the Issue Refund use case **after** the gateway confirms the refund; the
+  // use case validates the request against the refundable ceiling first, so the guards
+  // here are defense-in-depth (an internal caller bug, not a user-reachable rejection):
+  //
+  // - `amountMinor` must be a positive integer — a **plain `Error`** (a use case never
+  //   reaches this with a bad amount; the typed `REFUND_AMOUNT_INVALID` lives on `Refund`).
+  // - the payment must be `CAPTURED` — only captured money can be reversed. The use case
+  //   surfaces `REFUND_PAYMENT_NOT_CAPTURED` first, but the domain also rejects it with
+  //   `PAYMENT_INVALID_STATUS_TRANSITION` (409) so the invariant holds even off the
+  //   happy path (the `capture`/`void` transition-guard precedent).
+  // - the running total must not exceed the captured amount
+  //   (`refundedAmountMinor + amountMinor ≤ amountMinor`) — a **plain `Error**` (the use
+  //   case surfaces the typed `REFUND_EXCEEDS_REFUNDABLE` first).
+  //
+  // Effect: accumulate `refundedAmountMinor`; on a **full** refund (the cumulative total
+  // now equals the captured amount) walk `status → REFUNDED` and clear
+  // `flaggedForRefund` (a full refund settles the flag Cancel Order set). A **partial**
+  // refund leaves `status = CAPTURED` and the flag untouched — a captured order may still
+  // owe more, and a later refund completes it.
+  public refund(amountMinor: number): void {
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      throw new Error(
+        `Payment.refund: amountMinor must be a positive integer (minor units), got ${amountMinor}`,
+      );
+    }
+    if (this._status !== PaymentStatusEnum.CAPTURED) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
+        `Payment.refund: can only refund a captured payment (current: ${this._status})`,
+      );
+    }
+    if (this._refundedAmountMinor + amountMinor > this._amountMinor) {
+      throw new Error(
+        `Payment.refund: refund of ${amountMinor} would exceed the refundable remainder ` +
+          `(${this._amountMinor - this._refundedAmountMinor})`,
+      );
+    }
+
+    this._refundedAmountMinor += amountMinor;
+    if (this._refundedAmountMinor === this._amountMinor) {
+      this._status = PaymentStatusEnum.REFUNDED;
+      this._flaggedForRefund = false;
+    }
   }
 
   private static requireNonEmpty(value: string, code: OrderErrorCodeEnum, field: string): void {

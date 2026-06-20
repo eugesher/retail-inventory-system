@@ -52,4 +52,14 @@ export class PaymentEntity extends BaseEntity {
   // ahead of its writer).
   @Column({ name: 'flagged_for_refund', type: 'boolean', default: false })
   public flaggedForRefund: boolean;
+
+  // The cumulative refunded total in minor units; the refund operation increments it.
+  // BIGINT to match `amount_minor` (mysql2 returns BIGINT as a string, so the mapper
+  // coerces with `Number(...)`). The column ships ahead of its writer
+  // (docs/adr/028-cart-order-payment-and-address-chain.md §6 — the
+  // `flagged_for_refund`-ships-now precedent); SnakeNamingStrategy would map
+  // `refundedAmountMinor` → `refunded_amount_minor`, but the name is declared
+  // explicitly to keep the column name greppable next to its default.
+  @Column({ name: 'refunded_amount_minor', type: 'bigint', unsigned: true, default: 0 })
+  public refundedAmountMinor: number;
 }

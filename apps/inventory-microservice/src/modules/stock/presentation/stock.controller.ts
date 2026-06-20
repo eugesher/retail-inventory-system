@@ -11,6 +11,8 @@ import {
   IReservationReleasePayload,
   IReservationReleaseResult,
   IReservationReservePayload,
+  IRestockFromReturnPayload,
+  IRestockFromReturnResult,
   IStockAdjustPayload,
   IStockLocationsListPayload,
   IStockMovementListPayload,
@@ -37,6 +39,7 @@ import {
   ReceiveStockUseCase,
   ReleaseReservationUseCase,
   ReserveStockUseCase,
+  RestockFromReturnUseCase,
   TransferStockUseCase,
 } from '../application/use-cases';
 
@@ -52,6 +55,7 @@ export class StockController {
     private readonly allocateStock: AllocateStockUseCase,
     private readonly cancelAllocation: CancelAllocationUseCase,
     private readonly commitSale: CommitSaleUseCase,
+    private readonly restockFromReturn: RestockFromReturnUseCase,
     private readonly transferStock: TransferStockUseCase,
     private readonly listStockMovements: ListStockMovementsUseCase,
   ) {}
@@ -165,5 +169,20 @@ export class StockController {
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_COMMIT_SALE)
   public handleCommitSale(@Payload() payload: ICommitSalePayload): Promise<ICommitSaleResult> {
     return this.commitSale.execute(payload);
+  }
+
+  // Restock from Return (ADR-032): physically returns a return request's
+  // `restock`-disposition stock to sellable inventory at inspection time — per line
+  // it increments `quantity_on_hand` in one `StockLevel.changeOnHand(+quantity)` and
+  // appends one strictly-positive `return` movement referencing the return request
+  // (the long-reserved `return` ledger type's first producer). All-lines-atomic;
+  // idempotent on `returnRequestId` (a replay increments nothing and re-returns).
+  // Driven retail→inventory over RMQ after the local inspect commit (no gateway HTTP
+  // route).
+  @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_RESTOCK_FROM_RETURN)
+  public handleRestockFromReturn(
+    @Payload() payload: IRestockFromReturnPayload,
+  ): Promise<IRestockFromReturnResult> {
+    return this.restockFromReturn.execute(payload);
   }
 }

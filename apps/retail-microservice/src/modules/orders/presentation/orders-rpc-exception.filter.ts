@@ -40,18 +40,24 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.FULFILLMENT_NO_LINES]: HttpStatus.BAD_REQUEST,
   [OrderErrorCodeEnum.FULFILLMENT_LINE_QUANTITY_INVALID]: HttpStatus.BAD_REQUEST,
   [OrderErrorCodeEnum.FULFILLMENT_TRACKING_REQUIRED]: HttpStatus.BAD_REQUEST,
+  // Refund shape invariants → 400.
+  [OrderErrorCodeEnum.REFUND_AMOUNT_INVALID]: HttpStatus.BAD_REQUEST,
+  [OrderErrorCodeEnum.REFUND_REASON_REQUIRED]: HttpStatus.BAD_REQUEST,
 
   // Lookup misses → 404.
   [OrderErrorCodeEnum.ORDER_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [OrderErrorCodeEnum.ORDER_CART_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [OrderErrorCodeEnum.ORDER_LINE_NOT_FOUND]: HttpStatus.NOT_FOUND,
+  [OrderErrorCodeEnum.REFUND_NOT_FOUND]: HttpStatus.NOT_FOUND,
 
   // Ownership failure → 403: the caller is not the cart's owner (place), nor the
-  // order's owner / a staff override (read + capture) — the retail-side half of the
-  // owner(-or-staff) check, ADR-028 §7.
+  // order's owner / a staff override (read + capture), nor the refunded order's owner /
+  // staff (refund reads) — the retail-side half of the owner(-or-staff) check,
+  // ADR-028 §7 / ADR-032.
   [OrderErrorCodeEnum.ORDER_CART_ACCESS_FORBIDDEN]: HttpStatus.FORBIDDEN,
   [OrderErrorCodeEnum.ORDER_ACCESS_FORBIDDEN]: HttpStatus.FORBIDDEN,
+  [OrderErrorCodeEnum.REFUND_ACCESS_FORBIDDEN]: HttpStatus.FORBIDDEN,
 
   // Conflicts with current state → 409: an illegal payment-status transition, a cart
   // that cannot be placed (abandoned / empty), a line that cannot be priced, or a
@@ -71,6 +77,11 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_NOT_FULFILLABLE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_INVALID_FULFILLMENT_TRANSITION]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE]: HttpStatus.CONFLICT,
+  // Refund conflicts → 409: an illegal refund-status transition, a refund that would
+  // over-refund the payment, or a refund against a non-captured payment.
+  [OrderErrorCodeEnum.REFUND_INVALID_STATUS_TRANSITION]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.REFUND_EXCEEDS_REFUNDABLE]: HttpStatus.CONFLICT,
+  [OrderErrorCodeEnum.REFUND_PAYMENT_NOT_CAPTURED]: HttpStatus.CONFLICT,
 };
 
 // Terminates an `OrderDomainException` into the wire error shape the gateway's

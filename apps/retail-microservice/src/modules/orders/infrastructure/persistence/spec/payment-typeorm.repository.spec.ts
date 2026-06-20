@@ -21,6 +21,7 @@ const paymentEntity = (overrides: Partial<PaymentEntity> = {}): PaymentEntity =>
     authorizedAt: new Date('2026-06-10T00:00:00Z'),
     capturedAt: null,
     flaggedForRefund: false,
+    refundedAmountMinor: '0',
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -36,6 +37,18 @@ describe('PaymentMapper', () => {
     expect(payment.amountMinor).toBe(5997);
     expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
     expect(payment.flaggedForRefund).toBe(false);
+    // The BIGINT `refunded_amount_minor` string coerces to a number, like amount_minor.
+    expect(payment.refundedAmountMinor).toBe(0);
+  });
+
+  it('coerces a non-zero BIGINT refunded_amount_minor string from storage', () => {
+    // mysql2 returns the BIGINT column as a string; the cast mirrors the order_id /
+    // amount_minor string fixtures above (the order-line repository spec precedent).
+    const payment = PaymentMapper.toDomain(
+      paymentEntity({ refundedAmountMinor: '1000' as unknown as number }),
+    );
+
+    expect(payment.refundedAmountMinor).toBe(1000);
   });
 
   it('omits a null id so TypeORM inserts a fresh authorize', () => {
@@ -54,6 +67,7 @@ describe('PaymentMapper', () => {
     expect(partial.status).toBe(PaymentStatusEnum.AUTHORIZED);
     expect(partial.capturedAt).toBeNull();
     expect(partial.flaggedForRefund).toBe(false);
+    expect(partial.refundedAmountMinor).toBe(0);
   });
 });
 

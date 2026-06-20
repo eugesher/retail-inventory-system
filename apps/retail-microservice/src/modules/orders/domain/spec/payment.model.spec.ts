@@ -19,6 +19,8 @@ describe('Payment', () => {
       expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
       expect(payment.capturedAt).toBeNull();
       expect(payment.flaggedForRefund).toBe(false);
+      // A freshly authorized payment has refunded nothing; the writer ships later.
+      expect(payment.refundedAmountMinor).toBe(0);
       expect(payment.authorizedAt).toEqual(new Date('2026-06-10T00:00:00Z'));
       expect(payment.id).toBeNull();
       expect(payment.orderId).toBe(1);
@@ -145,6 +147,84 @@ describe('Payment', () => {
     });
   });
 
+  describe('refund', () => {
+    // A captured payment is the only refundable start; `capture()` first so the
+    // mutator's precondition is met.
+    const capturedPayment = (amountMinor = 5997): Payment => {
+      const payment = Payment.authorized({ ...authorizedInput(), amountMinor });
+      payment.capture(new Date('2026-06-11T09:30:00Z'));
+      return payment;
+    };
+
+    it('a partial refund stays captured and bumps refundedAmountMinor', () => {
+      const payment = capturedPayment(5997);
+
+      payment.refund(2000);
+
+      expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
+      expect(payment.refundedAmountMinor).toBe(2000);
+    });
+
+    it('accumulates across successive partial refunds', () => {
+      const payment = capturedPayment(5997);
+
+      payment.refund(2000);
+      payment.refund(1500);
+
+      expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
+      expect(payment.refundedAmountMinor).toBe(3500);
+    });
+
+    it('a refund completing the total flips to refunded and clears the refund flag', () => {
+      const payment = capturedPayment(5997);
+      payment.flagForRefund();
+      expect(payment.flaggedForRefund).toBe(true);
+
+      payment.refund(5997);
+
+      expect(payment.status).toBe(PaymentStatusEnum.REFUNDED);
+      expect(payment.refundedAmountMinor).toBe(5997);
+      // A full refund settles the flag Cancel Order set.
+      expect(payment.flaggedForRefund).toBe(false);
+    });
+
+    it('a final partial refund that completes the total flips to refunded', () => {
+      const payment = capturedPayment(5997);
+      payment.refund(2000);
+      payment.refund(3997);
+
+      expect(payment.status).toBe(PaymentStatusEnum.REFUNDED);
+      expect(payment.refundedAmountMinor).toBe(5997);
+    });
+
+    it('rejects a refund on a non-captured (authorized) payment', () => {
+      const payment = Payment.authorized(authorizedInput());
+
+      expect(() => payment.refund(100)).toThrow(OrderDomainException);
+    });
+
+    it('rejects an over-refund (cumulative beyond the captured amount)', () => {
+      const payment = capturedPayment(5997);
+      payment.refund(5000);
+
+      // Only 997 remains — a 1000 refund overshoots.
+      expect(() => payment.refund(1000)).toThrow(Error);
+      // The rejected refund left the counter and status untouched.
+      expect(payment.refundedAmountMinor).toBe(5000);
+      expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
+    });
+
+    it.each([
+      ['zero', 0],
+      ['negative', -1],
+      ['fractional', 12.5],
+    ])('rejects a %s amountMinor', (_label, amountMinor) => {
+      const payment = capturedPayment(5997);
+
+      expect(() => payment.refund(amountMinor)).toThrow(Error);
+    });
+  });
+
   describe('reconstitute', () => {
     it('rebuilds a captured payment from storage', () => {
       const payment = Payment.reconstitute({
@@ -164,6 +244,8 @@ describe('Payment', () => {
       expect(payment.capturedAt).toEqual(new Date('2026-06-11T09:30:00Z'));
       // Omitting the flag on the load path defaults it false.
       expect(payment.flaggedForRefund).toBe(false);
+      // Omitting the refunded total on the load path defaults it 0.
+      expect(payment.refundedAmountMinor).toBe(0);
     });
 
     it('round-trips a flaggedForRefund payment from storage', () => {
@@ -181,6 +263,44 @@ describe('Payment', () => {
       });
 
       expect(payment.flaggedForRefund).toBe(true);
+    });
+
+    it('round-trips a partially refunded total from storage', () => {
+      const payment = Payment.reconstitute({
+        id: 9,
+        orderId: 1,
+        amountMinor: 5997,
+        currency: 'USD',
+        method: 'fake-card',
+        status: PaymentStatusEnum.CAPTURED,
+        gatewayReference: 'fake_abc123',
+        authorizedAt: new Date('2026-06-10T00:00:00Z'),
+        capturedAt: new Date('2026-06-11T09:30:00Z'),
+        flaggedForRefund: true,
+        refundedAmountMinor: 1000,
+      });
+
+      expect(payment.refundedAmountMinor).toBe(1000);
+    });
+
+    it.each([
+      ['negative', -1],
+      ['fractional', 12.5],
+    ])('rejects a %s refundedAmountMinor on the load path', (_label, refundedAmountMinor) => {
+      expect(() =>
+        Payment.reconstitute({
+          id: 9,
+          orderId: 1,
+          amountMinor: 5997,
+          currency: 'USD',
+          method: 'fake-card',
+          status: PaymentStatusEnum.CAPTURED,
+          gatewayReference: 'fake_abc123',
+          authorizedAt: new Date('2026-06-10T00:00:00Z'),
+          capturedAt: new Date('2026-06-11T09:30:00Z'),
+          refundedAmountMinor,
+        }),
+      ).toThrow(OrderDomainException);
     });
   });
 });

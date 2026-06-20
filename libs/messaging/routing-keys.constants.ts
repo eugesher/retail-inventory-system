@@ -54,6 +54,18 @@ export const ROUTING_KEYS = {
   // `inventory.stock.{reserved,allocated,released}` precedent).
   INVENTORY_STOCK_COMMIT_SALE: 'inventory.stock.commit-sale',
   INVENTORY_STOCK_COMMITTED: 'inventory.stock.committed',
+  // `inventory.stock.restock-from-return` → `RestockFromReturnUseCase` (RPC, Retail
+  // Inspect & Disposition flow → Inventory): physically returns a return request's
+  // `restock`-disposition stock to sellable inventory — per line it increments
+  // `quantity_on_hand` (one `StockLevel.changeOnHand(+quantity)`) and appends one
+  // strictly-positive `return` movement referencing the return request. All-lines-
+  // atomic + idempotent on `returnRequestId` (ADR-032). `inventory.stock.returned`
+  // is the past-tense reserved-surface event it emits per restocked line onto
+  // `inventory_queue` (no consumer yet — the typed alias for the `return`-type
+  // movement, exposed as its own key for downstream filtering; the
+  // `inventory.stock.{allocated,committed}` precedent).
+  INVENTORY_STOCK_RESTOCK_FROM_RETURN: 'inventory.stock.restock-from-return',
+  INVENTORY_STOCK_RETURNED: 'inventory.stock.returned',
   CATALOG_PRODUCT_REGISTER: 'catalog.product.register',
   CATALOG_PRODUCT_PUBLISH: 'catalog.product.publish',
   CATALOG_PRODUCT_ARCHIVE: 'catalog.product.archive',
@@ -163,6 +175,40 @@ export const ROUTING_KEYS = {
   // `order:cancel`) with a proportional allocation release. Both resolve an `OrderView`.
   RETAIL_ORDER_CANCEL: 'retail.order.cancel',
   RETAIL_ORDER_CANCEL_LINE: 'retail.order.cancel-line',
+  // Return (RMA) RPC command + read keys (API Gateway → Retail, served by the returns
+  // controller — the returns bounded context is its own module, ADR-032). Each is the
+  // imperative command for one RMA lifecycle transition (the `catalog.variant.create`/
+  // `.created` split, ADR-008):
+  // `retail.return.open` → `OpenReturnRequestUseCase` (owner-or-staff; runs the return
+  // window + returnable-quantity checks and finalizes an `RMA-<year>-…` number) →
+  // `ReturnRequestView`; `retail.return.authorize`/`.reject`/`.receive`/`.close` walk the
+  // status machine (staff `order:return-authorize` for authorize/reject/close, warehouse
+  // `inventory:receive-return` for receive); `retail.return.get` resolves one
+  // `ReturnRequestView` (owner-or-staff `order:read`); `retail.return.list` resolves an
+  // order's `ReturnRequestView[]` newest-first (owner-or-staff `order:read`).
+  // `retail.return.inspect` is the warehouse condition/disposition step
+  // (`inventory:receive-return`): it records each line's outcome, walks the RMA
+  // `received -> inspected`, and triggers the cross-service restock for `restock`-
+  // disposition lines via `inventory.stock.restock-from-return` (ADR-032).
+  RETAIL_RETURN_OPEN: 'retail.return.open',
+  RETAIL_RETURN_AUTHORIZE: 'retail.return.authorize',
+  RETAIL_RETURN_REJECT: 'retail.return.reject',
+  RETAIL_RETURN_RECEIVE: 'retail.return.receive',
+  RETAIL_RETURN_INSPECT: 'retail.return.inspect',
+  RETAIL_RETURN_CLOSE: 'retail.return.close',
+  RETAIL_RETURN_GET: 'retail.return.get',
+  RETAIL_RETURN_LIST: 'retail.return.list',
+  // Refund RPC command + read keys (API Gateway → Retail, served by the orders
+  // controller — `Refund` is a sibling aggregate in the orders module, ADR-032).
+  // `retail.refund.issue` → `IssueRefundUseCase` issues a refund against a captured
+  // payment (staff `order:refund`): it validates the refundable ceiling, calls the
+  // payment gateway, writes a `refund` row, accumulates `payment.refunded_amount_minor`
+  // (flipping the payment to `refunded` on a full refund), audits the money movement,
+  // and resolves a `RefundView`. `retail.refund.list` → `ListRefundsForOrderUseCase`
+  // resolves an order's `RefundView[]` newest-first (owner-or-staff `order:read`). The
+  // auto-refund-from-cancel consumer calls `IssueRefundUseCase` directly (not over RMQ).
+  RETAIL_REFUND_ISSUE: 'retail.refund.issue',
+  RETAIL_REFUND_LIST: 'retail.refund.list',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -206,6 +252,33 @@ export const ROUTING_KEYS = {
   // old order model; it is **re-introduced fresh here** with a live producer (Cancel
   // Order), not resurrected from any stub. A reserved surface today (no consumer yet).
   RETAIL_ORDER_CANCELLED: 'retail.order.cancelled',
+  // Return (RMA) lifecycle events — the past-tense surfaces paired with the imperative
+  // `retail.return.*` commands (ADR-032). Two destinations by the
+  // producer-targets-consumer-queue pattern (ADR-008/020): `retail.return.requested` /
+  // `.authorized` / `.received` are the buyer-facing ones, emitted onto
+  // `notification_events` (the notification service's own queue — it binds a returns
+  // fan-out consumer for them); `retail.return.rejected` / `.closed` are emitted onto
+  // `retail_queue` (the producer's own queue — reserved surfaces today, no consumer).
+  // `retail.return.inspected` is the buyer-facing past-tense of `retail.return.inspect`,
+  // emitted onto `notification_events` (the notification service binds a returns consumer
+  // for it); it carries `restockedLineCount` so a downstream can tell how many lines went
+  // back to stock (ADR-032).
+  RETAIL_RETURN_REQUESTED: 'retail.return.requested',
+  RETAIL_RETURN_AUTHORIZED: 'retail.return.authorized',
+  RETAIL_RETURN_REJECTED: 'retail.return.rejected',
+  RETAIL_RETURN_RECEIVED: 'retail.return.received',
+  RETAIL_RETURN_INSPECTED: 'retail.return.inspected',
+  RETAIL_RETURN_CLOSED: 'retail.return.closed',
+  // Refund lifecycle events — the past-tense surfaces paired with the imperative
+  // `retail.refund.issue` command (ADR-032). Two destinations by the
+  // producer-targets-consumer-queue pattern (ADR-008/020): `retail.refund.issued` is the
+  // buyer-facing success event, emitted onto `notification_events` (the notification
+  // service binds a refund fan-out consumer for it); `retail.refund.failed` is emitted
+  // onto `retail_queue` (the producer's own queue — a reserved surface today, no
+  // consumer; modeled for a real gateway decline, unreachable with the always-succeed
+  // fake).
+  RETAIL_REFUND_ISSUED: 'retail.refund.issued',
+  RETAIL_REFUND_FAILED: 'retail.refund.failed',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

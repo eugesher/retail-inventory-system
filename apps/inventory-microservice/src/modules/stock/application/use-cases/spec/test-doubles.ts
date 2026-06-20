@@ -14,6 +14,7 @@ import {
   StockReceivedEvent,
   StockReleasedEvent,
   StockReservedEvent,
+  StockReturnedEvent,
 } from '../../../domain';
 import {
   IReservationRepositoryPort,
@@ -233,6 +234,7 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
   public readonly allocated: { event: StockAllocatedEvent; correlationId?: string }[] = [];
   public readonly released: { event: StockReleasedEvent; correlationId?: string }[] = [];
   public readonly committed: { event: StockCommittedEvent; correlationId?: string }[] = [];
+  public readonly returned: { event: StockReturnedEvent; correlationId?: string }[] = [];
   public readonly movementsRecorded: { movement: StockMovement; correlationId?: string }[] = [];
 
   public publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void> {
@@ -275,6 +277,11 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
 
   public publishStockCommitted(event: StockCommittedEvent, correlationId?: string): Promise<void> {
     this.committed.push({ event, correlationId });
+    return Promise.resolve();
+  }
+
+  public publishStockReturned(event: StockReturnedEvent, correlationId?: string): Promise<void> {
+    this.returned.push({ event, correlationId });
     return Promise.resolve();
   }
 

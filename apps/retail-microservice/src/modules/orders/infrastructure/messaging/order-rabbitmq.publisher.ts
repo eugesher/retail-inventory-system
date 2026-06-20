@@ -10,6 +10,8 @@ import {
   IRetailOrderPlacedEvent,
   IRetailPaymentAuthorizedEvent,
   IRetailPaymentCapturedEvent,
+  IRetailRefundFailedEvent,
+  IRetailRefundIssuedEvent,
 } from '@retail-inventory-system/contracts';
 import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
@@ -108,6 +110,31 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
     await firstValueFrom(
       this.retailClient.emit<void, IRetailOrderCancelledEvent>(
         ROUTING_KEYS.RETAIL_ORDER_CANCELLED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.refund.issued` is emitted through the `NOTIFICATION_MICROSERVICE` client so it
+  // lands on `notification_events` — the consumer's own queue, the
+  // producer-targets-consumer-queue pattern (ADR-008/020) — where the notification service
+  // binds a refund-confirmation fan-out.
+  public async publishRefundIssued(event: IRetailRefundIssuedEvent): Promise<void> {
+    await firstValueFrom(
+      this.notificationClient.emit<void, IRetailRefundIssuedEvent>(
+        ROUTING_KEYS.RETAIL_REFUND_ISSUED,
+        event,
+      ),
+    );
+  }
+
+  // `retail.refund.failed` rides the `RETAIL_MICROSERVICE` client onto `retail_queue`
+  // (the producer's own queue) — a reserved surface today (no consumer), modeled for a
+  // real gateway decline (unreachable with the always-succeed fake).
+  public async publishRefundFailed(event: IRetailRefundFailedEvent): Promise<void> {
+    await firstValueFrom(
+      this.retailClient.emit<void, IRetailRefundFailedEvent>(
+        ROUTING_KEYS.RETAIL_REFUND_FAILED,
         event,
       ),
     );
