@@ -92,24 +92,25 @@ export class OpenReturnRequestUseCase {
     // 3. Return-eligibility window.
     this.assertWithinReturnWindow(order, now);
 
-    // 4. Returnable-quantity invariant per requested line.
+    // 4. Returnable-quantity invariant per requested line. Index the order's lines by id
+    // once (O(N+M) over the order + requested lines, the sibling Inspect use case's
+    // pattern) rather than a per-requested-line `find` (O(N·M)).
     const alreadyReturned = await this.sumAlreadyReturnedByLine(orderId);
+    const orderLineById = new Map(order.lines.map((l) => [l.orderLineId, l]));
     for (const requestedLine of lines) {
-      const orderLine = order.lines.find((l) => l.orderLineId === requestedLine.orderLineId);
+      const orderLine = orderLineById.get(requestedLine.orderLineId);
       if (!orderLine) {
         throw new ReturnDomainException(
           ReturnErrorCodeEnum.RETURN_ORDER_LINE_NOT_FOUND,
           `Order line ${requestedLine.orderLineId} does not belong to order ${orderId}`,
         );
       }
-      const returnable =
-        orderLine.quantity -
-        orderLine.cancelledQuantity -
-        (alreadyReturned.get(requestedLine.orderLineId) ?? 0);
+      const alreadyReturnedQty = alreadyReturned.get(requestedLine.orderLineId) ?? 0;
+      const returnable = orderLine.quantity - orderLine.cancelledQuantity - alreadyReturnedQty;
       if (requestedLine.quantity > returnable) {
         throw new ReturnDomainException(
           ReturnErrorCodeEnum.RETURN_QUANTITY_EXCEEDS_RETURNABLE,
-          `Order line ${requestedLine.orderLineId}: cannot return ${requestedLine.quantity} of the ${returnable} returnable (ordered ${orderLine.quantity}, cancelled ${orderLine.cancelledQuantity}, already returned ${alreadyReturned.get(requestedLine.orderLineId) ?? 0})`,
+          `Order line ${requestedLine.orderLineId}: cannot return ${requestedLine.quantity} of the ${returnable} returnable (ordered ${orderLine.quantity}, cancelled ${orderLine.cancelledQuantity}, already returned ${alreadyReturnedQty})`,
         );
       }
     }

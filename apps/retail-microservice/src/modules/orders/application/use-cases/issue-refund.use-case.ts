@@ -98,9 +98,18 @@ export class IssueRefundUseCase {
       'Issuing refund',
     );
 
-    // The order anchors the audit context + the refund currency. A missing order is a
-    // data-integrity breach (a payment's `order_id` FK guarantees one) — 404.
-    const order = await this.orderRepository.findById(orderId);
+    // The order anchors the audit context + the refund currency; the payment is the money
+    // being reversed. Both are always needed on the success path and neither read depends
+    // on the other, so fetch them in one parallel round-trip rather than two sequential
+    // ones — this is the hot path for both the endpoint and the auto-refund-from-cancel
+    // consumer. The not-found guards still run in order below, preserving error precedence.
+    const [order, payment] = await Promise.all([
+      this.orderRepository.findById(orderId),
+      this.paymentRepository.findById(paymentId),
+    ]);
+
+    // A missing order is a data-integrity breach (a payment's `order_id` FK guarantees
+    // one) — 404. Checked first so it wins precedence over the payment guards.
     if (!order) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.ORDER_NOT_FOUND,
@@ -111,7 +120,6 @@ export class IssueRefundUseCase {
     // A missing payment, or one belonging to another order, means there is no captured
     // payment for this order to refund — the clearest code is the not-captured one. Two
     // guards (not `!payment || payment.orderId !== orderId`) so the type narrows cleanly.
-    const payment = await this.paymentRepository.findById(paymentId);
     if (payment === null) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.REFUND_PAYMENT_NOT_CAPTURED,
