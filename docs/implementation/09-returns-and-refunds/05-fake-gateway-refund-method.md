@@ -15,9 +15,9 @@ the pieces that make a refund _issuable_:
 - the **List Refunds** read.
 
 It also serves the **auto-refund-from-cancel** consumer
-(`04-auto-refund-from-cancel-order.md`, forthcoming), which calls the same use case directly
-rather than over RabbitMQ — so both the manual and the automatic refund paths run through one
-audited code path.
+([`04-auto-refund-from-cancel-order.md`](./04-auto-refund-from-cancel-order.md)), which calls
+the same use case directly rather than over RabbitMQ — so both the manual and the automatic
+refund paths run through one audited code path.
 
 ## 1. The `PAYMENT_GATEWAY.refund()` extension
 
@@ -170,7 +170,8 @@ arrives with the gateway-endpoints capability.
   / `flagged_for_refund` columns shipped ahead of their writer (§4/§6).
 - [`03-refund-as-distinct-entity.md`](./03-refund-as-distinct-entity.md) — the `Refund`
   aggregate, table, repository, and why a refund is its own entity.
-- `04-auto-refund-from-cancel-order.md` (forthcoming) — the consumer that issues a refund
-  automatically when Cancel Order flags a captured payment, through this same use case.
+- [`04-auto-refund-from-cancel-order.md`](./04-auto-refund-from-cancel-order.md) — the
+  consumer that issues a refund automatically when Cancel Order flags a captured payment,
+  through this same use case.
 - [`01-rma-lifecycle.md`](./01-rma-lifecycle.md) — the `ReturnRequest` aggregate whose
   closing return triggers a refund.

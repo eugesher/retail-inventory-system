@@ -21,14 +21,20 @@ import { ICorrelationPayload } from '../../microservices';
 // payment.refundedAmountMinor`). `reason` is the required human-supplied refund reason
 // (recorded on the `refund` row + the audit log). `idempotencyKey` is **accepted + logged
 // but not deduped** (ADR-032) — the gateway-reference natural idempotency + the
-// `refunded_amount_minor` ceiling are what prevent an over-refund on replay. `actorId` is
-// the resolved staff caller.
+// `refunded_amount_minor` ceiling are what prevent an over-refund on replay.
+//
+// `actorId` is the resolved caller for the audit row. It is the staff caller's id for the
+// manual endpoint, and **`null` for the system-initiated auto-refund-from-cancel path** (a
+// retail consumer reacting to `retail.order.cancelled` with `paymentFlaggedForRefund=true`
+// calls `IssueRefundUseCase` directly with no human actor). The audit contract already
+// models a null actor as a system / pre-auth movement (`IAuditLogEvent.actorId: string |
+// null`), so the two paths share one use case without a sentinel id.
 export interface IRetailRefundIssuePayload extends ICorrelationPayload {
   orderId: number;
   paymentId: number;
   amountMinor: number;
   reason: string;
-  actorId: string;
+  actorId: string | null;
   idempotencyKey?: string;
 }
 

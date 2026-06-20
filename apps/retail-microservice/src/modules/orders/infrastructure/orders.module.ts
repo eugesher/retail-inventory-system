@@ -39,6 +39,7 @@ import {
   PlaceOrderUseCase,
   ShipFulfillmentUseCase,
 } from '../application/use-cases';
+import { OrderCancelledConsumer } from './consumers';
 import {
   OrderCatalogRabbitmqAdapter,
   OrderCommitSaleRabbitmqAdapter,
@@ -78,7 +79,11 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 // `retail.order.list` / `retail.payment.capture` / `retail.fulfillment.create` /
 // `retail.fulfillment.list` / `retail.fulfillment.ship` / `retail.fulfillment.deliver` /
 // `retail.order.cancel` / `retail.order.cancel-line` / `retail.refund.issue` /
-// `retail.refund.list` RPC controller.
+// `retail.refund.list` RPC controller. It also registers the `OrderCancelledConsumer`
+// (`@EventPattern retail.order.cancelled`) — the auto-refund-from-cancel subscriber that
+// listens to retail's **own** cancel event on `retail_queue` and, when
+// `paymentFlaggedForRefund=true`, issues a full refund inline via `IssueRefundUseCase`
+// (ADR-032).
 //
 // Four messaging clients are imported: `MicroserviceClientCatalogModule` so Place
 // Order can snapshot from `catalog.variant.get` / `catalog.price.select` on
@@ -115,7 +120,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     MicroserviceClientNotificationModule,
     MicroserviceClientRetailModule,
   ],
-  controllers: [OrdersController],
+  controllers: [OrdersController, OrderCancelledConsumer],
   providers: [
     OrderTypeormRepository,
     { provide: ORDER_REPOSITORY, useExisting: OrderTypeormRepository },
