@@ -1,8 +1,10 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { IRetailRefundIssuedEvent } from '@retail-inventory-system/contracts';
+import {
+  IRetailRefundIssuedEvent,
+  NotificationChannelEnum,
+} from '@retail-inventory-system/contracts';
 
-import { NotificationChannelEnum } from '../../../domain';
 import { SendRefundNotificationUseCase } from '../send-refund-notification.use-case';
 import { FakeLogger, InMemoryNotifier } from './test-doubles';
 
@@ -40,7 +42,7 @@ describe('SendRefundNotificationUseCase', () => {
       const sent = notifier.sent[0];
 
       expect(sent.recipient).toBe('order:4242');
-      expect(sent.channel).toBe(NotificationChannelEnum.LOG);
+      expect(sent.channel).toBe(NotificationChannelEnum.EMAIL);
       expect(sent.subject).toContain('Refund');
       expect(sent.subject).toContain('4242');
       expect(sent.body).toContain('12');

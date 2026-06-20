@@ -16,6 +16,8 @@ export enum PermissionCodeEnum {
   ORDER_CANCEL = 'order:cancel',
   ORDER_REFUND = 'order:refund',
   ORDER_RETURN_AUTHORIZE = 'order:return-authorize',
+  NOTIFICATIONS_READ = 'notifications:read',
+  NOTIFICATIONS_WRITE = 'notifications:write',
   IAM_ASSIGN = 'iam:assign',
   IAM_ROLE_EDIT = 'iam:role-edit',
   AUDIT_READ = 'audit:read',

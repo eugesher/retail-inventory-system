@@ -1,9 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { IInventoryStockLowEvent } from '@retail-inventory-system/contracts';
+import {
+  IInventoryStockLowEvent,
+  NotificationChannelEnum,
+} from '@retail-inventory-system/contracts';
 
-import { Notification, NotificationChannelEnum } from '../../domain';
+import { Notification } from '../../domain';
 import { INotifierPort, NOTIFIER } from '../ports';
 
 @Injectable()
@@ -18,7 +21,7 @@ export class SendLowStockAlertUseCase {
   public async execute(event: IInventoryStockLowEvent): Promise<void> {
     const notification = new Notification({
       recipient: 'ops:inventory',
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Low stock: variant ${event.variantId} @ ${event.stockLocationId}`,
       body: `Variant ${event.variantId} at location '${event.stockLocationId}' has ${event.quantity} units left (threshold ${event.threshold}).`,
       metadata: {

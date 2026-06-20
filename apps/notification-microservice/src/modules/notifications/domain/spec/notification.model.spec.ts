@@ -1,9 +1,11 @@
-import { Notification, NotificationChannelEnum } from '..';
+import { NotificationChannelEnum } from '@retail-inventory-system/contracts';
+
+import { Notification } from '..';
 
 describe('Notification', () => {
   const validProps = {
     recipient: 'customer:7',
-    channel: NotificationChannelEnum.LOG,
+    channel: NotificationChannelEnum.EMAIL,
     subject: 'Order 1 received',
     body: 'Order body',
     metadata: { orderId: 1 },
@@ -12,7 +14,7 @@ describe('Notification', () => {
   it('constructs with valid props', () => {
     const notification = new Notification(validProps);
     expect(notification.recipient).toBe('customer:7');
-    expect(notification.channel).toBe(NotificationChannelEnum.LOG);
+    expect(notification.channel).toBe(NotificationChannelEnum.EMAIL);
     expect(notification.subject).toBe('Order 1 received');
     expect(notification.body).toBe('Order body');
     expect(notification.metadata).toEqual({ orderId: 1 });
@@ -33,7 +35,7 @@ describe('Notification', () => {
       () =>
         new Notification({
           ...validProps,
-          channel: 'sms' as NotificationChannelEnum,
+          channel: 'telegram' as NotificationChannelEnum,
         }),
     ).toThrow(/unknown channel/);
   });

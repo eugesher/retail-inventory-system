@@ -1,9 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { IRetailOrderPlacedEvent } from '@retail-inventory-system/contracts';
+import {
+  IRetailOrderPlacedEvent,
+  NotificationChannelEnum,
+} from '@retail-inventory-system/contracts';
 
-import { Notification, NotificationChannelEnum } from '../../domain';
+import { Notification } from '../../domain';
 import { INotifierPort, NOTIFIER } from '../ports';
 
 @Injectable()
@@ -20,7 +23,7 @@ export class SendOrderNotificationUseCase {
 
     const notification = new Notification({
       recipient: `order:${event.orderId}`,
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: `Order ${event.orderNumber} placed`,
       body:
         `Order ${event.orderNumber} (${event.lineCount} ${lineWord}) was placed ` +

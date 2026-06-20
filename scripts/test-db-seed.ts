@@ -119,6 +119,16 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     code: PermissionCodeEnum.PRICING_WRITE,
     description: 'Set or schedule prices and manage tax categories',
   },
+  {
+    id: '00000000-0000-4000-b000-000000000012',
+    code: PermissionCodeEnum.NOTIFICATIONS_READ,
+    description: 'Read notification templates and deliveries',
+  },
+  {
+    id: '00000000-0000-4000-b000-000000000013',
+    code: PermissionCodeEnum.NOTIFICATIONS_WRITE,
+    description: 'Author notification templates and retry deliveries',
+  },
 ];
 
 const ROLE_SEEDS: {

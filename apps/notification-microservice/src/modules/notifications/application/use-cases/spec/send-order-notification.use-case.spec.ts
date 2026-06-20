@@ -1,8 +1,10 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { IRetailOrderPlacedEvent } from '@retail-inventory-system/contracts';
+import {
+  IRetailOrderPlacedEvent,
+  NotificationChannelEnum,
+} from '@retail-inventory-system/contracts';
 
-import { NotificationChannelEnum } from '../../../domain';
 import { SendOrderNotificationUseCase } from '../send-order-notification.use-case';
 import { FakeLogger, InMemoryNotifier } from './test-doubles';
 
@@ -39,7 +41,7 @@ describe('SendOrderNotificationUseCase', () => {
     const sent = notifier.sent[0];
 
     expect(sent.recipient).toBe('order:4242');
-    expect(sent.channel).toBe(NotificationChannelEnum.LOG);
+    expect(sent.channel).toBe(NotificationChannelEnum.EMAIL);
     expect(sent.subject).toContain('ORD-2026-00004242');
     expect(sent.body).toContain('ORD-2026-00004242');
     expect(sent.body).toContain('29997');
