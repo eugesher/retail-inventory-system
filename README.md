@@ -88,19 +88,19 @@ The system handles order lifecycle management and product stock tracking across 
 │  Retail Microservice   │  │    Inventory Microservice     │
 │  Cart: 6 RPCs + place  │  │  RPC: stock-level.get,        │
 │  Orders: get/list/cap. │  │  location.list, receive,      │
-│  Fulfillment/Line:     │  │  adjust, transfer,            │
-│  create/ship/deliver/  │  │  stock-movement.list,         │
-│  cancel order + line.  │  │  reservation.reserve/release/ │
-│  Ship captures payment │  │  allocate, allocation.cancel, │
-│  + commit-sale -> inv. │  │  stock.commit-sale            │
-│  Calls inv reserve/    │  │  Aggregates: StockLevel,      │
-│  release/allocate.     │  │  StockLocation, Reservation,  │
-│  Emits order.placed +  │  │  StockMovement (ledger)       │
-│  fulfillment.* events. │  │  Consumes: variant.created    │
-└──────────────┬─────────┘  │  Emits: reserved/allocated/   │
-               │            │  released/committed           │
-               │            │  + stock.low ─────────────────┼─┐
-               │            │  ┌────────────┐               │ │
+│  Fulfillment: create/  │  │  adjust, transfer,            │
+│  ship/deliver/cancel.  │  │  stock-movement.list,         │
+│  Ship captures payment │  │  reservation.reserve/release/ │
+│  + commit-sale -> inv. │  │  allocate, allocation.cancel, │
+│  Returns: RMA lifecycle│  │  commit-sale + restock-return │
+│  -> inv restock-return │  │  Aggregates: StockLevel,      │
+│  Refunds: issue/list,  │  │  StockLocation, Reservation,  │
+│  auto-refund on cancel │  │  StockMovement (ledger)       │
+│  Calls inv reserve/    │  │  Consumes: variant.created    │
+│  release/allocate.     │  │  Emits: reserved/allocated/   │
+│  Emits order/fulfill./ │  │  released/committed/returned  │
+│  return/refund events  │  │  + stock.low ─────────────────┼─┐
+└──────────────┬─────────┘  │  ┌────────────┐               │ │
                │            │  │   Redis    │◄──cache-aside─┤ │
                │            │  │ stock keys │               │ │
                │            │  └────────────┘               │ │
@@ -127,7 +127,9 @@ The system handles order lifecycle management and product stock tracking across 
 ┌─────────────────────────────────────────────────────────────▼─┐
 │              Notification Microservice (RMQ)                  │
 │  Listens: inventory.stock.low, retail.order.placed,           │
-│  retail.fulfillment.shipped / .delivered                      │
+│  retail.fulfillment.shipped / .delivered,                     │
+│  retail.return.requested / .authorized / .received /          │
+│  .inspected, retail.refund.issued                             │
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
@@ -337,6 +339,8 @@ The **`Refund`** aggregate is a **fifth sibling aggregate inside `orders/`** (no
 **Issue Refund and List Refunds are now live** ([ADR-032](docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md), served by the orders controller over RabbitMQ **and fronted over HTTP** by the gateway `modules/orders/` refund extension — `POST /api/orders/:orderId/refunds` (staff `order:refund`) + `GET /api/orders/:orderId/refunds` (owner-or-staff `order:read`)). **Issue Refund** (`retail.refund.issue` → `IssueRefundUseCase`, **staff** `order:refund`) loads the order + payment, enforces the preconditions (the payment must be `captured` — `REFUND_PAYMENT_NOT_CAPTURED` — and the amount must fit the **refundable ceiling** — `REFUND_EXCEEDS_REFUNDABLE`), opens a `pending` `Refund`, calls `PAYMENT_GATEWAY.refund()` **outside** the transaction (the `FakePaymentGatewayAdapter` always succeeds with a fresh `fake_refund_<uuid>` reference), then runs `Payment.refund(amount)` (accumulating `refunded_amount_minor`, flipping the payment to `refunded` **and clearing the refund flag** only on a **full** refund — a partial leaves it `captured`) + `Refund.markIssued(...)` in **one short transaction** (the Capture precedent), **always audits** the money movement (the cross-cutting always-audit rule, written retail-side via the `AUDIT_LOG_PUBLISHER` port → a default log-only `NoOpAuditLogPublisher`, so it covers the auto-refund path too), and emits `retail.refund.issued` (→ `notification_events`); a gateway decline (modeled, unreachable with the fake) records a `failed` refund and emits `retail.refund.failed`. It is **naturally idempotent** — the `Idempotency-Key` header is accepted-not-deduped, but an already-`issued` refund for the same `(payment, amount, reason)` short-circuits with no second gateway call, and the `refunded_amount_minor` ceiling stops any replay over-refunding. **List Refunds** (`retail.refund.list` → `ListRefundsForOrderUseCase`, owner-or-staff `order:read`, `REFUND_ACCESS_FORBIDDEN` for a non-owner-non-staff caller) returns the order's `RefundView[]` newest-first.
 
 **The auto-refund-from-cancel consumer is now live too** ([ADR-032](docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)): `OrderCancelledConsumer` (an `@EventPattern retail.order.cancelled` subscriber in the orders module's `infrastructure/consumers/`) listens to retail's **own** cancel event on `retail_queue` and, when `paymentFlaggedForRefund=true`, resolves the captured `Payment` and **inline**-calls `IssueRefundUseCase` for the still-refundable remainder (`amountMinor − refundedAmountMinor`, only if `> 0`) with `reason: 'order-cancelled'` and a system (`null`) actor — so a captured order cancelled before it ships is both flagged **and** actually refunded. It reuses the one audited use case (no cross-service hop, no new deployable), and its idempotency falls out of the refundable-amount guard (a redelivery after a full refund computes `0` and no-ops — no job table; RabbitMQ is at-least-once); a downstream failure is warn-logged and swallowed, leaving the payment `flagged_for_refund` as the durable manual-retry anchor. The gateway HTTP refund endpoints and the notification refund fan-out (`RefundEventsConsumer` → `SendRefundNotificationUseCase`, in the notification service) are now live too. See [docs/implementation/09-returns-and-refunds/04-auto-refund-from-cancel-order.md](docs/implementation/09-returns-and-refunds/04-auto-refund-from-cancel-order.md) and [05-fake-gateway-refund-method.md](docs/implementation/09-returns-and-refunds/05-fake-gateway-refund-method.md).
+
+The whole returns + refunds capability is locked end-to-end by four gateway e2e suites that drive the HTTP routes and assert through public state (order/refund reads, the public stock read, the uncached movements ledger): [`test/return-restock-refund.e2e-spec.ts`](test/return-restock-refund.e2e-spec.ts) (the Stage-2 place → ship → deliver → open → authorize → receive → inspect-`restock` → close → refund chain — on-hand rises by the restocked quantity, one positive `return` movement appears, a partial refund leaves the payment `captured`), [`test/return-rejected.e2e-spec.ts`](test/return-rejected.e2e-spec.ts) (the open-time `RETURN_ORDER_NOT_RETURNABLE` / `RETURN_QUANTITY_EXCEEDS_RETURNABLE` guards + an explicit reject, all leaving stock untouched), [`test/auto-refund-from-cancel.e2e-spec.ts`](test/auto-refund-from-cancel.e2e-spec.ts) (capture-then-cancel → the consumer auto-issues a full refund, polled to `refunded`), and [`test/manual-refund.e2e-spec.ts`](test/manual-refund.e2e-spec.ts) (a goodwill partial refund, the double-issue idempotency assertion, the over-refund ceiling, and the full-remainder flip to `refunded`).
 
 ```
 apps/retail-microservice/src/
