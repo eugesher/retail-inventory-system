@@ -75,6 +75,15 @@ const CATALOG_PRICE_KEY_VERSION = 'v1';
 // terminates at the version), while the children facet is per-category and keeps
 // the standard `…category:<version>:<categoryId>:children` shape.
 const CATALOG_CATEGORY_KEY_VERSION = 'v1';
+// Reserved for a future cached notification-template read path. The render &
+// dispatch hot path resolves the latest-active template per
+// `(eventType, channel, locale)` on **every** outgoing notification — a deep,
+// mostly-static registry that is the natural caching candidate in the
+// notification service. The `notificationsTemplate*` builders below are **not
+// consumed yet**: the notification microservice does not import `CacheModule`.
+// They exist so a future cached read path adopts the v1 key shape without
+// re-keying; a bump of this constant re-keys every entry on the next deploy.
+const NOTIFICATIONS_TEMPLATE_KEY_VERSION = 'v1';
 
 // Sentinel for the "every facet for this id" key. Non-glob so the literal
 // cannot be confused with a Redis MATCH pattern (CACHE-011 fix from ADR-016).
@@ -162,6 +171,30 @@ export const CACHE_KEYS = {
 
   catalogCategoryChildren: (categoryId: number, opts?: ITenantOptions): string =>
     `${CACHE_KEYS.catalogCategoryChildrenPrefix(categoryId, opts)}children`,
+
+  // Reserved notification-template read-path builders (ADR-016 / ADR-022 /
+  // ADR-033). **Not consumed yet**: the notification microservice does not import
+  // `CacheModule`; these + `NOTIFICATIONS_TEMPLATE_KEY_VERSION` exist so a future
+  // cached "find latest active template" read path can adopt the v1 key shape
+  // without re-keying. The `<id>` axis is the composite natural key
+  // `(eventType, channel, locale)` — the template registry is resolved by that
+  // triple, not a surrogate id. Key shape:
+  // `ris:[t:<tenantId>:]notifications:template:v1:<eventType>:<channel>:<locale>`.
+  // The prefix terminates one segment short so a `delByPrefix` wipes every locale
+  // (or every channel) under a coarser scope in one call.
+  notificationsTemplatePrefix: (
+    eventType: string,
+    channel: string,
+    opts?: ITenantOptions,
+  ): string =>
+    `${rootPrefix(opts)}notifications:template:${NOTIFICATIONS_TEMPLATE_KEY_VERSION}:${eventType}:${channel}:`,
+
+  notificationsTemplate: (
+    eventType: string,
+    channel: string,
+    locale: string,
+    opts?: ITenantOptions,
+  ): string => `${CACHE_KEYS.notificationsTemplatePrefix(eventType, channel, opts)}${locale}`,
 
   // -- Pre-v3 (v2) shape — invalidate-only ----------------------------------
   // Returns the retired v2 stock prefix `ris:inventory:stock:v2:<id>:`. Exposed

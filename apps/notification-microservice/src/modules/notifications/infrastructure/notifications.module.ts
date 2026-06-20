@@ -1,6 +1,12 @@
 import { Module } from '@nestjs/common';
 
-import { NOTIFIER } from '../application/ports';
+import { DatabaseModule } from '@retail-inventory-system/database';
+
+import {
+  NOTIFICATION_DELIVERY_REPOSITORY,
+  NOTIFICATION_TEMPLATE_REPOSITORY,
+  NOTIFIER,
+} from '../application/ports';
 import {
   SendLowStockAlertUseCase,
   SendOrderNotificationUseCase,
@@ -17,10 +23,23 @@ import {
   ReturnEventsConsumer,
 } from './consumers';
 import { LogNotifierAdapter } from './delivery';
+import {
+  NotificationDeliveryEntity,
+  NotificationDeliveryTypeormRepository,
+  NotificationTemplateEntity,
+  NotificationTemplateTypeormRepository,
+} from './persistence';
 
 // `NOTIFIER` is bound to `LogNotifierAdapter` today; swap to
 // `EmailNotifierAdapter` / `WebhookNotifierAdapter` is a one-line `useExisting`
 // rebind once those adapters are implemented (ADR-011 §3).
+//
+// `DatabaseModule.forFeature([...])` registers the two persistence entities the
+// notification microservice now owns (its first DB tables, ADR-033). The two repository
+// ports (`NOTIFICATION_TEMPLATE_REPOSITORY` / `NOTIFICATION_DELIVERY_REPOSITORY`) are
+// bound to their TypeORM adapters here so they are injectable, even though no use case
+// resolves them yet — the renderer (a later capability) and Render & Dispatch are the
+// first consumers; the foundation only wires the seam.
 //
 // Five event consumers are wired: `InventoryEventsConsumer` fans out the inventory
 // low-stock alert (`inventory.stock.low`), `OrderEventsConsumer` fans out the
@@ -32,6 +51,7 @@ import { LogNotifierAdapter } from './delivery';
 // (`retail.refund.issued`). Each translates a plain wire event into a use case that
 // builds a `Notification` and dispatches it via `NOTIFIER`.
 @Module({
+  imports: [DatabaseModule.forFeature([NotificationTemplateEntity, NotificationDeliveryEntity])],
   controllers: [
     HealthController,
     InventoryEventsConsumer,
@@ -48,6 +68,16 @@ import { LogNotifierAdapter } from './delivery';
     SendRefundNotificationUseCase,
     LogNotifierAdapter,
     { provide: NOTIFIER, useExisting: LogNotifierAdapter },
+    NotificationTemplateTypeormRepository,
+    {
+      provide: NOTIFICATION_TEMPLATE_REPOSITORY,
+      useExisting: NotificationTemplateTypeormRepository,
+    },
+    NotificationDeliveryTypeormRepository,
+    {
+      provide: NOTIFICATION_DELIVERY_REPOSITORY,
+      useExisting: NotificationDeliveryTypeormRepository,
+    },
   ],
 })
 export class NotificationsModule {}
