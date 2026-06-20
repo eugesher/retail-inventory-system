@@ -198,6 +198,17 @@ export const ROUTING_KEYS = {
   RETAIL_RETURN_CLOSE: 'retail.return.close',
   RETAIL_RETURN_GET: 'retail.return.get',
   RETAIL_RETURN_LIST: 'retail.return.list',
+  // Refund RPC command + read keys (API Gateway → Retail, served by the orders
+  // controller — `Refund` is a sibling aggregate in the orders module, ADR-032).
+  // `retail.refund.issue` → `IssueRefundUseCase` issues a refund against a captured
+  // payment (staff `order:refund`): it validates the refundable ceiling, calls the
+  // payment gateway, writes a `refund` row, accumulates `payment.refunded_amount_minor`
+  // (flipping the payment to `refunded` on a full refund), audits the money movement,
+  // and resolves a `RefundView`. `retail.refund.list` → `ListRefundsForOrderUseCase`
+  // resolves an order's `RefundView[]` newest-first (owner-or-staff `order:read`). The
+  // auto-refund-from-cancel consumer calls `IssueRefundUseCase` directly (not over RMQ).
+  RETAIL_REFUND_ISSUE: 'retail.refund.issue',
+  RETAIL_REFUND_LIST: 'retail.refund.list',
   // Reserved-surface cart events (no consumer bound yet) — emitted onto
   // `retail_queue` by the cart operations. These are past-tense notifications,
   // distinct from the imperative command keys above.
@@ -258,6 +269,16 @@ export const ROUTING_KEYS = {
   RETAIL_RETURN_RECEIVED: 'retail.return.received',
   RETAIL_RETURN_INSPECTED: 'retail.return.inspected',
   RETAIL_RETURN_CLOSED: 'retail.return.closed',
+  // Refund lifecycle events — the past-tense surfaces paired with the imperative
+  // `retail.refund.issue` command (ADR-032). Two destinations by the
+  // producer-targets-consumer-queue pattern (ADR-008/020): `retail.refund.issued` is the
+  // buyer-facing success event, emitted onto `notification_events` (the notification
+  // service binds a refund fan-out consumer for it); `retail.refund.failed` is emitted
+  // onto `retail_queue` (the producer's own queue — a reserved surface today, no
+  // consumer; modeled for a real gateway decline, unreachable with the always-succeed
+  // fake).
+  RETAIL_REFUND_ISSUED: 'retail.refund.issued',
+  RETAIL_REFUND_FAILED: 'retail.refund.failed',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
 } as const;
 

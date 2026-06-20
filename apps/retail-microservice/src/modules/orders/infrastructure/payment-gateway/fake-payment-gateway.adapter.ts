@@ -7,6 +7,7 @@ import {
   IPaymentAuthorizeResult,
   IPaymentCaptureResult,
   IPaymentGatewayPort,
+  IPaymentRefundResult,
 } from '../../application/ports';
 
 // The default `PAYMENT_GATEWAY` binding (ADR-028 §4; the `LogNotifierAdapter`
@@ -17,7 +18,8 @@ import {
 //
 // It **always approves**: `authorize` returns `approved: true` with a fresh
 // `fake_<uuid>` reference and the caller's `method` (defaulting to `fake-card`);
-// `capture` returns `captured: true` echoing the reference. No external calls, no
+// `capture` returns `captured: true` echoing the reference; `refund` returns
+// `refunded: true` with a fresh `fake_refund_<uuid>` reference. No external calls, no
 // persistence, no failure paths — deterministic and side-effect-free. Each
 // `authorize` mints a distinct `gatewayReference` (the unique `payment.gateway_reference`
 // column relies on it). Swapping in a real gateway is a single provider rebinding in
@@ -41,6 +43,20 @@ export class FakePaymentGatewayAdapter implements IPaymentGatewayPort {
       captured: true,
       gatewayReference,
       capturedAt: new Date(),
+    });
+  }
+
+  // Always succeeds, minting a **fresh** `fake_refund_<uuid>` reference (a real processor
+  // returns a new refund id distinct from the charge reference). The request param of
+  // `IPaymentGatewayPort.refund` is omitted here — the fake validates nothing (the Issue
+  // Refund use case has already enforced the refundable ceiling) and takes no money, so it
+  // cannot fail. A real adapter implements the full arity, refunding `req.amountMinor`
+  // against `req.gatewayReference` (the `capture` precedent of dropping unused params).
+  public async refund(): Promise<IPaymentRefundResult> {
+    return Promise.resolve({
+      refunded: true,
+      gatewayReference: `fake_refund_${randomUUID()}`,
+      refundedAt: new Date(),
     });
   }
 }

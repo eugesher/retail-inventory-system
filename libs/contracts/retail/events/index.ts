@@ -15,3 +15,5 @@ export * from './return-rejected.event';
 export * from './return-received.event';
 export * from './return-inspected.event';
 export * from './return-closed.event';
+export * from './refund-issued.event';
+export * from './refund-failed.event';

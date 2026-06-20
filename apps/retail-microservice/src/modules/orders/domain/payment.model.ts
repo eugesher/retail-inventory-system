@@ -222,12 +222,59 @@ export class Payment extends AggregateRoot<number | null> {
 
   // Marks that this payment owes a refund. Driven by Cancel Order when it cancels an
   // order whose payment was already **captured** — the money is gone, so cancellation
-  // cannot simply void it; it flags the row and a later refund capability issues the
+  // cannot simply void it; it flags the row and the refund capability issues the
   // actual refund. **Idempotent** — flagging an already-flagged payment is a no-op, not
   // an error. The flag is orthogonal to `status` (a captured payment stays `captured`
-  // while flagged); only a refund moves the status (a later capability, ADR-028 §6).
+  // while flagged); only a refund moves the status (`refund()` below, ADR-028 §6).
   public flagForRefund(): void {
     this._flaggedForRefund = true;
+  }
+
+  // Records a refund of `amountMinor` against this captured payment — the writer of the
+  // `refunded_amount_minor` counter that shipped ahead of its consumer (ADR-028 §6).
+  // Driven by the Issue Refund use case **after** the gateway confirms the refund; the
+  // use case validates the request against the refundable ceiling first, so the guards
+  // here are defense-in-depth (an internal caller bug, not a user-reachable rejection):
+  //
+  // - `amountMinor` must be a positive integer — a **plain `Error`** (a use case never
+  //   reaches this with a bad amount; the typed `REFUND_AMOUNT_INVALID` lives on `Refund`).
+  // - the payment must be `CAPTURED` — only captured money can be reversed. The use case
+  //   surfaces `REFUND_PAYMENT_NOT_CAPTURED` first, but the domain also rejects it with
+  //   `PAYMENT_INVALID_STATUS_TRANSITION` (409) so the invariant holds even off the
+  //   happy path (the `capture`/`void` transition-guard precedent).
+  // - the running total must not exceed the captured amount
+  //   (`refundedAmountMinor + amountMinor ≤ amountMinor`) — a **plain `Error**` (the use
+  //   case surfaces the typed `REFUND_EXCEEDS_REFUNDABLE` first).
+  //
+  // Effect: accumulate `refundedAmountMinor`; on a **full** refund (the cumulative total
+  // now equals the captured amount) walk `status → REFUNDED` and clear
+  // `flaggedForRefund` (a full refund settles the flag Cancel Order set). A **partial**
+  // refund leaves `status = CAPTURED` and the flag untouched — a captured order may still
+  // owe more, and a later refund completes it.
+  public refund(amountMinor: number): void {
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      throw new Error(
+        `Payment.refund: amountMinor must be a positive integer (minor units), got ${amountMinor}`,
+      );
+    }
+    if (this._status !== PaymentStatusEnum.CAPTURED) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
+        `Payment.refund: can only refund a captured payment (current: ${this._status})`,
+      );
+    }
+    if (this._refundedAmountMinor + amountMinor > this._amountMinor) {
+      throw new Error(
+        `Payment.refund: refund of ${amountMinor} would exceed the refundable remainder ` +
+          `(${this._amountMinor - this._refundedAmountMinor})`,
+      );
+    }
+
+    this._refundedAmountMinor += amountMinor;
+    if (this._refundedAmountMinor === this._amountMinor) {
+      this._status = PaymentStatusEnum.REFUNDED;
+      this._flaggedForRefund = false;
+    }
   }
 
   private static requireNonEmpty(value: string, code: OrderErrorCodeEnum, field: string): void {

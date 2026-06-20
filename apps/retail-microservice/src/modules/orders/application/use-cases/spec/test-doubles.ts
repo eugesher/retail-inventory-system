@@ -2,6 +2,8 @@ import {
   CartStatusEnum,
   IAllocationCancelPayload,
   IAllocationResult,
+  IAuditLogEvent,
+  IAuditLogPublisher,
   ICommitSalePayload,
   ICommitSaleResult,
   IReservationAllocatePayload,
@@ -11,10 +13,19 @@ import {
   OrderStatusEnum,
   PaymentStatusEnum,
   PriceView,
+  RefundStatusEnum,
   VariantWithProductView,
 } from '@retail-inventory-system/contracts';
 
-import { Address, Fulfillment, FulfillmentLine, Order, OrderLine, Payment } from '../../../domain';
+import {
+  Address,
+  Fulfillment,
+  FulfillmentLine,
+  Order,
+  OrderLine,
+  Payment,
+  Refund,
+} from '../../../domain';
 import {
   IAddressRepositoryPort,
   IFulfillmentRepositoryPort,
@@ -31,7 +42,10 @@ import {
   IPaymentAuthorizeResult,
   IPaymentCaptureResult,
   IPaymentGatewayPort,
+  IPaymentRefundRequest,
+  IPaymentRefundResult,
   IPaymentRepositoryPort,
+  IRefundRepositoryPort,
   ITransactionPort,
   ITransactionScope,
 } from '../../ports';
@@ -319,24 +333,32 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
       gatewayReference: payment.gatewayReference,
       authorizedAt: payment.authorizedAt,
       capturedAt: payment.capturedAt,
-      // Preserve the refund flag across the save/re-read round-trip so the Cancel Order
-      // captured-payment path (`flagForRefund`) is observable in the re-read view (the
-      // real `PaymentMapper` round-trips it both directions).
+      // Preserve the refund flag + refunded total across the save/re-read round-trip so
+      // the Cancel Order captured-payment path (`flagForRefund`) and the Issue Refund path
+      // (`refund` → `refunded_amount_minor` + the status flip) are observable in the
+      // re-read view (the real `PaymentMapper` round-trips both directions).
       flaggedForRefund: payment.flaggedForRefund,
+      refundedAmountMinor: payment.refundedAmountMinor,
     });
   }
 }
 
 // A configurable payment gateway fake — approves or declines, minting a distinct
-// `gatewayReference` per authorize (the UNIQUE column relies on it).
+// `gatewayReference` per authorize (the UNIQUE column relies on it). `refundOk` arms a
+// decline so the Issue Refund spec can exercise the `failed` path; `refundCount` lets it
+// assert the natural-idempotency guard makes only one gateway call.
 export class FakePaymentGateway implements IPaymentGatewayPort {
   public authorizeCount = 0;
   public captureCount = 0;
+  public refundCount = 0;
+  public readonly refundCalls: IPaymentRefundRequest[] = [];
   private seq = 0;
+  private refundSeq = 0;
 
   constructor(
     private readonly approve = true,
     private readonly captureOk = true,
+    private readonly refundOk = true,
   ) {}
 
   public authorize(req: IPaymentAuthorizeRequest): Promise<IPaymentAuthorizeResult> {
@@ -357,6 +379,16 @@ export class FakePaymentGateway implements IPaymentGatewayPort {
       capturedAt: new Date('2026-06-10T00:00:00.000Z'),
     });
   }
+
+  public refund(req: IPaymentRefundRequest): Promise<IPaymentRefundResult> {
+    this.refundCount += 1;
+    this.refundCalls.push(req);
+    return Promise.resolve({
+      refunded: this.refundOk,
+      gatewayReference: `fake_refund_${++this.refundSeq}`,
+      refundedAt: new Date('2026-06-12T00:00:00.000Z'),
+    });
+  }
 }
 
 // Records the published wire events so a spec can assert each fired.
@@ -368,6 +400,8 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public readonly fulfillmentShipped: unknown[] = [];
   public readonly fulfillmentDelivered: unknown[] = [];
   public readonly orderCancelled: unknown[] = [];
+  public readonly refundIssued: unknown[] = [];
+  public readonly refundFailed: unknown[] = [];
 
   public publishOrderPlaced(event: unknown): Promise<void> {
     this.placed.push(event);
@@ -403,7 +437,112 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
     this.orderCancelled.push(event);
     return Promise.resolve();
   }
+
+  public publishRefundIssued(event: unknown): Promise<void> {
+    this.refundIssued.push(event);
+    return Promise.resolve();
+  }
+
+  public publishRefundFailed(event: unknown): Promise<void> {
+    this.refundFailed.push(event);
+    return Promise.resolve();
+  }
 }
+
+// Records published audit events so the Issue Refund spec can assert the always-audit
+// money-movement rule (ADR-032) — the event name + the before/after payment snapshot.
+export class SpyAuditLogPublisher implements IAuditLogPublisher {
+  public readonly events: IAuditLogEvent[] = [];
+
+  public publish(event: IAuditLogEvent): Promise<void> {
+    this.events.push(event);
+    return Promise.resolve();
+  }
+}
+
+// An in-memory refund store that assigns BIGINT ids + committed timestamps on save and
+// serves `findByOrderId` / `findByPaymentId` newest-first (mirroring the real repo's
+// `issued_at DESC, id DESC`). Enough to exercise the Issue Refund accounting + the
+// natural-idempotency guard + the List Refunds read without a test DB.
+export class FakeRefundRepository implements IRefundRepositoryPort {
+  public saveCount = 0;
+  private seq = 0;
+  private readonly byId = new Map<number, Refund>();
+
+  public save(refund: Refund): Promise<Refund> {
+    this.saveCount += 1;
+    const id = refund.id ?? ++this.seq;
+    const stored = this.rebuild(refund, id);
+    this.byId.set(id, stored);
+    return Promise.resolve(this.rebuild(stored, id));
+  }
+
+  public findById(id: number): Promise<Refund | null> {
+    const refund = this.byId.get(id);
+    return Promise.resolve(refund ? this.rebuild(refund, id) : null);
+  }
+
+  public findByOrderId(orderId: number): Promise<Refund[]> {
+    return Promise.resolve(this.sortedNewestFirst((refund) => refund.orderId === orderId));
+  }
+
+  public findByPaymentId(paymentId: number): Promise<Refund[]> {
+    return Promise.resolve(this.sortedNewestFirst((refund) => refund.paymentId === paymentId));
+  }
+
+  private sortedNewestFirst(predicate: (refund: Refund) => boolean): Refund[] {
+    return [...this.byId.values()]
+      .filter(predicate)
+      .sort((a, b) => {
+        const byIssued = (b.issuedAt?.getTime() ?? 0) - (a.issuedAt?.getTime() ?? 0);
+        return byIssued !== 0 ? byIssued : (b.id ?? 0) - (a.id ?? 0);
+      })
+      .map((refund) => this.rebuild(refund, refund.id!));
+  }
+
+  // Re-reads the saved graph the way the real repo does: concrete id + committed
+  // `createdAt` / `updatedAt` timestamps (the view factory's `!` assertions rely on them).
+  private rebuild(refund: Refund, id: number): Refund {
+    const now = new Date('2026-06-12T00:00:00.000Z');
+    return Refund.reconstitute({
+      id,
+      orderId: refund.orderId,
+      paymentId: refund.paymentId,
+      amountMinor: refund.amountMinor,
+      currency: refund.currency,
+      status: refund.status,
+      reason: refund.reason,
+      gatewayReference: refund.gatewayReference,
+      issuedAt: refund.issuedAt,
+      createdAt: refund.createdAt ?? now,
+      updatedAt: refund.updatedAt ?? now,
+    });
+  }
+}
+
+// A persisted-refund fixture (via `Refund.reconstitute`) for the List Refunds spec + the
+// idempotency-duplicate case.
+export const buildRefundFixture = (
+  id: number,
+  orderId: number,
+  paymentId: number,
+  status: RefundStatusEnum = RefundStatusEnum.ISSUED,
+  amountMinor = 1000,
+  reason = 'customer-return',
+): Refund =>
+  Refund.reconstitute({
+    id,
+    orderId,
+    paymentId,
+    amountMinor,
+    currency: 'USD',
+    status,
+    reason,
+    gatewayReference: status === RefundStatusEnum.ISSUED ? `fake_refund_${id}` : null,
+    issuedAt: status === RefundStatusEnum.ISSUED ? new Date('2026-06-12T00:00:00.000Z') : null,
+    createdAt: new Date('2026-06-12T00:00:00.000Z'),
+    updatedAt: new Date('2026-06-12T00:00:00.000Z'),
+  });
 
 // In-memory order→inventory commit-sale gateway. Records every commitSale call so the
 // ship spec can assert the `{ orderId, fulfillmentId, lines }` passed, and exposes a
