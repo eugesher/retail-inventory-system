@@ -3,6 +3,7 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import {
   INVENTORY_DEFAULT_STOCK_LOCATION,
+  IRestockFromReturnLine,
   IRestockFromReturnPayload,
   IRetailReturnInspectPayload,
   ReturnDispositionEnum,
@@ -201,14 +202,36 @@ export class InspectAndDispositionUseCase {
       snapshot.lines.map((line) => [line.orderLineId, line.variantId]),
     );
 
-    const payload: IRestockFromReturnPayload = {
-      returnRequestId: request.id!,
-      lines: restockLines.map((line) => ({
+    // Resolve each restock line's variant from the order snapshot (a `ReturnLine` carries
+    // only `orderLineId`). Every return line references a real order line — the Open use
+    // case validated it and the `return_line.order_line_id` RESTRICT FK enforces it — so a
+    // miss is an invariant breach. Log it for replay and DROP just that line rather than
+    // sending an `undefined` variantId downstream (the "snapshot not found" posture above;
+    // this path never throws — the inspection has already committed).
+    const restockPayloadLines: IRestockFromReturnLine[] = [];
+    for (const line of restockLines) {
+      const variantId = variantByOrderLine.get(line.orderLineId);
+      if (variantId === undefined) {
+        this.logger.error(
+          { correlationId, rmaId: request.id, orderLineId: line.orderLineId },
+          'Restock-from-Return: order line missing from order snapshot — skipping line (awaits operator replay)',
+        );
+        continue;
+      }
+      restockPayloadLines.push({
         returnLineId: line.id!,
-        variantId: variantByOrderLine.get(line.orderLineId)!,
+        variantId,
         stockLocationId: INVENTORY_DEFAULT_STOCK_LOCATION,
         quantity: line.quantity,
-      })),
+      });
+    }
+    if (restockPayloadLines.length === 0) {
+      return;
+    }
+
+    const payload: IRestockFromReturnPayload = {
+      returnRequestId: request.id!,
+      lines: restockPayloadLines,
       actorId,
       correlationId,
     };
