@@ -268,8 +268,10 @@ export class IssueRefundUseCase {
     await this.audit.publish({
       name,
       actorId: payload.actorId,
-      // Refunds are staff-gated (`order:refund`); the auto-refund path also routes an
-      // authorized actor through here. Audited as a staff money movement.
+      // Refunds are staff-gated (`order:refund`); the auto-refund-from-cancel path also
+      // routes through here with a **system** actor (`actorId` null). Either way it is a
+      // privileged money movement, audited as `staff` (the audit actor-kind union has no
+      // dedicated `system` member; the null `actorId` already signals the system origin).
       actorKind: 'staff',
       targetId: String(payload.orderId),
       targetKind: null,
