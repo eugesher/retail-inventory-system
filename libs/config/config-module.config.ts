@@ -46,6 +46,10 @@ export const configModuleConfig = {
     MAX_DELIVERY_ATTEMPTS: Joi.number().integer().positive().default(3),
     // Retention window (days) for delivery rows; the purge worker is a future capability.
     RETENTION_DELIVERY_DAYS: Joi.number().integer().positive().default(90),
+    // TEST-ONLY: when true, the notification microservice binds a deterministically-flaky
+    // NOTIFIER that fails a delivery carrying the test marker once (to exercise the retry
+    // path). Defaults false; production must never enable it.
+    NOTIFIER_TEST_FLAKY: Joi.boolean().default(false),
 
     JWT_ACCESS_SECRET: Joi.string().min(32).required(),
     JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
