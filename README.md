@@ -242,6 +242,7 @@ apps/notification-microservice/src/
     ├── application/
     │   ├── ports/
     │   │   ├── notifier.port.ts               # INotifierPort + NOTIFIER symbol
+    │   │   ├── template-renderer.port.ts      # ITemplateRendererPort + TEMPLATE_RENDERER symbol
     │   │   ├── notification-template.repository.port.ts   # NOTIFICATION_TEMPLATE_REPOSITORY
     │   │   └── notification-delivery.repository.port.ts   # NOTIFICATION_DELIVERY_REPOSITORY
     │   └── use-cases/
@@ -265,7 +266,9 @@ apps/notification-microservice/src/
     │   │   ├── log.notifier.adapter.ts         # default
     │   │   ├── email.notifier.adapter.ts       # scaffold (TODO)
     │   │   └── webhook.notifier.adapter.ts     # scaffold (TODO)
-    │   └── notifications.module.ts             # binds NOTIFIER + the two repo ports; DatabaseModule.forFeature
+    │   ├── render/                             # TEMPLATE_RENDERER implementation
+    │   │   └── handlebars-template-renderer.adapter.ts   # the only `handlebars` import (ADR-033)
+    │   └── notifications.module.ts             # binds NOTIFIER + TEMPLATE_RENDERER + the two repo ports; DatabaseModule.forFeature
     └── presentation/
         └── health.controller.ts                # @MessagePattern('notification.health.ping')
 ```
@@ -278,10 +281,17 @@ soft-delete via an `active` flag; `subject` required for `email`/`webhook`, opti
 `sms`/`push`); `notification_delivery` is the queryable audit trail of one outgoing
 notification (`queued → sent → delivered/failed/bounced`, monotonic `attemptCount`,
 live-ephemeral, with a STORED generated-column UNIQUE that dedupes a customer-facing
-double-dispatch). Both back the `NotificationTemplate` / `NotificationDelivery` aggregates;
-the renderer, the render-and-dispatch pipeline that fronts the `NOTIFIER`, the
-author/activate operations, and the gateway HTTP surface follow in later work. The two
-repository ports are wired but not yet resolved by any use case.
+double-dispatch). Both back the `NotificationTemplate` / `NotificationDelivery` aggregates.
+The **template renderer is live**: `ITemplateRendererPort` (`TEMPLATE_RENDERER`) is bound to
+`HandlebarsTemplateRendererAdapter` (the only file importing `handlebars`), which compiles a
+template subject/body against a render context. Handlebars is logic-light by design, and its
+`{{ }}` interpolation HTML-escapes the render context by default — the right posture for
+trusted, staff-authored template *source* combined with untrusted context *data* (no
+`{{{ triple-stache }}}` for data). See
+[docs/implementation/10-notification-templates-and-deliveries/05-handlebars-renderer-choice.md](docs/implementation/10-notification-templates-and-deliveries/05-handlebars-renderer-choice.md).
+The render-and-dispatch pipeline that fronts the `NOTIFIER` (the renderer's first consumer),
+the author/activate operations, and the gateway HTTP surface follow in later work. The two
+repository ports and the renderer port are wired but not yet resolved by any use case.
 
 The service fans out seven cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`), `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), `retail.fulfillment.shipped` / `retail.fulfillment.delivered` (via `FulfillmentEventsConsumer` → `SendShipmentNotificationUseCase.shipped`/`.delivered` — the shipment- and delivery-confirmation fan-out), the four return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected` (via `ReturnEventsConsumer` → `SendReturnNotificationUseCase.requested`/`.authorized`/`.received`/`.inspected` — the buyer-facing return-status fan-out, recipient derived from the RMA's `customerId`), and `retail.refund.issued` (via `RefundEventsConsumer` → `SendRefundNotificationUseCase.issued` — the refund-confirmation fan-out), all arriving on `notification_events`. The retail publishers emit each of these through the `NOTIFICATION_MICROSERVICE` client so they land on the consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as `retail.order.placed` does. (`retail.return.rejected` / `.closed` and `retail.refund.failed` stay reserved on `retail_queue` with no consumer — those are operational outcomes, not buyer notifications.) `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
 
