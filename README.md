@@ -81,6 +81,15 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/inventory/variants/:id/stock/adjust           │
 │  POST  /api/inventory/variants/:id/stock/transfer         │
 │  POST  /api/inventory/reservations/:id/release            │
+│                                                           │
+│  Notifications (templates + retry: notifications:write,   │
+│                 deliveries: notifications:read)           │
+│  GET   /api/notifications/templates                       │
+│  POST  /api/notifications/templates                       │
+│  PATCH /api/notifications/templates/:id/active            │
+│  GET   /api/notifications/deliveries                      │
+│  GET   /api/notifications/deliveries/:id                  │
+│  POST  /api/notifications/deliveries/:id/retry            │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -131,6 +140,8 @@ The system handles order lifecycle management and product stock tracking across 
 │  retail.fulfillment.shipped / .delivered,                     │
 │  retail.return.requested / .authorized / .received /          │
 │  .inspected, retail.refund.issued                             │
+│  Serves (gateway-fronted): template author/list/set-active,   │
+│  delivery list/get/retry RPCs                                 │
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
@@ -208,18 +219,30 @@ apps/api-gateway/src/
     │   │   ├── media.controller.ts            # POST/PATCH/DELETE /api/catalog/media[/...], GET /products|variants/:id/media
     │   │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory/CreateCategory/ReparentCategory/AttachProductCategories/AttachMedia/ReorderMedia request + ListProducts/PriceQuery/ListCategories/CategoryProducts query DTOs
     │   └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
-    └── inventory/                             # talks to inventory-microservice (read + write RPCs)
+    ├── inventory/                             # talks to inventory-microservice (read + write RPCs)
+    │   ├── application/
+    │   │   ├── ports/inventory-gateway.port.ts # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
+    │   │   └── use-cases/                     # GetVariantStock, ListLocations, ListVariantMovements,
+    │   │                                      #   ReceiveStock, AdjustStock, TransferStock, ReleaseReservation
+    │   ├── infrastructure/
+    │   │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read + write + reservation RPCs)
+    │   ├── presentation/
+    │   │   ├── inventory.controller.ts        # GET .../locations, /variants/:id/stock, /variants/:id/movements;
+    │   │   │                                  #   POST /variants/:id/stock/receive|adjust|transfer, /reservations/:id/release
+    │   │   └── dto/                           # variant-stock-query (?locationIds), movements-query, receive-stock, adjust-stock, transfer-stock request DTOs
+    │   └── inventory.module.ts                # binds INVENTORY_GATEWAY_PORT -> InventoryRabbitmqAdapter
+    └── notifications/                         # talks to notification-microservice (template + delivery RPCs)
         ├── application/
-        │   ├── ports/inventory-gateway.port.ts # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
-        │   └── use-cases/                     # GetVariantStock, ListLocations, ListVariantMovements,
-        │                                      #   ReceiveStock, AdjustStock, TransferStock, ReleaseReservation
+        │   ├── ports/notifications-gateway.port.ts # INotificationsGatewayPort + NOTIFICATIONS_GATEWAY_PORT
+        │   └── use-cases/                     # AuthorTemplate, SetTemplateActive, ListTemplates,
+        │                                      #   ListDeliveries, GetDelivery, RetryDelivery
         ├── infrastructure/
-        │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read + write + reservation RPCs)
+        │   └── messaging/notifications-rabbitmq.adapter.ts  # only ClientProxy holder (template + delivery RPCs)
         ├── presentation/
-        │   ├── inventory.controller.ts        # GET .../locations, /variants/:id/stock, /variants/:id/movements;
-        │   │                                  #   POST /variants/:id/stock/receive|adjust|transfer, /reservations/:id/release
-        │   └── dto/                           # variant-stock-query (?locationIds), movements-query, receive-stock, adjust-stock, transfer-stock request DTOs
-        └── inventory.module.ts                # binds INVENTORY_GATEWAY_PORT -> InventoryRabbitmqAdapter
+        │   ├── notifications.controller.ts    # GET/POST /api/notifications/templates, PATCH .../templates/:id/active;
+        │   │                                  #   GET .../deliveries[/:id], POST .../deliveries/:id/retry
+        │   └── dto/                           # author-template, set-template-active request + templates-query, deliveries-query DTOs
+        └── notifications.module.ts            # binds NOTIFICATIONS_GATEWAY_PORT -> NotificationsRabbitmqAdapter
 ```
 
 The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, and `PermissionAggregate` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
@@ -360,8 +383,12 @@ once. See
 [docs/implementation/10-notification-templates-and-deliveries/06-retry-and-failure-events.md](docs/implementation/10-notification-templates-and-deliveries/06-retry-and-failure-events.md).
 **All consumers are now rewired onto the pipeline** (ADR-033) — the five inline
 `Send*` notification use cases are deleted and every consumer routes its wire event through
-`RenderAndDispatchUseCase`. The gateway HTTP surface (the `list`/`get`/manual-retry routes)
-follows in later work.
+`RenderAndDispatchUseCase`. The **gateway HTTP surface is now live too** — the gateway
+`modules/notifications/` fronts the template authoring + delivery `list`/`get`/manual-retry RPCs
+over HTTP at `/api/notifications` (six staff-only routes — `notifications:write` for authoring +
+retry, `notifications:read` for the delivery reads; the `record-outcome` webhook-stub RPC stays
+RMQ-only). See
+[docs/implementation/10-notification-templates-and-deliveries/07-notifications-api-and-http-file.md](docs/implementation/10-notification-templates-and-deliveries/07-notifications-api-and-http-file.md).
 
 The service fans out eight cross-service events today, and **each consumer is now a thin
 translator** that maps its wire event onto the channel-agnostic `IRenderAndDispatchInput`
@@ -752,6 +779,14 @@ POST   /api/returns/:rmaId/close          # bearer + order:return-authorize — 
 # Refunds (order-scoped — staff Issue, owner-or-staff List)
 POST   /api/orders/:orderId/refunds       # bearer + order:refund — issue against a captured payment (RefundView 201; Idempotency-Key header)
 GET    /api/orders/:orderId/refunds       # bearer — owner OR staff order:read (RefundView[])
+
+# Notifications (staff-only admin/ops — templates + retry: notifications:write, deliveries: notifications:read)
+GET    /api/notifications/templates              # bearer + notifications:write — list templates (every version) (?eventType, ?channel, ?locale)
+POST   /api/notifications/templates              # bearer + notifications:write — author/edit a template version (NotificationTemplateView 201)
+PATCH  /api/notifications/templates/:id/active   # bearer + notifications:write — activate/deactivate a version ({ active }) — the rollback lever
+GET    /api/notifications/deliveries             # bearer + notifications:read  — delivery audit page (?customerId, ?eventReferenceType, ?eventReferenceId, ?status, ?page, ?pageSize)
+GET    /api/notifications/deliveries/:id         # bearer + notifications:read  — one delivery row (incl. renderedBody)
+POST   /api/notifications/deliveries/:id/retry   # bearer + notifications:write — manually retry a failed delivery (forces past backoff)
 
 # IAM admin
 GET   /api/iam/roles                    # bearer + iam:role-edit

@@ -1,0 +1,251 @@
+# Notification template + delivery endpoints
+# (apps/api-gateway/src/modules/notifications/presentation/notifications.controller.ts)
+#
+# The API gateway fronts the notification microservice's template authoring +
+# delivery audit RPCs over HTTP at /api/notifications. Every route is STAFF-ONLY —
+# these are admin/ops tools (authoring templates, the delivery audit trail, manual
+# retry), not customer-facing, so each carries an explicit @RequiresPermission and
+# there is NO owner-check. Customer tokens carry no `permissions` claim, so a
+# code-gated route is staff-only by construction.
+#   - GET   /notifications/templates                      (Bearer — notifications:write)
+#       The template registry browse — every version, active or not. Optional
+#       ?eventType=&channel=&locale= narrow the scan. A write-side admin read (you
+#       list to decide what to edit / roll back), hence notifications:write.
+#       Returns NotificationTemplateView[].
+#   - POST  /notifications/templates                      (Bearer — notifications:write)
+#       Author (create-or-edit) a template version, keyed on (eventType, channel,
+#       locale): the service derives the next version and appends a fresh `active`
+#       row. Body { eventType, channel, locale?, subject?, body }. `locale` defaults
+#       to en-US. A subject-less email/webhook is a 400; a duplicate version a 409.
+#       Returns the new NotificationTemplateView (201).
+#   - PATCH /notifications/templates/:id/active           (Bearer — notifications:write)
+#       Activate / deactivate one template VERSION by id — the rollback lever
+#       (deactivate the newest so resolution falls through to the prior active one).
+#       Body { active }. An unknown id is a 404. Returns NotificationTemplateView.
+#   - GET   /notifications/deliveries                     (Bearer — notifications:read)
+#       The paginated, NEWEST-FIRST audit read of the notification_delivery trail.
+#       Query { customerId?, eventReferenceType?, eventReferenceId?, status?, page?,
+#       pageSize? } — page defaults 1, pageSize defaults 20 (max 100). Returns
+#       IPage<NotificationDeliveryView> { items, total, page, size }.
+#   - GET   /notifications/deliveries/:id                 (Bearer — notifications:read)
+#       One delivery row by id, including the materialized renderedBody. An unknown
+#       id is a 404. Returns NotificationDeliveryView.
+#   - POST  /notifications/deliveries/:id/retry           (Bearer — notifications:write)
+#       Operator manual retry of one FAILED delivery — re-dispatches the
+#       already-rendered content, forcing past the scheduled sweeper's backoff gate.
+#       No body. Only a `failed` delivery is retryable: an unknown id is a 404, a
+#       non-`failed` source a 409. Returns the re-dispatched NotificationDeliveryView.
+#
+# NOTE — no record-outcome route. The notification.delivery.record-outcome RPC (the
+# ESP-webhook seam that marks a `sent` row delivered/bounced) deliberately has NO
+# gateway route. Real webhook ingestion (an HTTP endpoint with signature
+# verification + provider-payload mapping) is future work; the RPC stays RMQ-only.
+#
+# Where delivery rows come from
+#   A delivery row is written by a notification CONSUMER when a producing event
+#   fires AND a matching active template exists for its (eventType, channel='email',
+#   locale='en-US'). So the deliveries reads below return rows only once such an
+#   event has flowed (e.g. place an order over /api/cart/:id/place with a
+#   retail.order.placed template seeded/authored). Until then the list is an empty
+#   page — paste a real delivery id into @deliveryId to exercise the get/retry calls.
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures a seeded staff bearer token into
+#      @accessToken, which the protected requests substitute into their
+#      Authorization header. admin@example.com holds every permission (including
+#      notifications:read AND notifications:write).
+#   3. Run `authorTemplate` before `setTemplateActive` — it captures the new
+#      template id into @templateId, which the activate request targets.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name login
+# POST /api/auth/staff/login
+# Seeded admin login (admin@example.com / admin1234). Response is
+# TokenResponseDto { accessToken, refreshToken, expiresIn }.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name authorTemplate
+# POST /api/notifications/templates  (Bearer — notifications:write)
+# Author a retail.order.placed / email / en-US template. The body is a Handlebars
+# source rendered against the event context (so {{orderId}} resolves to the placed
+# order's id). Because `channel` is email, `subject` is REQUIRED (a subject-less
+# email author is a 400). Re-running this appends a HIGHER version (create-or-edit),
+# leaving prior versions retained — newest-active-wins resolution keeps the latest
+# live. Response is the new NotificationTemplateView { id, eventType, channel,
+# locale, subject, body, version, active, createdAt, updatedAt } (201).
+POST {{baseUrl}}/notifications/templates
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "eventType": "retail.order.placed",
+  "channel": "email",
+  "locale": "en-US",
+  "subject": "Your order {{orderId}} is confirmed",
+  "body": "Hi! Your order {{orderId}} totalling {{grandTotalMinor}} minor units was placed. Thank you!"
+}
+
+###
+@templateId = {{authorTemplate.response.body.$.id}}
+
+###
+
+# @name authorTemplateMissingSubject
+# POST /api/notifications/templates  (Bearer — notifications:write)
+# An email template with no subject is rejected 400
+# (NOTIFICATION_TEMPLATE_SUBJECT_REQUIRED) — the channel-specific subject rule,
+# surfaced from the notification domain via its RPC exception filter → the gateway.
+# No row is written. (For an sms/push channel the subject is optional and this body
+# would succeed.)
+POST {{baseUrl}}/notifications/templates
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "eventType": "retail.order.placed",
+  "channel": "email",
+  "locale": "en-US",
+  "body": "Subject-less email body — rejected before persist."
+}
+
+###
+
+# @name listTemplates
+# GET /api/notifications/templates  (Bearer — notifications:write)
+# The registry browse — every version, active or not. Here scoped to the
+# retail.order.placed event so the row authored above appears (plus any earlier
+# versions). Drop the query string to list the whole registry. Response is
+# NotificationTemplateView[].
+GET {{baseUrl}}/notifications/templates?eventType=retail.order.placed&channel=email&locale=en-US
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name setTemplateActiveDeactivate
+# PATCH /api/notifications/templates/:id/active  (Bearer — notifications:write)
+# Deactivate the version authored above (the rollback lever): resolution then falls
+# through to the prior active version for this key. Body { active: false }. Response
+# is the NotificationTemplateView with active=false.
+PATCH {{baseUrl}}/notifications/templates/{{templateId}}/active
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "active": false
+}
+
+###
+
+# @name setTemplateActiveReactivate
+# PATCH /api/notifications/templates/:id/active  (Bearer — notifications:write)
+# Re-activate the same version. Body { active: true }. Response is the
+# NotificationTemplateView with active=true.
+PATCH {{baseUrl}}/notifications/templates/{{templateId}}/active
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "active": true
+}
+
+###
+
+# @name setTemplateActiveNotFound
+# PATCH /api/notifications/templates/:id/active  (Bearer — notifications:write)
+# An unknown template id is a 404 (NOTIFICATION_TEMPLATE_NOT_FOUND), surfaced from
+# the notification domain via its RPC exception filter → the gateway.
+PATCH {{baseUrl}}/notifications/templates/999999/active
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "active": false
+}
+
+###
+
+# @name listDeliveries
+# GET /api/notifications/deliveries  (Bearer — notifications:read)
+# The paginated, NEWEST-FIRST audit read of the notification_delivery trail. Here
+# scoped to order-confirmation deliveries (eventReferenceType=order). Returns
+# IPage<NotificationDeliveryView> { items, total, page, size }. Empty until a
+# producing event has flowed against an active template (see "Where delivery rows
+# come from" above).
+GET {{baseUrl}}/notifications/deliveries?eventReferenceType=order&page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name listDeliveriesFailed
+# GET /api/notifications/deliveries?status=failed  (Bearer — notifications:read)
+# The same audit read narrowed to one lifecycle state — here `failed` deliveries
+# (the candidates for a manual retry). Use a returned row's id below.
+GET {{baseUrl}}/notifications/deliveries?status=failed&page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+###
+
+# A delivery row id. There is no endpoint that mints one — a delivery is written by
+# a notification consumer when a producing event fires against an active template.
+# Source an id from the listDeliveries read above (its items[].id), or from the
+# notification_delivery TABLE directly:
+#   SELECT id, status, event_reference_type, event_reference_id, attempt_count
+#   FROM notification_delivery ORDER BY created_at DESC LIMIT 5;
+# Paste a real delivery id here, then run getDelivery / retryDelivery.
+@deliveryId = 1
+
+###
+
+# @name getDelivery
+# GET /api/notifications/deliveries/:id  (Bearer — notifications:read)
+# One delivery row by id, including the materialized renderedBody (the exact content
+# sent). An unknown id is a 404 (NOTIFICATION_DELIVERY_NOT_FOUND). Response is
+# NotificationDeliveryView.
+GET {{baseUrl}}/notifications/deliveries/{{deliveryId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name retryDelivery
+# POST /api/notifications/deliveries/:id/retry  (Bearer — notifications:write)
+# Operator manual retry of one FAILED delivery — re-dispatches the row's
+# already-rendered subject/body via the NOTIFIER (no template re-lookup), forcing
+# past the scheduled sweeper's exponential backoff. No request body. Only a `failed`
+# delivery is retryable: an unknown id is a 404, a non-`failed` source a 409
+# (NOTIFICATION_DELIVERY_INVALID_STATUS_TRANSITION). Response is the re-dispatched
+# NotificationDeliveryView (status `sent` on success, or `failed` again with a higher
+# attemptCount). Pick a `failed` row's id from listDeliveriesFailed above.
+POST {{baseUrl}}/notifications/deliveries/{{deliveryId}}/retry
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name retryDeliveryNotFound
+# POST /api/notifications/deliveries/:id/retry  (Bearer — notifications:write)
+# A retry targeting an unknown id is a 404 (NOTIFICATION_DELIVERY_NOT_FOUND),
+# surfaced from the notification domain via its RPC exception filter → the gateway.
+POST {{baseUrl}}/notifications/deliveries/999999/retry
+Authorization: Bearer {{accessToken}}
