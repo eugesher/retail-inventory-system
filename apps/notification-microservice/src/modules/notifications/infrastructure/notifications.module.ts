@@ -9,6 +9,7 @@ import {
   TEMPLATE_RENDERER,
 } from '../application/ports';
 import {
+  RenderAndDispatchUseCase,
   SendLowStockAlertUseCase,
   SendOrderNotificationUseCase,
   SendRefundNotificationUseCase,
@@ -37,16 +38,19 @@ import { HandlebarsTemplateRendererAdapter } from './render';
 // rebind once those adapters are implemented (ADR-011 §3).
 //
 // `TEMPLATE_RENDERER` is bound to `HandlebarsTemplateRendererAdapter` — the seam
-// the Render & Dispatch use case (a later capability) renders a template
-// subject/body against an event context through. The Handlebars engine import is
-// confined to `infrastructure/render/` (ADR-004/017, ADR-033).
+// the `RenderAndDispatchUseCase` renders a template subject/body against an event
+// context through. The Handlebars engine import is confined to
+// `infrastructure/render/` (ADR-004/017, ADR-033).
 //
 // `DatabaseModule.forFeature([...])` registers the two persistence entities the
-// notification microservice now owns (its first DB tables, ADR-033). The two repository
+// notification microservice owns (its first DB tables, ADR-033). The two repository
 // ports (`NOTIFICATION_TEMPLATE_REPOSITORY` / `NOTIFICATION_DELIVERY_REPOSITORY`) are
-// bound to their TypeORM adapters here so they are injectable, even though no use case
-// resolves them yet — the renderer (a later capability) and Render & Dispatch are the
-// first consumers; the foundation only wires the seam.
+// bound to their TypeORM adapters here. `RenderAndDispatchUseCase` is the first
+// consumer of all four seams (template repo + delivery repo + renderer + `NOTIFIER`):
+// it resolves the latest active template, renders subject/body, persists a `queued`
+// `NotificationDelivery` row BEFORE the `NOTIFIER` call, then flips it `→ sent`/`→ failed`.
+// The consumers are rewired onto it in a later capability; the five inline use cases
+// still run unchanged today.
 //
 // Five event consumers are wired: `InventoryEventsConsumer` fans out the inventory
 // low-stock alert (`inventory.stock.low`), `OrderEventsConsumer` fans out the
@@ -68,6 +72,7 @@ import { HandlebarsTemplateRendererAdapter } from './render';
     RefundEventsConsumer,
   ],
   providers: [
+    RenderAndDispatchUseCase,
     SendLowStockAlertUseCase,
     SendOrderNotificationUseCase,
     SendShipmentNotificationUseCase,

@@ -13,6 +13,10 @@ export class InMemoryNotifier implements INotifierPort {
 export class FakeLogger {
   public readonly assignments: Record<string, unknown>[] = [];
   public readonly logs: { context: unknown; message?: string }[] = [];
+  // `warn` lines land in their own array so a spec can assert the missing-template /
+  // dispatch-failed warn branches without disturbing the `logs` (info) ordering the
+  // sibling specs assert on.
+  public readonly warns: { context: unknown; message?: string }[] = [];
 
   public assign(context: Record<string, unknown>): void {
     this.assignments.push(context);
@@ -20,5 +24,9 @@ export class FakeLogger {
 
   public info(context: unknown, message?: string): void {
     this.logs.push({ context, message });
+  }
+
+  public warn(context: unknown, message?: string): void {
+    this.warns.push({ context, message });
   }
 }
