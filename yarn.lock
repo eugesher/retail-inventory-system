@@ -6440,7 +6440,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"handlebars@npm:4.7.9":
+"handlebars@npm:4.7.9, handlebars@npm:^4.7.9":
   version: 4.7.9
   resolution: "handlebars@npm:4.7.9"
   dependencies:
@@ -9274,6 +9274,7 @@ __metadata:
     eslint-plugin-boundaries: "npm:^6.0.2"
     eslint-plugin-prettier: "npm:^5.5.5"
     express: "npm:^5.2.1"
+    handlebars: "npm:^4.7.9"
     husky: "npm:^9.1.7"
     jest: "npm:^29.7.0"
     joi: "npm:^18.1.1"
