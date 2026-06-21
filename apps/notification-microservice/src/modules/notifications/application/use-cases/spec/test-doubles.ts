@@ -1,7 +1,11 @@
 import { NotificationChannelEnum } from '@retail-inventory-system/contracts';
 
-import { Notification, NotificationTemplate } from '../../../domain';
+import { Notification, NotificationDelivery, NotificationTemplate } from '../../../domain';
 import {
+  INotificationDeliveryListFilter,
+  INotificationDeliveryPage,
+  INotificationDeliveryPageRequest,
+  INotificationDeliveryRepositoryPort,
   INotificationTemplateListFilter,
   INotificationTemplateRepositoryPort,
   INotifierPort,
@@ -128,5 +132,108 @@ export class InMemoryTemplateRepo implements INotificationTemplateRepositoryPort
           (filter.activeOnly !== true || r.active),
       ),
     );
+  }
+}
+
+// A persistence-simulating delivery repo for the delivery read/outcome use-case specs:
+// `save` assigns a fresh BIGINT to an id-less row (re-`reconstitute`d with concrete
+// timestamps, the real repo's re-read idiom) or replaces the row in place by id;
+// `findById` / `list` / `findByDedupeKey` / `listRetryable` read the in-memory `rows`.
+// `list` applies the same optional-field filter narrowing the real repo does and pages
+// over an id-DESC (newest-first) sort, so a spec can prove a filter narrows the page.
+export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort {
+  public readonly rows: NotificationDelivery[] = [];
+  private seq = 0;
+
+  public save(delivery: NotificationDelivery): Promise<NotificationDelivery> {
+    const id = delivery.id ?? ++this.seq;
+    const persisted = NotificationDelivery.reconstitute({
+      id,
+      templateId: delivery.templateId,
+      recipientCustomerId: delivery.recipientCustomerId,
+      recipientAddress: delivery.recipientAddress,
+      channel: delivery.channel,
+      eventReferenceType: delivery.eventReferenceType,
+      eventReferenceId: delivery.eventReferenceId,
+      status: delivery.status,
+      attemptCount: delivery.attemptCount,
+      lastAttemptAt: delivery.lastAttemptAt,
+      failureReason: delivery.failureReason,
+      renderedSubject: delivery.renderedSubject,
+      renderedBody: delivery.renderedBody,
+      correlationId: delivery.correlationId,
+      createdAt: delivery.createdAt ?? new Date(),
+      updatedAt: new Date(),
+    });
+    const idx = this.rows.findIndex((r) => r.id === id);
+    if (idx >= 0) {
+      this.rows[idx] = persisted;
+    } else {
+      this.rows.push(persisted);
+    }
+    return Promise.resolve(persisted);
+  }
+
+  public findById(id: number): Promise<NotificationDelivery | null> {
+    return Promise.resolve(this.rows.find((r) => r.id === id) ?? null);
+  }
+
+  public findByDedupeKey(
+    eventReferenceType: string,
+    eventReferenceId: string,
+    channel: NotificationChannelEnum,
+    recipientCustomerId: string,
+  ): Promise<NotificationDelivery | null> {
+    return Promise.resolve(
+      this.rows.find(
+        (r) =>
+          r.eventReferenceType === eventReferenceType &&
+          r.eventReferenceId === eventReferenceId &&
+          r.channel === channel &&
+          r.recipientCustomerId === recipientCustomerId,
+      ) ?? null,
+    );
+  }
+
+  public list(
+    filter: INotificationDeliveryListFilter,
+    page: INotificationDeliveryPageRequest,
+  ): Promise<INotificationDeliveryPage> {
+    const matched = this.rows
+      .filter(
+        (r) =>
+          (filter.status === undefined || r.status === filter.status) &&
+          (filter.channel === undefined || r.channel === filter.channel) &&
+          (filter.eventReferenceType === undefined ||
+            r.eventReferenceType === filter.eventReferenceType) &&
+          (filter.eventReferenceId === undefined ||
+            r.eventReferenceId === filter.eventReferenceId) &&
+          (filter.recipientCustomerId === undefined ||
+            r.recipientCustomerId === filter.recipientCustomerId),
+      )
+      // Newest-first, id DESC as the in-memory stand-in for `created_at DESC, id DESC`.
+      .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+
+    const start = (page.page - 1) * page.size;
+    return Promise.resolve({
+      items: matched.slice(start, start + page.size),
+      total: matched.length,
+      page: page.page,
+      size: page.size,
+    });
+  }
+
+  public listRetryable(
+    maxAttempts: number,
+    page: INotificationDeliveryPageRequest,
+  ): Promise<INotificationDeliveryPage> {
+    const matched = this.rows.filter((r) => r.attemptCount < maxAttempts);
+    const start = (page.page - 1) * page.size;
+    return Promise.resolve({
+      items: matched.slice(start, start + page.size),
+      total: matched.length,
+      page: page.page,
+      size: page.size,
+    });
   }
 }

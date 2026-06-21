@@ -101,4 +101,7 @@ export enum MicroserviceMessagePatternEnum {
   NOTIFICATION_TEMPLATE_AUTHOR = 'notification.template.author',
   NOTIFICATION_TEMPLATE_SET_ACTIVE = 'notification.template.set-active',
   NOTIFICATION_TEMPLATE_LIST = 'notification.template.list',
+  NOTIFICATION_DELIVERY_LIST = 'notification.delivery.list',
+  NOTIFICATION_DELIVERY_GET = 'notification.delivery.get',
+  NOTIFICATION_DELIVERY_RECORD_OUTCOME = 'notification.delivery.record-outcome',
 }

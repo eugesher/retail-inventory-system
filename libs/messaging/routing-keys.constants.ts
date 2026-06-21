@@ -288,6 +288,15 @@ export const ROUTING_KEYS = {
   NOTIFICATION_TEMPLATE_AUTHOR: 'notification.template.author',
   NOTIFICATION_TEMPLATE_SET_ACTIVE: 'notification.template.set-active',
   NOTIFICATION_TEMPLATE_LIST: 'notification.template.list',
+  // Notification delivery audit reads + the record-outcome RPC (Gateway →
+  // Notification, on `notification_events`). `list` is the paginated, filterable
+  // audit query; `get` loads one full delivery row by id; `record-outcome` is the
+  // ESP-webhook seam that flips a `sent` delivery to `delivered`/`bounced` (the
+  // webhook ingestion itself is a documented stub — RPC-only, no gateway route in
+  // this capability, ADR-033).
+  NOTIFICATION_DELIVERY_LIST: 'notification.delivery.list',
+  NOTIFICATION_DELIVERY_GET: 'notification.delivery.get',
+  NOTIFICATION_DELIVERY_RECORD_OUTCOME: 'notification.delivery.record-outcome',
 } as const;
 
 export type RoutingKey = (typeof ROUTING_KEYS)[keyof typeof ROUTING_KEYS];

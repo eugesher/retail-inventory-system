@@ -11,7 +11,10 @@ import {
 } from '../application/ports';
 import {
   AuthorTemplateUseCase,
+  GetDeliveryUseCase,
+  ListDeliveriesUseCase,
   ListTemplatesUseCase,
+  RecordDeliveryOutcomeUseCase,
   RenderAndDispatchUseCase,
   SendLowStockAlertUseCase,
   SendOrderNotificationUseCase,
@@ -58,14 +61,18 @@ import { HandlebarsTemplateRendererAdapter } from './render';
 // The consumers are rewired onto it in a later capability; the five inline use cases
 // still run unchanged today.
 //
-// `NotificationsController` opens the service's first non-health `@MessagePattern`
-// surface — the template authoring/read RPCs (`notification.template.author` /
-// `.set-active` / `.list`, ADR-033) the gateway calls. `AuthorTemplateUseCase`
-// (create-or-edit → a new `version`), `SetTemplateActiveUseCase`
-// (activate/deactivate a version by id), and `ListTemplatesUseCase` (the filtered
-// registry browse) back them, and the `APP_FILTER`-registered
-// `NotificationRpcExceptionFilter` maps a thrown `NotificationDomainException` onto
-// the wire `{ statusCode, message, code }` shape.
+// `NotificationsController` serves the service's non-health `@MessagePattern` surface
+// (ADR-033): the template authoring/read RPCs (`notification.template.author` /
+// `.set-active` / `.list`) the gateway calls — backed by `AuthorTemplateUseCase`
+// (create-or-edit → a new `version`), `SetTemplateActiveUseCase` (activate/deactivate
+// a version by id), and `ListTemplatesUseCase` (the filtered registry browse) — plus
+// the delivery audit reads + record-outcome RPCs (`notification.delivery.list` /
+// `.get` / `.record-outcome`) backed by `ListDeliveriesUseCase` (the paginated,
+// filterable audit read), `GetDeliveryUseCase` (one full delivery row by id), and
+// `RecordDeliveryOutcomeUseCase` (the ESP-webhook seam — `sent → delivered|bounced`;
+// the webhook ingestion itself is a documented stub, RPC-only). The
+// `APP_FILTER`-registered `NotificationRpcExceptionFilter` maps a thrown
+// `NotificationDomainException` onto the wire `{ statusCode, message, code }` shape.
 //
 // Five event consumers are wired: `InventoryEventsConsumer` fans out the inventory
 // low-stock alert (`inventory.stock.low`), `OrderEventsConsumer` fans out the
@@ -92,6 +99,9 @@ import { HandlebarsTemplateRendererAdapter } from './render';
     AuthorTemplateUseCase,
     SetTemplateActiveUseCase,
     ListTemplatesUseCase,
+    ListDeliveriesUseCase,
+    GetDeliveryUseCase,
+    RecordDeliveryOutcomeUseCase,
     RenderAndDispatchUseCase,
     SendLowStockAlertUseCase,
     SendOrderNotificationUseCase,
