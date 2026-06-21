@@ -11,10 +11,20 @@ import { ICorrelationPayload } from '../../microservices';
 // is this refund's amount in integer minor units (cents). `issuedAt` is the gateway's
 // refund stamp (ISO-8601); `eventVersion` is pinned to `'v1'`; `occurredAt` is an
 // ISO-8601 string.
+//
+// The refund event carries no `customerId` of its own, so `customerEmail` / `customerLocale`
+// are resolved producer-side from the refund's **order** `customerId` against the shared
+// `customer` table (a raw-SQL reader, no gateway-entity import) — giving the
+// refund-confirmation consumer a recipient WITHOUT a per-delivery cross-service RPC (ADR-033
+// choice), in place of the older `order:<orderId>` derived recipient. The email is `null` for
+// a tombstoned/missing customer; `customerLocale` is a placeholder shipped `null` today
+// (locale deferred). Both optional — additive on the wire.
 export interface IRetailRefundIssuedEvent extends ICorrelationPayload {
   refundId: number;
   orderId: number;
   paymentId: number;
+  customerEmail?: string | null;
+  customerLocale?: string | null;
   amountMinor: number;
   currency: string;
   issuedAt: string;

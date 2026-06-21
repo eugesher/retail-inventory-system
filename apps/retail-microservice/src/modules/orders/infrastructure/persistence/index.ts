@@ -33,6 +33,7 @@ export {
 export * from './address.mapper';
 export * from './address-typeorm.repository';
 export * from './cart-reader-typeorm.adapter';
+export * from './customer-contact-reader.typeorm.adapter';
 export * from './fulfillment.mapper';
 export * from './fulfillment-line.mapper';
 export * from './fulfillment-typeorm.repository';

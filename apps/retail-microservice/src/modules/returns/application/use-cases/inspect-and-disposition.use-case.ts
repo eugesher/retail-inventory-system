@@ -18,17 +18,20 @@ import {
 } from '../../domain';
 import {
   IInventoryRestockGatewayPort,
+  IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnOrderReaderPort,
   IReturnRequestRepositoryPort,
   ITransactionPort,
   INVENTORY_RESTOCK_GATEWAY,
+  RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_ORDER_READER,
   RETURN_REQUEST_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
 import { loadReturnById } from './return-access';
+import { resolveCustomerEmail } from './resolve-customer-email';
 import { retryThenLogForReplay } from './retry-then-log-for-replay';
 import { toReturnRequestView } from './return-view.factory';
 
@@ -84,6 +87,8 @@ export class InspectAndDispositionUseCase {
     private readonly restockGateway: IInventoryRestockGatewayPort,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
+    @Inject(RETURN_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IReturnCustomerContactReaderPort,
     @InjectPinoLogger(InspectAndDispositionUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -256,12 +261,20 @@ export class InspectAndDispositionUseCase {
     inspectedAt: Date,
     correlationId: string,
   ): Promise<void> {
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      request.customerId,
+      this.logger,
+      correlationId,
+    );
     try {
       await this.publisher.publishReturnInspected({
         rmaId: request.id!,
         rmaNumber: request.rmaNumber!,
         orderId: request.orderId,
         customerId: request.customerId,
+        customerEmail,
+        customerLocale: null,
         inspectedAt: inspectedAt.toISOString(),
         restockedLineCount,
         eventVersion: 'v1',

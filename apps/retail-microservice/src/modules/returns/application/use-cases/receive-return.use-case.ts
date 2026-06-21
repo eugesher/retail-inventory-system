@@ -5,12 +5,15 @@ import { IRetailReturnReceivePayload, ReturnRequestView } from '@retail-inventor
 
 import { ReturnRequest } from '../../domain';
 import {
+  IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
 } from '../ports';
 import { loadReturnById } from './return-access';
+import { resolveCustomerEmail } from './resolve-customer-email';
 import { toReturnRequestView } from './return-view.factory';
 
 // Receive Return walks an `authorized` RMA → `received` (warehouse
@@ -27,6 +30,8 @@ export class ReceiveReturnUseCase {
     private readonly repository: IReturnRequestRepositoryPort,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
+    @Inject(RETURN_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IReturnCustomerContactReaderPort,
     @InjectPinoLogger(ReceiveReturnUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -47,12 +52,20 @@ export class ReceiveReturnUseCase {
   }
 
   private async emitReceived(request: ReturnRequest, correlationId: string): Promise<void> {
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      request.customerId,
+      this.logger,
+      correlationId,
+    );
     try {
       await this.publisher.publishReturnReceived({
         rmaId: request.id!,
         rmaNumber: request.rmaNumber!,
         orderId: request.orderId,
         customerId: request.customerId,
+        customerEmail,
+        customerLocale: null,
         receivedAt: new Date().toISOString(),
         eventVersion: 'v1',
         occurredAt: new Date().toISOString(),

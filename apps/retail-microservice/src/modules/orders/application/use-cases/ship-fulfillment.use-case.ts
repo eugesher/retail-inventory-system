@@ -22,12 +22,14 @@ import {
   FULFILLMENT_REPOSITORY,
   IFulfillmentRepositoryPort,
   IOrderCommitSaleGatewayPort,
+  IOrderCustomerContactReaderPort,
   IOrderEventsPublisherPort,
   IOrderRepositoryPort,
   IPaymentGatewayPort,
   IPaymentRepositoryPort,
   ITransactionPort,
   ORDER_COMMIT_SALE_GATEWAY,
+  ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
   ORDER_REPOSITORY,
   PAYMENT_GATEWAY,
@@ -37,6 +39,7 @@ import {
 import { countsTowardShipped, sumLineQuantitiesByOrderLine } from './fulfillment-quantities';
 import { loadAuthorizedOrder } from './order-access';
 import { toFulfillmentView } from './fulfillment-view.factory';
+import { resolveCustomerEmail } from './resolve-customer-email';
 import { retryThenLogForReplay } from './retry-then-log-for-replay';
 
 // How many times Commit Sale is attempted after the local ship commit before the
@@ -105,6 +108,8 @@ export class ShipFulfillmentUseCase {
     private readonly commitSaleGateway: IOrderCommitSaleGatewayPort,
     @Inject(ORDER_EVENTS_PUBLISHER)
     private readonly publisher: IOrderEventsPublisherPort,
+    @Inject(ORDER_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IOrderCustomerContactReaderPort,
     @InjectPinoLogger(ShipFulfillmentUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -235,9 +240,19 @@ export class ShipFulfillmentUseCase {
       correlationId,
     );
 
+    // Resolve the buyer's email so the shipment-confirmation consumer has a recipient
+    // without a per-delivery RPC (ADR-033). Best-effort: a tombstoned/missing customer or a
+    // reader hiccup yields `null` (the helper never throws).
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      order.customerId,
+      this.logger,
+      correlationId,
+    );
+
     // Best-effort post-commit emits (ADR-020): always the shipped event, plus the
     // captured event only when THIS ship took the money.
-    await this.emitShipped(shippedFulfillment, correlationId);
+    await this.emitShipped(shippedFulfillment, customerEmail, correlationId);
     if (capture.capturedAt) {
       await this.emitCaptured(order, payment, idempotencyKey, correlationId);
     }
@@ -367,12 +382,19 @@ export class ShipFulfillmentUseCase {
   }
 
   // Best-effort, post-commit (ADR-020). The ship has already committed, so a publish
-  // failure is warn-logged and swallowed.
-  private async emitShipped(fulfillment: Fulfillment, correlationId: string): Promise<void> {
+  // failure is warn-logged and swallowed. `customerEmail` is the buyer's resolved contact
+  // (or `null`); `customerLocale` ships `null` (locale resolution deferred).
+  private async emitShipped(
+    fulfillment: Fulfillment,
+    customerEmail: string | null,
+    correlationId: string,
+  ): Promise<void> {
     try {
       await this.publisher.publishFulfillmentShipped({
         orderId: fulfillment.orderId,
         fulfillmentId: fulfillment.id!,
+        customerEmail,
+        customerLocale: null,
         trackingNumber: fulfillment.trackingNumber!,
         carrier: fulfillment.carrier,
         shippedAt: (fulfillment.shippedAt ?? new Date()).toISOString(),

@@ -11,15 +11,18 @@ import { Fulfillment, OrderDomainException, OrderErrorCodeEnum } from '../../dom
 import {
   FULFILLMENT_REPOSITORY,
   IFulfillmentRepositoryPort,
+  IOrderCustomerContactReaderPort,
   IOrderEventsPublisherPort,
   IOrderRepositoryPort,
   ITransactionPort,
+  ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
   ORDER_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
 import { loadAuthorizedOrder } from './order-access';
 import { toFulfillmentView } from './fulfillment-view.factory';
+import { resolveCustomerEmail } from './resolve-customer-email';
 
 // Mark Delivered is the happy-path terminal of the ship flow (ADR-031): a carrier (or,
 // since carrier webhooks are out of scope, an operator) confirms a `shipped` fulfillment
@@ -45,6 +48,8 @@ export class MarkDeliveredUseCase {
     private readonly fulfillmentRepository: IFulfillmentRepositoryPort,
     @Inject(ORDER_EVENTS_PUBLISHER)
     private readonly publisher: IOrderEventsPublisherPort,
+    @Inject(ORDER_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IOrderCustomerContactReaderPort,
     @InjectPinoLogger(MarkDeliveredUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -57,8 +62,9 @@ export class MarkDeliveredUseCase {
       'Marking fulfillment delivered',
     );
 
-    // Owner-or-staff authorization + existence (404 missing / 403 non-owner-non-staff).
-    await loadAuthorizedOrder(this.orderRepository, orderId, actorId, isStaffFulfill);
+    // Owner-or-staff authorization + existence (404 missing / 403 non-owner-non-staff). The
+    // order carries the `customerId` the post-commit event's email is resolved from.
+    const order = await loadAuthorizedOrder(this.orderRepository, orderId, actorId, isStaffFulfill);
 
     // Load the fulfillment + assert it is deliverable: it must belong to this order and
     // be `shipped` (the domain `markDelivered` re-guards inside the tx — this is the
@@ -119,7 +125,17 @@ export class MarkDeliveredUseCase {
       return saved;
     });
 
-    await this.emitDelivered(delivered, correlationId);
+    // Resolve the buyer's email so the delivery-confirmation consumer has a recipient
+    // without a per-delivery RPC (ADR-033). Best-effort: a tombstoned/missing customer or a
+    // reader hiccup yields `null` (the helper never throws).
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      order.customerId,
+      this.logger,
+      correlationId,
+    );
+
+    await this.emitDelivered(delivered, customerEmail, correlationId);
 
     this.logger.info({ correlationId, orderId, fulfillmentId }, 'Fulfillment delivered');
     return toFulfillmentView(delivered);
@@ -135,12 +151,19 @@ export class MarkDeliveredUseCase {
   }
 
   // Best-effort, post-commit (ADR-020). The delivery has already committed, so a publish
-  // failure is warn-logged and swallowed — it never fails the operation.
-  private async emitDelivered(fulfillment: Fulfillment, correlationId: string): Promise<void> {
+  // failure is warn-logged and swallowed — it never fails the operation. `customerEmail` is
+  // the buyer's resolved contact (or `null`); `customerLocale` ships `null` (locale deferred).
+  private async emitDelivered(
+    fulfillment: Fulfillment,
+    customerEmail: string | null,
+    correlationId: string,
+  ): Promise<void> {
     try {
       await this.publisher.publishFulfillmentDelivered({
         orderId: fulfillment.orderId,
         fulfillmentId: fulfillment.id!,
+        customerEmail,
+        customerLocale: null,
         deliveredAt: (fulfillment.deliveredAt ?? new Date()).toISOString(),
         eventVersion: 'v1',
         occurredAt: new Date().toISOString(),

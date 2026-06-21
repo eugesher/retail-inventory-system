@@ -10,15 +10,18 @@ import {
 
 import { ReturnDomainException, ReturnErrorCodeEnum, ReturnRequest } from '../../domain';
 import {
+  IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnOrderReaderPort,
   IReturnOrderSnapshot,
   IReturnRequestRepositoryPort,
+  RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_ORDER_READER,
   RETURN_REQUEST_REPOSITORY,
   RETURN_WINDOW_DAYS,
 } from '../ports';
+import { resolveCustomerEmail } from './resolve-customer-email';
 import { toReturnRequestView } from './return-view.factory';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -57,6 +60,8 @@ export class OpenReturnRequestUseCase {
     private readonly orderReader: IReturnOrderReaderPort,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
+    @Inject(RETURN_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IReturnCustomerContactReaderPort,
     @Inject(RETURN_WINDOW_DAYS)
     private readonly returnWindowDays: number,
     @InjectPinoLogger(OpenReturnRequestUseCase.name)
@@ -199,12 +204,23 @@ export class OpenReturnRequestUseCase {
   // failure is warn-logged and swallowed. The event is built from the saved aggregate so
   // it carries the concrete id + finalized RMA number.
   private async emitRequested(request: ReturnRequest, correlationId: string): Promise<void> {
+    // Resolve the buyer's email so the returns consumer has a recipient without a
+    // per-delivery RPC (ADR-033). Best-effort: a tombstoned/missing customer or a reader
+    // hiccup yields `null` (the helper never throws). `customerLocale` ships `null`.
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      request.customerId,
+      this.logger,
+      correlationId,
+    );
     try {
       await this.publisher.publishReturnRequested({
         rmaId: request.id!,
         rmaNumber: request.rmaNumber!,
         orderId: request.orderId,
         customerId: request.customerId,
+        customerEmail,
+        customerLocale: null,
         requestedAt: request.requestedAt.toISOString(),
         lineCount: request.lines.length,
         eventVersion: 'v1',

@@ -14,9 +14,18 @@ import { ICorrelationPayload } from '../../microservices';
 // emit (ADR-020). `orderId` / `fulfillmentId` identify the shipment; `deliveredAt` is
 // the delivery timestamp. `eventVersion` is pinned to `'v1'`; a breaking change ships
 // `'v2'`. `occurredAt` and `deliveredAt` are ISO-8601 strings.
+//
+// `customerEmail` / `customerLocale` carry the buyer's notification contact, resolved
+// producer-side from the shared `customer` table (a raw-SQL reader, no gateway-entity
+// import) so the delivery-confirmation consumer has a recipient WITHOUT a per-delivery
+// cross-service RPC (ADR-033 choice). The email is `null` for a tombstoned/missing
+// customer; `customerLocale` is a placeholder shipped `null` today (locale deferred).
+// Both optional — the field is additive on the wire.
 export interface IRetailFulfillmentDeliveredEvent extends ICorrelationPayload {
   orderId: number;
   fulfillmentId: number;
+  customerEmail?: string | null;
+  customerLocale?: string | null;
   deliveredAt: string;
   eventVersion: 'v1';
   occurredAt: string;

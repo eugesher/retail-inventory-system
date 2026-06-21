@@ -8,3 +8,4 @@ export * from './get-return.use-case';
 export * from './list-returns.use-case';
 export * from './return-view.factory';
 export * from './return-access';
+export * from './resolve-customer-email';
