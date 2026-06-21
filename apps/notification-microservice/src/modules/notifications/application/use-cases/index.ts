@@ -7,8 +7,3 @@ export * from './record-delivery-outcome.use-case';
 export * from './retry-delivery.use-case';
 export * from './retry-failed-deliveries.use-case';
 export * from './render-and-dispatch.use-case';
-export * from './send-low-stock-alert.use-case';
-export * from './send-order-notification.use-case';
-export * from './send-refund-notification.use-case';
-export * from './send-return-notification.use-case';
-export * from './send-shipment-notification.use-case';

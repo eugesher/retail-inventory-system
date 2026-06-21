@@ -5,8 +5,8 @@ business event into an outgoing notification. It loads the live template, render
 subject/body, persists a `NotificationDelivery` row in `queued` **before** any transport
 call, dispatches through the `NOTIFIER` port, then flips the row to `sent` or `failed`.
 Every event consumer ultimately calls this one use case; the consumers themselves (the
-translation from a specific wire event to the pipeline's input) are described in a sibling
-document and are wired onto it in a later capability.
+translation from a specific wire event to the pipeline's input) are now all wired onto it —
+each is a thin translator that maps its wire event onto the pipeline's input and delegates.
 
 The foundations this builds on are covered next door: the
 [`NotificationTemplate` registry](01-notification-template-versioning.md), the
@@ -174,9 +174,9 @@ projection belongs to the delivery-read operations (a sibling capability), not h
 
 It does **not** add any RPC or HTTP surface — it is invoked in-process by the event
 consumers, so there is no exception filter to map domain errors to HTTP here (the
-authoring RPCs introduce the first such surface). And it does not yet replace the inline
-hard-coded notification use cases — those still run unchanged until the consumers are
-rewired onto this pipeline.
+authoring RPCs introduce the first such surface). It is now the **only** notification
+delivery path: every consumer routes its wire event through this pipeline, and the inline
+hard-coded `Send*` notification use cases it replaced have been deleted.
 
 `correlationId` is logged **inline** in every branch — `PinoLogger.assign` throws outside
 an HTTP request scope, and these flows run inside `@EventPattern` handlers
