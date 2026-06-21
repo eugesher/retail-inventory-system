@@ -12,12 +12,14 @@ import {
 
 import { OrderDomainException, OrderErrorCodeEnum, Payment, Refund } from '../../domain';
 import {
+  IOrderCustomerContactReaderPort,
   IOrderEventsPublisherPort,
   IOrderRepositoryPort,
   IPaymentGatewayPort,
   IPaymentRepositoryPort,
   IRefundRepositoryPort,
   ITransactionPort,
+  ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
   ORDER_REPOSITORY,
   PAYMENT_GATEWAY,
@@ -26,6 +28,7 @@ import {
   TRANSACTION_PORT,
 } from '../ports';
 import { toRefundView } from './refund-view.factory';
+import { resolveCustomerEmail } from './resolve-customer-email';
 
 // A before/after snapshot of the captured payment, recorded on the audit row so an
 // auditor can see exactly what the refund moved.
@@ -82,6 +85,8 @@ export class IssueRefundUseCase {
     private readonly refundRepository: IRefundRepositoryPort,
     @Inject(ORDER_EVENTS_PUBLISHER)
     private readonly publisher: IOrderEventsPublisherPort,
+    @Inject(ORDER_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IOrderCustomerContactReaderPort,
     @Inject(AUDIT_LOG_PUBLISHER)
     private readonly audit: IAuditLogPublisher,
     @InjectPinoLogger(IssueRefundUseCase.name)
@@ -205,8 +210,19 @@ export class IssueRefundUseCase {
       status: payment.status,
       refundedAmountMinor: payment.refundedAmountMinor,
     };
+    // Resolve the buyer's email from the refund's ORDER (the refund event carries no
+    // customerId of its own) so the refund-confirmation consumer has a recipient without a
+    // per-delivery RPC (ADR-033). Best-effort: a tombstoned/missing customer or a reader
+    // hiccup yields `null` (the helper never throws).
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      order.customerId,
+      this.logger,
+      correlationId,
+    );
+
     await this.writeAudit('RefundIssued', issuedRefund, payload, before, after);
-    await this.emitIssued(issuedRefund, correlationId);
+    await this.emitIssued(issuedRefund, customerEmail, correlationId);
 
     this.logger.info(
       { correlationId, orderId, paymentId, refundId: issuedRefund.id, paymentStatus: after.status },
@@ -301,13 +317,20 @@ export class IssueRefundUseCase {
   }
 
   // Best-effort, post-commit (ADR-020). The refund has already committed, so a publish
-  // failure is warn-logged and swallowed.
-  private async emitIssued(refund: Refund, correlationId: string): Promise<void> {
+  // failure is warn-logged and swallowed. `customerEmail` is the buyer's resolved contact (or
+  // `null`); `customerLocale` ships `null` (locale resolution deferred).
+  private async emitIssued(
+    refund: Refund,
+    customerEmail: string | null,
+    correlationId: string,
+  ): Promise<void> {
     try {
       await this.publisher.publishRefundIssued({
         refundId: refund.id!,
         orderId: refund.orderId,
         paymentId: refund.paymentId,
+        customerEmail,
+        customerLocale: null,
         amountMinor: refund.amountMinor,
         currency: refund.currency,
         issuedAt: (refund.issuedAt ?? new Date()).toISOString(),

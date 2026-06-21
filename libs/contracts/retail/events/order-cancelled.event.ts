@@ -19,8 +19,20 @@ import { ICorrelationPayload } from '../../microservices';
 // `reason` is the optional human-supplied cancellation reason (`null` when omitted).
 // `eventVersion` is pinned to `'v1'`; a breaking change ships `'v2'`. `occurredAt` and
 // `cancelledAt` are ISO-8601 strings.
+//
+// It is now **dual-emitted** — onto `retail_queue` (the producer's own queue, where the
+// auto-refund-from-cancel `OrderCancelledConsumer` reads it) AND onto `notification_events`
+// (the notification service's queue, where a cancellation-confirmation consumer binds it).
+// `customerEmail` / `customerLocale` carry the buyer's notification contact for that second
+// consumer, resolved producer-side from the shared `customer` table (a raw-SQL reader, no
+// gateway-entity import) so it has a recipient WITHOUT a per-delivery cross-service RPC
+// (ADR-033 choice). The email is `null` for a tombstoned/missing customer; `customerLocale`
+// is a placeholder shipped `null` today (locale deferred). Both optional — additive on the
+// wire.
 export interface IRetailOrderCancelledEvent extends ICorrelationPayload {
   orderId: number;
+  customerEmail?: string | null;
+  customerLocale?: string | null;
   cancelledAt: string;
   reason: string | null;
   paymentFlaggedForRefund: boolean;

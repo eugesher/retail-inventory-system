@@ -14,11 +14,13 @@ import { Fulfillment, Order, OrderDomainException, OrderErrorCodeEnum } from '..
 import {
   FULFILLMENT_REPOSITORY,
   IFulfillmentRepositoryPort,
+  IOrderCustomerContactReaderPort,
   IOrderEventsPublisherPort,
   IOrderInventoryGatewayPort,
   IOrderRepositoryPort,
   IPaymentRepositoryPort,
   ITransactionPort,
+  ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
   ORDER_INVENTORY_GATEWAY,
   ORDER_REPOSITORY,
@@ -28,6 +30,7 @@ import {
 import { releaseAllocationWithRetry } from './cancel-allocation-retry';
 import { loadAuthorizedOrder } from './order-access';
 import { toOrderView } from './order-view.factory';
+import { resolveCustomerEmail } from './resolve-customer-email';
 
 // Cancel Order is the **pre-fulfillment unhappy terminal** (ADR-031): it unwinds an
 // order that has not yet shipped. It is the mirror of Ship — where Ship takes the money,
@@ -73,6 +76,8 @@ export class CancelOrderUseCase {
     private readonly inventoryGateway: IOrderInventoryGatewayPort,
     @Inject(ORDER_EVENTS_PUBLISHER)
     private readonly publisher: IOrderEventsPublisherPort,
+    @Inject(ORDER_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IOrderCustomerContactReaderPort,
     @InjectPinoLogger(CancelOrderUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -179,7 +184,24 @@ export class CancelOrderUseCase {
       correlationId,
     );
 
-    await this.emitCancelled(orderId, reason ?? null, paymentFlaggedForRefund, correlationId);
+    // Resolve the buyer's email so the cancellation-confirmation consumer (which now binds
+    // `retail.order.cancelled` off `notification_events`) has a recipient without a
+    // per-delivery RPC (ADR-033). Best-effort: a tombstoned/missing customer or a reader
+    // hiccup yields `null` (the helper never throws).
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      order.customerId,
+      this.logger,
+      correlationId,
+    );
+
+    await this.emitCancelled(
+      orderId,
+      customerEmail,
+      reason ?? null,
+      paymentFlaggedForRefund,
+      correlationId,
+    );
 
     // Re-read so the view carries the cancelled lifecycle + the settled payment.
     const [finalOrder, finalPayment] = await Promise.all([
@@ -225,9 +247,11 @@ export class CancelOrderUseCase {
   }
 
   // Best-effort, post-commit (ADR-020). The cancel has already committed, so a publish
-  // failure is warn-logged and swallowed.
+  // failure is warn-logged and swallowed. `customerEmail` is the buyer's resolved contact (or
+  // `null`); `customerLocale` ships `null` (locale resolution deferred).
   private async emitCancelled(
     orderId: number,
+    customerEmail: string | null,
     reason: string | null,
     paymentFlaggedForRefund: boolean,
     correlationId: string,
@@ -235,6 +259,8 @@ export class CancelOrderUseCase {
     try {
       await this.publisher.publishOrderCancelled({
         orderId,
+        customerEmail,
+        customerLocale: null,
         cancelledAt: new Date().toISOString(),
         reason,
         paymentFlaggedForRefund,

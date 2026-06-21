@@ -19,6 +19,7 @@ import {
 import {
   IOrderCartReaderPort,
   IOrderCatalogGatewayPort,
+  IOrderCustomerContactReaderPort,
   IOrderEventsPublisherPort,
   IOrderInventoryGatewayPort,
   IOrderRepositoryPort,
@@ -28,6 +29,7 @@ import {
   ADDRESS_REPOSITORY,
   ORDER_CART_READER,
   ORDER_CATALOG_GATEWAY,
+  ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
   ORDER_INVENTORY_GATEWAY,
   ORDER_REPOSITORY,
@@ -36,6 +38,7 @@ import {
 } from '../ports';
 import { AuthorizePaymentUseCase } from './authorize-payment.use-case';
 import { toOrderView } from './order-view.factory';
+import { resolveCustomerEmail } from './resolve-customer-email';
 
 // The repository overwrites `order_number` with the id-derived binding value on the
 // first insert (`ORD-<year>-<pad8(id)>`), so the value passed to `Order.place` is a
@@ -81,6 +84,8 @@ export class PlaceOrderUseCase {
     private readonly transactionPort: ITransactionPort,
     @Inject(ORDER_EVENTS_PUBLISHER)
     private readonly publisher: IOrderEventsPublisherPort,
+    @Inject(ORDER_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IOrderCustomerContactReaderPort,
     private readonly authorizePayment: AuthorizePaymentUseCase,
     @InjectPinoLogger(PlaceOrderUseCase.name)
     private readonly logger: PinoLogger,
@@ -355,11 +360,24 @@ export class PlaceOrderUseCase {
     const occurredAt = placedAt.toISOString();
     const orderId = order.id!;
 
+    // Resolve the buyer's email so the order-confirmation consumer has a recipient without
+    // a per-delivery RPC (ADR-033). Best-effort: a tombstoned/missing customer or a reader
+    // hiccup yields `null` (the helper never throws). `customerLocale` ships `null` (locale
+    // resolution deferred).
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      order.customerId,
+      this.logger,
+      correlationId,
+    );
+
     try {
       await this.publisher.publishOrderPlaced({
         orderId,
         orderNumber: order.orderNumber,
         customerId: order.customerId,
+        customerEmail,
+        customerLocale: null,
         grandTotalMinor: order.grandTotalMinor,
         currency: order.currency,
         lineCount: order.lines.length,

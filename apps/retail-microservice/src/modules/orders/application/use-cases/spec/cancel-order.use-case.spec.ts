@@ -14,6 +14,8 @@ import { CancelOrderUseCase } from '../cancel-order.use-case';
 import {
   buildOrderWithLinesFixture,
   buildPaymentFixture,
+  FAKE_CUSTOMER_EMAIL,
+  FakeCustomerContactReader,
   FakeFulfillmentRepository,
   FakeOrderInventoryGateway,
   FakeOrderRepository,
@@ -34,6 +36,7 @@ interface IHarness {
   paymentRepository: FakePaymentRepository;
   inventoryGateway: FakeOrderInventoryGateway;
   publisher: SpyOrderEventsPublisher;
+  customerContactReader: FakeCustomerContactReader;
 }
 
 const makeHarness = async (
@@ -48,6 +51,7 @@ const makeHarness = async (
   const paymentRepository = new FakePaymentRepository();
   const inventoryGateway = new FakeOrderInventoryGateway();
   const publisher = new SpyOrderEventsPublisher();
+  const customerContactReader = new FakeCustomerContactReader();
 
   await orderRepository.save(order);
   // `null` opts.payment means "no payment row" (a bare placed order before authorize).
@@ -66,6 +70,7 @@ const makeHarness = async (
     paymentRepository,
     inventoryGateway,
     publisher,
+    customerContactReader,
     logger,
   );
   return {
@@ -75,6 +80,7 @@ const makeHarness = async (
     paymentRepository,
     inventoryGateway,
     publisher,
+    customerContactReader,
   };
 };
 
@@ -116,7 +122,12 @@ describe('CancelOrderUseCase', () => {
         orderId: ORDER_ID,
         reason: 'changed-my-mind',
         paymentFlaggedForRefund: false,
+        // The buyer's email was resolved from the order's customerId and stamped on the
+        // dual-emitted cancellation event (ADR-033); locale ships null.
+        customerEmail: FAKE_CUSTOMER_EMAIL,
+        customerLocale: null,
       });
+      expect(h.customerContactReader.calls).toEqual([OWNER_ID]);
     });
 
     it('cancels a pending fulfillment along with the order', async () => {

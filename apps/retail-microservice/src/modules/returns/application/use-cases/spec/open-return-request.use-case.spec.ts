@@ -13,6 +13,8 @@ import { ReturnErrorCodeEnum, ReturnRequest } from '../../../domain';
 import { OpenReturnRequestUseCase } from '../open-return-request.use-case';
 import {
   buildOrderSnapshot,
+  FAKE_CUSTOMER_EMAIL,
+  FakeReturnCustomerContactReader,
   FakeReturnOrderReader,
   FakeReturnRequestRepository,
   SpyReturnEventsPublisher,
@@ -29,6 +31,7 @@ interface IHarness {
   repository: FakeReturnRequestRepository;
   reader: FakeReturnOrderReader;
   publisher: SpyReturnEventsPublisher;
+  customerContactReader: FakeReturnCustomerContactReader;
 }
 
 const makeHarness = (snapshot: IReturnOrderSnapshot | null = buildOrderSnapshot()): IHarness => {
@@ -36,8 +39,16 @@ const makeHarness = (snapshot: IReturnOrderSnapshot | null = buildOrderSnapshot(
   const repository = new FakeReturnRequestRepository();
   const reader = new FakeReturnOrderReader(snapshot);
   const publisher = new SpyReturnEventsPublisher();
-  const useCase = new OpenReturnRequestUseCase(repository, reader, publisher, WINDOW_DAYS, logger);
-  return { useCase, repository, reader, publisher };
+  const customerContactReader = new FakeReturnCustomerContactReader();
+  const useCase = new OpenReturnRequestUseCase(
+    repository,
+    reader,
+    publisher,
+    customerContactReader,
+    WINDOW_DAYS,
+    logger,
+  );
+  return { useCase, repository, reader, publisher, customerContactReader };
 };
 
 const openPayload = (
@@ -59,7 +70,7 @@ const daysAgo = (days: number): Date => new Date(Date.now() - days * 24 * 60 * 6
 describe('OpenReturnRequestUseCase', () => {
   describe('the return-eligibility window', () => {
     it('opens a return against a delivered order (always returnable)', async () => {
-      const { useCase, publisher } = makeHarness();
+      const { useCase, publisher, customerContactReader } = makeHarness();
 
       const view = await useCase.execute(openPayload());
 
@@ -69,6 +80,13 @@ describe('OpenReturnRequestUseCase', () => {
       expect(view.customerId).toBe(OWNER_ID);
       expect(view.lines).toEqual([expect.objectContaining({ orderLineId: 10, quantity: 2 })]);
       expect(publisher.requested).toHaveLength(1);
+      // The buyer's email was resolved from the RMA's customerId and stamped on the event
+      // (ADR-033); locale ships null.
+      expect(publisher.requested[0]).toMatchObject({
+        customerEmail: FAKE_CUSTOMER_EMAIL,
+        customerLocale: null,
+      });
+      expect(customerContactReader.calls).toEqual([OWNER_ID]);
     });
 
     it('opens a return against a shipped order within the window', async () => {

@@ -14,6 +14,7 @@ import {
   ADDRESS_REPOSITORY,
   FULFILLMENT_REPOSITORY,
   ORDER_CART_READER,
+  ORDER_CUSTOMER_CONTACT_READER,
   ORDER_CATALOG_GATEWAY,
   ORDER_COMMIT_SALE_GATEWAY,
   ORDER_EVENTS_PUBLISHER,
@@ -50,6 +51,7 @@ import {
   AddressEntity,
   AddressTypeormRepository,
   CartReaderTypeormAdapter,
+  CustomerContactReaderTypeormAdapter,
   FulfillmentEntity,
   FulfillmentLineEntity,
   FulfillmentTypeormRepository,
@@ -138,6 +140,11 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     { provide: TRANSACTION_PORT, useExisting: TypeormTransactionAdapter },
     CartReaderTypeormAdapter,
     { provide: ORDER_CART_READER, useExisting: CartReaderTypeormAdapter },
+    // The raw-SQL read of the gateway-owned `customer.email` the order events carry, so the
+    // notification consumer has a recipient without a per-delivery RPC (ADR-033). It never
+    // imports the gateway `CustomerEntity` — the `CartReaderTypeormAdapter` precedent (ADR-017).
+    CustomerContactReaderTypeormAdapter,
+    { provide: ORDER_CUSTOMER_CONTACT_READER, useExisting: CustomerContactReaderTypeormAdapter },
 
     OrderCatalogRabbitmqAdapter,
     { provide: ORDER_CATALOG_GATEWAY, useExisting: OrderCatalogRabbitmqAdapter },

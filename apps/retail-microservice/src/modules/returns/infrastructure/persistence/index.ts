@@ -12,4 +12,5 @@ export * from './return-request.mapper';
 export * from './return-line.mapper';
 export * from './return-request-typeorm.repository';
 export * from './return-order-reader-typeorm.adapter';
+export * from './customer-contact-reader.typeorm.adapter';
 export * from './typeorm-transaction.adapter';

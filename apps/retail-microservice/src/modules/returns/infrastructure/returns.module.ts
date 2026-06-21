@@ -11,6 +11,7 @@ import {
 
 import {
   INVENTORY_RESTOCK_GATEWAY,
+  RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_ORDER_READER,
   RETURN_REQUEST_REPOSITORY,
@@ -29,6 +30,7 @@ import {
 } from '../application/use-cases';
 import { InventoryRestockRabbitmqAdapter, ReturnRabbitmqPublisher } from './messaging';
 import {
+  CustomerContactReaderTypeormAdapter,
   ReturnOrderReaderTypeormAdapter,
   ReturnRequestEntity,
   ReturnLineEntity,
@@ -75,6 +77,13 @@ import { ReturnsController, ReturnRpcExceptionFilter } from '../presentation';
 
     ReturnOrderReaderTypeormAdapter,
     { provide: RETURN_ORDER_READER, useExisting: ReturnOrderReaderTypeormAdapter },
+
+    // The raw-SQL read of the gateway-owned `customer.email` the return events carry, so the
+    // notification consumer has a recipient without a per-delivery RPC (ADR-033). A local copy
+    // of the orders reader — returns cannot import the orders module (ADR-017), the
+    // `retry-then-log-for-replay` per-module-copy precedent.
+    CustomerContactReaderTypeormAdapter,
+    { provide: RETURN_CUSTOMER_CONTACT_READER, useExisting: CustomerContactReaderTypeormAdapter },
 
     TypeormTransactionAdapter,
     { provide: TRANSACTION_PORT, useExisting: TypeormTransactionAdapter },
