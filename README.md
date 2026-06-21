@@ -126,6 +126,7 @@ The system handles order lifecycle management and product stock tracking across 
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
 │              Notification Microservice (RMQ)                  │
+│  Tables: notification_template / notification_delivery        │
 │  Listens: inventory.stock.low, retail.order.placed,           │
 │  retail.fulfillment.shipped / .delivered,                     │
 │  retail.return.requested / .authorized / .received /          │
@@ -177,7 +178,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — the mutable `Cart`/`CartLine` (`modules/cart/`) with **full cart operations** (create/get/add/change/remove/claim over six RPCs, fronted at `/api/cart`) and the immutable `Order`/`OrderLine` + polymorphic `Address` + `Payment` + the per-shipment `Fulfillment` (`modules/orders/`) with **Place Order** (authorize-on-place), **Capture Payment** (explicit), **Get Order**, **List My Orders**, and the full **Fulfillment** lifecycle (**Create**/**List**/**Ship**/**Deliver**) + **Cancel Order**/**Cancel Line** live (`PAYMENT_GATEWAY` → `FakePaymentGatewayAdapter`) |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
-| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low`, `retail.order.placed`, `retail.fulfillment.shipped` / `.delivered`, the return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected`, and `retail.refund.issued` to a notifier port |
+| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low`, `retail.order.placed`, `retail.fulfillment.shipped` / `.delivered`, the return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected`, and `retail.refund.issued` to a notifier port. Owns the `notification_template` (versioned registry) + `notification_delivery` (audit trail) tables in the shared `retail_db` (ADR-033) |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, handles the category writes `catalog.category.create` / `catalog.category.reparent`, the category reads `catalog.category.list` / `catalog.category.get-tree` / `catalog.category.list-products`, the membership write `catalog.product.reclassify`, and the media operations `catalog.media.attach` / `catalog.media.reorder` / `catalog.media.detach` / `catalog.media.list`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
@@ -229,14 +230,20 @@ The notification microservice is the **canonical per-module template**. The inve
 
 ```
 apps/notification-microservice/src/
-├── app/app.module.ts                          # imports NotificationsModule + LoggerModule
+├── app/app.module.ts                          # imports NotificationsModule + LoggerModule + DatabaseModule.forRoot
 ├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 └── modules/notifications/
     ├── domain/
     │   ├── notification.model.ts              # ValueObject<Notification>
-    │   └── notification-channel.enum.ts
+    │   ├── notification-template.model.ts     # AggregateRoot — the versioned registry (ADR-033)
+    │   ├── notification-delivery.model.ts     # AggregateRoot — the delivery audit trail (ADR-033)
+    │   ├── notification-error-code.enum.ts    # NotificationErrorCodeEnum
+    │   └── notification-domain.exception.ts   # NotificationDomainException
     ├── application/
-    │   ├── ports/notifier.port.ts             # INotifierPort + NOTIFIER symbol
+    │   ├── ports/
+    │   │   ├── notifier.port.ts               # INotifierPort + NOTIFIER symbol
+    │   │   ├── notification-template.repository.port.ts   # NOTIFICATION_TEMPLATE_REPOSITORY
+    │   │   └── notification-delivery.repository.port.ts   # NOTIFICATION_DELIVERY_REPOSITORY
     │   └── use-cases/
     │       ├── send-low-stock-alert.use-case.ts
     │       ├── send-order-notification.use-case.ts
@@ -244,6 +251,10 @@ apps/notification-microservice/src/
     │       ├── send-return-notification.use-case.ts   # requested/authorized/received/inspected
     │       └── send-refund-notification.use-case.ts   # issued
     ├── infrastructure/
+    │   ├── persistence/                        # the service's first DB layer (ADR-033)
+    │   │   ├── notification-template.entity.ts / .mapper.ts / -typeorm.repository.ts
+    │   │   ├── notification-delivery.entity.ts / .mapper.ts / -typeorm.repository.ts
+    │   │   └── index.ts                         # exports notificationEntities
     │   ├── consumers/                          # RMQ @EventPattern subscribers
     │   │   ├── inventory-events.consumer.ts    # inventory.stock.low
     │   │   ├── order-events.consumer.ts        # retail.order.placed
@@ -254,10 +265,23 @@ apps/notification-microservice/src/
     │   │   ├── log.notifier.adapter.ts         # default
     │   │   ├── email.notifier.adapter.ts       # scaffold (TODO)
     │   │   └── webhook.notifier.adapter.ts     # scaffold (TODO)
-    │   └── notifications.module.ts             # binds NOTIFIER -> LogNotifierAdapter
+    │   └── notifications.module.ts             # binds NOTIFIER + the two repo ports; DatabaseModule.forFeature
     └── presentation/
         └── health.controller.ts                # @MessagePattern('notification.health.ping')
 ```
+
+The notification microservice now owns **two database tables** in the shared `retail_db`
+([ADR-033](docs/adr/033-notification-templates-deliveries-and-render-dispatch.md)) — its
+first persistence. `notification_template` is a versioned, per-`(eventType, channel, locale)`
+registry (an edit appends a new business `version`, old rows retained for audit/rollback;
+soft-delete via an `active` flag; `subject` required for `email`/`webhook`, optional for
+`sms`/`push`); `notification_delivery` is the queryable audit trail of one outgoing
+notification (`queued → sent → delivered/failed/bounced`, monotonic `attemptCount`,
+live-ephemeral, with a STORED generated-column UNIQUE that dedupes a customer-facing
+double-dispatch). Both back the `NotificationTemplate` / `NotificationDelivery` aggregates;
+the renderer, the render-and-dispatch pipeline that fronts the `NOTIFIER`, the
+author/activate operations, and the gateway HTTP surface follow in later work. The two
+repository ports are wired but not yet resolved by any use case.
 
 The service fans out seven cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`), `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), `retail.fulfillment.shipped` / `retail.fulfillment.delivered` (via `FulfillmentEventsConsumer` → `SendShipmentNotificationUseCase.shipped`/`.delivered` — the shipment- and delivery-confirmation fan-out), the four return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected` (via `ReturnEventsConsumer` → `SendReturnNotificationUseCase.requested`/`.authorized`/`.received`/`.inspected` — the buyer-facing return-status fan-out, recipient derived from the RMA's `customerId`), and `retail.refund.issued` (via `RefundEventsConsumer` → `SendRefundNotificationUseCase.issued` — the refund-confirmation fan-out), all arriving on `notification_events`. The retail publishers emit each of these through the `NOTIFICATION_MICROSERVICE` client so they land on the consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as `retail.order.placed` does. (`retail.return.rejected` / `.closed` and `retail.refund.failed` stay reserved on `retail_queue` with no consumer — those are operational outcomes, not buyer notifications.) `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
 
