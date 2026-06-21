@@ -1,6 +1,6 @@
 import { NotificationChannelEnum } from '@retail-inventory-system/contracts';
 
-import { Notification, NotificationDelivery, NotificationTemplate } from '../../../domain';
+import { NotificationDelivery, NotificationTemplate } from '../../../domain';
 import {
   INotificationDeliveryListFilter,
   INotificationDeliveryPage,
@@ -8,17 +8,7 @@ import {
   INotificationDeliveryRepositoryPort,
   INotificationTemplateListFilter,
   INotificationTemplateRepositoryPort,
-  INotifierPort,
 } from '../../ports';
-
-export class InMemoryNotifier implements INotifierPort {
-  public readonly sent: Notification[] = [];
-
-  public send(notification: Notification): Promise<void> {
-    this.sent.push(notification);
-    return Promise.resolve();
-  }
-}
 
 export class FakeLogger {
   public readonly assignments: Record<string, unknown>[] = [];

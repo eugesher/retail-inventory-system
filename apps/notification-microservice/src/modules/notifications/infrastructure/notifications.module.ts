@@ -12,6 +12,7 @@ import {
   NOTIFICATION_EVENTS_PUBLISHER,
   NOTIFICATION_TEMPLATE_REPOSITORY,
   NOTIFIER,
+  OPS_NOTIFICATIONS_EMAIL,
   TEMPLATE_RENDERER,
 } from '../application/ports';
 import {
@@ -23,11 +24,6 @@ import {
   RenderAndDispatchUseCase,
   RetryDeliveryUseCase,
   RetryFailedDeliveriesUseCase,
-  SendLowStockAlertUseCase,
-  SendOrderNotificationUseCase,
-  SendRefundNotificationUseCase,
-  SendReturnNotificationUseCase,
-  SendShipmentNotificationUseCase,
   SetTemplateActiveUseCase,
 } from '../application/use-cases';
 import { HealthController } from '../presentation/health.controller';
@@ -36,6 +32,7 @@ import { NotificationsController } from '../presentation/notifications.controlle
 import {
   FulfillmentEventsConsumer,
   InventoryEventsConsumer,
+  OrderCancelledNotificationConsumer,
   OrderEventsConsumer,
   RefundEventsConsumer,
   ReturnEventsConsumer,
@@ -83,15 +80,25 @@ import { DeliveryRetryScheduler } from './scheduling';
 // `APP_FILTER`-registered `NotificationRpcExceptionFilter` maps a thrown
 // `NotificationDomainException` onto the wire `{ statusCode, message, code }` shape.
 //
-// Five event consumers are wired: `InventoryEventsConsumer` fans out the inventory
-// low-stock alert (`inventory.stock.low`), `OrderEventsConsumer` fans out the
-// order-placed confirmation (`retail.order.placed`), `FulfillmentEventsConsumer` fans
-// out the two shipment lifecycle events (`retail.fulfillment.shipped` / `.delivered`),
-// `ReturnEventsConsumer` fans out the four return lifecycle events
-// (`retail.return.requested` / `.authorized` / `.received` / `.inspected`), and
-// `RefundEventsConsumer` fans out the refund-issued confirmation
-// (`retail.refund.issued`). Each translates a plain wire event into a use case that
-// builds a `Notification` and dispatches it via `NOTIFIER`.
+// Six event consumers are wired, and EVERY one now routes its wire event through
+// `RenderAndDispatchUseCase` (the template-driven persist-then-send pipeline, ADR-033) —
+// the inline per-event send use cases they used to call are deleted. Each consumer owns
+// only the event → `IRenderAndDispatchInput` mapping (`eventType`, reference type/id,
+// recipient, render context):
+// `InventoryEventsConsumer` fans out the inventory low-stock alert
+// (`inventory.stock.low`) to the ops mailbox (`OPS_NOTIFICATIONS_EMAIL`, a null-recipient
+// system row); `OrderEventsConsumer` the order-placed confirmation
+// (`retail.order.placed`); `OrderCancelledNotificationConsumer` the cancellation
+// confirmation (`retail.order.cancelled` — the notification-side consumer on
+// `notification_events`, distinct from the retail-side auto-refund consumer on
+// `retail_queue`); `FulfillmentEventsConsumer` the two shipment lifecycle events
+// (`retail.fulfillment.shipped` / `.delivered`); `ReturnEventsConsumer` the four return
+// lifecycle events (`retail.return.requested` / `.authorized` / `.received` /
+// `.inspected`); and `RefundEventsConsumer` the refund-issued confirmation
+// (`retail.refund.issued`). A customer-facing event whose `customerEmail` is null
+// warn-logs and skips (the shared `dispatchCustomerEmailNotification` helper) — there is
+// no one to notify. `OPS_NOTIFICATIONS_EMAIL` is a `ConfigService` value provider (Joi
+// default `ops@example.com`, the `MAX_DELIVERY_ATTEMPTS` precedent).
 //
 // The retry capability is wired here too (ADR-033). `RetryDeliveryUseCase` is the manual
 // `notification.delivery.retry` RPC; `RetryFailedDeliveriesUseCase` is the scheduled
@@ -114,6 +121,7 @@ import { DeliveryRetryScheduler } from './scheduling';
     NotificationsController,
     InventoryEventsConsumer,
     OrderEventsConsumer,
+    OrderCancelledNotificationConsumer,
     FulfillmentEventsConsumer,
     ReturnEventsConsumer,
     RefundEventsConsumer,
@@ -130,11 +138,6 @@ import { DeliveryRetryScheduler } from './scheduling';
     RetryFailedDeliveriesUseCase,
     DeliveryRetryScheduler,
     RenderAndDispatchUseCase,
-    SendLowStockAlertUseCase,
-    SendOrderNotificationUseCase,
-    SendShipmentNotificationUseCase,
-    SendReturnNotificationUseCase,
-    SendRefundNotificationUseCase,
     LogNotifierAdapter,
     { provide: NOTIFIER, useExisting: LogNotifierAdapter },
     HandlebarsTemplateRendererAdapter,
@@ -158,6 +161,16 @@ import { DeliveryRetryScheduler } from './scheduling';
       provide: MAX_DELIVERY_ATTEMPTS,
       useFactory: (config: ConfigService): number =>
         config.get<number>('MAX_DELIVERY_ATTEMPTS') ?? 3,
+      inject: [ConfigService],
+    },
+    // The operations mailbox a system/ops notification (today only the low-stock alert) is
+    // sent to, resolved from `OPS_NOTIFICATIONS_EMAIL` (Joi default `ops@example.com`) so
+    // the consumer injects a plain string rather than reading env (the `MAX_DELIVERY_ATTEMPTS`
+    // value-provider precedent, ADR-033).
+    {
+      provide: OPS_NOTIFICATIONS_EMAIL,
+      useFactory: (config: ConfigService): string =>
+        config.get<string>('OPS_NOTIFICATIONS_EMAIL') ?? 'ops@example.com',
       inject: [ConfigService],
     },
   ],

@@ -36,8 +36,7 @@ import { toNotificationDeliveryView } from './notification-delivery-view.factory
 // (`RetryFailedDeliveriesUseCase`) honors — an operator deciding to retry now overrides
 // the "too soon" wait. The single re-dispatch + cap-emit step lives in `reattempt`, which
 // the sweeper calls directly with an already-loaded failed row (so the two retry paths
-// share one source of truth; the `SendShipmentNotificationUseCase` two-public-method
-// precedent).
+// share one source of truth; the one-use-case-with-multiple-public-methods precedent).
 //
 // State rule: only a `failed` delivery is retryable. An unknown id →
 // `DELIVERY_NOT_FOUND` (404); a non-`failed` source (`queued` / `sent` / `delivered` /

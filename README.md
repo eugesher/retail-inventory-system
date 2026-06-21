@@ -269,12 +269,14 @@ apps/notification-microservice/src/
     │   │   ├── notification-template.entity.ts / .mapper.ts / -typeorm.repository.ts
     │   │   ├── notification-delivery.entity.ts / .mapper.ts / -typeorm.repository.ts
     │   │   └── index.ts                         # exports notificationEntities
-    │   ├── consumers/                          # RMQ @EventPattern subscribers
-    │   │   ├── inventory-events.consumer.ts    # inventory.stock.low
-    │   │   ├── order-events.consumer.ts        # retail.order.placed
-    │   │   ├── fulfillment-events.consumer.ts  # retail.fulfillment.shipped / .delivered
-    │   │   ├── return-events.consumer.ts       # retail.return.requested / .authorized / .received / .inspected
-    │   │   └── refund-events.consumer.ts       # retail.refund.issued
+    │   ├── consumers/                              # RMQ @EventPattern subscribers — all → RenderAndDispatchUseCase
+    │   │   ├── dispatch-customer-email.ts          # shared: missing-recipient skip + render-and-dispatch call
+    │   │   ├── inventory-events.consumer.ts        # inventory.stock.low → OPS_NOTIFICATIONS_EMAIL (system row)
+    │   │   ├── order-events.consumer.ts            # retail.order.placed
+    │   │   ├── order-cancelled-events.consumer.ts  # retail.order.cancelled (notification-side; distinct from retail's auto-refund consumer)
+    │   │   ├── fulfillment-events.consumer.ts      # retail.fulfillment.shipped / .delivered
+    │   │   ├── return-events.consumer.ts           # retail.return.requested / .authorized / .received / .inspected
+    │   │   └── refund-events.consumer.ts           # retail.refund.issued
     │   ├── delivery/                           # NOTIFIER implementations
     │   │   ├── log.notifier.adapter.ts         # default
     │   │   ├── email.notifier.adapter.ts       # scaffold (TODO)
@@ -356,13 +358,44 @@ alerting surface (no consumer today) that a future ops-alert / dead-letter capab
 monotonic `attemptCount` makes the cap a clean comparison and the failure event fire exactly
 once. See
 [docs/implementation/10-notification-templates-and-deliveries/06-retry-and-failure-events.md](docs/implementation/10-notification-templates-and-deliveries/06-retry-and-failure-events.md).
-The consumers are **not yet rewired** onto the pipeline (the five inline use cases still
-run), and the gateway HTTP surface (the `list`/`get`/manual-retry routes) follows in later
-work.
+**All consumers are now rewired onto the pipeline** (ADR-033) — the five inline
+`Send*` notification use cases are deleted and every consumer routes its wire event through
+`RenderAndDispatchUseCase`. The gateway HTTP surface (the `list`/`get`/manual-retry routes)
+follows in later work.
 
-The service fans out seven cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`), `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), `retail.fulfillment.shipped` / `retail.fulfillment.delivered` (via `FulfillmentEventsConsumer` → `SendShipmentNotificationUseCase.shipped`/`.delivered` — the shipment- and delivery-confirmation fan-out), the four return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected` (via `ReturnEventsConsumer` → `SendReturnNotificationUseCase.requested`/`.authorized`/`.received`/`.inspected` — the buyer-facing return-status fan-out, recipient derived from the RMA's `customerId`), and `retail.refund.issued` (via `RefundEventsConsumer` → `SendRefundNotificationUseCase.issued` — the refund-confirmation fan-out), all arriving on `notification_events`. The retail publishers emit each of these through the `NOTIFICATION_MICROSERVICE` client so they land on the consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as `retail.order.placed` does. (`retail.return.rejected` / `.closed` and `retail.refund.failed` stay reserved on `retail_queue` with no consumer — those are operational outcomes, not buyer notifications.) `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
+The service fans out eight cross-service events today, and **each consumer is now a thin
+translator** that maps its wire event onto the channel-agnostic `IRenderAndDispatchInput`
+(`eventType` = the routing key, an `eventReferenceType`/`eventReferenceId`, the recipient,
+and the event fields as the render context) and hands it to `RenderAndDispatchUseCase` — so
+on receipt the service loads the matching template, renders, persists a `queued` delivery
+**before** the `NOTIFIER` call, then flips the row. The consumers: `inventory.stock.low`
+(via `InventoryEventsConsumer` — a **system/ops** alert sent to `OPS_NOTIFICATIONS_EMAIL`
+with a null recipient customer, so it is not deduped, reference `stock-low` +
+`variantId:stockLocationId`), `retail.order.placed` (via `OrderEventsConsumer`, reference
+`order`), `retail.order.cancelled` (via the **new** `OrderCancelledNotificationConsumer`,
+reference `order` — the notification-side consumer on `notification_events`, distinct from
+retail's auto-refund `OrderCancelledConsumer` on `retail_queue`), `retail.fulfillment.shipped`
+/ `.delivered` (via `FulfillmentEventsConsumer`, reference `fulfillment`), the four return
+lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected` (via
+`ReturnEventsConsumer`, reference `return-request` — these carry the buyer's `customerId`, so
+it becomes the dedupe anchor), and `retail.refund.issued` (via `RefundEventsConsumer`,
+reference `refund`). For a **customer-facing event whose `customerEmail` is `null`** (a
+tombstoned/guest buyer with no contact on file), the shared `dispatchCustomerEmailNotification`
+helper warn-logs (with `correlationId`) and **skips** — the `Notification` value object
+requires a non-empty recipient, so there is simply no one to notify. The retail publishers
+emit each of these through the `NOTIFICATION_MICROSERVICE` client so they land on the
+consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as
+`retail.order.placed` does. (`retail.return.rejected` / `.closed` and `retail.refund.failed`
+stay reserved on `retail_queue` with no consumer — those are operational outcomes, not buyer
+notifications.) Until the seed templates land (a later capability), a consumer that finds no
+matching template warn-logs and no-ops — nothing is dispatched and no delivery row is
+persisted. `LogNotifierAdapter` is still the default `NOTIFIER` transport (the structured
+notification is written to Pino at `info`); switching to email or webhook delivery is a
+single `useExisting`/`useClass` rebind in `notifications.module.ts`. The notification
+microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the
+event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
 
-**Producer-side customer email on the events (ADR-033).** So a notification consumer has a recipient without a per-delivery cross-service RPC, every customer-facing retail event now carries an optional `customerEmail` / `customerLocale`, resolved producer-side when the event is built. The nine producers — `PlaceOrderUseCase`, `ShipFulfillmentUseCase`, `MarkDeliveredUseCase`, `CancelOrderUseCase`, `IssueRefundUseCase` (orders) and `OpenReturnRequestUseCase`, `AuthorizeReturnUseCase`, `ReceiveReturnUseCase`, `InspectAndDispositionUseCase` (returns) — each resolve the buyer's email from the relevant `customerId` through a raw-SQL **customer-contact reader** (`ORDER_CUSTOMER_CONTACT_READER` / `RETURN_CUSTOMER_CONTACT_READER` — one indexed `SELECT email FROM customer WHERE id = ?`, never importing the gateway's `CustomerEntity`, the `ORDER_CART_READER` cross-module precedent of [ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)). Resolution is best-effort on the post-commit emit path: a tombstoned/missing customer or a reader hiccup yields `customerEmail: null` and never fails the committed operation. `customerLocale` ships populated `null` (locale resolution is deferred). `retail.refund.issued` resolves its email from the refund's **order** (the event carries no `customerId` of its own); `inventory.stock.low` is a system/ops alert and carries no `customerEmail`. **`retail.order.cancelled` is now dual-emitted** — the same payload lands on both `retail_queue` (where retail's own auto-refund `OrderCancelledConsumer` reads it) and `notification_events` (where a cancellation-confirmation consumer can read the `customerEmail`). See [docs/implementation/10-notification-templates-and-deliveries/04-customer-email-on-producer-events.md](docs/implementation/10-notification-templates-and-deliveries/04-customer-email-on-producer-events.md).
+**Producer-side customer email on the events (ADR-033).** So a notification consumer has a recipient without a per-delivery cross-service RPC, every customer-facing retail event now carries an optional `customerEmail` / `customerLocale`, resolved producer-side when the event is built. The nine producers — `PlaceOrderUseCase`, `ShipFulfillmentUseCase`, `MarkDeliveredUseCase`, `CancelOrderUseCase`, `IssueRefundUseCase` (orders) and `OpenReturnRequestUseCase`, `AuthorizeReturnUseCase`, `ReceiveReturnUseCase`, `InspectAndDispositionUseCase` (returns) — each resolve the buyer's email from the relevant `customerId` through a raw-SQL **customer-contact reader** (`ORDER_CUSTOMER_CONTACT_READER` / `RETURN_CUSTOMER_CONTACT_READER` — one indexed `SELECT email FROM customer WHERE id = ?`, never importing the gateway's `CustomerEntity`, the `ORDER_CART_READER` cross-module precedent of [ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)). Resolution is best-effort on the post-commit emit path: a tombstoned/missing customer or a reader hiccup yields `customerEmail: null` and never fails the committed operation. `customerLocale` ships populated `null` (locale resolution is deferred). `retail.refund.issued` resolves its email from the refund's **order** (the event carries no `customerId` of its own); `inventory.stock.low` is a system/ops alert and carries no `customerEmail`. **`retail.order.cancelled` is now dual-emitted** — the same payload lands on both `retail_queue` (where retail's own auto-refund `OrderCancelledConsumer` reads it) and `notification_events` (where the notification service's `OrderCancelledNotificationConsumer` reads the `customerEmail` and dispatches the cancellation confirmation). See [docs/implementation/10-notification-templates-and-deliveries/04-customer-email-on-producer-events.md](docs/implementation/10-notification-templates-and-deliveries/04-customer-email-on-producer-events.md).
 
 The inventory microservice exposes a single `stock` bounded context laid out the same way:
 
@@ -996,8 +1029,7 @@ The following shows the full log output for a `POST /api/inventory/variants/1/st
 {"level":30,"time":1748000000020,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","variantId":1,"quantityDelta":-8,"reasonCode":"damage","msg":"Received RPC: adjust stock"}
 {"level":30,"time":1748000000035,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","variantId":1,"stockLocationId":"default-warehouse","quantityOnHand":2,"msg":"Stock adjusted"}
 {"level":30,"time":1748000000037,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","pattern":"inventory.stock.low","quantity":2,"threshold":5,"msg":"Emitting low-stock event"}
-{"level":30,"time":1748000000045,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"SendLowStockAlertUseCase","variantId":1,"quantity":2,"threshold":5,"msg":"Received event: stock low"}
-{"level":30,"time":1748000000050,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"SendLowStockAlertUseCase","channel":"log","msg":"Low-stock alert dispatched"}
+{"level":30,"time":1748000000050,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"RenderAndDispatchUseCase","deliveryId":42,"channel":"email","eventReferenceType":"stock-low","eventReferenceId":"1:default-warehouse","msg":"Notification dispatched"}
 {"level":30,"time":1748000000060,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","res":{"statusCode":200},"responseTime":50,"msg":"request completed"}
 ```
 

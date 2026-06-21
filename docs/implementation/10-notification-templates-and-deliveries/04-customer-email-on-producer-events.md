@@ -19,8 +19,8 @@ infrastructure publisher; post-commit emits are best-effort).
 A retail event like `retail.order.placed` identifies an order — `orderId`, `orderNumber`,
 the money, a `customerId`. It does **not** carry an email address; the customer's contact
 details live on the gateway-owned `customer` table, which the notification service has never
-read. When the notification consumer (a later capability) receives the event and wants to
-send a confirmation, it has to answer one question first: *where do I send it?*
+read. When a notification consumer receives the event and wants to send a confirmation, it
+has to answer one question first: *where do I send it?*
 
 Some events do not even carry the buyer's id. `retail.refund.issued` identifies a refund and
 its payment; until now the refund-confirmation recipient was derived as the synthetic string
@@ -156,8 +156,9 @@ the field now means that future change is a value fill, not a wire-contract chan
 - **`retail_queue`** — retail's *own* `OrderCancelledConsumer`, the auto-refund-from-cancel
   subscriber that, when `paymentFlaggedForRefund` is `true`, issues the owed refund inline.
   This consumer has existed since the cancel capability landed.
-- **`notification_events`** — the notification service's cancellation-confirmation consumer
-  (a later capability), which needs the `customerEmail` the event now carries.
+- **`notification_events`** — the notification service's `OrderCancelledNotificationConsumer`,
+  the cancellation-confirmation subscriber, which reads the `customerEmail` the event now
+  carries to dispatch the buyer's cancellation notice.
 
 Previously the event was emitted **only** onto `retail_queue`. This slice makes
 `publishOrderCancelled` **dual-emit**: the same payload goes onto both queues, fired
@@ -174,9 +175,11 @@ retail events use; `retail.order.cancelled` is simply the one event that needs t
 
 ## 7. What is not here
 
-- **The consumers that read these fields** are a later capability — including the new
-  cancellation consumer that will bind `retail.order.cancelled` off `notification_events` and
-  read `event.customerEmail` for its recipient.
+- **The consumers that read these fields** are now live — every notification consumer routes
+  its wire event (and its resolved `customerEmail`) through `RenderAndDispatchUseCase`,
+  including the new `OrderCancelledNotificationConsumer` that binds `retail.order.cancelled`
+  off `notification_events`. A customer-facing event whose `customerEmail` is `null`
+  warn-logs and skips (no recipient, nothing to send).
 - **Actual locale resolution** — `customerLocale` ships populated `null`.
 - **Adapter unit specs** — the raw-SQL readers query a real `EntityManager` (like their
   `ORDER_CART_READER` / `RETURN_ORDER_READER` siblings, which carry no unit specs either); the

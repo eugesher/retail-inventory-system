@@ -13,8 +13,8 @@ import { RetryFailedDeliveriesUseCase } from '../retry-failed-deliveries.use-cas
 import { FakeLogger, InMemoryDeliveryRepo } from './test-doubles';
 
 // A notifier whose next send outcome is scripted, so a spec can drive a retry to success
-// or another failure deterministically. `sent` records the dispatched notifications (the
-// `InMemoryNotifier` shape), `failNext` flips a single send to reject.
+// or another failure deterministically. `sent` records the dispatched notifications,
+// `failNext` flips a single send to reject.
 class ScriptedNotifier implements INotifierPort {
   public readonly sent: Notification[] = [];
   public shouldFail = false;
