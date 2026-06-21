@@ -297,6 +297,19 @@ export const ROUTING_KEYS = {
   NOTIFICATION_DELIVERY_LIST: 'notification.delivery.list',
   NOTIFICATION_DELIVERY_GET: 'notification.delivery.get',
   NOTIFICATION_DELIVERY_RECORD_OUTCOME: 'notification.delivery.record-outcome',
+  // `notification.delivery.retry` → `RetryDeliveryUseCase` (RPC, Gateway →
+  // Notification, on `notification_events`): the operator manual-retry of one `failed`
+  // delivery — re-dispatches the already-rendered body/subject via `NOTIFIER`, flips
+  // the row `sent`/`failed`, and (at the attempt cap) emits the failure event. A manual
+  // retry forces past the backoff gate the scheduled sweeper honors (ADR-033).
+  NOTIFICATION_DELIVERY_RETRY: 'notification.delivery.retry',
+  // `notifications.delivery.failed` — the producer event emitted onto the notification
+  // service's own `notification_events` queue when a delivery exhausts its
+  // `MAX_DELIVERY_ATTEMPTS` budget and stays `failed`. A reserved surface today (no
+  // consumer): the downstream-alerting seam a future ops-alert / dead-letter capability
+  // binds (ADR-033). The plural `notifications.*` prefix marks it as the cross-cutting
+  // alerting stream, distinct from the singular `notification.delivery.*` RPC commands.
+  NOTIFICATIONS_DELIVERY_FAILED: 'notifications.delivery.failed',
 } as const;
 
 export type RoutingKey = (typeof ROUTING_KEYS)[keyof typeof ROUTING_KEYS];

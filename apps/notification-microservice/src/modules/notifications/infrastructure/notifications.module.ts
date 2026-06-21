@@ -1,10 +1,15 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
+import { MicroserviceClientNotificationModule } from '@retail-inventory-system/messaging';
 
 import {
+  MAX_DELIVERY_ATTEMPTS,
   NOTIFICATION_DELIVERY_REPOSITORY,
+  NOTIFICATION_EVENTS_PUBLISHER,
   NOTIFICATION_TEMPLATE_REPOSITORY,
   NOTIFIER,
   TEMPLATE_RENDERER,
@@ -16,6 +21,8 @@ import {
   ListTemplatesUseCase,
   RecordDeliveryOutcomeUseCase,
   RenderAndDispatchUseCase,
+  RetryDeliveryUseCase,
+  RetryFailedDeliveriesUseCase,
   SendLowStockAlertUseCase,
   SendOrderNotificationUseCase,
   SendRefundNotificationUseCase,
@@ -34,6 +41,7 @@ import {
   ReturnEventsConsumer,
 } from './consumers';
 import { LogNotifierAdapter } from './delivery';
+import { NotificationRabbitmqPublisher } from './messaging';
 import {
   NotificationDeliveryEntity,
   NotificationDeliveryTypeormRepository,
@@ -41,6 +49,7 @@ import {
   NotificationTemplateTypeormRepository,
 } from './persistence';
 import { HandlebarsTemplateRendererAdapter } from './render';
+import { DeliveryRetryScheduler } from './scheduling';
 
 // `NOTIFIER` is bound to `LogNotifierAdapter` today; swap to
 // `EmailNotifierAdapter` / `WebhookNotifierAdapter` is a one-line `useExisting`
@@ -83,8 +92,23 @@ import { HandlebarsTemplateRendererAdapter } from './render';
 // `RefundEventsConsumer` fans out the refund-issued confirmation
 // (`retail.refund.issued`). Each translates a plain wire event into a use case that
 // builds a `Notification` and dispatches it via `NOTIFIER`.
+//
+// The retry capability is wired here too (ADR-033). `RetryDeliveryUseCase` is the manual
+// `notification.delivery.retry` RPC; `RetryFailedDeliveriesUseCase` is the scheduled
+// sweeper, driven by `DeliveryRetryScheduler` (an `@nestjs/schedule` `@Interval`,
+// discovered by `ScheduleModule.forRoot()`). Both re-dispatch the already-rendered content
+// via `NOTIFIER` and, at the `MAX_DELIVERY_ATTEMPTS` cap, emit `notifications.delivery.failed`
+// through `NOTIFICATION_EVENTS_PUBLISHER` → `NotificationRabbitmqPublisher` (the sole
+// `ClientProxy` holder, emitting onto the service's own `notification_events` queue — a
+// reserved alerting surface, no consumer). `MicroserviceClientNotificationModule` supplies
+// that client; `MAX_DELIVERY_ATTEMPTS` is a `ConfigService` value provider (Joi default 3,
+// the retail `RETURN_WINDOW_DAYS` precedent).
 @Module({
-  imports: [DatabaseModule.forFeature([NotificationTemplateEntity, NotificationDeliveryEntity])],
+  imports: [
+    DatabaseModule.forFeature([NotificationTemplateEntity, NotificationDeliveryEntity]),
+    MicroserviceClientNotificationModule,
+    ScheduleModule.forRoot(),
+  ],
   controllers: [
     HealthController,
     NotificationsController,
@@ -102,6 +126,9 @@ import { HandlebarsTemplateRendererAdapter } from './render';
     ListDeliveriesUseCase,
     GetDeliveryUseCase,
     RecordDeliveryOutcomeUseCase,
+    RetryDeliveryUseCase,
+    RetryFailedDeliveriesUseCase,
+    DeliveryRetryScheduler,
     RenderAndDispatchUseCase,
     SendLowStockAlertUseCase,
     SendOrderNotificationUseCase,
@@ -121,6 +148,17 @@ import { HandlebarsTemplateRendererAdapter } from './render';
     {
       provide: NOTIFICATION_DELIVERY_REPOSITORY,
       useExisting: NotificationDeliveryTypeormRepository,
+    },
+    NotificationRabbitmqPublisher,
+    { provide: NOTIFICATION_EVENTS_PUBLISHER, useExisting: NotificationRabbitmqPublisher },
+    // The per-delivery retry cap, resolved from `MAX_DELIVERY_ATTEMPTS` (Joi default 3) so
+    // the retry use cases inject a plain number rather than reading env (the retail
+    // `RETURN_WINDOW_DAYS` value-provider precedent, ADR-033).
+    {
+      provide: MAX_DELIVERY_ATTEMPTS,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('MAX_DELIVERY_ATTEMPTS') ?? 3,
+      inject: [ConfigService],
     },
   ],
 })

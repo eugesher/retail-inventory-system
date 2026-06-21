@@ -244,7 +244,9 @@ apps/notification-microservice/src/
     │   │   ├── notifier.port.ts               # INotifierPort + NOTIFIER symbol
     │   │   ├── template-renderer.port.ts      # ITemplateRendererPort + TEMPLATE_RENDERER symbol
     │   │   ├── notification-template.repository.port.ts   # NOTIFICATION_TEMPLATE_REPOSITORY
-    │   │   └── notification-delivery.repository.port.ts   # NOTIFICATION_DELIVERY_REPOSITORY
+    │   │   ├── notification-delivery.repository.port.ts   # NOTIFICATION_DELIVERY_REPOSITORY
+    │   │   ├── notification-events.publisher.port.ts      # NOTIFICATION_EVENTS_PUBLISHER (ADR-033)
+    │   │   └── max-delivery-attempts.token.ts             # MAX_DELIVERY_ATTEMPTS value-provider token
     │   └── use-cases/
     │       ├── author-template.use-case.ts           # create-or-edit → a new version (ADR-033)
     │       ├── set-template-active.use-case.ts        # activate/deactivate a version
@@ -253,6 +255,8 @@ apps/notification-microservice/src/
     │       ├── list-deliveries.use-case.ts            # paginated, filterable delivery audit read (ADR-033)
     │       ├── get-delivery.use-case.ts               # one full delivery row by id
     │       ├── record-delivery-outcome.use-case.ts    # sent → delivered/bounced (ESP-webhook seam)
+    │       ├── retry-delivery.use-case.ts             # manual retry of one failed delivery (ADR-033)
+    │       ├── retry-failed-deliveries.use-case.ts    # scheduled backoff sweeper (ADR-033)
     │       ├── notification-delivery-view.factory.ts  # delivery → NotificationDeliveryView
     │       ├── render-and-dispatch.use-case.ts       # persist-then-send pipeline (ADR-033)
     │       ├── send-low-stock-alert.use-case.ts
@@ -277,10 +281,14 @@ apps/notification-microservice/src/
     │   │   └── webhook.notifier.adapter.ts     # scaffold (TODO)
     │   ├── render/                             # TEMPLATE_RENDERER implementation
     │   │   └── handlebars-template-renderer.adapter.ts   # the only `handlebars` import (ADR-033)
-    │   └── notifications.module.ts             # binds NOTIFIER + TEMPLATE_RENDERER + the two repo ports; DatabaseModule.forFeature
+    │   ├── messaging/                          # outbound events (the sole ClientProxy holder)
+    │   │   └── notification-rabbitmq.publisher.ts   # NOTIFICATION_EVENTS_PUBLISHER → notifications.delivery.failed (ADR-033)
+    │   ├── scheduling/                         # @nestjs/schedule driver
+    │   │   └── delivery-retry.scheduler.ts     # @Interval → RetryFailedDeliveriesUseCase (ADR-033)
+    │   └── notifications.module.ts             # binds the ports + ScheduleModule.forRoot() + MAX_DELIVERY_ATTEMPTS; DatabaseModule.forFeature
     └── presentation/
         ├── health.controller.ts                # @MessagePattern('notification.health.ping')
-        ├── notifications.controller.ts         # @MessagePattern template author/set-active/list + delivery list/get/record-outcome (ADR-033)
+        ├── notifications.controller.ts         # @MessagePattern template author/set-active/list + delivery list/get/record-outcome/retry (ADR-033)
         └── notification-rpc-exception.filter.ts # NotificationErrorCodeEnum → HTTP (APP_FILTER)
 ```
 
@@ -332,9 +340,25 @@ loads one full delivery row by id (`DELIVERY_NOT_FOUND` on a miss), and
 with ESP signature verification + provider-payload mapping) is a **documented stub** —
 `record-outcome` is RPC-only with no gateway route this capability. See
 [docs/implementation/10-notification-templates-and-deliveries/02-notification-delivery-as-audit-trail.md](docs/implementation/10-notification-templates-and-deliveries/02-notification-delivery-as-audit-trail.md).
+The **retry capability is live** too — a manual path and a scheduled one over one shared
+re-dispatch step ([ADR-033](docs/adr/033-notification-templates-deliveries-and-render-dispatch.md)).
+`RetryDeliveryUseCase` is the `notification.delivery.retry` RPC an operator triggers to retry
+one `failed` delivery now (only a `failed` delivery is retryable — `DELIVERY_NOT_FOUND` /
+`DELIVERY_INVALID_STATUS_TRANSITION` otherwise); it re-dispatches the row's **already-rendered**
+subject/body (no template re-lookup — the row is a self-contained snapshot) and forces past the
+backoff gate. `RetryFailedDeliveriesUseCase` is the scheduled sweeper, driven by
+`DeliveryRetryScheduler` (an `@nestjs/schedule` `@Interval`): it scans `failed` deliveries
+under their `MAX_DELIVERY_ATTEMPTS` budget, applies an exponential backoff gate
+(`baseMs · 2^(attemptCount-1)`, skipping rows still inside their window), and re-attempts the
+due ones. When a (manual or scheduled) retry leaves a delivery `failed` at the cap, the service
+emits `notifications.delivery.failed` once onto its own `notification_events` queue — a reserved
+alerting surface (no consumer today) that a future ops-alert / dead-letter capability binds. The
+monotonic `attemptCount` makes the cap a clean comparison and the failure event fire exactly
+once. See
+[docs/implementation/10-notification-templates-and-deliveries/06-retry-and-failure-events.md](docs/implementation/10-notification-templates-and-deliveries/06-retry-and-failure-events.md).
 The consumers are **not yet rewired** onto the pipeline (the five inline use cases still
-run), and the retry sweeper plus the gateway HTTP surface (the `list`/`get` reads) follow
-in later work.
+run), and the gateway HTTP surface (the `list`/`get`/manual-retry routes) follows in later
+work.
 
 The service fans out seven cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`), `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), `retail.fulfillment.shipped` / `retail.fulfillment.delivered` (via `FulfillmentEventsConsumer` → `SendShipmentNotificationUseCase.shipped`/`.delivered` — the shipment- and delivery-confirmation fan-out), the four return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected` (via `ReturnEventsConsumer` → `SendReturnNotificationUseCase.requested`/`.authorized`/`.received`/`.inspected` — the buyer-facing return-status fan-out, recipient derived from the RMA's `customerId`), and `retail.refund.issued` (via `RefundEventsConsumer` → `SendRefundNotificationUseCase.issued` — the refund-confirmation fan-out), all arriving on `notification_events`. The retail publishers emit each of these through the `NOTIFICATION_MICROSERVICE` client so they land on the consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as `retail.order.placed` does. (`retail.return.rejected` / `.closed` and `retail.refund.failed` stay reserved on `retail_queue` with no consumer — those are operational outcomes, not buyer notifications.) `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
 
