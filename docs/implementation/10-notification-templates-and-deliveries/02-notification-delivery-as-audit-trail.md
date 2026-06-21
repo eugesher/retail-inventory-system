@@ -1,11 +1,12 @@
 # The `NotificationDelivery` audit trail
 
 This document introduces the **`NotificationDelivery`** aggregate — the queryable record
-of one outgoing notification. It covers the data + domain foundation: the model, its
-table, the status lifecycle, the database-level double-dispatch guard, and the repository
-port. The operations that **write** delivery rows (Render & Dispatch) and **read** them
-(the delivery history / outcome reads, the retry sweeper) are described in sibling
-documents; this foundation establishes the row they all turn on.
+of one outgoing notification. It covers the model, its table, the status lifecycle, the
+database-level double-dispatch guard, the repository port, the **audit query** (filters +
+paging), and the **Record Delivery Outcome** seam that flips a `sent` delivery to
+`delivered`/`bounced`. The operation that **writes** delivery rows (Render & Dispatch) and
+the retry sweeper that re-attempts `failed` rows are described in sibling documents; this
+document covers the row's full lifecycle and every way the trail is read.
 
 ## 1. The delivery row is the source of truth for "did we send this?"
 
@@ -137,6 +138,65 @@ boundary): `save` (with the ER_DUP_ENTRY → load-existing path of §3), `findBy
 `NotificationDeliveryTypeormRepository` is the single
 `@InjectRepository(NotificationDeliveryEntity)` site. `NotificationDeliveryView` (in
 `libs/contracts/notifications`) is the RPC/HTTP response shape.
+
+## 7. Querying the trail — filters and paging
+
+Two read RPCs expose the delivery trail to staff (the gateway HTTP routes that front them
+are a later capability):
+
+- **`notification.delivery.list`** → `ListDeliveriesUseCase` — the paginated, filterable
+  audit query. The payload (`INotificationDeliveryListPayload`) carries four optional
+  filters and a page request:
+  - `customerId` → the row's `recipient_customer_id` (one customer's notification
+    history, served by the `(recipient_customer_id, created_at)` index);
+  - `eventReferenceType` + `eventReferenceId` → every delivery triggered by one business
+    event (served by the `(event_reference_type, event_reference_id)` index);
+  - `status` → one lifecycle state (e.g. every `bounced` delivery);
+  - `page` (1-based) + `pageSize`.
+
+  Every field is **optional and narrows** the scan — an absent field widens it, so an
+  empty filter lists *every* delivery. Results come back **newest-first**
+  (`created_at DESC, id DESC` — the `id` tiebreaker makes the order total when two rows
+  share a timestamp) in the canonical `IPage<NotificationDeliveryView>` envelope
+  (`{ items, total, page, size }`). The read is **uncached** — an audit query is
+  low-frequency, operator-driven, and must show the latest rows; caching would add an
+  invalidation hop on every dispatch for no hit-rate benefit (the inventory
+  movements-ledger precedent). When the payload omits `page`/`pageSize`, the use case
+  applies a `1` / `20` backstop (the gateway DTO also defaults them at the edge).
+
+- **`notification.delivery.get`** → `GetDeliveryUseCase` — the single-row drill-down by
+  id, returning the full `NotificationDeliveryView` (including the materialized
+  `renderedBody`/`renderedSubject`). An unknown id raises `NotificationDomainException`
+  with `DELIVERY_NOT_FOUND` (404).
+
+## 8. Record Delivery Outcome — the ESP-webhook seam
+
+A `sent` status means the **transport accepted** the message — not that it reached the
+inbox. The final word comes asynchronously from the provider: a *delivery receipt* or a
+*bounce notice*. **`notification.delivery.record-outcome`** → `RecordDeliveryOutcomeUseCase`
+is the seam that records it:
+
+```
+SENT  ──outcome 'delivered'──▶  DELIVERED   (a delivery receipt)
+SENT  ──outcome 'bounced'────▶  BOUNCED     (a bounce notice; failureReason recorded)
+```
+
+The use case loads the delivery (`DELIVERY_NOT_FOUND` on a miss), then calls the domain
+mutator the outcome selects — `markDelivered()` or `markBounced(reason)`. Those mutators
+are the **single source** of the `sent`-only guard: a non-`sent` source row (`queued`,
+`failed`, or already-`delivered`/`bounced`) raises `DELIVERY_INVALID_STATUS_TRANSITION`
+(409). Both transitions are **attempt-free** — they record a downstream receipt, not a new
+send, so `attemptCount` does not move (only `markSent`/`markFailed` consume an attempt,
+§2). A `bounced` outcome with no `failureReason` falls back to a non-empty default so the
+audit row always records *why* it bounced.
+
+**The webhook ingestion itself is a documented stub.** A real ESP integration needs an
+HTTP endpoint that verifies the provider's webhook signature and maps the provider's
+payload shape onto `{ deliveryId, outcome, failureReason? }`. That bridge is **out of
+scope** this capability — `RecordDeliveryOutcomeUseCase` is reachable only via the
+`notification.delivery.record-outcome` RPC as the internal sketch the bridge would call,
+and it is deliberately **not exposed at the gateway** (unlike the `list`/`get` reads,
+which do get gateway routes in a later capability). Real ESP integration is future work.
 
 See the [sibling template document](01-notification-template-versioning.md) for the
 versioned registry, and

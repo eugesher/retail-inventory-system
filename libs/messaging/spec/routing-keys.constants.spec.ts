@@ -279,6 +279,15 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.NOTIFICATION_TEMPLATE_LIST).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATION_TEMPLATE_LIST,
     );
+    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_LIST).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_LIST,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_GET).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_GET,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_RECORD_OUTCOME).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_RECORD_OUTCOME,
+    );
   });
 
   it('uses dotted naming convention', () => {
