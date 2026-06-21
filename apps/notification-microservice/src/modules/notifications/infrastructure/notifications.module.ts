@@ -7,6 +7,7 @@ import { DatabaseModule } from '@retail-inventory-system/database';
 import { MicroserviceClientNotificationModule } from '@retail-inventory-system/messaging';
 
 import {
+  INotifierPort,
   MAX_DELIVERY_ATTEMPTS,
   NOTIFICATION_DELIVERY_REPOSITORY,
   NOTIFICATION_EVENTS_PUBLISHER,
@@ -37,7 +38,7 @@ import {
   RefundEventsConsumer,
   ReturnEventsConsumer,
 } from './consumers';
-import { LogNotifierAdapter } from './delivery';
+import { FlakyLogNotifierAdapter, LogNotifierAdapter } from './delivery';
 import { NotificationRabbitmqPublisher } from './messaging';
 import {
   NotificationDeliveryEntity,
@@ -139,7 +140,25 @@ import { DeliveryRetryScheduler } from './scheduling';
     DeliveryRetryScheduler,
     RenderAndDispatchUseCase,
     LogNotifierAdapter,
-    { provide: NOTIFIER, useExisting: LogNotifierAdapter },
+    FlakyLogNotifierAdapter,
+    // `NOTIFIER` is `LogNotifierAdapter` by default. When `NOTIFIER_TEST_FLAKY` is set
+    // (the test infra / a retry e2e suite turns it on; production never does), the
+    // deterministically-flaky `FlakyLogNotifierAdapter` is selected instead — it fails a
+    // delivery whose rendered body carries the test marker exactly once, so the retry path
+    // (failed → retry → sent) can be exercised end to end. It is inert for every non-marker
+    // delivery, so other suites are unaffected even with the flag on (ADR-033).
+    //
+    // The flag is read straight off `process.env` (not via `ConfigService`) DELIBERATELY:
+    // `ConfigModule.forRoot` validates `process.env` when the `@Module` decorator is
+    // evaluated (at AppModule import time), so a value an e2e suite sets in `beforeAll`
+    // would be missed by `ConfigService`. This factory runs at DI-init time — after the
+    // suite has set the flag — so the live `process.env` read picks it up.
+    {
+      provide: NOTIFIER,
+      useFactory: (log: LogNotifierAdapter, flaky: FlakyLogNotifierAdapter): INotifierPort =>
+        process.env.NOTIFIER_TEST_FLAKY === 'true' ? flaky : log,
+      inject: [LogNotifierAdapter, FlakyLogNotifierAdapter],
+    },
     HandlebarsTemplateRendererAdapter,
     { provide: TEMPLATE_RENDERER, useExisting: HandlebarsTemplateRendererAdapter },
     NotificationTemplateTypeormRepository,
