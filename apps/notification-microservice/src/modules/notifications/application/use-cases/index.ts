@@ -1,3 +1,4 @@
+export * from './render-and-dispatch.use-case';
 export * from './send-low-stock-alert.use-case';
 export * from './send-order-notification.use-case';
 export * from './send-refund-notification.use-case';

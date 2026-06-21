@@ -246,6 +246,7 @@ apps/notification-microservice/src/
     │   │   ├── notification-template.repository.port.ts   # NOTIFICATION_TEMPLATE_REPOSITORY
     │   │   └── notification-delivery.repository.port.ts   # NOTIFICATION_DELIVERY_REPOSITORY
     │   └── use-cases/
+    │       ├── render-and-dispatch.use-case.ts       # persist-then-send pipeline (ADR-033)
     │       ├── send-low-stock-alert.use-case.ts
     │       ├── send-order-notification.use-case.ts
     │       ├── send-shipment-notification.use-case.ts
@@ -289,9 +290,21 @@ template subject/body against a render context. Handlebars is logic-light by des
 trusted, staff-authored template *source* combined with untrusted context *data* (no
 `{{{ triple-stache }}}` for data). See
 [docs/implementation/10-notification-templates-and-deliveries/05-handlebars-renderer-choice.md](docs/implementation/10-notification-templates-and-deliveries/05-handlebars-renderer-choice.md).
-The render-and-dispatch pipeline that fronts the `NOTIFIER` (the renderer's first consumer),
-the author/activate operations, and the gateway HTTP surface follow in later work. The two
-repository ports and the renderer port are wired but not yet resolved by any use case.
+The **render-and-dispatch pipeline is live**: `RenderAndDispatchUseCase` is the single
+persist-then-send path every consumer will call. Given a channel-agnostic input
+(`{ eventType, channel, locale?, recipientCustomerId, recipientAddress, eventReferenceType,
+eventReferenceId, context, correlationId }`), it resolves the latest active template, renders
+subject/body, **persists a `queued` delivery row *before* the `NOTIFIER` call**, then flips
+the row to `sent` or `failed` (the failure is recorded on the row, never rethrown — the
+retry sweeper re-attempts). A redelivered customer-facing event is deduped to a no-op
+(an explicit pre-check plus the database UNIQUE), a missing template warns and persists
+nothing, and a null-subject channel falls back to the `eventType` as the transport subject.
+It is the first consumer of all four seams (template repo, delivery repo, renderer,
+`NOTIFIER`). See
+[docs/implementation/10-notification-templates-and-deliveries/03-render-and-dispatch-pipeline.md](docs/implementation/10-notification-templates-and-deliveries/03-render-and-dispatch-pipeline.md).
+The consumers are **not yet rewired** onto it (the five inline use cases still run), and the
+author/activate operations, the delivery reads, the retry sweeper, and the gateway HTTP
+surface follow in later work.
 
 The service fans out seven cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`), `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), `retail.fulfillment.shipped` / `retail.fulfillment.delivered` (via `FulfillmentEventsConsumer` → `SendShipmentNotificationUseCase.shipped`/`.delivered` — the shipment- and delivery-confirmation fan-out), the four return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected` (via `ReturnEventsConsumer` → `SendReturnNotificationUseCase.requested`/`.authorized`/`.received`/`.inspected` — the buyer-facing return-status fan-out, recipient derived from the RMA's `customerId`), and `retail.refund.issued` (via `RefundEventsConsumer` → `SendRefundNotificationUseCase.issued` — the refund-confirmation fan-out), all arriving on `notification_events`. The retail publishers emit each of these through the `NOTIFICATION_MICROSERVICE` client so they land on the consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as `retail.order.placed` does. (`retail.return.rejected` / `.closed` and `retail.refund.failed` stay reserved on `retail_queue` with no consumer — those are operational outcomes, not buyer notifications.) `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
 
