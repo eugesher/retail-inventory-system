@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
 
@@ -9,14 +10,19 @@ import {
   TEMPLATE_RENDERER,
 } from '../application/ports';
 import {
+  AuthorTemplateUseCase,
+  ListTemplatesUseCase,
   RenderAndDispatchUseCase,
   SendLowStockAlertUseCase,
   SendOrderNotificationUseCase,
   SendRefundNotificationUseCase,
   SendReturnNotificationUseCase,
   SendShipmentNotificationUseCase,
+  SetTemplateActiveUseCase,
 } from '../application/use-cases';
 import { HealthController } from '../presentation/health.controller';
+import { NotificationRpcExceptionFilter } from '../presentation/notification-rpc-exception.filter';
+import { NotificationsController } from '../presentation/notifications.controller';
 import {
   FulfillmentEventsConsumer,
   InventoryEventsConsumer,
@@ -52,6 +58,15 @@ import { HandlebarsTemplateRendererAdapter } from './render';
 // The consumers are rewired onto it in a later capability; the five inline use cases
 // still run unchanged today.
 //
+// `NotificationsController` opens the service's first non-health `@MessagePattern`
+// surface — the template authoring/read RPCs (`notification.template.author` /
+// `.set-active` / `.list`, ADR-033) the gateway calls. `AuthorTemplateUseCase`
+// (create-or-edit → a new `version`), `SetTemplateActiveUseCase`
+// (activate/deactivate a version by id), and `ListTemplatesUseCase` (the filtered
+// registry browse) back them, and the `APP_FILTER`-registered
+// `NotificationRpcExceptionFilter` maps a thrown `NotificationDomainException` onto
+// the wire `{ statusCode, message, code }` shape.
+//
 // Five event consumers are wired: `InventoryEventsConsumer` fans out the inventory
 // low-stock alert (`inventory.stock.low`), `OrderEventsConsumer` fans out the
 // order-placed confirmation (`retail.order.placed`), `FulfillmentEventsConsumer` fans
@@ -65,6 +80,7 @@ import { HandlebarsTemplateRendererAdapter } from './render';
   imports: [DatabaseModule.forFeature([NotificationTemplateEntity, NotificationDeliveryEntity])],
   controllers: [
     HealthController,
+    NotificationsController,
     InventoryEventsConsumer,
     OrderEventsConsumer,
     FulfillmentEventsConsumer,
@@ -72,6 +88,10 @@ import { HandlebarsTemplateRendererAdapter } from './render';
     RefundEventsConsumer,
   ],
   providers: [
+    { provide: APP_FILTER, useClass: NotificationRpcExceptionFilter },
+    AuthorTemplateUseCase,
+    SetTemplateActiveUseCase,
+    ListTemplatesUseCase,
     RenderAndDispatchUseCase,
     SendLowStockAlertUseCase,
     SendOrderNotificationUseCase,
