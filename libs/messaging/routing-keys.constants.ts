@@ -280,6 +280,14 @@ export const ROUTING_KEYS = {
   RETAIL_REFUND_ISSUED: 'retail.refund.issued',
   RETAIL_REFUND_FAILED: 'retail.refund.failed',
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
+  // Notification template authoring RPCs (Gateway → Notification, on
+  // `notification_events`) — the notification service's first non-health
+  // `@MessagePattern` surface (ADR-033). `author` is create-or-edit (append a new
+  // `version`); `set-active` activates/deactivates one version by id; `list` is the
+  // filtered registry browse.
+  NOTIFICATION_TEMPLATE_AUTHOR: 'notification.template.author',
+  NOTIFICATION_TEMPLATE_SET_ACTIVE: 'notification.template.set-active',
+  NOTIFICATION_TEMPLATE_LIST: 'notification.template.list',
 } as const;
 
 export type RoutingKey = (typeof ROUTING_KEYS)[keyof typeof ROUTING_KEYS];

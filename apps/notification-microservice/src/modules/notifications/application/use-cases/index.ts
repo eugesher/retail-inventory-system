@@ -1,3 +1,6 @@
+export * from './author-template.use-case';
+export * from './set-template-active.use-case';
+export * from './list-templates.use-case';
 export * from './render-and-dispatch.use-case';
 export * from './send-low-stock-alert.use-case';
 export * from './send-order-notification.use-case';
