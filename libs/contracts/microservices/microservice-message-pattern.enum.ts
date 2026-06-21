@@ -104,4 +104,6 @@ export enum MicroserviceMessagePatternEnum {
   NOTIFICATION_DELIVERY_LIST = 'notification.delivery.list',
   NOTIFICATION_DELIVERY_GET = 'notification.delivery.get',
   NOTIFICATION_DELIVERY_RECORD_OUTCOME = 'notification.delivery.record-outcome',
+  NOTIFICATION_DELIVERY_RETRY = 'notification.delivery.retry',
+  NOTIFICATIONS_DELIVERY_FAILED = 'notifications.delivery.failed',
 }

@@ -1,4 +1,5 @@
 export * from './enums';
+export * from './events';
 export * from './notification-template.view';
 export * from './notification-delivery.view';
 export * from './notification-template-author.payload';
@@ -7,3 +8,4 @@ export * from './notification-template-list.payload';
 export * from './notification-delivery-list.payload';
 export * from './notification-delivery-get.payload';
 export * from './notification-delivery-record-outcome.payload';
+export * from './notification-delivery-retry.payload';

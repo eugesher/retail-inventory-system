@@ -5,6 +5,7 @@ import {
   INotificationDeliveryGetPayload,
   INotificationDeliveryListPayload,
   INotificationDeliveryRecordOutcomePayload,
+  INotificationDeliveryRetryPayload,
   INotificationTemplateAuthorPayload,
   INotificationTemplateListPayload,
   INotificationTemplateSetActivePayload,
@@ -20,6 +21,7 @@ import {
   ListDeliveriesUseCase,
   ListTemplatesUseCase,
   RecordDeliveryOutcomeUseCase,
+  RetryDeliveryUseCase,
   SetTemplateActiveUseCase,
 } from '../application/use-cases';
 
@@ -48,6 +50,7 @@ export class NotificationsController {
     private readonly listDeliveriesUseCase: ListDeliveriesUseCase,
     private readonly getDeliveryUseCase: GetDeliveryUseCase,
     private readonly recordDeliveryOutcomeUseCase: RecordDeliveryOutcomeUseCase,
+    private readonly retryDeliveryUseCase: RetryDeliveryUseCase,
   ) {}
 
   @MessagePattern(ROUTING_KEYS.NOTIFICATION_TEMPLATE_AUTHOR)
@@ -90,5 +93,15 @@ export class NotificationsController {
     @Payload() payload: INotificationDeliveryRecordOutcomePayload,
   ): Promise<NotificationDeliveryView> {
     return this.recordDeliveryOutcomeUseCase.execute(payload);
+  }
+
+  // The operator manual-retry of one `failed` delivery — re-dispatches the
+  // already-rendered content, forcing past the scheduled sweeper's backoff gate (ADR-033).
+  // The gateway manual-retry HTTP route that fronts this RPC is a later capability.
+  @MessagePattern(ROUTING_KEYS.NOTIFICATION_DELIVERY_RETRY)
+  public async retryDelivery(
+    @Payload() payload: INotificationDeliveryRetryPayload,
+  ): Promise<NotificationDeliveryView> {
+    return this.retryDeliveryUseCase.execute(payload);
   }
 }
