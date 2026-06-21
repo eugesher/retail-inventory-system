@@ -156,26 +156,19 @@ export class NotificationDeliveryTypeormRepository
 
   // The retry sweeper's scan: `failed` rows that have not yet exhausted their attempt
   // budget (`attempt_count < maxAttempts`), oldest-attempt-first so the longest-waiting
-  // delivery retries next. Served by the `(status, last_attempt_at)` index.
-  public async listRetryable(
-    maxAttempts: number,
-    page: INotificationDeliveryPageRequest,
-  ): Promise<INotificationDeliveryPage> {
-    const [entities, total] = await this.deliveryRepository.findAndCount({
+  // delivery retries next. Served by the `(status, last_attempt_at)` index. A plain
+  // `find` (not `findAndCount`) — the sweeper only iterates the batch, so it never pays
+  // for a `COUNT(*)` it would discard.
+  public async listRetryable(maxAttempts: number, limit: number): Promise<NotificationDelivery[]> {
+    const entities = await this.deliveryRepository.find({
       where: {
         status: NotificationDeliveryStatusEnum.FAILED,
         attemptCount: LessThan(maxAttempts),
       },
       order: { lastAttemptAt: 'ASC', id: 'ASC' },
-      skip: (page.page - 1) * page.size,
-      take: page.size,
+      take: limit,
     });
 
-    return {
-      items: entities.map((entity) => NotificationDeliveryMapper.toDomain(entity)),
-      total,
-      page: page.page,
-      size: page.size,
-    };
+    return entities.map((entity) => NotificationDeliveryMapper.toDomain(entity));
   }
 }

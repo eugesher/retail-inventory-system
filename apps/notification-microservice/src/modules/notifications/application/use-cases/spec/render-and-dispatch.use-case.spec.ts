@@ -103,7 +103,7 @@ class RecordingDeliveryRepo implements INotificationDeliveryRepositoryPort {
   public list(): Promise<INotificationDeliveryPage> {
     throw new Error('not used in render & dispatch');
   }
-  public listRetryable(): Promise<INotificationDeliveryPage> {
+  public listRetryable(): Promise<NotificationDelivery[]> {
     throw new Error('not used in render & dispatch');
   }
 }

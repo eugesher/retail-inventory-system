@@ -213,17 +213,8 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
     });
   }
 
-  public listRetryable(
-    maxAttempts: number,
-    page: INotificationDeliveryPageRequest,
-  ): Promise<INotificationDeliveryPage> {
+  public listRetryable(maxAttempts: number, limit: number): Promise<NotificationDelivery[]> {
     const matched = this.rows.filter((r) => r.attemptCount < maxAttempts);
-    const start = (page.page - 1) * page.size;
-    return Promise.resolve({
-      items: matched.slice(start, start + page.size),
-      total: matched.length,
-      page: page.page,
-      size: page.size,
-    });
+    return Promise.resolve(matched.slice(0, limit));
   }
 }

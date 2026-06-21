@@ -17,6 +17,7 @@ import {
   NOTIFIER,
   TEMPLATE_RENDERER,
 } from '../ports';
+import { resolveTransportSubject } from './transport-subject';
 
 // The default locale when a consumer does not supply one. Every seeded template is keyed
 // at `en-US` this capability; a future localized catalogue would pass the buyer's locale
@@ -188,10 +189,7 @@ export class RenderAndDispatchUseCase {
     //    subject; for a null-subject channel (sms/push) we fall back to `eventType` so the
     //    transport always has a meaningful line (the persisted `renderedSubject` stays
     //    null — the fallback is a transport detail, not stored content).
-    const subjectForTransport =
-      renderedSubject !== null && renderedSubject.trim().length > 0
-        ? renderedSubject
-        : input.eventType;
+    const subjectForTransport = resolveTransportSubject(renderedSubject, input.eventType);
     const now = new Date();
     try {
       await this.notifier.send(

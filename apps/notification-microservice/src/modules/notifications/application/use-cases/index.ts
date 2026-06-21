@@ -7,3 +7,4 @@ export * from './record-delivery-outcome.use-case';
 export * from './retry-delivery.use-case';
 export * from './retry-failed-deliveries.use-case';
 export * from './render-and-dispatch.use-case';
+export * from './transport-subject';

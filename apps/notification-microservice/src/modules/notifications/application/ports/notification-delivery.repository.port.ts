@@ -54,8 +54,10 @@ export interface INotificationDeliveryPage {
 // - `findById` is the by-id load path (Record Outcome / Retry resolve a delivery by id).
 // - `list` is the paged, filtered audit read (newest-first).
 // - `listRetryable` is the retry sweeper's scan: `status = failed AND attempt_count <
-//   maxAttempts`, oldest-attempt-first, paged — served by the
-//   `(status, last_attempt_at)` index.
+//   maxAttempts`, oldest-attempt-first, capped at `limit` — served by the
+//   `(status, last_attempt_at)` index. It returns a bounded batch (not a page): the
+//   sweeper only iterates the rows and never needs a full match count, so it skips the
+//   `COUNT(*)` the paged `list` pays.
 export interface INotificationDeliveryRepositoryPort {
   save(delivery: NotificationDelivery): Promise<NotificationDelivery>;
   findById(id: number): Promise<NotificationDelivery | null>;
@@ -69,8 +71,5 @@ export interface INotificationDeliveryRepositoryPort {
     filter: INotificationDeliveryListFilter,
     page: INotificationDeliveryPageRequest,
   ): Promise<INotificationDeliveryPage>;
-  listRetryable(
-    maxAttempts: number,
-    page: INotificationDeliveryPageRequest,
-  ): Promise<INotificationDeliveryPage>;
+  listRetryable(maxAttempts: number, limit: number): Promise<NotificationDelivery[]>;
 }

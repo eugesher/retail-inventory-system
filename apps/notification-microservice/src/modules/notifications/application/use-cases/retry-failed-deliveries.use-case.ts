@@ -62,10 +62,7 @@ export class RetryFailedDeliveriesUseCase {
     const sweepCorrelationId = randomUUID();
     const now = new Date();
 
-    const { items } = await this.deliveryRepo.listRetryable(this.maxAttempts, {
-      page: 1,
-      size: SWEEP_BATCH_SIZE,
-    });
+    const items = await this.deliveryRepo.listRetryable(this.maxAttempts, SWEEP_BATCH_SIZE);
 
     let skipped = 0;
     let retried = 0;
