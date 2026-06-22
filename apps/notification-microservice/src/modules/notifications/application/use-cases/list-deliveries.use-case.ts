@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
+import { clampPageWindow } from '@retail-inventory-system/common';
 import {
   INotificationDeliveryListPayload,
   IPage,
@@ -9,13 +10,6 @@ import {
 
 import { INotificationDeliveryRepositoryPort, NOTIFICATION_DELIVERY_REPOSITORY } from '../ports';
 import { toNotificationDeliveryView } from './notification-delivery-view.factory';
-
-// Default page index + size for the audit read when the payload omits them. A future
-// gateway DTO defaults these at the edge; these are the backstop for the
-// directly-reachable RMQ path, mirroring the inventory movements-audit convention
-// (`page`→1, `size`→20).
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 20;
 
 // List Deliveries: the paginated, filterable audit read of the `notification_delivery`
 // trail (ADR-033). Every filter field narrows the scan — `customerId` →
@@ -40,8 +34,11 @@ export class ListDeliveriesUseCase {
     payload: INotificationDeliveryListPayload,
   ): Promise<IPage<NotificationDeliveryView>> {
     const { customerId, eventReferenceType, eventReferenceId, status, correlationId } = payload;
-    const page = payload.page ?? DEFAULT_PAGE;
-    const size = payload.pageSize ?? DEFAULT_PAGE_SIZE;
+    // Clamp the untrusted (page, pageSize) — this RMQ handler is directly reachable, so a
+    // malformed page (0, negative, fractional) or an oversized pageSize must be normalized
+    // before it reaches the repository's `skip((page - 1) * size)` (the catalog list
+    // precedent; defaults page→1, size→20, capped at 100).
+    const { page, size } = clampPageWindow(payload.page, payload.pageSize);
 
     this.logger.info(
       { correlationId, customerId, eventReferenceType, eventReferenceId, status, page, size },

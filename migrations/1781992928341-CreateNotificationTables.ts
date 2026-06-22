@@ -24,12 +24,17 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // the STORED generated column `delivery_dedupe_key`: MySQL has no partial unique index,
 // so (following the `price.open_scope_key` precedent) the column is non-NULL only when
 // `recipient_customer_id IS NOT NULL`, and a UNIQUE index over it permits at most one
-// customer-facing delivery per `(event_reference_type, event_reference_id, channel,
-// recipient_customer_id)` — two consumers racing the same event collide on the INSERT,
-// the loser catches `ER_DUP_ENTRY`. System/ops notifications (`recipient_customer_id IS
-// NULL`) carry a NULL key and are NOT deduped (MySQL treats multiple NULLs as distinct,
-// so each low-stock alert is a fresh row). The column is computed by MySQL — no
-// application code ever writes it.
+// customer-facing delivery per `(template_id, event_reference_type, event_reference_id,
+// channel, recipient_customer_id)`. `template_id` is part of the key so two DISTINCT
+// event types that share one business reference — e.g. the `retail.return.requested` /
+// `.authorized` / `.received` / `.inspected` family, all keyed on the same `rmaId` /
+// `recipient_customer_id` — each resolve to their own template and are NOT collapsed into
+// a single delivery (without it, only the first lifecycle email would ever send). A TRUE
+// redelivery of the SAME event resolves to the same active template, so two consumers
+// racing it collide on the INSERT and the loser catches `ER_DUP_ENTRY`. System/ops
+// notifications (`recipient_customer_id IS NULL`) carry a NULL key and are NOT deduped
+// (MySQL treats multiple NULLs as distinct, so each low-stock alert is a fresh row). The
+// column is computed by MySQL — no application code ever writes it.
 export class CreateNotificationTables1781992928341 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
@@ -72,8 +77,9 @@ export class CreateNotificationTables1781992928341 implements MigrationInterface
         correlation_id        VARCHAR(64) NOT NULL,
         delivery_dedupe_key   VARCHAR(255) GENERATED ALWAYS AS (
                                 CASE WHEN recipient_customer_id IS NOT NULL
-                                     THEN CONCAT(event_reference_type, ':', event_reference_id, ':',
-                                                 channel, ':', recipient_customer_id)
+                                     THEN CONCAT(template_id, ':', event_reference_type, ':',
+                                                 event_reference_id, ':', channel, ':',
+                                                 recipient_customer_id)
                                      ELSE NULL END
                               ) STORED,
         created_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

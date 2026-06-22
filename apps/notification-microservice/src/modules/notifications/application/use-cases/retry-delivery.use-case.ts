@@ -24,6 +24,7 @@ import {
   NOTIFIER,
 } from '../ports';
 import { toNotificationDeliveryView } from './notification-delivery-view.factory';
+import { resolveTransportSubject } from './transport-subject';
 
 // Retry Delivery — the operator manual-retry of one `failed` notification delivery
 // (ADR-033), the `notification.delivery.retry` RPC. It re-dispatches the
@@ -101,10 +102,10 @@ export class RetryDeliveryUseCase {
     // (sms/push) falls back to the `eventReferenceType` so the transport always has a
     // line. EMAIL always carries a rendered subject this capability, so the fallback is
     // dormant for now — but it keeps the retry honest for non-email channels.
-    const subjectForTransport =
-      delivery.renderedSubject !== null && delivery.renderedSubject.trim().length > 0
-        ? delivery.renderedSubject
-        : delivery.eventReferenceType;
+    const subjectForTransport = resolveTransportSubject(
+      delivery.renderedSubject,
+      delivery.eventReferenceType,
+    );
 
     const now = new Date();
     try {

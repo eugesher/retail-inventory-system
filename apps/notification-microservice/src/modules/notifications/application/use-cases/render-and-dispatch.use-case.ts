@@ -17,6 +17,7 @@ import {
   NOTIFIER,
   TEMPLATE_RENDERER,
 } from '../ports';
+import { resolveTransportSubject } from './transport-subject';
 
 // The default locale when a consumer does not supply one. Every seeded template is keyed
 // at `en-US` this capability; a future localized catalogue would pass the buyer's locale
@@ -38,7 +39,9 @@ const DEFAULT_LOCALE = 'en-US';
 // - `recipientAddress` is the resolved destination (a customer email or the ops mailbox).
 // - `eventReferenceType` / `eventReferenceId` link the delivery back to the business
 //   event (`order`/`return-request`/`stock-low`/`fulfillment`/`refund` + its id) and form
-//   the dedupe scope together with `channel` + `recipientCustomerId`.
+//   the dedupe scope together with the resolved template id + `channel` +
+//   `recipientCustomerId` (the template id keeps distinct event types that share one
+//   reference — the `retail.return.*` family on one `rmaId` — from collapsing).
 // - `context` is the Handlebars render context (the event's fields).
 // - `correlationId` threads the trace.
 export interface IRenderAndDispatchInput {
@@ -126,14 +129,50 @@ export class RenderAndDispatchUseCase {
     //    sms/push) — guarding null is the use case's concern, not the renderer's
     //    (ADR-033). HTML-escaping of context data is the renderer's default ({{ }}, never
     //    a triple-stache) — the staff-authored-template security posture.
-    const renderedSubject =
-      template.subject !== null ? this.renderer.render(template.subject, input.context) : null;
-    const renderedBody = this.renderer.render(template.body, input.context);
+    //
+    //    A render that THROWS (a malformed staff-authored Handlebars template) or yields
+    //    an empty body must NOT escape this use case: it runs inside an `@EventPattern`
+    //    consumer, where an exception would blind-redeliver the event under at-least-once
+    //    RMQ (and `NotificationDelivery.open` itself rejects an empty body with a plain
+    //    Error). Treat both as a config gap — warn and return null WITHOUT persisting a
+    //    row, exactly like a missing template.
+    let renderedSubject: string | null;
+    let renderedBody: string;
+    try {
+      renderedSubject =
+        template.subject !== null ? this.renderer.render(template.subject, input.context) : null;
+      renderedBody = this.renderer.render(template.body, input.context);
+    } catch (err) {
+      this.logger.warn(
+        {
+          correlationId: input.correlationId,
+          eventType: input.eventType,
+          channel: input.channel,
+          templateId: template.id,
+          reason: err instanceof Error ? err.message : String(err),
+        },
+        'Template render failed; skipping delivery',
+      );
+      return null;
+    }
+    if (renderedBody.trim().length === 0) {
+      this.logger.warn(
+        {
+          correlationId: input.correlationId,
+          eventType: input.eventType,
+          channel: input.channel,
+          templateId: template.id,
+        },
+        'Template rendered an empty body; skipping delivery',
+      );
+      return null;
+    }
 
     // 3. Idempotency pre-check — customer-facing rows only. A redelivered event whose
     //    delivery already exists short-circuits to that row with NO second NOTIFIER call.
     if (input.recipientCustomerId !== null) {
       const existing = await this.deliveryRepo.findByDedupeKey(
+        template.id!,
         input.eventReferenceType,
         input.eventReferenceId,
         input.channel,
@@ -188,10 +227,7 @@ export class RenderAndDispatchUseCase {
     //    subject; for a null-subject channel (sms/push) we fall back to `eventType` so the
     //    transport always has a meaningful line (the persisted `renderedSubject` stays
     //    null — the fallback is a transport detail, not stored content).
-    const subjectForTransport =
-      renderedSubject !== null && renderedSubject.trim().length > 0
-        ? renderedSubject
-        : input.eventType;
+    const subjectForTransport = resolveTransportSubject(renderedSubject, input.eventType);
     const now = new Date();
     try {
       await this.notifier.send(
