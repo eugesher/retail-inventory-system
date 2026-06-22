@@ -8,10 +8,11 @@ import { ITemplateRendererPort } from '../../application/ports';
 // engine import is confined to `infrastructure/`).
 //
 // `Handlebars.compile` returns a `delegate` function; calling it with the render
-// context produces the final string. We compile per call: acceptable at this
-// volume, and a compiled-template cache keyed by template id+version is a noted
-// future optimization (the unconsumed `CACHE_KEYS.notificationsTemplate(...)`
-// key is where it would live).
+// context produces the final string. Compilation (lex + AST + codegen) is pure for a
+// given source string, so the delegate is memoized in a small in-process map keyed by
+// the source — the same active template is compiled once, not on every dispatch (the
+// hottest path in the service). A new template version is a new source string and gets
+// its own entry; the live registry is tiny so the map stays bounded.
 //
 // Security posture: `{{ }}` interpolation HTML-escapes its value by default,
 // which is the correct default for any channel that may render as HTML (email).
@@ -21,8 +22,14 @@ import { ITemplateRendererPort } from '../../application/ports';
 // never be emitted unescaped.
 @Injectable()
 export class HandlebarsTemplateRendererAdapter implements ITemplateRendererPort {
+  private readonly compiled = new Map<string, Handlebars.TemplateDelegate>();
+
   public render(source: string, context: Record<string, unknown>): string {
-    const template = Handlebars.compile(source);
+    let template = this.compiled.get(source);
+    if (template === undefined) {
+      template = Handlebars.compile(source);
+      this.compiled.set(source, template);
+    }
 
     return template(context);
   }

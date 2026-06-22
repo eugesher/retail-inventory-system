@@ -48,8 +48,10 @@ export interface INotificationDeliveryPage {
 //   (`recipientCustomerId IS NULL`) carry a null dedupe key and are never deduped.
 // - `findByDedupeKey` is the explicit idempotency pre-check the dispatch use case runs
 //   BEFORE opening a row (skip if a delivery already exists for the
-//   `(eventReferenceType, eventReferenceId, channel, recipientCustomerId)` tuple). A
-//   null `recipientCustomerId` is not a dedupe scope, so this is only meaningful for
+//   `(templateId, eventReferenceType, eventReferenceId, channel, recipientCustomerId)`
+//   tuple). `templateId` is part of the scope so two distinct event types sharing one
+//   business reference (the `retail.return.*` family on one `rmaId`) are not collapsed.
+//   A null `recipientCustomerId` is not a dedupe scope, so this is only meaningful for
 //   customer-facing notifications.
 // - `findById` is the by-id load path (Record Outcome / Retry resolve a delivery by id).
 // - `list` is the paged, filtered audit read (newest-first).
@@ -62,6 +64,7 @@ export interface INotificationDeliveryRepositoryPort {
   save(delivery: NotificationDelivery): Promise<NotificationDelivery>;
   findById(id: number): Promise<NotificationDelivery | null>;
   findByDedupeKey(
+    templateId: number,
     eventReferenceType: string,
     eventReferenceId: string,
     channel: NotificationChannelEnum,

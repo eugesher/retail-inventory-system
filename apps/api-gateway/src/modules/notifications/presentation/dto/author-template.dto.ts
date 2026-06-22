@@ -15,11 +15,11 @@ export class AuthorTemplateRequestDto {
   @ApiProperty({
     example: 'retail.order.placed',
     description: 'The event type the template renders for (the routing-key string)',
-    maxLength: 128,
+    maxLength: 64,
   })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(128)
+  @MaxLength(64)
   public eventType: string;
 
   @ApiProperty({
@@ -34,11 +34,11 @@ export class AuthorTemplateRequestDto {
     example: 'en-US',
     default: 'en-US',
     description: 'The template locale; defaults to en-US when omitted',
-    maxLength: 35,
+    maxLength: 10,
   })
   @IsOptional()
   @IsString()
-  @MaxLength(35)
+  @MaxLength(10)
   public locale = 'en-US';
 
   @ApiPropertyOptional({

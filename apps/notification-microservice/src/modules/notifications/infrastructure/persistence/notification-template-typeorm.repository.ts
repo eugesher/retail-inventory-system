@@ -9,7 +9,12 @@ import {
   INotificationTemplateListFilter,
   INotificationTemplateRepositoryPort,
 } from '../../application/ports';
-import { NotificationTemplate } from '../../domain';
+import {
+  NotificationDomainException,
+  NotificationErrorCodeEnum,
+  NotificationTemplate,
+} from '../../domain';
+import { isDuplicateEntryError } from './mysql-error.util';
 import { NotificationTemplateEntity } from './notification-template.entity';
 import { NotificationTemplateMapper } from './notification-template.mapper';
 
@@ -39,7 +44,24 @@ export class NotificationTemplateTypeormRepository
   }
 
   public async save(template: NotificationTemplate): Promise<NotificationTemplate> {
-    const saved = await this.templateRepository.save(NotificationTemplateMapper.toEntity(template));
+    let saved: NotificationTemplateEntity;
+    try {
+      saved = await this.templateRepository.save(NotificationTemplateMapper.toEntity(template));
+    } catch (error) {
+      // A concurrent author that raced past the use case's `maxVersion` pre-check writes
+      // the same `(event_type, channel, locale, version)` and collides on the natural-key
+      // UNIQUE. The pre-check cannot close that TOCTOU race — the UNIQUE is the real
+      // backstop — so translate the `ER_DUP_ENTRY` into the typed duplicate-version code
+      // (→ 409) here rather than leaking a raw driver error as a 500 (the delivery-repo
+      // ER_DUP translation precedent).
+      if (isDuplicateEntryError(error)) {
+        throw new NotificationDomainException(
+          NotificationErrorCodeEnum.TEMPLATE_DUPLICATE_VERSION,
+          `A notification template for (${template.eventType}, ${template.channel}, ${template.locale}) at version ${template.version} already exists`,
+        );
+      }
+      throw error;
+    }
     // Re-read so the returned aggregate carries the concrete generated id + committed DB
     // timestamps. The row was just written, so a miss is an invariant breach.
     const reloaded = await this.templateRepository.findOne({ where: { id: Number(saved.id) } });

@@ -169,6 +169,7 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
   }
 
   public findByDedupeKey(
+    templateId: number,
     eventReferenceType: string,
     eventReferenceId: string,
     channel: NotificationChannelEnum,
@@ -177,6 +178,7 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
     return Promise.resolve(
       this.rows.find(
         (r) =>
+          r.templateId === templateId &&
           r.eventReferenceType === eventReferenceType &&
           r.eventReferenceId === eventReferenceId &&
           r.channel === channel &&

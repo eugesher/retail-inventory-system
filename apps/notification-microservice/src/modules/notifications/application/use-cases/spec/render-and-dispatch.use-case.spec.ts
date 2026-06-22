@@ -276,6 +276,33 @@ describe('RenderAndDispatchUseCase', () => {
     ).toBe(true);
   });
 
+  it('persists no row and does not throw when the template renders an empty body', async () => {
+    // A body that references a context key the event never carries renders to '' (the
+    // FakeRenderer substitutes a missing key with empty). The use case runs inside an
+    // `@EventPattern` consumer, so an empty render must warn-and-skip (like a missing
+    // template) rather than let `NotificationDelivery.open`'s non-empty-body guard throw
+    // out of the handler and blind-redeliver the event.
+    templateRepo.latest = NotificationTemplate.reconstitute({
+      id: 7,
+      eventType: 'retail.order.placed',
+      channel: NotificationChannelEnum.EMAIL,
+      locale: 'en-US',
+      subject: 'Hello {{name}}',
+      body: '{{missingField}}',
+      version: 1,
+      active: true,
+    });
+
+    const result = await useCase.execute(buildInput({ context: { name: 'Ada' } }));
+
+    expect(result).toBeNull();
+    expect(deliveryRepo.saved).toHaveLength(0);
+    expect(notifier.sent).toHaveLength(0);
+    expect(
+      logger.warns.some((w) => w.message === 'Template rendered an empty body; skipping delivery'),
+    ).toBe(true);
+  });
+
   it('returns the existing row and does NOT re-dispatch on a dedupe collision (customer-facing)', async () => {
     templateRepo.latest = emailTemplate();
     const alreadySent = NotificationDelivery.reconstitute({

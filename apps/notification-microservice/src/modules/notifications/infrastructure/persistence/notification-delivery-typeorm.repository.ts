@@ -15,27 +15,9 @@ import {
   INotificationDeliveryRepositoryPort,
 } from '../../application/ports';
 import { NotificationDelivery } from '../../domain';
+import { isDuplicateEntryError } from './mysql-error.util';
 import { NotificationDeliveryEntity } from './notification-delivery.entity';
 import { NotificationDeliveryMapper } from './notification-delivery.mapper';
-
-// MySQL's "duplicate entry for key" markers — duck-typed (not `instanceof
-// QueryFailedError`) so the predicate matches whether the driver nests the real error
-// under `driverError` or not (the inventory `mysql-error.util` shape, re-declared here
-// because that util lives in another service's module — returns never reaches across).
-interface IMysqlDriverError {
-  errno?: number;
-  code?: string;
-  driverError?: { errno?: number; code?: string };
-}
-
-function isDuplicateEntryError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const candidate = error as IMysqlDriverError;
-  const driver = candidate.driverError ?? candidate;
-  return driver.errno === 1062 || driver.code === 'ER_DUP_ENTRY';
-}
 
 // The single `@InjectRepository(NotificationDeliveryEntity)` site for the
 // `NotificationDelivery` aggregate. A single-row upsert (no owned children), re-reading
@@ -75,13 +57,14 @@ export class NotificationDeliveryTypeormRepository
       return NotificationDeliveryMapper.toDomain(reloaded);
     } catch (error) {
       // The double-dispatch race: another consumer already INSERTed a customer-facing
-      // delivery for this `(eventReferenceType, eventReferenceId, channel,
+      // delivery for this `(templateId, eventReferenceType, eventReferenceId, channel,
       // recipientCustomerId)` tuple, so this INSERT collides on the dedupe UNIQUE index.
       // Re-load and return the winner's row — the dispatch is idempotent (ADR-033). Only
       // customer-facing rows are deduped (a null `recipientCustomerId` ⇒ null dedupe key
       // ⇒ never a collision), so this branch is gated on a non-null recipient.
       if (isDuplicateEntryError(error) && delivery.recipientCustomerId !== null) {
         const existing = await this.findByDedupeKey(
+          delivery.templateId,
           delivery.eventReferenceType,
           delivery.eventReferenceId,
           delivery.channel,
@@ -100,18 +83,20 @@ export class NotificationDeliveryTypeormRepository
     return entity ? NotificationDeliveryMapper.toDomain(entity) : null;
   }
 
-  // The explicit idempotency pre-check — queries by the four dedupe component columns
-  // (the same tuple the generated `delivery_dedupe_key` concatenates). Only meaningful
-  // for customer-facing notifications (a null `recipientCustomerId` is not a dedupe
-  // scope).
+  // The explicit idempotency pre-check — queries by the five dedupe component columns
+  // (the same tuple the generated `delivery_dedupe_key` concatenates, `templateId`
+  // included so distinct event types sharing one business reference are not collapsed).
+  // Only meaningful for customer-facing notifications (a null `recipientCustomerId` is
+  // not a dedupe scope).
   public async findByDedupeKey(
+    templateId: number,
     eventReferenceType: string,
     eventReferenceId: string,
     channel: NotificationChannelEnum,
     recipientCustomerId: string,
   ): Promise<NotificationDelivery | null> {
     const entity = await this.deliveryRepository.findOne({
-      where: { eventReferenceType, eventReferenceId, channel, recipientCustomerId },
+      where: { templateId, eventReferenceType, eventReferenceId, channel, recipientCustomerId },
     });
     return entity ? NotificationDeliveryMapper.toDomain(entity) : null;
   }
