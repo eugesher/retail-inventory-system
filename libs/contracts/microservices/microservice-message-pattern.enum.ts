@@ -98,4 +98,12 @@ export enum MicroserviceMessagePatternEnum {
   RETAIL_REFUND_ISSUED = 'retail.refund.issued',
   RETAIL_REFUND_FAILED = 'retail.refund.failed',
   NOTIFICATION_HEALTH_PING = 'notification.health.ping',
+  NOTIFICATION_TEMPLATE_AUTHOR = 'notification.template.author',
+  NOTIFICATION_TEMPLATE_SET_ACTIVE = 'notification.template.set-active',
+  NOTIFICATION_TEMPLATE_LIST = 'notification.template.list',
+  NOTIFICATION_DELIVERY_LIST = 'notification.delivery.list',
+  NOTIFICATION_DELIVERY_GET = 'notification.delivery.get',
+  NOTIFICATION_DELIVERY_RECORD_OUTCOME = 'notification.delivery.record-outcome',
+  NOTIFICATION_DELIVERY_RETRY = 'notification.delivery.retry',
+  NOTIFICATIONS_DELIVERY_FAILED = 'notifications.delivery.failed',
 }

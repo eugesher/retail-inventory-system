@@ -1,4 +1,5 @@
 export * from './address.repository.port';
+export * from './customer-contact-reader.port';
 export * from './fulfillment.repository.port';
 export * from './order.repository.port';
 export * from './order-cart-reader.port';

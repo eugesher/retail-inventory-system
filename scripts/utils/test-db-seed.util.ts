@@ -30,6 +30,10 @@ export class TestDbSeedUtil {
     // which runs before these SQL files), product_variant (catalog-product-variant.sql),
     // and snapshots the variant's price (price.sql) — so it must come last.
     'cart.sql',
+    // One active v1 template per notification event type. No FK dependency
+    // (notification_template references nothing; notification_delivery is not seeded),
+    // so its position is free — placed last after the catalog/retail fixtures.
+    'notification-template.sql',
   ];
 
   public static readStatements(filePath: string): string[] {

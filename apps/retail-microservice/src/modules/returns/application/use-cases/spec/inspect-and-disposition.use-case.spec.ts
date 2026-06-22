@@ -13,7 +13,9 @@ import { ReturnErrorCodeEnum, ReturnLine, ReturnRequest } from '../../../domain'
 import { IReturnOrderSnapshot } from '../../ports';
 import { InspectAndDispositionUseCase } from '../inspect-and-disposition.use-case';
 import {
+  FAKE_CUSTOMER_EMAIL,
   FakeInventoryRestockGateway,
+  FakeReturnCustomerContactReader,
   FakeReturnOrderReader,
   FakeReturnRequestRepository,
   FakeTransactionPort,
@@ -83,6 +85,7 @@ const makeHarness = (
   repository: FakeReturnRequestRepository;
   restockGateway: FakeInventoryRestockGateway;
   publisher: SpyReturnEventsPublisher;
+  customerContactReader: FakeReturnCustomerContactReader;
 } => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const transactionPort = new FakeTransactionPort();
@@ -92,15 +95,17 @@ const makeHarness = (
   );
   const restockGateway = new FakeInventoryRestockGateway(options.restockFailure ?? null);
   const publisher = new SpyReturnEventsPublisher();
+  const customerContactReader = new FakeReturnCustomerContactReader();
   const useCase = new InspectAndDispositionUseCase(
     transactionPort,
     repository,
     orderReader,
     restockGateway,
     publisher,
+    customerContactReader,
     logger,
   );
-  return { useCase, repository, restockGateway, publisher };
+  return { useCase, repository, restockGateway, publisher, customerContactReader };
 };
 
 // Inspect payload covering both lines. Disposition per line is configurable so a spec can
@@ -178,6 +183,10 @@ describe('InspectAndDispositionUseCase', () => {
       restockedLineCount: 1,
       eventVersion: 'v1',
       correlationId: 'corr-inspect',
+      // The buyer's email was resolved from the RMA's customerId and stamped on the event
+      // (ADR-033); locale ships null.
+      customerEmail: FAKE_CUSTOMER_EMAIL,
+      customerLocale: null,
     });
   });
 

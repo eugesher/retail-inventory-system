@@ -10,6 +10,8 @@ import { ReturnErrorCodeEnum } from '../../../domain';
 import { AuthorizeReturnUseCase } from '../authorize-return.use-case';
 import {
   buildPersistedReturn,
+  FAKE_CUSTOMER_EMAIL,
+  FakeReturnCustomerContactReader,
   FakeReturnRequestRepository,
   SpyReturnEventsPublisher,
 } from './test-doubles';
@@ -20,12 +22,14 @@ const makeHarness = (): {
   useCase: AuthorizeReturnUseCase;
   repository: FakeReturnRequestRepository;
   publisher: SpyReturnEventsPublisher;
+  customerContactReader: FakeReturnCustomerContactReader;
 } => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const repository = new FakeReturnRequestRepository();
   const publisher = new SpyReturnEventsPublisher();
-  const useCase = new AuthorizeReturnUseCase(repository, publisher, logger);
-  return { useCase, repository, publisher };
+  const customerContactReader = new FakeReturnCustomerContactReader();
+  const useCase = new AuthorizeReturnUseCase(repository, publisher, customerContactReader, logger);
+  return { useCase, repository, publisher, customerContactReader };
 };
 
 const payload = (rmaId: number): IRetailReturnAuthorizePayload => ({
@@ -36,7 +40,7 @@ const payload = (rmaId: number): IRetailReturnAuthorizePayload => ({
 
 describe('AuthorizeReturnUseCase', () => {
   it('walks a requested RMA → authorized and emits retail.return.authorized', async () => {
-    const { useCase, repository, publisher } = makeHarness();
+    const { useCase, repository, publisher, customerContactReader } = makeHarness();
     const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.REQUESTED));
 
     const view = await useCase.execute(payload(seeded.id!));
@@ -52,7 +56,12 @@ describe('AuthorizeReturnUseCase', () => {
       orderId: seeded.orderId,
       eventVersion: 'v1',
       correlationId: 'corr-auth',
+      // The buyer's email was resolved from the RMA's customerId and stamped on the event
+      // (ADR-033); locale ships null.
+      customerEmail: FAKE_CUSTOMER_EMAIL,
+      customerLocale: null,
     });
+    expect(customerContactReader.calls).toEqual([seeded.customerId]);
   });
 
   it('rejects a missing RMA with RETURN_NOT_FOUND (404)', async () => {

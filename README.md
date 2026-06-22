@@ -81,6 +81,15 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/inventory/variants/:id/stock/adjust           │
 │  POST  /api/inventory/variants/:id/stock/transfer         │
 │  POST  /api/inventory/reservations/:id/release            │
+│                                                           │
+│  Notifications (templates + retry: notifications:write,   │
+│                 deliveries: notifications:read)           │
+│  GET   /api/notifications/templates                       │
+│  POST  /api/notifications/templates                       │
+│  PATCH /api/notifications/templates/:id/active            │
+│  GET   /api/notifications/deliveries                      │
+│  GET   /api/notifications/deliveries/:id                  │
+│  POST  /api/notifications/deliveries/:id/retry            │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -126,10 +135,15 @@ The system handles order lifecycle management and product stock tracking across 
                                                               │
 ┌─────────────────────────────────────────────────────────────▼─┐
 │              Notification Microservice (RMQ)                  │
+│  Tables: notification_template / notification_delivery        │
 │  Listens: inventory.stock.low, retail.order.placed,           │
-│  retail.fulfillment.shipped / .delivered,                     │
-│  retail.return.requested / .authorized / .received /          │
-│  .inspected, retail.refund.issued                             │
+│  retail.order.cancelled, retail.fulfillment.shipped /         │
+│  .delivered, retail.return.requested / .authorized /          │
+│  .received / .inspected, retail.refund.issued                 │
+│  Render & Dispatch -> notification_delivery audit row         │
+│  (queued -> sent / failed, retry sweeper + manual retry)      │
+│  Serves (gateway-fronted): template author/list/set-active,   │
+│  delivery list/get/retry RPCs                                 │
 │  Fan-out via NotifierPort (log / email / webhook adapters)    │
 └───────────────────────────────────────────────────────────────┘
 
@@ -177,7 +191,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `api-gateway`               | HTTP (port 3000)                | Single entry point; routes requests to microservices |
 | `retail-microservice`       | RabbitMQ (`retail_queue`)       | Checkout context — the mutable `Cart`/`CartLine` (`modules/cart/`) with **full cart operations** (create/get/add/change/remove/claim over six RPCs, fronted at `/api/cart`) and the immutable `Order`/`OrderLine` + polymorphic `Address` + `Payment` + the per-shipment `Fulfillment` (`modules/orders/`) with **Place Order** (authorize-on-place), **Capture Payment** (explicit), **Get Order**, **List My Orders**, and the full **Fulfillment** lifecycle (**Create**/**List**/**Ship**/**Deliver**) + **Cancel Order**/**Cancel Line** live (`PAYMENT_GATEWAY` → `FakePaymentGatewayAdapter`) |
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
-| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low`, `retail.order.placed`, `retail.fulfillment.shipped` / `.delivered`, the return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected`, and `retail.refund.issued` to a notifier port |
+| `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low`, `retail.order.placed`, `retail.fulfillment.shipped` / `.delivered`, the return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected`, and `retail.refund.issued` to a notifier port. Owns the `notification_template` (versioned registry) + `notification_delivery` (audit trail) tables in the shared `retail_db` (ADR-033) |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, handles the category writes `catalog.category.create` / `catalog.category.reparent`, the category reads `catalog.category.list` / `catalog.category.get-tree` / `catalog.category.list-products`, the membership write `catalog.product.reclassify`, and the media operations `catalog.media.attach` / `catalog.media.reorder` / `catalog.media.detach` / `catalog.media.list`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
 
 ### API Gateway layout
@@ -207,18 +221,30 @@ apps/api-gateway/src/
     │   │   ├── media.controller.ts            # POST/PATCH/DELETE /api/catalog/media[/...], GET /products|variants/:id/media
     │   │   └── dto/                           # Register/CreateVariant/SetPrice/CreateTaxCategory/AttachTaxCategory/CreateCategory/ReparentCategory/AttachProductCategories/AttachMedia/ReorderMedia request + ListProducts/PriceQuery/ListCategories/CategoryProducts query DTOs
     │   └── catalog.module.ts                  # binds CATALOG_GATEWAY_PORT -> CatalogRabbitmqAdapter
-    └── inventory/                             # talks to inventory-microservice (read + write RPCs)
+    ├── inventory/                             # talks to inventory-microservice (read + write RPCs)
+    │   ├── application/
+    │   │   ├── ports/inventory-gateway.port.ts # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
+    │   │   └── use-cases/                     # GetVariantStock, ListLocations, ListVariantMovements,
+    │   │                                      #   ReceiveStock, AdjustStock, TransferStock, ReleaseReservation
+    │   ├── infrastructure/
+    │   │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read + write + reservation RPCs)
+    │   ├── presentation/
+    │   │   ├── inventory.controller.ts        # GET .../locations, /variants/:id/stock, /variants/:id/movements;
+    │   │   │                                  #   POST /variants/:id/stock/receive|adjust|transfer, /reservations/:id/release
+    │   │   └── dto/                           # variant-stock-query (?locationIds), movements-query, receive-stock, adjust-stock, transfer-stock request DTOs
+    │   └── inventory.module.ts                # binds INVENTORY_GATEWAY_PORT -> InventoryRabbitmqAdapter
+    └── notifications/                         # talks to notification-microservice (template + delivery RPCs)
         ├── application/
-        │   ├── ports/inventory-gateway.port.ts # IInventoryGatewayPort + INVENTORY_GATEWAY_PORT
-        │   └── use-cases/                     # GetVariantStock, ListLocations, ListVariantMovements,
-        │                                      #   ReceiveStock, AdjustStock, TransferStock, ReleaseReservation
+        │   ├── ports/notifications-gateway.port.ts # INotificationsGatewayPort + NOTIFICATIONS_GATEWAY_PORT
+        │   └── use-cases/                     # AuthorTemplate, SetTemplateActive, ListTemplates,
+        │                                      #   ListDeliveries, GetDelivery, RetryDelivery
         ├── infrastructure/
-        │   └── messaging/inventory-rabbitmq.adapter.ts  # only ClientProxy holder (read + write + reservation RPCs)
+        │   └── messaging/notifications-rabbitmq.adapter.ts  # only ClientProxy holder (template + delivery RPCs)
         ├── presentation/
-        │   ├── inventory.controller.ts        # GET .../locations, /variants/:id/stock, /variants/:id/movements;
-        │   │                                  #   POST /variants/:id/stock/receive|adjust|transfer, /reservations/:id/release
-        │   └── dto/                           # variant-stock-query (?locationIds), movements-query, receive-stock, adjust-stock, transfer-stock request DTOs
-        └── inventory.module.ts                # binds INVENTORY_GATEWAY_PORT -> InventoryRabbitmqAdapter
+        │   ├── notifications.controller.ts    # GET/POST /api/notifications/templates, PATCH .../templates/:id/active;
+        │   │                                  #   GET .../deliveries[/:id], POST .../deliveries/:id/retry
+        │   └── dto/                           # author-template, set-template-active request + templates-query, deliveries-query DTOs
+        └── notifications.module.ts            # binds NOTIFICATIONS_GATEWAY_PORT -> NotificationsRabbitmqAdapter
 ```
 
 The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, and `PermissionAggregate` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
@@ -229,37 +255,173 @@ The notification microservice is the **canonical per-module template**. The inve
 
 ```
 apps/notification-microservice/src/
-├── app/app.module.ts                          # imports NotificationsModule + LoggerModule
+├── app/app.module.ts                          # imports NotificationsModule + LoggerModule + DatabaseModule.forRoot
 ├── main.ts                                    # first import: @retail-inventory-system/observability/tracer
 └── modules/notifications/
     ├── domain/
     │   ├── notification.model.ts              # ValueObject<Notification>
-    │   └── notification-channel.enum.ts
+    │   ├── notification-template.model.ts     # AggregateRoot — the versioned registry (ADR-033)
+    │   ├── notification-delivery.model.ts     # AggregateRoot — the delivery audit trail (ADR-033)
+    │   ├── notification-error-code.enum.ts    # NotificationErrorCodeEnum
+    │   └── notification-domain.exception.ts   # NotificationDomainException
     ├── application/
-    │   ├── ports/notifier.port.ts             # INotifierPort + NOTIFIER symbol
+    │   ├── ports/
+    │   │   ├── notifier.port.ts               # INotifierPort + NOTIFIER symbol
+    │   │   ├── template-renderer.port.ts      # ITemplateRendererPort + TEMPLATE_RENDERER symbol
+    │   │   ├── notification-template.repository.port.ts   # NOTIFICATION_TEMPLATE_REPOSITORY
+    │   │   ├── notification-delivery.repository.port.ts   # NOTIFICATION_DELIVERY_REPOSITORY
+    │   │   ├── notification-events.publisher.port.ts      # NOTIFICATION_EVENTS_PUBLISHER (ADR-033)
+    │   │   └── max-delivery-attempts.token.ts             # MAX_DELIVERY_ATTEMPTS value-provider token
     │   └── use-cases/
-    │       ├── send-low-stock-alert.use-case.ts
-    │       ├── send-order-notification.use-case.ts
-    │       ├── send-shipment-notification.use-case.ts
-    │       ├── send-return-notification.use-case.ts   # requested/authorized/received/inspected
-    │       └── send-refund-notification.use-case.ts   # issued
+    │       ├── author-template.use-case.ts           # create-or-edit → a new version (ADR-033)
+    │       ├── set-template-active.use-case.ts        # activate/deactivate a version
+    │       ├── list-templates.use-case.ts             # filtered registry browse
+    │       ├── notification-template-view.factory.ts  # template → NotificationTemplateView
+    │       ├── list-deliveries.use-case.ts            # paginated, filterable delivery audit read (ADR-033)
+    │       ├── get-delivery.use-case.ts               # one full delivery row by id
+    │       ├── record-delivery-outcome.use-case.ts    # sent → delivered/bounced (ESP-webhook seam)
+    │       ├── retry-delivery.use-case.ts             # manual retry of one failed delivery (ADR-033)
+    │       ├── retry-failed-deliveries.use-case.ts    # scheduled backoff sweeper (ADR-033)
+    │       ├── notification-delivery-view.factory.ts  # delivery → NotificationDeliveryView
+    │       └── render-and-dispatch.use-case.ts       # persist-then-send pipeline every consumer calls (ADR-033)
     ├── infrastructure/
-    │   ├── consumers/                          # RMQ @EventPattern subscribers
-    │   │   ├── inventory-events.consumer.ts    # inventory.stock.low
-    │   │   ├── order-events.consumer.ts        # retail.order.placed
-    │   │   ├── fulfillment-events.consumer.ts  # retail.fulfillment.shipped / .delivered
-    │   │   ├── return-events.consumer.ts       # retail.return.requested / .authorized / .received / .inspected
-    │   │   └── refund-events.consumer.ts       # retail.refund.issued
+    │   ├── persistence/                        # the service's first DB layer (ADR-033)
+    │   │   ├── notification-template.entity.ts / .mapper.ts / -typeorm.repository.ts
+    │   │   ├── notification-delivery.entity.ts / .mapper.ts / -typeorm.repository.ts
+    │   │   └── index.ts                         # exports notificationEntities
+    │   ├── consumers/                              # RMQ @EventPattern subscribers — all → RenderAndDispatchUseCase
+    │   │   ├── dispatch-customer-email.ts          # shared: missing-recipient skip + render-and-dispatch call
+    │   │   ├── inventory-events.consumer.ts        # inventory.stock.low → OPS_NOTIFICATIONS_EMAIL (system row)
+    │   │   ├── order-events.consumer.ts            # retail.order.placed
+    │   │   ├── order-cancelled-events.consumer.ts  # retail.order.cancelled (notification-side; distinct from retail's auto-refund consumer)
+    │   │   ├── fulfillment-events.consumer.ts      # retail.fulfillment.shipped / .delivered
+    │   │   ├── return-events.consumer.ts           # retail.return.requested / .authorized / .received / .inspected
+    │   │   └── refund-events.consumer.ts           # retail.refund.issued
     │   ├── delivery/                           # NOTIFIER implementations
     │   │   ├── log.notifier.adapter.ts         # default
     │   │   ├── email.notifier.adapter.ts       # scaffold (TODO)
     │   │   └── webhook.notifier.adapter.ts     # scaffold (TODO)
-    │   └── notifications.module.ts             # binds NOTIFIER -> LogNotifierAdapter
+    │   ├── render/                             # TEMPLATE_RENDERER implementation
+    │   │   └── handlebars-template-renderer.adapter.ts   # the only `handlebars` import (ADR-033)
+    │   ├── messaging/                          # outbound events (the sole ClientProxy holder)
+    │   │   └── notification-rabbitmq.publisher.ts   # NOTIFICATION_EVENTS_PUBLISHER → notifications.delivery.failed (ADR-033)
+    │   ├── scheduling/                         # @nestjs/schedule driver
+    │   │   └── delivery-retry.scheduler.ts     # @Interval → RetryFailedDeliveriesUseCase (ADR-033)
+    │   └── notifications.module.ts             # binds the ports + ScheduleModule.forRoot() + MAX_DELIVERY_ATTEMPTS; DatabaseModule.forFeature
     └── presentation/
-        └── health.controller.ts                # @MessagePattern('notification.health.ping')
+        ├── health.controller.ts                # @MessagePattern('notification.health.ping')
+        ├── notifications.controller.ts         # @MessagePattern template author/set-active/list + delivery list/get/record-outcome/retry (ADR-033)
+        └── notification-rpc-exception.filter.ts # NotificationErrorCodeEnum → HTTP (APP_FILTER)
 ```
 
-The service fans out seven cross-service events today: `inventory.stock.low` (via `InventoryEventsConsumer` → `SendLowStockAlertUseCase`), `retail.order.placed` (via `OrderEventsConsumer` → `SendOrderNotificationUseCase`), `retail.fulfillment.shipped` / `retail.fulfillment.delivered` (via `FulfillmentEventsConsumer` → `SendShipmentNotificationUseCase.shipped`/`.delivered` — the shipment- and delivery-confirmation fan-out), the four return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected` (via `ReturnEventsConsumer` → `SendReturnNotificationUseCase.requested`/`.authorized`/`.received`/`.inspected` — the buyer-facing return-status fan-out, recipient derived from the RMA's `customerId`), and `retail.refund.issued` (via `RefundEventsConsumer` → `SendRefundNotificationUseCase.issued` — the refund-confirmation fan-out), all arriving on `notification_events`. The retail publishers emit each of these through the `NOTIFICATION_MICROSERVICE` client so they land on the consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as `retail.order.placed` does. (`retail.return.rejected` / `.closed` and `retail.refund.failed` stay reserved on `retail_queue` with no consumer — those are operational outcomes, not buyer notifications.) `LogNotifierAdapter` writes the structured notification to Pino at `info` level — useful as a development sink and as the canonical implementation. Switching to email or webhook delivery is a single `useExisting`/`useClass` rebind in `notifications.module.ts` once those adapters are implemented. The notification microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
+The notification microservice now owns **two database tables** in the shared `retail_db`
+([ADR-033](docs/adr/033-notification-templates-deliveries-and-render-dispatch.md)) — its
+first persistence. `notification_template` is a versioned, per-`(eventType, channel, locale)`
+registry (an edit appends a new business `version`, old rows retained for audit/rollback;
+soft-delete via an `active` flag; `subject` required for `email`/`webhook`, optional for
+`sms`/`push`); `notification_delivery` is the queryable audit trail of one outgoing
+notification (`queued → sent → delivered/failed/bounced`, monotonic `attemptCount`,
+live-ephemeral, with a STORED generated-column UNIQUE that dedupes a customer-facing
+double-dispatch). Both back the `NotificationTemplate` / `NotificationDelivery` aggregates.
+The **template renderer is live**: `ITemplateRendererPort` (`TEMPLATE_RENDERER`) is bound to
+`HandlebarsTemplateRendererAdapter` (the only file importing `handlebars`), which compiles a
+template subject/body against a render context. Handlebars is logic-light by design, and its
+`{{ }}` interpolation HTML-escapes the render context by default — the right posture for
+trusted, staff-authored template *source* combined with untrusted context *data* (no
+`{{{ triple-stache }}}` for data). See
+[docs/implementation/10-notification-templates-and-deliveries/05-handlebars-renderer-choice.md](docs/implementation/10-notification-templates-and-deliveries/05-handlebars-renderer-choice.md).
+The **render-and-dispatch pipeline is live**: `RenderAndDispatchUseCase` is the single
+persist-then-send path every consumer will call. Given a channel-agnostic input
+(`{ eventType, channel, locale?, recipientCustomerId, recipientAddress, eventReferenceType,
+eventReferenceId, context, correlationId }`), it resolves the latest active template, renders
+subject/body, **persists a `queued` delivery row *before* the `NOTIFIER` call**, then flips
+the row to `sent` or `failed` (the failure is recorded on the row, never rethrown — the
+retry sweeper re-attempts). A redelivered customer-facing event is deduped to a no-op
+(an explicit pre-check plus the database UNIQUE), a missing template warns and persists
+nothing, and a null-subject channel falls back to the `eventType` as the transport subject.
+It is the first consumer of all four seams (template repo, delivery repo, renderer,
+`NOTIFIER`). See
+[docs/implementation/10-notification-templates-and-deliveries/03-render-and-dispatch-pipeline.md](docs/implementation/10-notification-templates-and-deliveries/03-render-and-dispatch-pipeline.md).
+The **template authoring RPCs are live** — the service's first non-health
+`@MessagePattern` surface (`notification.template.author` / `.set-active` / `.list`,
+ADR-033). `AuthorTemplateUseCase` is create-or-edit (append a new business `version`;
+old versions retained, the newest `active` wins via `findLatestActive`),
+`SetTemplateActiveUseCase` activates/deactivates a version by id (the rollback lever),
+and `ListTemplatesUseCase` is the filtered registry browse — all served by
+`NotificationsController` with a `NotificationRpcExceptionFilter` (`APP_FILTER`) mapping
+`NotificationErrorCodeEnum` → HTTP. See
+[docs/implementation/10-notification-templates-and-deliveries/01-notification-template-versioning.md](docs/implementation/10-notification-templates-and-deliveries/01-notification-template-versioning.md).
+The **delivery audit reads + record-outcome RPCs are live** too (`notification.delivery.list`
+/ `.get` / `.record-outcome`, ADR-033). `ListDeliveriesUseCase` is the paginated,
+filterable audit query (filters: `customerId` / `eventReferenceType` / `eventReferenceId`
+/ `status`; newest-first `IPage<NotificationDeliveryView>`; uncached), `GetDeliveryUseCase`
+loads one full delivery row by id (`DELIVERY_NOT_FOUND` on a miss), and
+`RecordDeliveryOutcomeUseCase` is the **ESP-webhook seam** — it flips a `sent` delivery to
+`delivered` (a receipt) or `bounced` (a bounce notice), a non-`sent` source being
+`DELIVERY_INVALID_STATUS_TRANSITION`. The webhook ingestion itself (a real HTTP endpoint
+with ESP signature verification + provider-payload mapping) is a **documented stub** —
+`record-outcome` is RPC-only with no gateway route this capability. See
+[docs/implementation/10-notification-templates-and-deliveries/02-notification-delivery-as-audit-trail.md](docs/implementation/10-notification-templates-and-deliveries/02-notification-delivery-as-audit-trail.md).
+The **retry capability is live** too — a manual path and a scheduled one over one shared
+re-dispatch step ([ADR-033](docs/adr/033-notification-templates-deliveries-and-render-dispatch.md)).
+`RetryDeliveryUseCase` is the `notification.delivery.retry` RPC an operator triggers to retry
+one `failed` delivery now (only a `failed` delivery is retryable — `DELIVERY_NOT_FOUND` /
+`DELIVERY_INVALID_STATUS_TRANSITION` otherwise); it re-dispatches the row's **already-rendered**
+subject/body (no template re-lookup — the row is a self-contained snapshot) and forces past the
+backoff gate. `RetryFailedDeliveriesUseCase` is the scheduled sweeper, driven by
+`DeliveryRetryScheduler` (an `@nestjs/schedule` `@Interval`): it scans `failed` deliveries
+under their `MAX_DELIVERY_ATTEMPTS` budget, applies an exponential backoff gate
+(`baseMs · 2^(attemptCount-1)`, skipping rows still inside their window), and re-attempts the
+due ones. When a (manual or scheduled) retry leaves a delivery `failed` at the cap, the service
+emits `notifications.delivery.failed` once onto its own `notification_events` queue — a reserved
+alerting surface (no consumer today) that a future ops-alert / dead-letter capability binds. The
+monotonic `attemptCount` makes the cap a clean comparison and the failure event fire exactly
+once. See
+[docs/implementation/10-notification-templates-and-deliveries/06-retry-and-failure-events.md](docs/implementation/10-notification-templates-and-deliveries/06-retry-and-failure-events.md).
+**All consumers are now rewired onto the pipeline** (ADR-033) — the five inline
+`Send*` notification use cases are deleted and every consumer routes its wire event through
+`RenderAndDispatchUseCase`. The **gateway HTTP surface is now live too** — the gateway
+`modules/notifications/` fronts the template authoring + delivery `list`/`get`/manual-retry RPCs
+over HTTP at `/api/notifications` (six staff-only routes — `notifications:write` for authoring +
+retry, `notifications:read` for the delivery reads; the `record-outcome` webhook-stub RPC stays
+RMQ-only). See
+[docs/implementation/10-notification-templates-and-deliveries/07-notifications-api-and-http-file.md](docs/implementation/10-notification-templates-and-deliveries/07-notifications-api-and-http-file.md).
+
+The service consumes ten cross-service events today, and **each consumer is now a thin
+translator** that maps its wire event onto the channel-agnostic `IRenderAndDispatchInput`
+(`eventType` = the routing key, an `eventReferenceType`/`eventReferenceId`, the recipient,
+and the event fields as the render context) and hands it to `RenderAndDispatchUseCase` — so
+on receipt the service loads the matching template, renders, persists a `queued` delivery
+**before** the `NOTIFIER` call, then flips the row. The consumers: `inventory.stock.low`
+(via `InventoryEventsConsumer` — a **system/ops** alert sent to `OPS_NOTIFICATIONS_EMAIL`
+with a null recipient customer, so it is not deduped, reference `stock-low` +
+`variantId:stockLocationId`), `retail.order.placed` (via `OrderEventsConsumer`, reference
+`order`), `retail.order.cancelled` (via the **new** `OrderCancelledNotificationConsumer`,
+reference `order` — the notification-side consumer on `notification_events`, distinct from
+retail's auto-refund `OrderCancelledConsumer` on `retail_queue`), `retail.fulfillment.shipped`
+/ `.delivered` (via `FulfillmentEventsConsumer`, reference `fulfillment`), the four return
+lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected` (via
+`ReturnEventsConsumer`, reference `return-request` — these carry the buyer's `customerId`, so
+it becomes the dedupe anchor), and `retail.refund.issued` (via `RefundEventsConsumer`,
+reference `refund`). For a **customer-facing event whose `customerEmail` is `null`** (a
+tombstoned/guest buyer with no contact on file), the shared `dispatchCustomerEmailNotification`
+helper warn-logs (with `correlationId`) and **skips** — the `Notification` value object
+requires a non-empty recipient, so there is simply no one to notify. The retail publishers
+emit each of these through the `NOTIFICATION_MICROSERVICE` client so they land on the
+consumer's own queue (the producer-targets-consumer-queue pattern, ADR-008/020), exactly as
+`retail.order.placed` does. (`retail.return.rejected` / `.closed` and `retail.refund.failed`
+stay reserved on `retail_queue` with no consumer — those are operational outcomes, not buyer
+notifications.) Until the seed templates land (a later capability), a consumer that finds no
+matching template warn-logs and no-ops — nothing is dispatched and no delivery row is
+persisted. `LogNotifierAdapter` is still the default `NOTIFIER` transport (the structured
+notification is written to Pino at `info`); switching to email or webhook delivery is a
+single `useExisting`/`useClass` rebind in `notifications.module.ts`. The notification
+microservice is RMQ-only (no HTTP surface); its health check rides the same transport as the
+event subscribers. See [ADR-011](docs/adr/011-notifier-port-and-adapters.md).
+
+**Producer-side customer email on the events (ADR-033).** So a notification consumer has a recipient without a per-delivery cross-service RPC, every customer-facing retail event now carries an optional `customerEmail` / `customerLocale`, resolved producer-side when the event is built. The nine producers — `PlaceOrderUseCase`, `ShipFulfillmentUseCase`, `MarkDeliveredUseCase`, `CancelOrderUseCase`, `IssueRefundUseCase` (orders) and `OpenReturnRequestUseCase`, `AuthorizeReturnUseCase`, `ReceiveReturnUseCase`, `InspectAndDispositionUseCase` (returns) — each resolve the buyer's email from the relevant `customerId` through a raw-SQL **customer-contact reader** (`ORDER_CUSTOMER_CONTACT_READER` / `RETURN_CUSTOMER_CONTACT_READER` — one indexed `SELECT email FROM customer WHERE id = ?`, never importing the gateway's `CustomerEntity`, the `ORDER_CART_READER` cross-module precedent of [ADR-017](docs/adr/017-architecture-lint-via-eslint-boundaries.md)). Resolution is best-effort on the post-commit emit path: a tombstoned/missing customer or a reader hiccup yields `customerEmail: null` and never fails the committed operation. `customerLocale` ships populated `null` (locale resolution is deferred). `retail.refund.issued` resolves its email from the refund's **order** (the event carries no `customerId` of its own); `inventory.stock.low` is a system/ops alert and carries no `customerEmail`. **`retail.order.cancelled` is now dual-emitted** — the same payload lands on both `retail_queue` (where retail's own auto-refund `OrderCancelledConsumer` reads it) and `notification_events` (where the notification service's `OrderCancelledNotificationConsumer` reads the `customerEmail` and dispatches the cancellation confirmation). See [docs/implementation/10-notification-templates-and-deliveries/04-customer-email-on-producer-events.md](docs/implementation/10-notification-templates-and-deliveries/04-customer-email-on-producer-events.md).
+
+The whole notification capability is locked end-to-end by five gateway e2e suites that drive the HTTP routes and assert through **public state** (the `/api/notifications/deliveries` audit reads + the `notification_delivery` table — never an event spy): [`test/notifications-place-order.e2e-spec.ts`](test/notifications-place-order.e2e-spec.ts) (place an order → exactly one `sent` delivery for the order ref, addressed to the buyer, body carrying the order number — the dedupe proof), [`test/notifications-ship-fulfillment.e2e-spec.ts`](test/notifications-ship-fulfillment.e2e-spec.ts) (place → fulfill → ship → a `sent` `fulfillment`-ref delivery whose body carries the carrier + tracking number), [`test/notifications-low-stock.e2e-spec.ts`](test/notifications-low-stock.e2e-spec.ts) (drive on-hand at/below threshold → a system/ops row addressed to `OPS_NOTIFICATIONS_EMAIL` with a null recipient customer), [`test/notifications-template-edit.e2e-spec.ts`](test/notifications-template-edit.e2e-spec.ts) (author a `v2` of the `retail.order.placed` template → the next order's delivery renders from the new version), and [`test/notifications-retry.e2e-spec.ts`](test/notifications-retry.e2e-spec.ts) (force a first-attempt failure via the flaky notifier → the row lands `failed` with `attempt_count=1` → manual retry flips it `sent` at `attempt_count=2`). They join the pre-existing [`test/notification.e2e-spec.ts`](test/notification.e2e-spec.ts), adapted to the template-driven flow.
 
 The inventory microservice exposes a single `stock` bounded context laid out the same way:
 
@@ -617,6 +779,14 @@ POST   /api/returns/:rmaId/close          # bearer + order:return-authorize — 
 POST   /api/orders/:orderId/refunds       # bearer + order:refund — issue against a captured payment (RefundView 201; Idempotency-Key header)
 GET    /api/orders/:orderId/refunds       # bearer — owner OR staff order:read (RefundView[])
 
+# Notifications (staff-only admin/ops — templates + retry: notifications:write, deliveries: notifications:read)
+GET    /api/notifications/templates              # bearer + notifications:write — list templates (every version) (?eventType, ?channel, ?locale)
+POST   /api/notifications/templates              # bearer + notifications:write — author/edit a template version (NotificationTemplateView 201)
+PATCH  /api/notifications/templates/:id/active   # bearer + notifications:write — activate/deactivate a version ({ active }) — the rollback lever
+GET    /api/notifications/deliveries             # bearer + notifications:read  — delivery audit page (?customerId, ?eventReferenceType, ?eventReferenceId, ?status, ?page, ?pageSize)
+GET    /api/notifications/deliveries/:id         # bearer + notifications:read  — one delivery row (incl. renderedBody)
+POST   /api/notifications/deliveries/:id/retry   # bearer + notifications:write — manually retry a failed delivery (forces past backoff)
+
 # IAM admin
 GET   /api/iam/roles                    # bearer + iam:role-edit
 POST  /api/iam/roles                    # bearer + iam:role-edit
@@ -711,6 +881,8 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `order:cancel` | `admin`, `warehouse-staff`, `order-support` |
 | `order:refund` | `admin`, `order-support` |
 | `order:return-authorize` | `admin`, `order-support` |
+| `notifications:read` | `admin` |
+| `notifications:write` | `admin` |
 | `iam:assign` | `admin` |
 | `iam:role-edit` | `admin` |
 | `audit:read` | `admin` |
@@ -727,6 +899,15 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `AUTH_ARGON2_MEMORY_COST` | `19456` (kib) | OWASP 2024 minimum for argon2id. |
 | `AUTH_ARGON2_TIME_COST` | `2` | Iteration count. |
 | `AUTH_ARGON2_PARALLELISM` | `1` | Threads. |
+
+The notification microservice reads four further defaulted variables (all Joi-validated, so a missing value never fails boot):
+
+| Variable | Default | Notes |
+| -------- | ------- | ----- |
+| `OPS_NOTIFICATIONS_EMAIL` | `ops@example.com` | Ops mailbox for system-only notifications with no customer recipient (e.g. the inventory low-stock alert). |
+| `MAX_DELIVERY_ATTEMPTS` | `3` | Max attempts before a notification delivery is abandoned and `notifications.delivery.failed` is emitted. |
+| `RETENTION_DELIVERY_DAYS` | `90` | Retention window (days) for delivery rows; the purge worker is a future capability. |
+| `NOTIFIER_TEST_FLAKY` | `false` | **Test-only.** When `true`, the `NOTIFIER` binding swaps to a flaky log adapter that fails the first dispatch of any rendered body carrying the `__FAIL_ONCE__` marker, then succeeds on retry — the seam the retry e2e suite drives. Never set in production or shared dev env files; the suite toggles it per-run and reads it straight off `process.env`. |
 
 ### Local development
 
@@ -813,7 +994,24 @@ The seed also loads one **example cart** for the seeded customer so `GET /api/ca
 | --- | --- | --- | --- | --- |
 | `00000000-0000-4000-d000-000000000001` | `customer@example.com` | `USD` | `active` | variant 1 ×2 @ `4999` (snapshot) |
 
-`scripts/seeds/cart.sql` runs last (idempotently — the cart row is `INSERT IGNORE` on its UUID, the line is a `WHERE NOT EXISTS` guarded insert on the `(cart_id, variant_id)` pair so it never collides with an e2e-built line's auto-increment id): the cart FKs the seeded `customer` (loaded by the identity pass, which the seed runs **before** the SQL fixtures), and the line FKs `product_variant` and snapshots variant 1's seeded USD price. The cart id uses the `...-d000-...` (carts) namespace, alongside the `a000` (users) / `b000` (permissions) / `c000` (roles) prefixes.
+`scripts/seeds/cart.sql` runs after the catalog/pricing/stock fixtures it depends on (idempotently — the cart row is `INSERT IGNORE` on its UUID, the line is a `WHERE NOT EXISTS` guarded insert on the `(cart_id, variant_id)` pair so it never collides with an e2e-built line's auto-increment id): the cart FKs the seeded `customer` (loaded by the identity pass, which the seed runs **before** the SQL fixtures), and the line FKs `product_variant` and snapshots variant 1's seeded USD price. The cart id uses the `...-d000-...` (carts) namespace, alongside the `a000` (users) / `b000` (permissions) / `c000` (roles) prefixes.
+
+The seed finally loads the **notification templates** so the render-and-dispatch pipeline has something to resolve on a cold start. `scripts/seeds/notification-template.sql` (registered last — it has no FK, so its position is free) inserts **ten** `notification_template` rows, one per event type the notification consumers route through `RenderAndDispatchUseCase`, all `channel='email'`, `locale='en-US'`, `version=1`, `active=1` (auto-increment `id`). Without a matching template the pipeline warn-logs "no active template" and persists no delivery, so this seed is what makes a real `notification_delivery` row appear end to end:
+
+| `event_type` | Subject (Handlebars) |
+| --- | --- |
+| `retail.order.placed` | `Order #{{orderNumber}} confirmed` |
+| `retail.order.cancelled` | `Order #{{orderId}} cancelled` |
+| `retail.fulfillment.shipped` | `Order #{{orderId}} has shipped` |
+| `retail.fulfillment.delivered` | `Your order arrived` |
+| `retail.return.requested` | `Return {{rmaNumber}} received` |
+| `retail.return.authorized` | `Return {{rmaNumber}} authorized` |
+| `retail.return.received` | `Return {{rmaNumber}} received at warehouse` |
+| `retail.return.inspected` | `Return {{rmaNumber}} inspected` |
+| `retail.refund.issued` | `Refund issued` |
+| `inventory.stock.low` | `Low stock alert` |
+
+The subjects/bodies are Handlebars over the wire event (the consumer hands the whole event object as the render context), so every `{{placeholder}}` matches an actual field on that event's contract under `libs/contracts/{retail,inventory}/events/*` (the shipment and cancellation events carry `orderId` but no `orderNumber`, so those key on `orderId`). `INSERT IGNORE` + the UNIQUE `(event_type, channel, locale, version)` make a re-seed a no-op; an over-the-API author appends a **higher** version (newest-active-wins), so a later edit or rollback never touches these baseline rows.
 
 The `order:capture` permission is seeded (id `...-b000-00000000000e`) and bound to the `order-support` and `admin` roles — it is the staff override on `POST /api/orders/:orderId/payments/capture` (the owning customer needs no permission, only ownership).
 
@@ -883,12 +1081,31 @@ The following shows the full log output for a `POST /api/inventory/variants/1/st
 {"level":30,"time":1748000000020,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","variantId":1,"quantityDelta":-8,"reasonCode":"damage","msg":"Received RPC: adjust stock"}
 {"level":30,"time":1748000000035,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","variantId":1,"stockLocationId":"default-warehouse","quantityOnHand":2,"msg":"Stock adjusted"}
 {"level":30,"time":1748000000037,"app":"inventory-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"AdjustStockUseCase","pattern":"inventory.stock.low","quantity":2,"threshold":5,"msg":"Emitting low-stock event"}
-{"level":30,"time":1748000000045,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"SendLowStockAlertUseCase","variantId":1,"quantity":2,"threshold":5,"msg":"Received event: stock low"}
-{"level":30,"time":1748000000050,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"SendLowStockAlertUseCase","channel":"log","msg":"Low-stock alert dispatched"}
+{"level":30,"time":1748000000050,"app":"notification-microservice","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","context":"RenderAndDispatchUseCase","deliveryId":42,"channel":"email","eventReferenceType":"stock-low","eventReferenceId":"1:default-warehouse","msg":"Notification dispatched"}
 {"level":30,"time":1748000000060,"app":"api-gateway","correlationId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","res":{"statusCode":200},"responseTime":50,"msg":"request completed"}
 ```
 
 See [ADR-001](docs/adr/001-structured-logging-with-pino.md) for the rationale behind this design.
+
+### Notifications: templates, deliveries, and retries
+
+The notification microservice does more than log a fan-out line — it keeps a **durable, queryable audit trail** of every outgoing notification ([ADR-033](docs/adr/033-notification-templates-deliveries-and-render-dispatch.md)). The model has three moving parts:
+
+- **Template** (`notification_template`) — a versioned, per-`(eventType, channel, locale)` registry of the Handlebars `subject`/`body`. Authoring an edit appends a new business `version` and the newest `active` one wins (`findLatestActive`); old versions are retained for audit and one-call rollback (deactivate the newest via `PATCH /api/notifications/templates/:id/active`).
+- **Delivery** (`notification_delivery`) — one row per outgoing notification, the answer to "did we send this?". On each consumed event the pipeline resolves the active template, renders it, and **persists the row in `queued` _before_ calling the `NOTIFIER`**, then flips it `→ sent` (success) or `→ failed` (the failure reason is recorded on the row, never rethrown). The row carries the rendered `subject`/`body`, the recipient, the `(eventReferenceType, eventReferenceId)` it answers to, a monotonic `attemptCount`, and the `correlationId` — so a delivery row is filterable by the same `correlationId` that ties the log lines together.
+- **Retry** — a `@nestjs/schedule` sweeper re-attempts `failed` deliveries on exponential backoff up to `MAX_DELIVERY_ATTEMPTS`, and an operator can force one now via `POST /api/notifications/deliveries/:id/retry` (ignores the backoff gate, re-dispatches the row's already-rendered body). At the cap the service emits `notifications.delivery.failed` once onto its own `notification_events` queue (a reserved alerting seam).
+
+**Inspecting a delivery.** The audit trail is fronted by two staff-only (`notifications:read`) gateway reads — list and drill-down:
+
+```bash
+# Every delivery for one order (newest first), filtered by the event reference
+GET /api/notifications/deliveries?eventReferenceType=order&eventReferenceId=42&status=sent
+
+# One delivery row in full, including the rendered body
+GET /api/notifications/deliveries/91
+```
+
+Both also filter by `customerId` / `eventReferenceType` / `eventReferenceId` / `status` and page via `?page` / `?pageSize`. Off the running stack you can read the same trail straight from MySQL — e.g. `SELECT id, status, attempt_count, event_reference_type, event_reference_id, recipient_address, correlation_id FROM notification_delivery ORDER BY id DESC` shows the recent dispatches, and a customer-facing row is deduped by a STORED generated `delivery_dedupe_key` so the same logical notification never lands twice.
 
 ### Distributed tracing (OpenTelemetry + Jaeger)
 

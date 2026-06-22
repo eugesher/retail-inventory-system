@@ -7,6 +7,8 @@ import { ReturnErrorCodeEnum } from '../../../domain';
 import { ReceiveReturnUseCase } from '../receive-return.use-case';
 import {
   buildPersistedReturn,
+  FAKE_CUSTOMER_EMAIL,
+  FakeReturnCustomerContactReader,
   FakeReturnRequestRepository,
   SpyReturnEventsPublisher,
 } from './test-doubles';
@@ -17,12 +19,14 @@ const makeHarness = (): {
   useCase: ReceiveReturnUseCase;
   repository: FakeReturnRequestRepository;
   publisher: SpyReturnEventsPublisher;
+  customerContactReader: FakeReturnCustomerContactReader;
 } => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const repository = new FakeReturnRequestRepository();
   const publisher = new SpyReturnEventsPublisher();
-  const useCase = new ReceiveReturnUseCase(repository, publisher, logger);
-  return { useCase, repository, publisher };
+  const customerContactReader = new FakeReturnCustomerContactReader();
+  const useCase = new ReceiveReturnUseCase(repository, publisher, customerContactReader, logger);
+  return { useCase, repository, publisher, customerContactReader };
 };
 
 const payload = (rmaId: number): IRetailReturnReceivePayload => ({
@@ -33,7 +37,7 @@ const payload = (rmaId: number): IRetailReturnReceivePayload => ({
 
 describe('ReceiveReturnUseCase', () => {
   it('walks an authorized RMA → received and emits retail.return.received', async () => {
-    const { useCase, repository, publisher } = makeHarness();
+    const { useCase, repository, publisher, customerContactReader } = makeHarness();
     const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.AUTHORIZED));
 
     const view = await useCase.execute(payload(seeded.id!));
@@ -47,8 +51,12 @@ describe('ReceiveReturnUseCase', () => {
       rmaNumber: seeded.rmaNumber,
       eventVersion: 'v1',
       correlationId: 'corr-recv',
+      // The buyer's email was resolved from the RMA's customerId (ADR-033); locale ships null.
+      customerEmail: FAKE_CUSTOMER_EMAIL,
+      customerLocale: null,
     });
     expect(publisher.received[0].receivedAt).toEqual(expect.any(String));
+    expect(customerContactReader.calls).toEqual([seeded.customerId]);
   });
 
   it('rejects a missing RMA with RETURN_NOT_FOUND (404)', async () => {

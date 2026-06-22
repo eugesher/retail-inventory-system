@@ -16,6 +16,8 @@ import {
 import { ReturnLine, ReturnRequest } from '../../../domain';
 import {
   IInventoryRestockGatewayPort,
+  IReturnCustomerContact,
+  IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnOrderReaderPort,
   IReturnOrderSnapshot,
@@ -155,6 +157,29 @@ export class SpyReturnEventsPublisher implements IReturnEventsPublisherPort {
   public publishReturnClosed(event: IRetailReturnClosedEvent): Promise<void> {
     this.closed.push(event);
     return Promise.resolve();
+  }
+}
+
+// The default email the `FakeReturnCustomerContactReader` returns, so specs can assert the
+// producing use case stamped exactly what the reader resolved.
+export const FAKE_CUSTOMER_EMAIL = 'buyer@example.com';
+
+// In-memory `RETURN_CUSTOMER_CONTACT_READER` double (the orders `FakeCustomerContactReader`
+// precedent — a local copy, returns cannot import the orders test-doubles). Records every
+// lookup so a spec can assert the producing use case consulted it; `email` is the value
+// returned for any resolvable id (default `FAKE_CUSTOMER_EMAIL`), `found=false` simulates a
+// customer id that resolves no row (→ `null`).
+export class FakeReturnCustomerContactReader implements IReturnCustomerContactReaderPort {
+  public readonly calls: string[] = [];
+
+  constructor(
+    private readonly email: string | null = FAKE_CUSTOMER_EMAIL,
+    private readonly found = true,
+  ) {}
+
+  public findContactByCustomerId(customerId: string): Promise<IReturnCustomerContact | null> {
+    this.calls.push(customerId);
+    return Promise.resolve(this.found ? { email: this.email } : null);
   }
 }
 

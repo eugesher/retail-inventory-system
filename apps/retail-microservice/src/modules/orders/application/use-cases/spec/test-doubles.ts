@@ -33,6 +33,8 @@ import {
   IOrderCartSnapshot,
   IOrderCatalogGatewayPort,
   IOrderCommitSaleGatewayPort,
+  IOrderCustomerContact,
+  IOrderCustomerContactReaderPort,
   IOrderEventsPublisherPort,
   IOrderInventoryGatewayPort,
   IOrderPage,
@@ -155,6 +157,29 @@ export class FakeCartReader implements IOrderCartReaderPort {
       return Promise.resolve(true);
     }
     return Promise.resolve(false);
+  }
+}
+
+// The default email the `FakeCustomerContactReader` returns, so specs can assert the
+// producing use case stamped exactly what the reader resolved.
+export const FAKE_CUSTOMER_EMAIL = 'buyer@example.com';
+
+// In-memory `ORDER_CUSTOMER_CONTACT_READER` double. Records every lookup so a spec can
+// assert the producing use case consulted it, and is configurable: `email` is the value
+// returned for any resolvable id (default `FAKE_CUSTOMER_EMAIL`); `found=false` simulates a
+// customer id that resolves no row (a tombstoned/unknown customer → `null`). The two together
+// cover the "stamps the resolved email" and "missing customer → null email" cases.
+export class FakeCustomerContactReader implements IOrderCustomerContactReaderPort {
+  public readonly calls: string[] = [];
+
+  constructor(
+    private readonly email: string | null = FAKE_CUSTOMER_EMAIL,
+    private readonly found = true,
+  ) {}
+
+  public findContactByCustomerId(customerId: string): Promise<IOrderCustomerContact | null> {
+    this.calls.push(customerId);
+    return Promise.resolve(this.found ? { email: this.email } : null);
   }
 }
 

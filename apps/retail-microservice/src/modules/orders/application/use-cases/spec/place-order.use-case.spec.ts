@@ -20,9 +20,11 @@ import {
   buildPrice,
   buildVariant,
   CommitFailingTransactionPort,
+  FAKE_CUSTOMER_EMAIL,
   FakeAddressRepository,
   FakeCartReader,
   FakeCatalogGateway,
+  FakeCustomerContactReader,
   FakeOrderInventoryGateway,
   FakeOrderRepository,
   FakePaymentGateway,
@@ -78,6 +80,7 @@ interface IHarness {
   addressRepository: FakeAddressRepository;
   paymentRepository: FakePaymentRepository;
   paymentGateway: FakePaymentGateway;
+  customerContactReader: FakeCustomerContactReader;
   publisher: SpyOrderEventsPublisher;
   logger: PinoLoggerMock;
 }
@@ -87,6 +90,7 @@ const makeHarness = (
   catalog = catalogMaps(),
   approve = true,
   transactionPort: ITransactionPort = new FakeTransactionPort(),
+  customerContactReader: FakeCustomerContactReader = new FakeCustomerContactReader(),
 ): IHarness => {
   const logger = makePinoLoggerMock();
   const typedLogger = logger as unknown as PinoLogger;
@@ -115,6 +119,7 @@ const makeHarness = (
     paymentRepository,
     transactionPort,
     publisher,
+    customerContactReader,
     authorize,
     typedLogger,
   );
@@ -127,6 +132,7 @@ const makeHarness = (
     addressRepository,
     paymentRepository,
     paymentGateway,
+    customerContactReader,
     publisher,
     logger,
   };
@@ -204,7 +210,12 @@ describe('PlaceOrderUseCase', () => {
         grandTotalMinor: 29997,
         lineCount: 2,
         eventVersion: 'v1',
+        // The buyer's email was resolved from the order's customerId and stamped on the
+        // event (ADR-033); locale ships null.
+        customerEmail: FAKE_CUSTOMER_EMAIL,
+        customerLocale: null,
       });
+      expect(h.customerContactReader.calls).toEqual([CUSTOMER_ID]);
       expect(h.publisher.authorized[0]).toMatchObject({
         orderId: view.id,
         amountMinor: 29997,
@@ -244,6 +255,31 @@ describe('PlaceOrderUseCase', () => {
       expect(allocateSpy.mock.invocationCallOrder[0]).toBeLessThan(
         authorizeSpy.mock.invocationCallOrder[0],
       );
+    });
+  });
+
+  describe('customer email enrichment (ADR-033)', () => {
+    it('stamps customerEmail null when the customer resolves no row (tombstoned/unknown)', async () => {
+      // The reader finds no row for the buyer's id — the placed event carries a null email
+      // (the consumer falls back to its own recipient resolution) but the order still places.
+      const h = makeHarness(
+        activeCart(),
+        catalogMaps(),
+        true,
+        new FakeTransactionPort(),
+        new FakeCustomerContactReader(null, false),
+      );
+
+      const view = await h.useCase.execute(placePayload());
+
+      expect(view.status).toBe(OrderStatusEnum.PENDING);
+      expect(h.publisher.placed).toHaveLength(1);
+      expect(h.publisher.placed[0]).toMatchObject({
+        customerEmail: null,
+        customerLocale: null,
+      });
+      // The reader was still consulted (the order's customerId is non-null).
+      expect(h.customerContactReader.calls).toEqual([CUSTOMER_ID]);
     });
   });
 

@@ -1,6 +1,5 @@
+import { NotificationChannelEnum } from '@retail-inventory-system/contracts';
 import { ValueObject } from '@retail-inventory-system/ddd';
-
-import { NotificationChannelEnum } from './notification-channel.enum';
 
 export interface INotificationProps extends Record<string, unknown> {
   recipient: string;

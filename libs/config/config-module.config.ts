@@ -38,6 +38,19 @@ export const configModuleConfig = {
     // fails boot (the `RESERVATION_TTL_MINUTES` precedent).
     RETURN_WINDOW_DAYS: Joi.number().integer().positive().default(30),
 
+    // Ops mailbox for system-only notifications with no customer recipient
+    // (e.g. the inventory low-stock alert). Defaulted so a missing var never fails boot.
+    OPS_NOTIFICATIONS_EMAIL: Joi.string().email().default('ops@example.com'),
+    // Max attempts before a notification delivery is abandoned and
+    // `notifications.delivery.failed` is emitted.
+    MAX_DELIVERY_ATTEMPTS: Joi.number().integer().positive().default(3),
+    // Retention window (days) for delivery rows; the purge worker is a future capability.
+    RETENTION_DELIVERY_DAYS: Joi.number().integer().positive().default(90),
+    // TEST-ONLY: when true, the notification microservice binds a deterministically-flaky
+    // NOTIFIER that fails a delivery carrying the test marker once (to exercise the retry
+    // path). Defaults false; production must never enable it.
+    NOTIFIER_TEST_FLAKY: Joi.boolean().default(false),
+
     JWT_ACCESS_SECRET: Joi.string().min(32).required(),
     JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
     JWT_REFRESH_SECRET: Joi.string()

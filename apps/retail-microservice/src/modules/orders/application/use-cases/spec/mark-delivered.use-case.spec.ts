@@ -13,6 +13,8 @@ import { Fulfillment, Order, OrderErrorCodeEnum } from '../../../domain';
 import { MarkDeliveredUseCase } from '../mark-delivered.use-case';
 import {
   buildOrderWithLinesFixture,
+  FAKE_CUSTOMER_EMAIL,
+  FakeCustomerContactReader,
   FakeFulfillmentRepository,
   FakeOrderRepository,
   FakeTransactionPort,
@@ -29,6 +31,7 @@ interface IHarness {
   orderRepository: FakeOrderRepository;
   fulfillmentRepository: FakeFulfillmentRepository;
   publisher: SpyOrderEventsPublisher;
+  customerContactReader: FakeCustomerContactReader;
 }
 
 const makeHarness = async (order: Order): Promise<IHarness> => {
@@ -36,6 +39,7 @@ const makeHarness = async (order: Order): Promise<IHarness> => {
   const orderRepository = new FakeOrderRepository();
   const fulfillmentRepository = new FakeFulfillmentRepository();
   const publisher = new SpyOrderEventsPublisher();
+  const customerContactReader = new FakeCustomerContactReader();
   await orderRepository.save(order);
 
   const useCase = new MarkDeliveredUseCase(
@@ -43,9 +47,10 @@ const makeHarness = async (order: Order): Promise<IHarness> => {
     orderRepository,
     fulfillmentRepository,
     publisher,
+    customerContactReader,
     logger,
   );
-  return { useCase, orderRepository, fulfillmentRepository, publisher };
+  return { useCase, orderRepository, fulfillmentRepository, publisher, customerContactReader };
 };
 
 // Persists a SHIPPED fulfillment for the order (the only state Deliver accepts).
@@ -99,6 +104,13 @@ describe('MarkDeliveredUseCase', () => {
       expect(reread?.status).toBe(OrderStatusEnum.DELIVERED);
       expect(reread?.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.DELIVERED);
       expect(h.publisher.fulfillmentDelivered).toHaveLength(1);
+      // The buyer's email was resolved from the order's customerId and stamped on the
+      // delivery event (ADR-033); locale ships null.
+      expect(h.publisher.fulfillmentDelivered[0]).toMatchObject({
+        customerEmail: FAKE_CUSTOMER_EMAIL,
+        customerLocale: null,
+      });
+      expect(h.customerContactReader.calls).toEqual([OWNER_ID]);
     });
 
     it('keeps a multi-fulfillment order non-delivered until every fulfillment is delivered', async () => {

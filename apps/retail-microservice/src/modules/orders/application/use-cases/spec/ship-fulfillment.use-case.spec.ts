@@ -21,6 +21,8 @@ import { ShipFulfillmentUseCase } from '../ship-fulfillment.use-case';
 import {
   buildOrderWithLinesFixture,
   buildPaymentFixture,
+  FAKE_CUSTOMER_EMAIL,
+  FakeCustomerContactReader,
   FakeOrderCommitSaleGateway,
   FakeOrderRepository,
   FakeFulfillmentRepository,
@@ -54,6 +56,7 @@ interface IHarness {
   paymentGateway: FakePaymentGateway;
   commitSaleGateway: FakeOrderCommitSaleGateway;
   publisher: SpyOrderEventsPublisher;
+  customerContactReader: FakeCustomerContactReader;
   fulfillmentId: number;
 }
 
@@ -74,6 +77,7 @@ const makeHarness = async (
   const paymentGateway = new FakePaymentGateway(true, opts.captureOk ?? true);
   const commitSaleGateway = new FakeOrderCommitSaleGateway();
   const publisher = new SpyOrderEventsPublisher();
+  const customerContactReader = new FakeCustomerContactReader();
 
   await orderRepository.save(order);
   const payment =
@@ -97,6 +101,7 @@ const makeHarness = async (
     paymentGateway,
     commitSaleGateway,
     publisher,
+    customerContactReader,
     logger,
   );
   return {
@@ -107,6 +112,7 @@ const makeHarness = async (
     paymentGateway,
     commitSaleGateway,
     publisher,
+    customerContactReader,
     fulfillmentId: saved.id!,
   };
 };
@@ -146,6 +152,13 @@ describe('ShipFulfillmentUseCase', () => {
         lines: [{ variantId: 10, stockLocationId: 'default-warehouse', quantity: 3 }],
       });
       expect(h.publisher.fulfillmentShipped).toHaveLength(1);
+      // The buyer's email was resolved from the order's customerId and stamped on the
+      // shipment event (ADR-033); locale ships null.
+      expect(h.publisher.fulfillmentShipped[0]).toMatchObject({
+        customerEmail: FAKE_CUSTOMER_EMAIL,
+        customerLocale: null,
+      });
+      expect(h.customerContactReader.calls).toEqual([OWNER_ID]);
     });
 
     it('does not roll the ship back when Commit Sale fails after retries', async () => {

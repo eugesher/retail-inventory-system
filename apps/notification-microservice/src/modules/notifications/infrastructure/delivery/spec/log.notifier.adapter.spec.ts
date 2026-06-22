@@ -1,6 +1,8 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { Notification, NotificationChannelEnum } from '../../../domain';
+import { NotificationChannelEnum } from '@retail-inventory-system/contracts';
+
+import { Notification } from '../../../domain';
 import { LogNotifierAdapter } from '../log.notifier.adapter';
 
 describe('LogNotifierAdapter', () => {
@@ -16,7 +18,7 @@ describe('LogNotifierAdapter', () => {
   it('emits a Pino info line containing every notification field', async () => {
     const notification = new Notification({
       recipient: 'customer:7',
-      channel: NotificationChannelEnum.LOG,
+      channel: NotificationChannelEnum.EMAIL,
       subject: 'Order 42 received',
       body: 'Order 42 is now pending.',
       metadata: { orderId: 42, customerId: 7 },
@@ -28,7 +30,7 @@ describe('LogNotifierAdapter', () => {
     expect(infoSpy).toHaveBeenCalledWith(
       {
         recipient: 'customer:7',
-        channel: NotificationChannelEnum.LOG,
+        channel: NotificationChannelEnum.EMAIL,
         subject: 'Order 42 received',
         body: 'Order 42 is now pending.',
         metadata: { orderId: 42, customerId: 7 },

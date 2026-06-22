@@ -270,6 +270,30 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.NOTIFICATION_HEALTH_PING).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATION_HEALTH_PING,
     );
+    expect(ROUTING_KEYS.NOTIFICATION_TEMPLATE_AUTHOR).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_TEMPLATE_AUTHOR,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_TEMPLATE_SET_ACTIVE).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_TEMPLATE_SET_ACTIVE,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_TEMPLATE_LIST).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_TEMPLATE_LIST,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_LIST).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_LIST,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_GET).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_GET,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_RECORD_OUTCOME).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_RECORD_OUTCOME,
+    );
+    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_RETRY).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_RETRY,
+    );
+    expect(ROUTING_KEYS.NOTIFICATIONS_DELIVERY_FAILED).toBe(
+      MicroserviceMessagePatternEnum.NOTIFICATIONS_DELIVERY_FAILED,
+    );
   });
 
   it('uses dotted naming convention', () => {

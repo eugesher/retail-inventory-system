@@ -11,6 +11,8 @@ import { OrderErrorCodeEnum, Payment } from '../../../domain';
 import { IssueRefundUseCase } from '../issue-refund.use-case';
 import {
   buildOrderFixture,
+  FAKE_CUSTOMER_EMAIL,
+  FakeCustomerContactReader,
   FakeOrderRepository,
   FakePaymentGateway,
   FakePaymentRepository,
@@ -32,6 +34,7 @@ interface IHarness {
   refundRepository: FakeRefundRepository;
   paymentGateway: FakePaymentGateway;
   publisher: SpyOrderEventsPublisher;
+  customerContactReader: FakeCustomerContactReader;
   audit: SpyAuditLogPublisher;
 }
 
@@ -64,6 +67,7 @@ const makeHarness = async (
   const paymentRepository = new FakePaymentRepository();
   const refundRepository = new FakeRefundRepository();
   const publisher = new SpyOrderEventsPublisher();
+  const customerContactReader = new FakeCustomerContactReader();
   const audit = new SpyAuditLogPublisher();
 
   await orderRepository.save(buildOrderFixture(ORDER_ID, OWNER_ID));
@@ -76,6 +80,7 @@ const makeHarness = async (
     paymentRepository,
     refundRepository,
     publisher,
+    customerContactReader,
     audit,
     logger,
   );
@@ -86,6 +91,7 @@ const makeHarness = async (
     refundRepository,
     paymentGateway: gateway,
     publisher,
+    customerContactReader,
     audit,
   };
 };
@@ -128,7 +134,12 @@ describe('IssueRefundUseCase', () => {
       paymentId: PAYMENT_ID,
       amountMinor: CAPTURED_AMOUNT,
       eventVersion: 'v1',
+      // The buyer's email was resolved from the refund's ORDER customerId (the refund event
+      // carries none of its own) and stamped on the event (ADR-033); locale ships null.
+      customerEmail: FAKE_CUSTOMER_EMAIL,
+      customerLocale: null,
     });
+    expect(h.customerContactReader.calls).toEqual([OWNER_ID]);
     expect(h.publisher.refundFailed).toHaveLength(0);
   });
 

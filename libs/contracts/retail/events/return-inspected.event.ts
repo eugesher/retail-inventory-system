@@ -15,11 +15,20 @@ import { ICorrelationPayload } from '../../microservices';
 // `inventory.stock.restock-from-return`) — a downstream can tell a refund-only inspection
 // (0) from one that returned goods to the shelf. `eventVersion` is pinned to `'v1'`;
 // `occurredAt` and `inspectedAt` are ISO-8601 strings.
+//
+// `customerEmail` / `customerLocale` carry the buyer's notification contact, resolved
+// producer-side from the RMA's `customerId` against the shared `customer` table (a raw-SQL
+// reader, no gateway-entity import) so the returns consumer has a recipient WITHOUT a
+// per-delivery cross-service RPC (ADR-033 choice). The email is `null` for a
+// tombstoned/missing customer; `customerLocale` is a placeholder shipped `null` today
+// (locale deferred). Both optional — additive on the wire.
 export interface IRetailReturnInspectedEvent extends ICorrelationPayload {
   rmaId: number;
   rmaNumber: string;
   orderId: number;
   customerId: string;
+  customerEmail?: string | null;
+  customerLocale?: string | null;
   inspectedAt: string;
   restockedLineCount: number;
   eventVersion: 'v1';

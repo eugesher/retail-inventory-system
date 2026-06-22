@@ -8,12 +8,15 @@ import {
 
 import { ReturnRequest } from '../../domain';
 import {
+  IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
 } from '../ports';
 import { loadReturnById } from './return-access';
+import { resolveCustomerEmail } from './resolve-customer-email';
 import { toReturnRequestView } from './return-view.factory';
 
 // Authorize Return walks a `requested` RMA → `authorized` (staff `order:return-authorize`,
@@ -31,6 +34,8 @@ export class AuthorizeReturnUseCase {
     private readonly repository: IReturnRequestRepositoryPort,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
+    @Inject(RETURN_CUSTOMER_CONTACT_READER)
+    private readonly customerContactReader: IReturnCustomerContactReaderPort,
     @InjectPinoLogger(AuthorizeReturnUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -51,12 +56,20 @@ export class AuthorizeReturnUseCase {
   }
 
   private async emitAuthorized(request: ReturnRequest, correlationId: string): Promise<void> {
+    const customerEmail = await resolveCustomerEmail(
+      this.customerContactReader,
+      request.customerId,
+      this.logger,
+      correlationId,
+    );
     try {
       await this.publisher.publishReturnAuthorized({
         rmaId: request.id!,
         rmaNumber: request.rmaNumber!,
         orderId: request.orderId,
         customerId: request.customerId,
+        customerEmail,
+        customerLocale: null,
         authorizedAt: request.authorizedAt!.toISOString(),
         eventVersion: 'v1',
         occurredAt: new Date().toISOString(),

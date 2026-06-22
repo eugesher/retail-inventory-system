@@ -14,10 +14,20 @@ import { ICorrelationPayload } from '../../microservices';
 // order back. `customerId` is the gateway customer UUID or `null` (a tombstoned
 // order). `eventVersion` is pinned to `'v1'`; a breaking change ships `'v2'`.
 // `occurredAt` is an ISO-8601 string.
+//
+// `customerEmail` / `customerLocale` are the buyer's notification contact, resolved
+// producer-side from the shared `customer` table (a raw-SQL reader, no gateway-entity
+// import) so the notification consumer has a recipient WITHOUT a per-delivery
+// cross-service RPC (ADR-033 records this "carry the email on the event" choice). The
+// email is `null` for a tombstoned/missing customer; `customerLocale` is a placeholder
+// shipped `null` today (locale resolution is deferred). Both are optional so the field
+// is additive on the wire — older consumers ignore it.
 export interface IRetailOrderPlacedEvent extends ICorrelationPayload {
   orderId: number;
   orderNumber: string;
   customerId: string | null;
+  customerEmail?: string | null;
+  customerLocale?: string | null;
   grandTotalMinor: number;
   currency: string;
   lineCount: number;
