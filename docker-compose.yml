@@ -28,6 +28,9 @@ services:
       - '3306:3306'
     volumes:
       - mysql-data:/var/lib/mysql
+      # Provisions the isolated `ris_eventstore` schema + grant on a fresh volume,
+      # before any migration runs (ADR-034). Runs only on first init.
+      - ./scripts/mysql-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
       interval: 10s
@@ -68,6 +71,7 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      EVENTSTORE_DATABASE_URL: mysql://retail:retailpass@mysql:3306/ris_eventstore
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       CACHE_TTL_MS_DEFAULT: 60000
@@ -97,6 +101,7 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      EVENTSTORE_DATABASE_URL: mysql://retail:retailpass@mysql:3306/ris_eventstore
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       CACHE_TTL_MS_DEFAULT: 60000
@@ -127,6 +132,7 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      EVENTSTORE_DATABASE_URL: mysql://retail:retailpass@mysql:3306/ris_eventstore
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       CACHE_TTL_MS_DEFAULT: 60000
@@ -156,6 +162,7 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      EVENTSTORE_DATABASE_URL: mysql://retail:retailpass@mysql:3306/ris_eventstore
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       CACHE_TTL_MS_DEFAULT: 60000
@@ -185,6 +192,7 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      EVENTSTORE_DATABASE_URL: mysql://retail:retailpass@mysql:3306/ris_eventstore
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       DEFAULT_CURRENCY: USD
@@ -194,6 +202,36 @@ services:
       - .:/app
       - /app/node_modules
     command: yarn start:dev:catalog-microservice
+    networks:
+      - backend
+
+  event-store-microservice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: event-store-microservice
+    container_name: event-store-microservice
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://retail:retailpass@mysql:3306/retail_db
+      EVENTSTORE_DATABASE_URL: mysql://retail:retailpass@mysql:3306/ris_eventstore
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CACHE_TTL_MS_DEFAULT: 60000
+      OTEL_SERVICE_NAME: event-store-microservice
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: yarn start:dev:event-store-microservice
     networks:
       - backend
 
