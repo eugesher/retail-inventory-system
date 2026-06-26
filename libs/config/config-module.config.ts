@@ -13,6 +13,14 @@ export const configModuleConfig = {
     DATABASE_URL: Joi.string().uri({ scheme: 'mysql' }).required(),
     DATABASE_LOGGING: Joi.boolean().default(process.env.NODE_ENV !== 'production'),
 
+    // The event-store microservice persists the event firehose + the staff audit log to
+    // an isolated logical database `ris_eventstore` (same MySQL instance, separate
+    // schema + migration history), kept off the operational `retail_db` so the
+    // write-heavy append stream never pressures live checkout/inventory reads
+    // (ADR-034). Required — the event store fails fast at boot without it; the other
+    // five services never read it.
+    EVENTSTORE_DATABASE_URL: Joi.string().uri({ scheme: 'mysql' }).required(),
+
     // ISO-4217 currency the catalog publish precondition resolves against — a
     // product publishes only when every variant has an in-effect price in this
     // currency. Defaulted, so a missing var never fails boot.

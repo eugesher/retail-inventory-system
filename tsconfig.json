@@ -21,6 +21,9 @@
       "@retail-inventory-system/apps/catalog-microservice": [
         "apps/catalog-microservice/src/app/app.module"
       ],
+      "@retail-inventory-system/apps/event-store-microservice": [
+        "apps/event-store-microservice/src/app/app.module"
+      ],
       "@retail-inventory-system/apps/inventory-microservice": [
         "apps/inventory-microservice/src/app/app.module"
       ],
