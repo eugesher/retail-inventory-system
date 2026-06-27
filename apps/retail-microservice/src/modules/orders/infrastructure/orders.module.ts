@@ -8,6 +8,7 @@ import {
   MicroserviceClientInventoryModule,
   MicroserviceClientNotificationModule,
   MicroserviceClientRetailModule,
+  MicroserviceClientRisEventsModule,
 } from '@retail-inventory-system/messaging';
 
 import {
@@ -65,13 +66,14 @@ import {
   TypeormTransactionAdapter,
 } from './persistence';
 import { FakePaymentGatewayAdapter } from './payment-gateway';
-import { NoOpAuditLogPublisher } from './audit';
+import { RmqAuditLogPublisher } from './audit';
 import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 
 // The orders bounded-context module: the `Order` / `Address` / `Payment` /
 // `Fulfillment` / `Refund` repositories, the `PAYMENT_GATEWAY` seam (default
-// `FakePaymentGatewayAdapter`, ADR-028 §4), the `AUDIT_LOG_PUBLISHER` seam (default
-// `NoOpAuditLogPublisher`, the always-audit money-movement rule, ADR-032), the
+// `FakePaymentGatewayAdapter`, ADR-028 §4), the `AUDIT_LOG_PUBLISHER` seam (the real
+// `RmqAuditLogPublisher` onto `ris.events`, the always-audit money-movement rule,
+// ADR-032/035), the
 // transactional unit-of-work (`TRANSACTION_PORT`), the outbound seams (catalog snapshot
 // reads, the inventory allocate/cancel + commit-sale seams, and the
 // order/payment/fulfillment/refund event emits), the Place Order + Authorize Payment +
@@ -87,16 +89,18 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
 // `paymentFlaggedForRefund=true`, issues a full refund inline via `IssueRefundUseCase`
 // (ADR-032).
 //
-// Four messaging clients are imported: `MicroserviceClientCatalogModule` so Place
+// Five messaging clients are imported: `MicroserviceClientCatalogModule` so Place
 // Order can snapshot from `catalog.variant.get` / `catalog.price.select` on
 // `catalog_queue`; `MicroserviceClientInventoryModule` so Place Order can allocate
 // (and compensate-cancel) the cart's stock holds via `inventory.reservation.allocate`
 // / `inventory.allocation.cancel` and Ship Fulfillment can decrement physical stock
 // via `inventory.stock.commit-sale` on `inventory_queue` (ADR-030 §4 / ADR-031);
 // `MicroserviceClientNotificationModule` so `retail.order.placed` lands on
-// `notification_events` (the consumer's queue); and `MicroserviceClientRetailModule`
+// `notification_events` (the consumer's queue); `MicroserviceClientRetailModule`
 // so the reserved `retail.payment.authorized` event lands on the service's own
-// `retail_queue`. `useExisting` shares each adapter
+// `retail_queue`; and `MicroserviceClientRisEventsModule` so `RmqAuditLogPublisher`
+// can emit `audit.staff.action` onto the `ris.events` topic exchange (ADR-035).
+// `useExisting` shares each adapter
 // instance with code that injects the concrete class while use cases depend on the
 // port symbols (the `cart.module.ts` / `stock.module.ts` pattern). The
 // `OrdersRpcExceptionFilter` is registered via `APP_FILTER` so every order
@@ -121,6 +125,10 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     MicroserviceClientInventoryModule,
     MicroserviceClientNotificationModule,
     MicroserviceClientRetailModule,
+    // The producer-side client for the `ris.events` topic exchange — the real
+    // `RmqAuditLogPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy` to
+    // emit `audit.staff.action` for the always-audit refund money movements (ADR-035).
+    MicroserviceClientRisEventsModule,
   ],
   controllers: [OrdersController, OrderCancelledConsumer],
   providers: [
@@ -154,10 +162,10 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     { provide: ORDER_COMMIT_SALE_GATEWAY, useExisting: OrderCommitSaleRabbitmqAdapter },
     OrderRabbitmqPublisher,
     { provide: ORDER_EVENTS_PUBLISHER, useExisting: OrderRabbitmqPublisher },
-    // The always-audit seam for refund money movements (ADR-032). Default is the
-    // log-only `NoOpAuditLogPublisher`; a real audit sink swaps in by rebinding.
-    NoOpAuditLogPublisher,
-    { provide: AUDIT_LOG_PUBLISHER, useExisting: NoOpAuditLogPublisher },
+    // The always-audit seam for refund money movements (ADR-032/035): the real RMQ
+    // adapter publishes `audit.staff.action` onto the `ris.events` topic exchange.
+    RmqAuditLogPublisher,
+    { provide: AUDIT_LOG_PUBLISHER, useExisting: RmqAuditLogPublisher },
 
     AuthorizePaymentUseCase,
     PlaceOrderUseCase,
