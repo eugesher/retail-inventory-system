@@ -157,6 +157,16 @@ The system handles order lifecycle management and product stock tracking across 
 │  Pricing: price.set/list/select + tax-category RPCs           │
 └───────────────────────────────────────────────────────────────┘
 
+┌───────────────────────────────────────────────────────────────┐
+│                Event Store Microservice (RMQ)                │
+│  Binds: event_store_firehose_queue → ris.events  (#)          │
+│  OWN DB: ris_eventstore  (isolated schema, NOT the shared DB) │
+│  Context: audit-and-events (domain-events/ + audit-log/)      │
+│  Tables: domain_event + audit_log_entry (append-only)         │
+│  FirehoseConsumer: audit.staff.action → audit_log_entry,      │
+│                    else → domain_event (idempotent ingest)    │
+└───────────────────────────────────────────────────────────────┘
+
 OpenTelemetry: every service exports OTLP/HTTP spans through the
 otel-collector → Jaeger UI at http://localhost:16686 (see the
 "Distributed tracing" section below).
@@ -174,9 +184,9 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 
 | Library | Purpose |
 | ------- | ------- |
-| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/`, `inventory/`, `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, JWT payload interfaces, `IAuditLogPublisher` port + `AUDIT_LOG_PUBLISHER` token). |
+| `contracts` | Cross-service message and DTO contracts (plain TypeScript). Sub-areas: `microservices/` (queue/pattern/client-token/app-name enums, `ICorrelationPayload`), `retail/`, `inventory/`, `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, JWT payload interfaces, `IAuditLogPublisher` port + `AUDIT_LOG_PUBLISHER` token, `IAuditStaffActionEvent` — the `audit.staff.action` wire contract). |
 | `database` | TypeORM base — `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, and `DatabaseModule.forRoot(entities)` / `DatabaseModule.forFeature(entities)`. |
-| `messaging` | RabbitMQ wiring — `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory,Notification}Module`, `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `ROUTING_KEYS` and `EXCHANGES` constants. |
+| `messaging` | RabbitMQ wiring — `MessagingModule`, per-service `MicroserviceClient{Retail,Inventory,Notification,Catalog}Module` + `MicroserviceClientRisEventsModule` (the `ris.events` topic-exchange producer client), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher` (the shared dual-publish mirror helper — non-throwing best-effort, reused by all seven domain-event publishers), `ROUTING_KEYS` and `EXCHANGES` constants (`RIS_EVENTS_TOPIC` live; the rest reserved). |
 | `cache` | Cache port + Redis adapter — `ICachePort` (`get` / `set` / `del` / `wrap` / `delByPrefix` / `singleFlight`), `CACHE_PORT` DI token, `RedisCacheAdapter` (OTel-spanned), `CacheModule` (global), `@Cacheable()` decorator, `CACHE_KEYS` registry. |
 | `observability` | Pino logger (`LoggerModuleConfig` with trace-correlation hook), `CorrelationMiddleware` + `@CorrelationId()` + `CORRELATION_ID_HEADER`, OTel bootstrap (`tracer.ts` side-effect import for `main.ts`), `TraceContextInterceptor` and `MetricsModule` placeholders. |
 | `ddd` | Framework-free domain building blocks — `Entity`, `AggregateRoot`, `ValueObject`, `DomainEvent`, `IRepositoryPort`. No `@nestjs/*` or TypeORM imports. |
@@ -193,6 +203,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low`, `retail.order.placed`, `retail.fulfillment.shipped` / `.delivered`, the return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected`, and `retail.refund.issued` to a notifier port. Owns the `notification_template` (versioned registry) + `notification_delivery` (audit trail) tables in the shared `retail_db` (ADR-033) |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, handles the category writes `catalog.category.create` / `catalog.category.reparent`, the category reads `catalog.category.list` / `catalog.category.get-tree` / `catalog.category.list-products`, the membership write `catalog.product.reclassify`, and the media operations `catalog.media.attach` / `catalog.media.reorder` / `catalog.media.detach` / `catalog.media.list`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
+| `event-store-microservice`  | RabbitMQ (`event_store_firehose_queue`) | Append-only sink for the event firehose + the staff audit log; persists to its **own isolated database** `ris_eventstore` ([ADR-034](docs/adr/034-isolated-eventstore-database.md)), separate from the shared `retail_db`. Owns two **append-only** tables — `domain_event` (firehose log, composite-UNIQUE idempotency key) and `audit_log_entry` (staff audit trail) — plus their frozen value objects and direct-implement repository ports (`append` + reads only, no save/update/delete). Binds its queue `#` to the `ris.events` topic exchange; the `FirehoseConsumer` dispatches `audit.staff.action` → `audit_log_entry` and every other event → `domain_event` (idempotent, warn-and-drop on bad input, never rethrows). Both paths now have live producers — the audit publisher mirrors `audit.staff.action` and all seven domain-event publishers dual-publish their full event set onto `ris.events`; read queries land in later work |
 
 ### API Gateway layout
 
@@ -588,6 +599,9 @@ yarn start:dev
 | `yarn migration:revert` | Revert the last applied migration. |
 | `yarn migration:show` | List every migration with its applied/pending status. |
 | `yarn typeorm:migration-cli` | Raw TypeORM CLI hook used by the three commands above (pre-wired with the data-source config). |
+| `yarn migration:create:eventstore <Name>` | Scaffold a migration under `migrations/eventstore/` for the isolated `ris_eventstore` schema ([ADR-034](docs/adr/034-isolated-eventstore-database.md)). |
+| `yarn migration:run:eventstore` | Apply pending `ris_eventstore` migrations (creates `domain_event` + `audit_log_entry`). |
+| `yarn migration:revert:eventstore` / `yarn migration:show:eventstore` | Revert the last / list `ris_eventstore` migrations. The two pipelines keep separate `migrations` ledgers; `test:infra:reload` runs both. |
 
 ### Testing
 

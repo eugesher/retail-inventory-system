@@ -7,7 +7,11 @@ import {
   ICatalogProductPublishedEvent,
   ICatalogVariantCreatedEvent,
 } from '@retail-inventory-system/contracts';
-import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientTokenEnum,
+  RisEventsMirrorPublisher,
+  ROUTING_KEYS,
+} from '@retail-inventory-system/messaging';
 
 import { ICatalogEventsPublisherPort } from '../../application/ports';
 
@@ -25,6 +29,12 @@ import { ICatalogEventsPublisherPort } from '../../application/ports';
 // `catalog.product.published` / `.archived` stay on `catalog_queue` as reserved
 // surfaces — emitting to a queue with no matching handler is the same pattern
 // `retail.order.confirmed` follows today.
+//
+// Every event is additionally **dual-published** (ADR-035): after the primary
+// emit, the same routing key + wire is mirrored onto the `ris.events` topic
+// exchange via the shared `RisEventsMirrorPublisher`, so the event-store firehose
+// captures the catalog stream without re-binding the inventory auto-init consumer.
+// The mirror is best-effort and non-throwing, ordered after the primary emit.
 @Injectable()
 export class CatalogRabbitmqPublisher implements ICatalogEventsPublisherPort {
   constructor(
@@ -32,6 +42,7 @@ export class CatalogRabbitmqPublisher implements ICatalogEventsPublisherPort {
     private readonly catalogClient: ClientProxy,
     @Inject(MicroserviceClientTokenEnum.INVENTORY_MICROSERVICE)
     private readonly inventoryClient: ClientProxy,
+    private readonly risEvents: RisEventsMirrorPublisher,
   ) {}
 
   public async publishVariantCreated(event: ICatalogVariantCreatedEvent): Promise<void> {
@@ -44,6 +55,7 @@ export class CatalogRabbitmqPublisher implements ICatalogEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.CATALOG_VARIANT_CREATED, event);
   }
 
   public async publishProductPublished(event: ICatalogProductPublishedEvent): Promise<void> {
@@ -53,6 +65,7 @@ export class CatalogRabbitmqPublisher implements ICatalogEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.CATALOG_PRODUCT_PUBLISHED, event);
   }
 
   public async publishProductArchived(event: ICatalogProductArchivedEvent): Promise<void> {
@@ -62,5 +75,6 @@ export class CatalogRabbitmqPublisher implements ICatalogEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.CATALOG_PRODUCT_ARCHIVED, event);
   }
 }

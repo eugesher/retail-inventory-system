@@ -2,7 +2,10 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
-import { MicroserviceClientCatalogModule } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientCatalogModule,
+  MicroserviceClientRisEventsModule,
+} from '@retail-inventory-system/messaging';
 
 import { PRICING_EVENTS_PUBLISHER, PRICING_REPOSITORY } from './application/ports';
 import {
@@ -31,15 +34,19 @@ import { PricingController, PricingRpcExceptionFilter } from './presentation';
 // concrete class directly, while use cases depend on the port symbols
 // (`PRICING_REPOSITORY`, `PRICING_EVENTS_PUBLISHER`).
 // `MicroserviceClientCatalogModule` provides the `catalog_queue` `ClientProxy` the
-// publisher injects. The `PricingRpcExceptionFilter` is registered via
-// `APP_FILTER` so it applies however the microservice is bootstrapped (main.ts or
-// the e2e `createMicroservice(AppModule)`). No `CacheModule`: the threshold for
-// caching pricing reads is unmet, so the reserved `catalogPrice*` builder stays
-// unconsumed (ADR-026).
+// publisher injects; `MicroserviceClientRisEventsModule` provides the `ris.events`
+// topic-exchange client so the publisher can mirror every pricing event onto the
+// event-store firehose (ADR-035, the `RisEventsMirrorPublisher` dual-publish). The
+// `PricingRpcExceptionFilter` is registered via `APP_FILTER` so it applies however
+// the microservice is bootstrapped (main.ts or the e2e
+// `createMicroservice(AppModule)`). No `CacheModule`: the threshold for caching
+// pricing reads is unmet, so the reserved `catalogPrice*` builder stays unconsumed
+// (ADR-026).
 @Module({
   imports: [
     DatabaseModule.forFeature([PriceEntity, TaxCategoryEntity]),
     MicroserviceClientCatalogModule,
+    MicroserviceClientRisEventsModule,
   ],
   controllers: [PricingController],
   providers: [

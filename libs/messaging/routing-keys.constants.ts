@@ -310,6 +310,15 @@ export const ROUTING_KEYS = {
   // binds (ADR-033). The plural `notifications.*` prefix marks it as the cross-cutting
   // alerting stream, distinct from the singular `notification.delivery.*` RPC commands.
   NOTIFICATIONS_DELIVERY_FAILED: 'notifications.delivery.failed',
+  // `audit.staff.action` — the cross-cutting staff-action audit stream (ADR-035).
+  // Emitted onto the `ris.events` topic exchange by the real `AUDIT_LOG_PUBLISHER`
+  // adapters (api-gateway `auth` + retail `orders`) whenever a privileged actor
+  // mutates state (role assignment, refund, …); consumed only by the event store's
+  // audit-log ingest, which dispatches it to `audit_log_entry` while every other
+  // routing key flows to the domain-event ingest. It rides `ris.events`, not a
+  // service queue, because the audit log is a destination of its own, decoupled
+  // from the operational request/response paths.
+  AUDIT_STAFF_ACTION: 'audit.staff.action',
 } as const;
 
 export type RoutingKey = (typeof ROUTING_KEYS)[keyof typeof ROUTING_KEYS];
