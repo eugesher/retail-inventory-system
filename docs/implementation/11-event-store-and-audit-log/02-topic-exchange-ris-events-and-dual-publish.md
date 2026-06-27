@@ -144,16 +144,69 @@ firehose-shaped binding works before any consumer exists. The mapping, the no-op
 deletions, and why only these two services are swapped are detailed in
 [04-auditlog-ingestion-and-publisher-swap.md](04-auditlog-ingestion-and-publisher-swap.md).
 
+## 6. Producer fan-out: every domain-event publisher mirrors
+
+With the topology proven by the audit stream, the firehose is switched on for **every**
+business event. Each of the seven `infrastructure/messaging/*-rabbitmq.publisher.ts`
+adapters — the only files in their services permitted to hold a `ClientProxy`
+([ADR-009](../../adr/009-port-adapter-at-the-gateway.md) /
+[ADR-004](../../adr/004-adopt-hexagonal-architecture-per-service.md)) — keeps its existing
+default-exchange `emit` **and** mirrors the same routing key + wire onto `ris.events`:
+
+| Publisher | Service / module | Events mirrored |
+| --- | --- | --- |
+| `StockRabbitmqPublisher` | inventory `stock` | `inventory.stock.{low,received,adjusted,reserved,allocated,released,committed,returned}`, `inventory.stock-level.initialized`, `inventory.stock-movement.recorded` (10) |
+| `CatalogRabbitmqPublisher` | catalog `catalog` | `catalog.variant.created`, `catalog.product.published`/`.archived` (3) |
+| `PricingRabbitmqPublisher` | catalog `pricing` | `catalog.price.changed`/`.scheduled` (2) |
+| `CartRabbitmqPublisher` | retail `cart` | `retail.cart.created`/`.line-added`/`.line-removed`/`.line-quantity-changed` (4) |
+| `OrderRabbitmqPublisher` | retail `orders` | `retail.order.placed`/`.cancelled`, `retail.payment.authorized`/`.captured`, `retail.fulfillment.created`/`.shipped`/`.delivered`, `retail.refund.issued`/`.failed` (9) |
+| `ReturnRabbitmqPublisher` | retail `returns` | `retail.return.requested`/`.authorized`/`.received`/`.inspected`/`.rejected`/`.closed` (6) |
+| `NotificationRabbitmqPublisher` | notification `notifications` | `notifications.delivery.failed` (1) |
+
+The mirror is one line after each primary emit, through the shared helper from §4:
+
+```ts
+await firstValueFrom(this.primaryClient.emit(ROUTING_KEYS.SOME_KEY, wire)); // unchanged
+await this.risEvents.mirror(ROUTING_KEYS.SOME_KEY, wire);                    // added
+```
+
+Three properties keep the fan-out safe and uniform:
+
+- **Same key, same payload, verbatim.** The mirror reuses the *exact* routing-key constant
+  and the *same* wire object the primary emit used — so the firehose's `eventType` is
+  precisely the producer's routing key, and the ingest stores the producer's payload with
+  no re-encoding. No new routing key or event shape is introduced.
+- **Best-effort and non-throwing.** `RisEventsMirrorPublisher.mirror` now swallows its own
+  rejection (warn-log, no throw) — see §4. A `ris.events` outage therefore cannot surface
+  out of a publish method, so the 30+ call sites need no `try/catch`. This matters because
+  the primary publish is itself best-effort post-commit
+  ([ADR-020](../../adr/020-rabbitmq-as-inter-service-bus.md)): the mutation has already
+  committed by the time any event is emitted.
+- **Ordered after the primary emit.** The mirror is awaited *after* the primary, so a
+  mirror hiccup can never delay or shadow the publish that feeds the real consumers. The
+  dual-emitted `retail.order.cancelled` (two queue destinations,
+  [ADR-033](../../adr/033-notification-templates-deliveries-and-render-dispatch.md)) is mirrored
+  **once** — it is one logical event, and the firehose ingest is idempotent regardless.
+
+**Existing consumers are untouched.** Because each adapter preserves its primary
+default-exchange emit, every queue-bound subscriber — the notification service's six
+`@EventPattern` consumers, the inventory auto-init consumer, the retail auto-refund
+consumer — keeps receiving its events exactly as before. The event store receives a
+*copy* through the separate topic-exchange channel; nothing was re-bound.
+
+Each owning Nest module imports `MicroserviceClientRisEventsModule` so the mirror is
+injectable (the retail `orders` module already imported it for the audit adapter — §5).
+After this change, the event store's `domain_event` table fills from live producer
+traffic, completing the firehose end-to-end.
+
 ## What is deliberately deferred
 
-This change wires the producer side and one producer. Later capabilities complete the
-picture:
+The producer side and both ingest paths are now complete. The remaining capabilities are
+read-side and operational:
 
-- **The bulk dual-publish fan-out** — mirroring the seven domain-event publishers
-  (`catalog.*`, `inventory.*`, `retail.*`, notification events) onto `ris.events` through
-  `RisEventsMirrorPublisher`.
-- **The firehose consumer** — the `#.#` binding on the event-store listener, the
-  in-consumer routing-key dispatch, the ingest use cases, and the duplicate-absorbing
-  idempotency key.
-- **The persistence** — the `domain_event` / `audit_log_entry` tables in
-  `ris_eventstore`.
+- **Reads / queries** over the captured firehose — a `domain_event` / `audit_log_entry`
+  query surface (by correlation id, by actor, by aggregate) has no HTTP/RPC endpoint yet.
+- **A transactional outbox** — the dual-publish is best-effort, not exactly-once; a
+  durable outbox that guarantees every committed mutation is mirrored is future work.
+- **Threading the request IP** — `audit_log_entry.ip_address` is always null; no call
+  site captures the originating IP today.

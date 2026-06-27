@@ -6,6 +6,7 @@ import { DatabaseModule } from '@retail-inventory-system/database';
 import {
   MicroserviceClientInventoryModule,
   MicroserviceClientNotificationModule,
+  MicroserviceClientRisEventsModule,
 } from '@retail-inventory-system/messaging';
 
 import {
@@ -53,11 +54,14 @@ import {
 // the new `v2`/`variantId` key shape). The `CatalogEventsConsumer` subscribes to
 // `catalog.variant.created` (auto-init), driving `AutoInitStockLevelUseCase`.
 //
-// Two messaging clients are imported: `MicroserviceClientNotificationModule` for
-// `inventory.stock.low`, and `MicroserviceClientInventoryModule` so the publisher
-// can emit `inventory.stock-level.initialized` onto this service's own queue. The
-// transaction adapter backs the Receive/Adjust write path and the optimistic
-// writes the inventory-reservation capability adds.
+// Three messaging clients are imported: `MicroserviceClientNotificationModule` for
+// `inventory.stock.low`, `MicroserviceClientInventoryModule` so the publisher can
+// emit `inventory.stock-level.initialized` onto this service's own queue, and
+// `MicroserviceClientRisEventsModule` so the publisher can mirror every stock event
+// onto the `ris.events` topic exchange for the event-store firehose (ADR-035, the
+// `RisEventsMirrorPublisher` dual-publish). The transaction adapter backs the
+// Receive/Adjust write path and the optimistic writes the inventory-reservation
+// capability adds.
 @Module({
   imports: [
     DatabaseModule.forFeature([
@@ -68,6 +72,7 @@ import {
     ]),
     MicroserviceClientNotificationModule,
     MicroserviceClientInventoryModule,
+    MicroserviceClientRisEventsModule,
   ],
   controllers: [StockController, CatalogEventsConsumer],
   providers: [
