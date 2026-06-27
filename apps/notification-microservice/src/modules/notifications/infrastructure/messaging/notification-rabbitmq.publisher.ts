@@ -3,7 +3,11 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
 import { INotificationDeliveryFailedEvent } from '@retail-inventory-system/contracts';
-import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientTokenEnum,
+  RisEventsMirrorPublisher,
+  ROUTING_KEYS,
+} from '@retail-inventory-system/messaging';
 
 import { INotificationEventsPublisherPort } from '../../application/ports';
 
@@ -18,11 +22,17 @@ import { INotificationEventsPublisherPort } from '../../application/ports';
 // downstream-alerting seam a future ops-alert / dead-letter capability binds. (A service
 // emitting onto its own queue is the same client wiring the cross-service publishers use;
 // the absence of a consumer is what makes it "reserved", not the destination.)
+//
+// The event is additionally **dual-published** (ADR-035): after the primary emit, the
+// same routing key + wire is mirrored onto the `ris.events` topic exchange via the shared
+// `RisEventsMirrorPublisher`, so the event-store firehose captures the delivery-failure
+// stream. The mirror is best-effort and non-throwing, ordered after the primary emit.
 @Injectable()
 export class NotificationRabbitmqPublisher implements INotificationEventsPublisherPort {
   constructor(
     @Inject(MicroserviceClientTokenEnum.NOTIFICATION_MICROSERVICE)
     private readonly notificationClient: ClientProxy,
+    private readonly risEvents: RisEventsMirrorPublisher,
   ) {}
 
   public async publishDeliveryFailed(event: INotificationDeliveryFailedEvent): Promise<void> {
@@ -35,5 +45,6 @@ export class NotificationRabbitmqPublisher implements INotificationEventsPublish
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.NOTIFICATIONS_DELIVERY_FAILED, event);
   }
 }

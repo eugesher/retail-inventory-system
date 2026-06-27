@@ -6,6 +6,7 @@ import {
   MicroserviceClientCatalogModule,
   MicroserviceClientInventoryModule,
   MicroserviceClientRetailModule,
+  MicroserviceClientRisEventsModule,
 } from '@retail-inventory-system/messaging';
 
 import {
@@ -41,16 +42,19 @@ import { CartController, CartRpcExceptionFilter } from '../presentation';
 // `MicroserviceClientInventoryModule` so Add/Change/Remove can reserve/release
 // stock via `inventory.reservation.*` on `inventory_queue` (ADR-030); and
 // `MicroserviceClientRetailModule` so the publisher can emit the four reserved
-// `retail.cart.*` events onto the service's own `retail_queue`. The
-// `CartRpcExceptionFilter` is registered via `APP_FILTER` so it maps every
-// `@MessagePattern` handler's `CartDomainException` onto the wire status the
-// gateway resolves.
+// `retail.cart.*` events onto the service's own `retail_queue`; and
+// `MicroserviceClientRisEventsModule` so the publisher can mirror those same events
+// onto the `ris.events` topic exchange for the event-store firehose (ADR-035, the
+// `RisEventsMirrorPublisher` dual-publish). The `CartRpcExceptionFilter` is
+// registered via `APP_FILTER` so it maps every `@MessagePattern` handler's
+// `CartDomainException` onto the wire status the gateway resolves.
 @Module({
   imports: [
     DatabaseModule.forFeature([CartEntity, CartLineEntity]),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
     MicroserviceClientRetailModule,
+    MicroserviceClientRisEventsModule,
   ],
   controllers: [CartController],
   providers: [
