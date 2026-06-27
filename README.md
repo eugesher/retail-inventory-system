@@ -162,7 +162,8 @@ The system handles order lifecycle management and product stock tracking across 
 │  Binds: event_store_firehose_queue (idle — no handlers yet)   │
 │  OWN DB: ris_eventstore  (isolated schema, NOT the shared DB) │
 │  Context: audit-and-events (domain-events/ + audit-log/)      │
-│  Future: #.# firehose sink + staff audit log (append-only)    │
+│  Tables: domain_event + audit_log_entry (append-only)         │
+│  Future: #.# firehose consumer + ingest into the two logs     │
 └───────────────────────────────────────────────────────────────┘
 
 OpenTelemetry: every service exports OTLP/HTTP spans through the
@@ -201,7 +202,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low`, `retail.order.placed`, `retail.fulfillment.shipped` / `.delivered`, the return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected`, and `retail.refund.issued` to a notifier port. Owns the `notification_template` (versioned registry) + `notification_delivery` (audit trail) tables in the shared `retail_db` (ADR-033) |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, handles the category writes `catalog.category.create` / `catalog.category.reparent`, the category reads `catalog.category.list` / `catalog.category.get-tree` / `catalog.category.list-products`, the membership write `catalog.product.reclassify`, and the media operations `catalog.media.attach` / `catalog.media.reorder` / `catalog.media.detach` / `catalog.media.list`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
-| `event-store-microservice`  | RabbitMQ (`event_store_firehose_queue`) | Append-only sink for the event firehose + the staff audit log; persists to its **own isolated database** `ris_eventstore` ([ADR-034](docs/adr/034-isolated-eventstore-database.md)), separate from the shared `retail_db`. Currently a shell that boots and idles on its queue with no handlers bound (default exchange); the `#.#` topic-exchange firehose, the `domain_event` / `audit_log_entry` tables, and the consumers land in later work |
+| `event-store-microservice`  | RabbitMQ (`event_store_firehose_queue`) | Append-only sink for the event firehose + the staff audit log; persists to its **own isolated database** `ris_eventstore` ([ADR-034](docs/adr/034-isolated-eventstore-database.md)), separate from the shared `retail_db`. Owns two **append-only** tables — `domain_event` (firehose log, composite-UNIQUE idempotency key) and `audit_log_entry` (staff audit trail) — plus their frozen value objects and direct-implement repository ports (`append` + reads only, no save/update/delete). Still boots and idles on its queue with no handlers bound (default exchange); the `#.#` topic-exchange firehose consumer + the ingest land in later work |
 
 ### API Gateway layout
 
@@ -597,6 +598,9 @@ yarn start:dev
 | `yarn migration:revert` | Revert the last applied migration. |
 | `yarn migration:show` | List every migration with its applied/pending status. |
 | `yarn typeorm:migration-cli` | Raw TypeORM CLI hook used by the three commands above (pre-wired with the data-source config). |
+| `yarn migration:create:eventstore <Name>` | Scaffold a migration under `migrations/eventstore/` for the isolated `ris_eventstore` schema ([ADR-034](docs/adr/034-isolated-eventstore-database.md)). |
+| `yarn migration:run:eventstore` | Apply pending `ris_eventstore` migrations (creates `domain_event` + `audit_log_entry`). |
+| `yarn migration:revert:eventstore` / `yarn migration:show:eventstore` | Revert the last / list `ris_eventstore` migrations. The two pipelines keep separate `migrations` ledgers; `test:infra:reload` runs both. |
 
 ### Testing
 
