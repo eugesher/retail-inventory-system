@@ -1,17 +1,19 @@
-# The staff audit log: the publisher swap onto `ris.events`
+# The staff audit log: publisher swap and ingestion into `audit_log_entry`
 
-This document covers how the staff audit log reaches the event store. It has two
-halves:
+This document covers how the staff audit log reaches the event store, end to end. It
+has two halves:
 
-- **the publisher swap** (this revision) — retiring the log-only no-op audit adapters
-  and replacing them with a real RMQ publisher that emits `audit.staff.action` onto the
+- **the publisher swap** (§1–§4) — retiring the log-only no-op audit adapters and
+  replacing them with a real RMQ publisher that emits `audit.staff.action` onto the
   `ris.events` topic exchange; and
-- **the ingestion side** — the event store's audit-log consumer and the
-  `audit_log_entry` persistence — which is a later capability and extends this document
-  when it lands.
+- **the ingestion side** (§5) — the event store's firehose consumer routing
+  `audit.staff.action` to the audit-log ingest, which maps it 1:1 into the append-only
+  `audit_log_entry` table.
 
 It builds on the `ris.events` topology from
-[02-topic-exchange-ris-events-and-dual-publish.md](02-topic-exchange-ris-events-and-dual-publish.md)
+[02-topic-exchange-ris-events-and-dual-publish.md](02-topic-exchange-ris-events-and-dual-publish.md),
+the firehose consumer + domain-event ingest in
+[03-domainevent-ingestion-and-idempotency.md](03-domainevent-ingestion-and-idempotency.md),
 and the decision in [ADR-035](../../adr/035-event-store-firehose-topic-exchange.md).
 
 ## 1. The audit seam before the swap
@@ -144,11 +146,59 @@ context at all. The wire field exists and is reserved so the ingest schema is st
 IP capture is added (threading `request.ip` through the gateway audit points). It is a
 known, documented gap, not an oversight.
 
-## What is deliberately deferred
+## 5. The ingestion side: routing `audit.staff.action` into `audit_log_entry`
 
-The **ingestion side** is a later capability that extends this document: the event
-store's audit-log consumer (the `audit.staff.action` branch of the in-consumer
-routing-key dispatch), the `audit_log_entry` table in `ris_eventstore`, and the
-duplicate-absorbing idempotency key. Until it lands, an emitted `audit.staff.action`
-message is published onto `ris.events` and — with no `#.#` consumer bound yet — dropped
-by the broker as unrouted, by design.
+The other end of the wire now exists. The event store's single
+[`FirehoseConsumer`](../../../apps/event-store-microservice/src/modules/firehose.consumer.ts)
+(see [03-domainevent-ingestion-and-idempotency.md](03-domainevent-ingestion-and-idempotency.md)
+§1) reads each message's concrete routing key and dispatches:
+
+```ts
+if (routingKey === ROUTING_KEYS.AUDIT_STAFF_ACTION) {
+  await this.ingestAuditLog.execute(payload as IAuditStaffActionEvent);
+} else {
+  await this.ingestDomainEvent.execute(routingKey, payload);
+}
+```
+
+So `audit.staff.action` is the **one** routing key handled by the audit-log branch;
+everything else is a raw firehose event. An audit action lands **only** in
+`audit_log_entry`, never also in `domain_event` — the two logs stay distinct.
+
+### The 1:1 map
+
+[`IngestAuditLogUseCase`](../../../apps/event-store-microservice/src/modules/audit-log/application/use-cases/ingest-audit-log.use-case.ts)
+maps the wire `IAuditStaffActionEvent` straight onto an `AuditLogEntry` — the inverse of
+the publisher mapping in §2. The wire is already a transport-flattened projection, so the
+ingest does no inference: `actorId`, `actorType`, `action`, `entityType`, `entityId`,
+`before`, `after`, `ipAddress`, and `correlationId` copy across verbatim, and the ISO
+`occurredAt` string is parsed to a `Date`. Then `AUDIT_LOG_REPOSITORY.append` inserts the
+row.
+
+### No idempotency key — and why that is correct
+
+Unlike the firehose log, `audit_log_entry` has **no** dedupe UNIQUE (see
+[06-append-only-enforcement.md](06-append-only-enforcement.md)). An audit trail records
+*occurrences*: two identical staff actions a second apart are two genuine events, not a
+duplicate, so collapsing them would lose information. `append` therefore always inserts.
+The at-least-once guarantee means a redelivery could in principle write a second row, but
+audit publishing is rare, post-commit, and best-effort — the trade-off favors never
+dropping a real action over de-duplicating a redelivery, the opposite call from the
+high-volume firehose.
+
+### Validation and the never-rethrow posture
+
+Two load-bearing columns are validated before the insert; a violation is a **warn +
+drop**, never an exception (ADR-011 §7 — a throw inside an `@EventPattern` blind-redelivers
+in a hot loop):
+
+- an `actorType` outside `{staff-user, system}` (the two-value origin axis) → dropped;
+- an absent or unparseable `occurredAt` → dropped (the audit timeline cannot be defaulted).
+
+Any thrown persist error is likewise caught, warn-logged, and swallowed. The message is
+acked in every case.
+
+> Before this branch was wired, an emitted `audit.staff.action` was published onto
+> `ris.events` and — with no `#` consumer bound — dropped by the broker as unrouted. It
+> now lands in `audit_log_entry`. The `ipAddress` gap (§4) persists end to end: the column
+> is populated with the wire value, which is always `null` today.

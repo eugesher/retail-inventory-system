@@ -159,11 +159,12 @@ The system handles order lifecycle management and product stock tracking across 
 
 ┌───────────────────────────────────────────────────────────────┐
 │                Event Store Microservice (RMQ)                │
-│  Binds: event_store_firehose_queue (idle — no handlers yet)   │
+│  Binds: event_store_firehose_queue → ris.events  (#)          │
 │  OWN DB: ris_eventstore  (isolated schema, NOT the shared DB) │
 │  Context: audit-and-events (domain-events/ + audit-log/)      │
 │  Tables: domain_event + audit_log_entry (append-only)         │
-│  Future: #.# firehose consumer + ingest into the two logs     │
+│  FirehoseConsumer: audit.staff.action → audit_log_entry,      │
+│                    else → domain_event (idempotent ingest)    │
 └───────────────────────────────────────────────────────────────┘
 
 OpenTelemetry: every service exports OTLP/HTTP spans through the
@@ -202,7 +203,7 @@ Path-aliased TypeScript libraries under `libs/`, imported as `@retail-inventory-
 | `inventory-microservice`    | RabbitMQ (`inventory_queue`)    | Per-variant availability + location reads; consumes `catalog.variant.created` to auto-initialize a zeroed `StockLevel` |
 | `notification-microservice` | RabbitMQ (`notification_events`) | Fan-out of `inventory.stock.low`, `retail.order.placed`, `retail.fulfillment.shipped` / `.delivered`, the return lifecycle events `retail.return.requested` / `.authorized` / `.received` / `.inspected`, and `retail.refund.issued` to a notifier port. Owns the `notification_template` (versioned registry) + `notification_delivery` (audit trail) tables in the shared `retail_db` (ADR-033) |
 | `catalog-microservice`      | RabbitMQ (`catalog_queue`)      | Home of the product / variant catalog bounded context; handles `catalog.product.register` / `catalog.variant.create` / `catalog.product.publish` / `catalog.product.archive`, serves the read queries `catalog.product.list` / `catalog.product.get` / `catalog.variant.get`, handles the category writes `catalog.category.create` / `catalog.category.reparent`, the category reads `catalog.category.list` / `catalog.category.get-tree` / `catalog.category.list-products`, the membership write `catalog.product.reclassify`, and the media operations `catalog.media.attach` / `catalog.media.reorder` / `catalog.media.detach` / `catalog.media.list`, emits `catalog.variant.created` onto `inventory_queue` (consumed by the inventory auto-init), and emits `catalog.product.published` / `catalog.product.archived` onto `catalog_queue` (reserved). Also hosts the colocated **pricing** module's RPCs `catalog.price.set` / `catalog.price.list` / `catalog.price.select` / `catalog.tax-category.create` / `catalog.tax-category.list` / `catalog.variant.set-tax-category` and its events `catalog.price.changed` / `catalog.price.scheduled` |
-| `event-store-microservice`  | RabbitMQ (`event_store_firehose_queue`) | Append-only sink for the event firehose + the staff audit log; persists to its **own isolated database** `ris_eventstore` ([ADR-034](docs/adr/034-isolated-eventstore-database.md)), separate from the shared `retail_db`. Owns two **append-only** tables — `domain_event` (firehose log, composite-UNIQUE idempotency key) and `audit_log_entry` (staff audit trail) — plus their frozen value objects and direct-implement repository ports (`append` + reads only, no save/update/delete). Still boots and idles on its queue with no handlers bound (default exchange); the `#.#` topic-exchange firehose consumer + the ingest land in later work |
+| `event-store-microservice`  | RabbitMQ (`event_store_firehose_queue`) | Append-only sink for the event firehose + the staff audit log; persists to its **own isolated database** `ris_eventstore` ([ADR-034](docs/adr/034-isolated-eventstore-database.md)), separate from the shared `retail_db`. Owns two **append-only** tables — `domain_event` (firehose log, composite-UNIQUE idempotency key) and `audit_log_entry` (staff audit trail) — plus their frozen value objects and direct-implement repository ports (`append` + reads only, no save/update/delete). Binds its queue `#` to the `ris.events` topic exchange; the `FirehoseConsumer` dispatches `audit.staff.action` → `audit_log_entry` and every other event → `domain_event` (idempotent, warn-and-drop on bad input, never rethrows). Only the audit path has a live producer today; the domain-event dual-publish + read queries land in later work |
 
 ### API Gateway layout
 

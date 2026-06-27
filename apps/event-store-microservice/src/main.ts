@@ -6,6 +6,7 @@ import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { Logger, PinoLogger } from 'nestjs-pino';
 
 import { MicroserviceQueueEnum, AppNameEnum } from '@retail-inventory-system/contracts';
+import { EXCHANGES } from '@retail-inventory-system/messaging';
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 import { AppModule } from './app';
 
@@ -19,12 +20,13 @@ declare const module: {
   void (async (): Promise<void> => {
     const configService = new ConfigService();
 
-    // The event store boots as a plain RMQ listener on its own
-    // `event_store_firehose_queue`, bound to the default exchange (the
-    // `notification-microservice` shape). It registers NO `@MessagePattern` /
-    // `@EventPattern` handlers yet, so it connects and idles. A later capability
-    // re-points this connection at the `ris.events` topic exchange with `#.#`
-    // wildcards so the queue receives the whole event firehose.
+    // The event store binds its durable `event_store_firehose_queue` to the `ris.events`
+    // TOPIC exchange (ADR-035) — not the default exchange. With `exchangeType: 'topic'`
+    // + `wildcards: true`, the `FirehoseConsumer`'s `@EventPattern('#')` becomes the AMQP
+    // binding routing key (`#` is the catch-all that routes EVERY key), so the one queue
+    // receives the whole firehose and the consumer dispatches by the concrete routing key.
+    // `noAck: false` keeps at-least-once delivery; the consumer never rethrows, so a
+    // message is always acked (ADR-011 §7).
     const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
       bufferLogs: true,
       transport: Transport.RMQ,
@@ -33,6 +35,9 @@ declare const module: {
         noAck: false,
         queue: MicroserviceQueueEnum.EVENT_STORE_FIREHOSE_QUEUE,
         queueOptions: { durable: true },
+        exchange: EXCHANGES.RIS_EVENTS_TOPIC,
+        exchangeType: 'topic',
+        wildcards: true,
       },
     });
 
