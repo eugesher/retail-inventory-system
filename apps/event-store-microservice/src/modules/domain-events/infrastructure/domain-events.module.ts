@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
 
+import { IngestDomainEventUseCase } from '../application/use-cases';
 import { DOMAIN_EVENT_REPOSITORY } from '../application/ports';
 import { DomainEventEntity, DomainEventTypeormRepository } from './persistence';
 
@@ -12,12 +13,16 @@ import { DomainEventEntity, DomainEventTypeormRepository } from './persistence';
 //
 // `DatabaseModule.forFeature([DomainEventEntity])` registers the entity against the
 // eventstore connection the app module opened; `DOMAIN_EVENT_REPOSITORY` is bound to
-// its append-only TypeORM adapter and EXPORTED so the firehose consumer / ingest use
-// case (a later capability) can resolve it. There is no consumer or use case yet — the
-// service still boots and idles with no handlers bound.
+// its append-only TypeORM adapter. `IngestDomainEventUseCase` is provided AND EXPORTED so
+// the context-root `FirehoseConsumer` (which spans both sibling modules) can inject it —
+// the use case stays inside its owning module, the cross-module dispatcher resolves it
+// through this export.
 @Module({
   imports: [DatabaseModule.forFeature([DomainEventEntity])],
-  providers: [{ provide: DOMAIN_EVENT_REPOSITORY, useClass: DomainEventTypeormRepository }],
-  exports: [DOMAIN_EVENT_REPOSITORY],
+  providers: [
+    { provide: DOMAIN_EVENT_REPOSITORY, useClass: DomainEventTypeormRepository },
+    IngestDomainEventUseCase,
+  ],
+  exports: [DOMAIN_EVENT_REPOSITORY, IngestDomainEventUseCase],
 })
 export class DomainEventsModule {}

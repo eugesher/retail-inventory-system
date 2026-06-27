@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
 
+import { IngestAuditLogUseCase } from '../application/use-cases';
 import { AUDIT_LOG_REPOSITORY } from '../application/ports';
 import { AuditLogEntryEntity, AuditLogEntryTypeormRepository } from './persistence';
 
@@ -12,12 +13,16 @@ import { AuditLogEntryEntity, AuditLogEntryTypeormRepository } from './persisten
 //
 // `DatabaseModule.forFeature([AuditLogEntryEntity])` registers the entity against the
 // eventstore connection; `AUDIT_LOG_REPOSITORY` is bound to its append-only TypeORM
-// adapter and EXPORTED so the audit-ingest use case (a later capability) can resolve
-// it. There is no consumer or use case yet — the service still boots and idles with no
-// handlers bound.
+// adapter. `IngestAuditLogUseCase` is provided AND EXPORTED so the context-root
+// `FirehoseConsumer` can inject it for the `audit.staff.action` branch of its dispatch —
+// the use case stays inside its owning module, the cross-module dispatcher resolves it
+// through this export.
 @Module({
   imports: [DatabaseModule.forFeature([AuditLogEntryEntity])],
-  providers: [{ provide: AUDIT_LOG_REPOSITORY, useClass: AuditLogEntryTypeormRepository }],
-  exports: [AUDIT_LOG_REPOSITORY],
+  providers: [
+    { provide: AUDIT_LOG_REPOSITORY, useClass: AuditLogEntryTypeormRepository },
+    IngestAuditLogUseCase,
+  ],
+  exports: [AUDIT_LOG_REPOSITORY, IngestAuditLogUseCase],
 })
 export class AuditLogModule {}
