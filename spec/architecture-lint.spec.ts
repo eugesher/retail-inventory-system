@@ -5,6 +5,7 @@
 // cannot be silently weakened in a future refactor without a failing test.
 
 import { Linter } from 'eslint';
+import * as fs from 'fs';
 import * as path from 'path';
 
 // Both plugins ship as CommonJS with a real default-export wrapper. Using
@@ -729,6 +730,126 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
+  // The event-store microservice (the sixth deployable, ADR-034/035) follows the
+  // canonical per-module hexagonal layout — its context modules live under
+  // `infrastructure/`, so the generic `apps/*/src/modules/*/...` element patterns classify
+  // its layers automatically with no `eslint.config.mjs` change. These fixtures repeat the
+  // bumpers there, pointed at the real event-store paths, and add the sibling-module
+  // isolation between its two append-only contexts (`domain-events` ↔ `audit-log`). Note:
+  // the event store has no `presentation/` layer — its firehose dispatcher is a
+  // context-root `@Controller()` (FirehoseConsumer), an unmatched element outside the
+  // per-module taxonomy (like the bounded-context aggregator module itself), so it carries
+  // no presentation bumper. The append-only repository shape is locked by the separate
+  // structural assertion that follows this block.
+  describe('boundaries/dependencies — event-store microservice', () => {
+    it('domain (DomainEvent, AuditLogEntry frozen value objects) may not import @nestjs/common', () => {
+      const code = `import { Injectable } from '@nestjs/common';\nexport const x = Injectable;\n`;
+      const messages = lint(
+        code,
+        'apps/event-store-microservice/src/modules/domain-events/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('domain may not import typeorm', () => {
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/event-store-microservice/src/modules/audit-log/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('application use-case (IngestDomainEvent, IngestAuditLog) may not import typeorm', () => {
+      // The ingest use cases reach the append-only logs via the repository ports
+      // (DOMAIN_EVENT_REPOSITORY / AUDIT_LOG_REPOSITORY) — never via EntityManager.
+      const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
+      const messages = lint(
+        code,
+        'apps/event-store-microservice/src/modules/domain-events/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('application use-case may not import @nestjs/typeorm', () => {
+      const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
+      const messages = lint(
+        code,
+        'apps/event-store-microservice/src/modules/audit-log/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('application port may not import typeorm', () => {
+      // IDomainEventRepositoryPort / IAuditLogRepositoryPort return the DomainEvent /
+      // AuditLogEntry value objects only — no TypeORM Repository leak across the seam.
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(
+        code,
+        'apps/event-store-microservice/src/modules/domain-events/application/ports/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('domain-events domain may not import the audit-log module domain (cross-module)', () => {
+      // Resolves to a real audit-log file, so the boundaries resolver types the target as
+      // the audit-log `domain`. `sameModule('domain')` requires the same app *and* module,
+      // so a domain-events → audit-log domain edge is cross-module and disallowed — locking
+      // in the isolation between the event store's two append-only contexts. The only link
+      // is the context-root FirehoseConsumer, which injects each module's ingest use case
+      // via DI (a port), never a cross-module domain import.
+      // 2 levels up: domain → domain-events, then audit-log/domain/...
+      const code = `import { AuditLogEntry } from '../../audit-log/domain/audit-log-entry.model';\nexport type Y = AuditLogEntry;\n`;
+      const messages = lint(
+        code,
+        'apps/event-store-microservice/src/modules/domain-events/domain/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+  });
+
+  // The event store's two repositories are append-only by construction (ADR-035; the
+  // docs/implementation/11-event-store-and-audit-log/06-append-only-enforcement.md §2.4
+  // forward note promised this guard would land with the documentation/lint pass). The
+  // boundaries plugin governs *import edges*, not method surfaces, so this structural
+  // assertion reads the real adapter sources and pins the shape: each implements its port
+  // DIRECTLY (never `extends BaseTypeormRepository`, whose public `save`/`softDelete` would
+  // contradict append-only) and exposes no UPDATE/DELETE mutator — the sole write verb is
+  // `append`, via TypeORM `insert`.
+  describe('event-store repositories are append-only (structural)', () => {
+    const repoFiles = [
+      'apps/event-store-microservice/src/modules/domain-events/infrastructure/persistence/domain-event-typeorm.repository.ts',
+      'apps/event-store-microservice/src/modules/audit-log/infrastructure/persistence/audit-log-entry-typeorm.repository.ts',
+    ];
+
+    it.each(repoFiles)(
+      '%s implements its port directly, never extends BaseTypeormRepository',
+      (relPath) => {
+        const source = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
+        // Implements the repository port directly (the append-only seam)...
+        expect(source).toMatch(
+          /export class \w+TypeormRepository\s+implements\s+I\w+RepositoryPort/,
+        );
+        // ...and deliberately does NOT inherit BaseTypeormRepository's save/softDelete surface.
+        expect(source).not.toMatch(/extends\s+BaseTypeormRepository/);
+      },
+    );
+
+    it.each(repoFiles)(
+      '%s exposes append() but declares/calls no save/update/delete mutator',
+      (relPath) => {
+        const source = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
+        // The append verb is present...
+        expect(source).toMatch(/public\s+async\s+append\s*\(/);
+        // ...and no mutating method is declared or reached. The repos call `.insert(...)` and
+        // `.find(...)` only — never `.save`/`.update`/`.delete`/`.softDelete`/`.remove`. (The
+        // prose comments write ``save`:`` and uppercase "UPDATE or DELETE", neither matching
+        // `<verb>(`.)
+        expect(source).not.toMatch(/\b(save|update|delete|softDelete|remove)\s*\(/);
+      },
+    );
+  });
+
   describe('positive cases — allowed edges do not flag', () => {
     it('domain importing lib-ddd is allowed', () => {
       const code = `import { AggregateRoot } from '@retail-inventory-system/ddd';\nexport const x = AggregateRoot;\n`;
@@ -751,10 +872,10 @@ describe('boundaries rules (ADR-017)', () => {
     });
 
     it('auth infrastructure/audit may import @retail-inventory-system/contracts (for the IAuditLogPublisher port)', () => {
-      // NoOpAuditLogPublisher implements the IAuditLogPublisher interface
-      // re-exported from contracts. The boundaries config treats audit as
-      // in-element-type `infrastructure`, which is already allowed to
-      // import lib-contracts.
+      // RmqAuditLogPublisher (the real AUDIT_LOG_PUBLISHER adapter, ADR-035)
+      // implements the IAuditLogPublisher interface re-exported from contracts.
+      // The boundaries config treats audit as in-element-type `infrastructure`,
+      // which is already allowed to import lib-contracts.
       const code = `import type { IAuditLogPublisher } from '@retail-inventory-system/contracts';\nexport type X = IAuditLogPublisher;\n`;
       const messages = lint(
         code,
