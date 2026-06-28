@@ -77,6 +77,11 @@ jobs:
 
     env:
       DATABASE_URL: mysql://retail:retailpass@localhost:3306/retail_db
+      # The event store persists to an ISOLATED logical database `ris_eventstore`
+      # (ADR-034) — a separate schema on the same MySQL instance. Only the event-store
+      # microservice opens it, but it is a required config key for every service, so it
+      # is set here (parity with `DATABASE_URL`) for the in-process e2e boots.
+      EVENTSTORE_DATABASE_URL: mysql://retail:retailpass@localhost:3306/ris_eventstore
       RABBITMQ_URL: amqp://guest:guest@localhost:5672
       REDIS_URL: redis://localhost:6379
       LOG_LEVEL: warn
@@ -135,8 +140,22 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
+      # The MySQL service container auto-creates only `retail_db` (its `MYSQL_DATABASE`).
+      # The event store's isolated `ris_eventstore` schema (ADR-034) — provisioned
+      # locally by the docker-compose init mount, which GitHub service containers can't
+      # use — is created here by piping the SAME init SQL (one source of truth) to the
+      # client as root, so the `retail` user gains it just like on a fresh docker volume.
+      - name: Create event-store database
+        run: mysql -h 127.0.0.1 -P 3306 -uroot -proot < scripts/mysql-init/01-create-eventstore-db.sql
+
       - name: Run migrations
         run: yarn migration:run
+
+      # Apply the event-store schema's OWN migration history (ADR-034) — the second
+      # family `test:infra:reload` runs locally. Without it the firehose tables are
+      # absent and the event-store microservice boot fails.
+      - name: Run event-store migrations
+        run: yarn migration:run:eventstore
 
       - name: Seed database
         run: yarn test:seed
