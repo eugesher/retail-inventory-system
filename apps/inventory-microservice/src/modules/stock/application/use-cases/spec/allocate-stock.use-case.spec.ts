@@ -57,6 +57,7 @@ describe('AllocateStockUseCase', () => {
       movements,
       cache,
       publisher,
+      5, // OCC_RETRY_ATTEMPTS budget
       TTL_MINUTES,
       makePinoLoggerMock() as unknown as PinoLogger,
     );

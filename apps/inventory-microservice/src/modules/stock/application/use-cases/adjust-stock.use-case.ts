@@ -21,6 +21,7 @@ import {
   IStockMovementRepositoryPort,
   IStockRepositoryPort,
   ITransactionPort,
+  OCC_RETRY_ATTEMPTS,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_MOVEMENT_REPOSITORY,
@@ -64,6 +65,8 @@ export class AdjustStockUseCase {
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
     private readonly publisher: IStockEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(AdjustStockUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -109,6 +112,7 @@ export class AdjustStockUseCase {
         movementRepository: this.movementRepository,
         stockCache: this.stockCache,
         logger: this.logger,
+        maxAttempts: this.maxAttempts,
       },
       {
         variantId,

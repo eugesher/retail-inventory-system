@@ -80,15 +80,15 @@ withInvalidation(                          // ADR-023: invalidate AFTER commit
   concurrent writer advanced the row first, the UPDATE matches zero rows and the
   repository throws `StockWriteConflictError`.
 - **Only a conflict is retried.** `runWithStockWriteRetry` re-runs the attempt
-  under a *fresh transaction* (so it re-reads the now-current version) up to
-  `MAX_WRITE_ATTEMPTS = 5`. A domain rejection (`OUT_OF_STOCK`, a below-zero
+  under a *fresh transaction* (so it re-reads the now-current version) up to the
+  configurable `OCC_RETRY_ATTEMPTS` budget (default 5). A domain rejection (`OUT_OF_STOCK`, a below-zero
   Adjust) is **not** a conflict — it propagates immediately, so a genuinely
   out-of-stock request fails fast rather than retrying five times.
 - **Exhaustion is a 409.** When the budget is spent the helper throws
   `InventoryDomainException(STOCK_WRITE_CONFLICT)`, which the presentation filter
   maps to `409 Conflict` — the caller may simply retry.
 - **One budget, not two.** Reserve, Release, Receive, and Adjust all share the
-  same `MAX_WRITE_ATTEMPTS`; a second budget would be a second thing to tune.
+  same `OCC_RETRY_ATTEMPTS` budget; a second budget would be a second thing to tune.
 
 ### A reservation that loses the INSERT race converges, it does not fail
 

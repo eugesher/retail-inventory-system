@@ -24,6 +24,7 @@ import {
   ITransactionScope,
   RESERVATION_REPOSITORY,
   RESERVATION_TTL_MINUTES,
+  OCC_RETRY_ATTEMPTS,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_REPOSITORY,
@@ -57,6 +58,8 @@ export class ReserveStockUseCase {
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
     private readonly publisher: IStockEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @Inject(RESERVATION_TTL_MINUTES)
     private readonly ttlMinutes: number,
     @InjectPinoLogger(ReserveStockUseCase.name)
@@ -87,7 +90,11 @@ export class ReserveStockUseCase {
     const saved = await this.stockCache.withInvalidation(
       () =>
         runWithStockWriteRetry(
-          { transactionPort: this.transactionPort, logger: this.logger },
+          {
+            transactionPort: this.transactionPort,
+            logger: this.logger,
+            maxAttempts: this.maxAttempts,
+          },
           (scope) => this.reserveOnce(scope, variantId, stockLocationId, quantity, cartId),
           { variantId, stockLocationId, correlationId },
         ),

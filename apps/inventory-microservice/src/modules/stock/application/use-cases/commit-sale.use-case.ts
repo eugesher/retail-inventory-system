@@ -16,6 +16,7 @@ import {
   IStockRepositoryPort,
   ITransactionPort,
   ITransactionScope,
+  OCC_RETRY_ATTEMPTS,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_MOVEMENT_REPOSITORY,
@@ -92,6 +93,8 @@ export class CommitSaleUseCase {
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
     private readonly publisher: IStockEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(CommitSaleUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -126,7 +129,11 @@ export class CommitSaleUseCase {
     const outcome = await this.stockCache.withInvalidation(
       () =>
         runWithStockWriteRetry(
-          { transactionPort: this.transactionPort, logger: this.logger },
+          {
+            transactionPort: this.transactionPort,
+            logger: this.logger,
+            maxAttempts: this.maxAttempts,
+          },
           (scope) => this.commitOnce(scope, orderId, fulfillmentId, lines, actorId),
           { correlationId },
         ),

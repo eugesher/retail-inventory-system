@@ -106,6 +106,8 @@ services:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       CACHE_TTL_MS_DEFAULT: 60000
       CACHE_TTL_MS_PRODUCT_STOCK: 60000
+      # Bounded optimistic-concurrency retry budget for the stock write protocol (ADR-036).
+      OCC_RETRY_ATTEMPTS: 5
       OTEL_SERVICE_NAME: inventory-microservice
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     volumes:
@@ -166,6 +168,9 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       CACHE_TTL_MS_DEFAULT: 60000
+      # Idempotency-key retention + optimistic-concurrency retry budget (ADR-036).
+      IDEMPOTENCY_KEY_TTL_HOURS: 24
+      OCC_RETRY_ATTEMPTS: 5
       OTEL_SERVICE_NAME: retail-microservice
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     volumes:
