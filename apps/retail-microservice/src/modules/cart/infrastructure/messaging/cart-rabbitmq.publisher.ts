@@ -8,7 +8,11 @@ import {
   IRetailCartLineQuantityChangedEvent,
   IRetailCartLineRemovedEvent,
 } from '@retail-inventory-system/contracts';
-import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientTokenEnum,
+  RisEventsMirrorPublisher,
+  ROUTING_KEYS,
+} from '@retail-inventory-system/messaging';
 
 import { ICartEventsPublisherPort } from '../../application/ports';
 
@@ -22,11 +26,19 @@ import { ICartEventsPublisherPort } from '../../application/ports';
 // pattern the `inventory.stock.{received,adjusted}` reserved events follow). The
 // broker holds them for a future consumer (e.g. an analytics or cart-recovery
 // capability).
+//
+// Even though the `retail.cart.*` events have no business consumer yet, every one
+// is **dual-published** (ADR-035): after the primary emit, the same routing key +
+// wire is mirrored onto the `ris.events` topic exchange via the shared
+// `RisEventsMirrorPublisher`, so the event-store firehose captures the full cart
+// lifecycle (the first half of a Place Order chain). The mirror is best-effort and
+// non-throwing, ordered after the primary emit.
 @Injectable()
 export class CartRabbitmqPublisher implements ICartEventsPublisherPort {
   constructor(
     @Inject(MicroserviceClientTokenEnum.RETAIL_MICROSERVICE)
     private readonly retailClient: ClientProxy,
+    private readonly risEvents: RisEventsMirrorPublisher,
   ) {}
 
   public async publishCartCreated(event: IRetailCartCreatedEvent): Promise<void> {
@@ -38,6 +50,7 @@ export class CartRabbitmqPublisher implements ICartEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_CART_CREATED, event);
   }
 
   public async publishCartLineAdded(event: IRetailCartLineAddedEvent): Promise<void> {
@@ -47,6 +60,7 @@ export class CartRabbitmqPublisher implements ICartEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_CART_LINE_ADDED, event);
   }
 
   public async publishCartLineRemoved(event: IRetailCartLineRemovedEvent): Promise<void> {
@@ -56,6 +70,7 @@ export class CartRabbitmqPublisher implements ICartEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_CART_LINE_REMOVED, event);
   }
 
   public async publishCartLineQuantityChanged(
@@ -67,5 +82,6 @@ export class CartRabbitmqPublisher implements ICartEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_CART_LINE_QUANTITY_CHANGED, event);
   }
 }

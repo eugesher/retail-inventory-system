@@ -6,7 +6,11 @@ import {
   ICatalogPriceChangedEvent,
   ICatalogPriceScheduledEvent,
 } from '@retail-inventory-system/contracts';
-import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientTokenEnum,
+  RisEventsMirrorPublisher,
+  ROUTING_KEYS,
+} from '@retail-inventory-system/messaging';
 
 import { IPricingEventsPublisherPort } from '../../application/ports';
 
@@ -16,11 +20,18 @@ import { IPricingEventsPublisherPort } from '../../application/ports';
 // colocates with catalog and shares its queue (ADR-026) — and waits for the
 // broker ack. No consumer is bound yet; emitting to a queue with no matching
 // handler is the same reserved-surface pattern the catalog events follow today.
+//
+// Every event is additionally **dual-published** (ADR-035): after the primary
+// emit, the same routing key + wire is mirrored onto the `ris.events` topic
+// exchange via the shared `RisEventsMirrorPublisher`, so the event-store firehose
+// captures the pricing stream. The mirror is best-effort and non-throwing, ordered
+// after the primary emit.
 @Injectable()
 export class PricingRabbitmqPublisher implements IPricingEventsPublisherPort {
   constructor(
     @Inject(MicroserviceClientTokenEnum.CATALOG_MICROSERVICE)
     private readonly catalogClient: ClientProxy,
+    private readonly risEvents: RisEventsMirrorPublisher,
   ) {}
 
   public async publishPriceChanged(event: ICatalogPriceChangedEvent): Promise<void> {
@@ -32,6 +43,7 @@ export class PricingRabbitmqPublisher implements IPricingEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.CATALOG_PRICE_CHANGED, event);
   }
 
   public async publishPriceScheduled(event: ICatalogPriceScheduledEvent): Promise<void> {
@@ -41,5 +53,6 @@ export class PricingRabbitmqPublisher implements IPricingEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.CATALOG_PRICE_SCHEDULED, event);
   }
 }

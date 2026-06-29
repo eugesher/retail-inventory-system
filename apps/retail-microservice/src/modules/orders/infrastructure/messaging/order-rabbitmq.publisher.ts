@@ -13,7 +13,11 @@ import {
   IRetailRefundFailedEvent,
   IRetailRefundIssuedEvent,
 } from '@retail-inventory-system/contracts';
-import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientTokenEnum,
+  RisEventsMirrorPublisher,
+  ROUTING_KEYS,
+} from '@retail-inventory-system/messaging';
 
 import { IOrderEventsPublisherPort } from '../../application/ports';
 
@@ -28,6 +32,14 @@ import { IOrderEventsPublisherPort } from '../../application/ports';
 // the notification re-point capability. `retail.payment.authorized` is emitted
 // through the `RETAIL_MICROSERVICE` client onto `retail_queue` (the producer's own
 // queue) — a reserved surface today, like the four `retail.cart.*` events.
+//
+// Every event is additionally **dual-published** (ADR-035): after the primary
+// emit, the same routing key + wire is mirrored onto the `ris.events` topic
+// exchange via the shared `RisEventsMirrorPublisher`, so the event-store firehose
+// captures the whole order/payment/fulfillment/refund stream. The mirror is
+// best-effort and non-throwing, ordered after the primary emit. The dual-emitted
+// `retail.order.cancelled` is mirrored **once** — it is one logical event with two
+// queue destinations, and the firehose ingest is idempotent regardless.
 @Injectable()
 export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
   constructor(
@@ -35,6 +47,7 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
     private readonly notificationClient: ClientProxy,
     @Inject(MicroserviceClientTokenEnum.RETAIL_MICROSERVICE)
     private readonly retailClient: ClientProxy,
+    private readonly risEvents: RisEventsMirrorPublisher,
   ) {}
 
   public async publishOrderPlaced(event: IRetailOrderPlacedEvent): Promise<void> {
@@ -46,6 +59,7 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_ORDER_PLACED, event);
   }
 
   public async publishPaymentAuthorized(event: IRetailPaymentAuthorizedEvent): Promise<void> {
@@ -55,6 +69,7 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_PAYMENT_AUTHORIZED, event);
   }
 
   public async publishPaymentCaptured(event: IRetailPaymentCapturedEvent): Promise<void> {
@@ -64,6 +79,7 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURED, event);
   }
 
   // `retail.fulfillment.created` rides the `RETAIL_MICROSERVICE` client onto
@@ -76,6 +92,7 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_FULFILLMENT_CREATED, event);
   }
 
   // `retail.fulfillment.shipped` is emitted through the `NOTIFICATION_MICROSERVICE`
@@ -89,6 +106,7 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_FULFILLMENT_SHIPPED, event);
   }
 
   // `retail.fulfillment.delivered` is emitted through the `NOTIFICATION_MICROSERVICE`
@@ -101,6 +119,7 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_FULFILLMENT_DELIVERED, event);
   }
 
   // `retail.order.cancelled` is **dual-emitted** (ADR-033) — it has two distinct consumers
@@ -131,6 +150,9 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         ),
       ),
     ]);
+    // One logical event, two queue destinations above — mirror it onto the firehose
+    // exactly once (the ingest is idempotent regardless, ADR-035).
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_ORDER_CANCELLED, event);
   }
 
   // `retail.refund.issued` is emitted through the `NOTIFICATION_MICROSERVICE` client so it
@@ -144,6 +166,7 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_REFUND_ISSUED, event);
   }
 
   // `retail.refund.failed` rides the `RETAIL_MICROSERVICE` client onto `retail_queue`
@@ -156,5 +179,6 @@ export class OrderRabbitmqPublisher implements IOrderEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_REFUND_FAILED, event);
   }
 }

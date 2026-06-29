@@ -6,6 +6,7 @@ import { DatabaseModule } from '@retail-inventory-system/database';
 import {
   MicroserviceClientCatalogModule,
   MicroserviceClientInventoryModule,
+  MicroserviceClientRisEventsModule,
 } from '@retail-inventory-system/messaging';
 
 import {
@@ -72,8 +73,11 @@ const DEFAULT_CURRENCY_PROVIDER = {
 // `MicroserviceClientInventoryModule` provides the `inventory_queue` `ClientProxy`
 // the publisher emits `catalog.variant.created` through (producer-targets-
 // consumer-queue — the inventory auto-init consumer listens there, ADR-008/020).
-// The `forFeature` array is the entity-classes literal (the loose
-// `catalogEntities` const type does not satisfy `forFeature`).
+// `MicroserviceClientRisEventsModule` provides the `ris.events` topic-exchange
+// client so the publisher can mirror every catalog event onto the event-store
+// firehose (ADR-035, the `RisEventsMirrorPublisher` dual-publish). The
+// `forFeature` array is the entity-classes literal (the loose `catalogEntities`
+// const type does not satisfy `forFeature`).
 @Module({
   imports: [
     DatabaseModule.forFeature([
@@ -84,6 +88,7 @@ const DEFAULT_CURRENCY_PROVIDER = {
     ]),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
+    MicroserviceClientRisEventsModule,
   ],
   controllers: [CatalogController, CategoryController, MediaController],
   providers: [

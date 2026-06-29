@@ -4,7 +4,10 @@ import { APP_FILTER } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
-import { MicroserviceClientNotificationModule } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientNotificationModule,
+  MicroserviceClientRisEventsModule,
+} from '@retail-inventory-system/messaging';
 
 import {
   INotifierPort,
@@ -109,12 +112,16 @@ import { DeliveryRetryScheduler } from './scheduling';
 // through `NOTIFICATION_EVENTS_PUBLISHER` → `NotificationRabbitmqPublisher` (the sole
 // `ClientProxy` holder, emitting onto the service's own `notification_events` queue — a
 // reserved alerting surface, no consumer). `MicroserviceClientNotificationModule` supplies
-// that client; `MAX_DELIVERY_ATTEMPTS` is a `ConfigService` value provider (Joi default 3,
-// the retail `RETURN_WINDOW_DAYS` precedent).
+// that client; `MicroserviceClientRisEventsModule` supplies the `ris.events`
+// topic-exchange client so the publisher can mirror `notifications.delivery.failed` onto
+// the event-store firehose (ADR-035, the `RisEventsMirrorPublisher` dual-publish);
+// `MAX_DELIVERY_ATTEMPTS` is a `ConfigService` value provider (Joi default 3, the retail
+// `RETURN_WINDOW_DAYS` precedent).
 @Module({
   imports: [
     DatabaseModule.forFeature([NotificationTemplateEntity, NotificationDeliveryEntity]),
     MicroserviceClientNotificationModule,
+    MicroserviceClientRisEventsModule,
     ScheduleModule.forRoot(),
   ],
   controllers: [

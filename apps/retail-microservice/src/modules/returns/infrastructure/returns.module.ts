@@ -7,6 +7,7 @@ import {
   MicroserviceClientInventoryModule,
   MicroserviceClientNotificationModule,
   MicroserviceClientRetailModule,
+  MicroserviceClientRisEventsModule,
 } from '@retail-inventory-system/messaging';
 
 import {
@@ -56,7 +57,10 @@ import { ReturnsController, ReturnRpcExceptionFilter } from '../presentation';
 // `.closed` onto `retail_queue` (the producer-targets-consumer-queue split, ADR-008/020),
 // and `MicroserviceClientInventoryModule` so the `INVENTORY_RESTOCK_GATEWAY` adapter can
 // call `inventory.stock.restock-from-return` on `inventory_queue` (the Inspect &
-// Disposition cross-service restock, ADR-032). `RETURN_WINDOW_DAYS` is a
+// Disposition cross-service restock, ADR-032). A fourth client,
+// `MicroserviceClientRisEventsModule`, provides the `ris.events` topic-exchange client
+// so the publisher can mirror every return event onto the event-store firehose (ADR-035,
+// the `RisEventsMirrorPublisher` dual-publish). `RETURN_WINDOW_DAYS` is a
 // `ConfigService`-backed value provider resolving `RETURN_WINDOW_DAYS` (Joi default 30) so
 // the Open use case injects a plain number (the inventory `RESERVATION_TTL_MINUTES`
 // precedent). `TRANSACTION_PORT` is now wired (the Inspect use case records the per-line
@@ -69,6 +73,7 @@ import { ReturnsController, ReturnRpcExceptionFilter } from '../presentation';
     MicroserviceClientNotificationModule,
     MicroserviceClientRetailModule,
     MicroserviceClientInventoryModule,
+    MicroserviceClientRisEventsModule,
   ],
   controllers: [ReturnsController],
   providers: [

@@ -1,1 +1,1 @@
-export * from './no-op-audit-log.publisher';
+export * from './rmq-audit-log.publisher';

@@ -277,11 +277,11 @@ export class IssueRefundUseCase {
     );
   }
 
-  // The always-audit money-movement record (ADR-032). Awaited (not best-effort) — auditing
-  // is integral to a refund; the default `NoOpAuditLogPublisher` never throws, and a real
-  // sink's reliability is its own concern (the gateway login/logout precedent). No
-  // `targetKind` member fits an order/payment/refund, so the ids ride the structured
-  // payload and `targetKind` stays null.
+  // The always-audit money-movement record (ADR-032/035). Awaited (not best-effort) —
+  // auditing is integral to a refund; the bound `RmqAuditLogPublisher` swallows its own
+  // broker failures (warn-log, never rethrow per ADR-020), so the await never blocks the
+  // refund. No `targetKind` member fits an order/payment/refund, so the ids ride the
+  // structured payload and `targetKind` stays null.
   private async writeAudit(
     name: 'RefundIssued' | 'RefundFailed',
     refund: Refund,

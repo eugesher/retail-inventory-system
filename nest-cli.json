@@ -59,6 +59,15 @@
       "compilerOptions": {
         "tsConfigPath": "apps/catalog-microservice/tsconfig.app.json"
       }
+    },
+    "event-store-microservice": {
+      "type": "application",
+      "root": "apps/event-store-microservice",
+      "entryFile": "main",
+      "sourceRoot": "apps/event-store-microservice/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/event-store-microservice/tsconfig.app.json"
+      }
     }
   }
 }

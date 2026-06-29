@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule as AuthLibModule, AUTH_USER_VALIDATOR } from '@retail-inventory-system/auth';
 import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
+import { MicroserviceClientRisEventsModule } from '@retail-inventory-system/messaging';
 
 import {
   CUSTOMER_REPOSITORY,
@@ -24,7 +25,7 @@ import {
   ValidateJwtSubjectUseCase,
 } from './application/use-cases';
 import { Argon2PasswordAdapter } from './infrastructure/argon2';
-import { NoOpAuditLogPublisher } from './infrastructure/audit';
+import { RmqAuditLogPublisher } from './infrastructure/audit';
 import { JwtTokenAdapter } from './infrastructure/jwt';
 import {
   CustomerEntity,
@@ -76,6 +77,10 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
   imports: [
     TypeOrmModule.forFeature([StaffUserEntity, RoleEntity, PermissionEntity, CustomerEntity]),
     authLibDynamicModule,
+    // The producer-side client for the `ris.events` topic exchange — the real
+    // `RmqAuditLogPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy`
+    // to emit `audit.staff.action` (ADR-035).
+    MicroserviceClientRisEventsModule,
   ],
   controllers: [AuthController, AuthAdminController, CustomerAuthController, StaffLoginController],
   providers: [
@@ -85,8 +90,11 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     JwtTokenAdapter,
     { provide: TOKEN_SERVICE, useExisting: JwtTokenAdapter },
 
-    NoOpAuditLogPublisher,
-    { provide: AUDIT_LOG_PUBLISHER, useExisting: NoOpAuditLogPublisher },
+    // The audit seam (ADR-035): the real RMQ adapter publishes `audit.staff.action`
+    // onto `ris.events`. `iam` consumes `AUDIT_LOG_PUBLISHER` through this module's
+    // export (there is no second binding in `iam`).
+    RmqAuditLogPublisher,
+    { provide: AUDIT_LOG_PUBLISHER, useExisting: RmqAuditLogPublisher },
 
     RoleTypeormRepository,
     { provide: ROLE_REPOSITORY, useExisting: RoleTypeormRepository },

@@ -10,7 +10,11 @@ import {
   IRetailReturnRejectedEvent,
   IRetailReturnRequestedEvent,
 } from '@retail-inventory-system/contracts';
-import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientTokenEnum,
+  RisEventsMirrorPublisher,
+  ROUTING_KEYS,
+} from '@retail-inventory-system/messaging';
 
 import { IReturnEventsPublisherPort } from '../../application/ports';
 
@@ -26,6 +30,11 @@ import { IReturnEventsPublisherPort } from '../../application/ports';
 // internal-status `retail.return.rejected` / `.closed` are emitted through the
 // `RETAIL_MICROSERVICE` client onto `retail_queue` (the producer's own queue — reserved
 // surfaces today, no consumer).
+//
+// Every event is additionally **dual-published** (ADR-035): after the primary emit, the
+// same routing key + wire is mirrored onto the `ris.events` topic exchange via the shared
+// `RisEventsMirrorPublisher`, so the event-store firehose captures the whole RMA lifecycle.
+// The mirror is best-effort and non-throwing, ordered after the primary emit.
 @Injectable()
 export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
   constructor(
@@ -33,6 +42,7 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
     private readonly notificationClient: ClientProxy,
     @Inject(MicroserviceClientTokenEnum.RETAIL_MICROSERVICE)
     private readonly retailClient: ClientProxy,
+    private readonly risEvents: RisEventsMirrorPublisher,
   ) {}
 
   public async publishReturnRequested(event: IRetailReturnRequestedEvent): Promise<void> {
@@ -44,6 +54,7 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_RETURN_REQUESTED, event);
   }
 
   public async publishReturnAuthorized(event: IRetailReturnAuthorizedEvent): Promise<void> {
@@ -53,6 +64,7 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_RETURN_AUTHORIZED, event);
   }
 
   public async publishReturnReceived(event: IRetailReturnReceivedEvent): Promise<void> {
@@ -62,6 +74,7 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_RETURN_RECEIVED, event);
   }
 
   // `retail.return.inspected` rides the `NOTIFICATION_MICROSERVICE` client onto
@@ -74,6 +87,7 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_RETURN_INSPECTED, event);
   }
 
   // `retail.return.rejected` rides the `RETAIL_MICROSERVICE` client onto `retail_queue`
@@ -85,6 +99,7 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_RETURN_REJECTED, event);
   }
 
   // `retail.return.closed` rides the `RETAIL_MICROSERVICE` client onto `retail_queue` —
@@ -96,5 +111,6 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
         event,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.RETAIL_RETURN_CLOSED, event);
   }
 }

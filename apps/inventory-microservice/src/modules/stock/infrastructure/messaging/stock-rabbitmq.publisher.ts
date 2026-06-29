@@ -14,7 +14,11 @@ import {
   IInventoryStockReservedEvent,
   IInventoryStockReturnedEvent,
 } from '@retail-inventory-system/contracts';
-import { MicroserviceClientTokenEnum, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientTokenEnum,
+  RisEventsMirrorPublisher,
+  ROUTING_KEYS,
+} from '@retail-inventory-system/messaging';
 
 import {
   StockAdjustedEvent,
@@ -39,6 +43,13 @@ import { IStockEventsPublisherPort } from '../../application/ports';
 // with no cross-service consumer yet). Each is the producer-targets-consumer-queue
 // pattern — the destination queue is fixed by which client token the emit goes
 // through (ADR-008 / ADR-020).
+//
+// Every event is **dual-published** (ADR-035): after the primary default-exchange
+// `emit` above, the same routing key + wire is mirrored onto the `ris.events`
+// topic exchange via the shared `RisEventsMirrorPublisher`, so the event store's
+// firehose captures the whole inventory stream (the highest-volume producer)
+// without re-binding any existing consumer. The mirror is best-effort and
+// non-throwing, ordered after the primary emit.
 @Injectable()
 export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
   constructor(
@@ -46,6 +57,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
     private readonly notificationClient: ClientProxy,
     @Inject(MicroserviceClientTokenEnum.INVENTORY_MICROSERVICE)
     private readonly inventoryClient: ClientProxy,
+    private readonly risEvents: RisEventsMirrorPublisher,
   ) {}
 
   public async publishStockLow(event: StockLowEvent, correlationId?: string): Promise<void> {
@@ -68,6 +80,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_LOW, wire);
   }
 
   public async publishStockReceived(
@@ -93,6 +106,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_RECEIVED, wire);
   }
 
   public async publishStockAdjusted(
@@ -119,6 +133,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_ADJUSTED, wire);
   }
 
   public async publishStockLevelInitialized(
@@ -142,6 +157,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED, wire);
   }
 
   public async publishStockReserved(
@@ -167,6 +183,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_RESERVED, wire);
   }
 
   public async publishStockAllocated(
@@ -191,6 +208,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_ALLOCATED, wire);
   }
 
   public async publishStockReleased(
@@ -216,6 +234,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_RELEASED, wire);
   }
 
   public async publishStockCommitted(
@@ -240,6 +259,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_COMMITTED, wire);
   }
 
   public async publishStockReturned(
@@ -264,6 +284,7 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_RETURNED, wire);
   }
 
   // Maps the domain `StockMovement` record straight to the wire event (no wrapper
@@ -301,5 +322,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
         wire,
       ),
     );
+    await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_RECORDED, wire);
   }
 }
