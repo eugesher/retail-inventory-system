@@ -1,10 +1,5 @@
-import { ClientProxy } from '@nestjs/microservices';
-import { PinoLogger } from 'nestjs-pino';
-import { of, throwError } from 'rxjs';
-
 import { IAuditLogEvent, IAuditStaffActionEvent } from '@retail-inventory-system/contracts';
-import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
-import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
+import { ROUTING_KEYS, RisEventsMirrorPublisher } from '@retail-inventory-system/messaging';
 
 import { RmqAuditLogPublisher } from '../rmq-audit-log.publisher';
 
@@ -20,34 +15,34 @@ const buildEvent = (overrides: Partial<IAuditLogEvent> = {}): IAuditLogEvent => 
 });
 
 describe('RmqAuditLogPublisher (api-gateway auth)', () => {
-  let emit: jest.Mock;
-  let client: ClientProxy;
-  let logger: PinoLoggerMock;
+  let mirror: jest.Mock;
+  let risEvents: RisEventsMirrorPublisher;
   let publisher: RmqAuditLogPublisher;
 
   beforeEach(() => {
-    emit = jest.fn().mockReturnValue(of(undefined));
-    client = { emit } as unknown as ClientProxy;
-    logger = makePinoLoggerMock();
-    publisher = new RmqAuditLogPublisher(client, logger as unknown as PinoLogger);
+    // The shared mirror publisher owns the emit + best-effort swallow (covered by its own
+    // spec); here we only assert this adapter maps + delegates to it.
+    mirror = jest.fn().mockResolvedValue(undefined);
+    risEvents = { mirror } as unknown as RisEventsMirrorPublisher;
+    publisher = new RmqAuditLogPublisher(risEvents);
   });
 
-  // Reads the first `emit` call as a typed [routingKey, wirePayload] tuple.
-  const firstEmit = (): [string, IAuditStaffActionEvent] =>
-    emit.mock.calls[0] as [string, IAuditStaffActionEvent];
-  const emittedWire = (): IAuditStaffActionEvent => firstEmit()[1];
+  // Reads the first `mirror` call as a typed [routingKey, wirePayload] tuple.
+  const firstMirror = (): [string, IAuditStaffActionEvent] =>
+    mirror.mock.calls[0] as [string, IAuditStaffActionEvent];
+  const mirroredWire = (): IAuditStaffActionEvent => firstMirror()[1];
 
-  it('emits onto the audit.staff.action routing key', async () => {
+  it('mirrors onto the audit.staff.action routing key', async () => {
     await publisher.publish(buildEvent());
 
-    expect(emit).toHaveBeenCalledTimes(1);
-    expect(firstEmit()[0]).toBe(ROUTING_KEYS.AUDIT_STAFF_ACTION);
+    expect(mirror).toHaveBeenCalledTimes(1);
+    expect(firstMirror()[0]).toBe(ROUTING_KEYS.AUDIT_STAFF_ACTION);
   });
 
   it('maps name → action, actorKind → actorType, targetKind/targetId → entityType/entityId', async () => {
     await publisher.publish(buildEvent());
 
-    const wire = emittedWire();
+    const wire = mirroredWire();
     expect(wire.action).toBe('StaffUserRolesAssigned');
     expect(wire.actorType).toBe('staff-user');
     expect(wire.actorId).toBe('staff-1');
@@ -60,13 +55,13 @@ describe('RmqAuditLogPublisher (api-gateway auth)', () => {
   it('records null ipAddress (no IP captured at call sites today)', async () => {
     await publisher.publish(buildEvent());
 
-    expect(emittedWire().ipAddress).toBeNull();
+    expect(mirroredWire().ipAddress).toBeNull();
   });
 
   it('maps a non-staff actorKind to the system actorType', async () => {
     await publisher.publish(buildEvent({ actorKind: 'customer', actorId: null }));
 
-    const wire = emittedWire();
+    const wire = mirroredWire();
     expect(wire.actorType).toBe('system');
     expect(wire.actorId).toBeNull();
   });
@@ -74,7 +69,7 @@ describe('RmqAuditLogPublisher (api-gateway auth)', () => {
   it('records the whole payload as `after` (before null) when no before/after keys are supplied', async () => {
     await publisher.publish(buildEvent({ payload: { roleNames: ['admin'] } }));
 
-    const wire = emittedWire();
+    const wire = mirroredWire();
     expect(wire.before).toBeNull();
     expect(wire.after).toEqual({ roleNames: ['admin'] });
   });
@@ -84,7 +79,7 @@ describe('RmqAuditLogPublisher (api-gateway auth)', () => {
     const after = { roleNames: ['admin'] };
     await publisher.publish(buildEvent({ payload: { before, after } }));
 
-    const wire = emittedWire();
+    const wire = mirroredWire();
     expect(wire.before).toEqual(before);
     expect(wire.after).toEqual(after);
   });
@@ -93,20 +88,12 @@ describe('RmqAuditLogPublisher (api-gateway auth)', () => {
     const fixed = new Date('2026-06-27T10:11:12.000Z');
     await publisher.publish(buildEvent({ occurredAt: fixed }));
 
-    expect(emittedWire().occurredAt).toBe('2026-06-27T10:11:12.000Z');
+    expect(mirroredWire().occurredAt).toBe('2026-06-27T10:11:12.000Z');
   });
 
   it('falls back to an empty correlationId when the event carries none', async () => {
     await publisher.publish(buildEvent({ correlationId: null }));
 
-    expect(emittedWire().correlationId).toBe('');
-  });
-
-  it('swallows a rejected emit (best-effort post-commit) and warn-logs it', async () => {
-    emit.mockReturnValue(throwError(() => new Error('broker down')));
-
-    await expect(publisher.publish(buildEvent())).resolves.toBeUndefined();
-    expect(logger.warn).toHaveBeenCalledTimes(1);
-    expect(logger.error).not.toHaveBeenCalled();
+    expect(mirroredWire().correlationId).toBe('');
   });
 });

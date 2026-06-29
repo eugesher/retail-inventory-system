@@ -26,10 +26,9 @@ import {
 // order the mirror *after* their primary `emit` — a mirror hiccup can never shadow
 // the primary publish that feeds the real consumers. The at-least-once broker plus
 // the event store's idempotent ingest absorb the duplicate delivery a retry would
-// otherwise need. (The audit-log adapters use the same `RIS_EVENTS_PUBLISHER`
-// client directly rather than this helper, because they map a domain event into a
-// wire shape first; this helper is the seam the domain-event publishers reuse for
-// the bulk fan-out.)
+// otherwise need. (Both the domain-event publishers and the real audit-log adapters
+// reuse this one helper — the audit adapters map their event to the wire shape first,
+// then mirror it, so the emit + swallow lives in exactly one place.)
 @Injectable()
 export class RisEventsMirrorPublisher {
   constructor(

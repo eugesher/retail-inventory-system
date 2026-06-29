@@ -4,7 +4,7 @@ import { IAuditStaffActionEvent } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { AuditLogEntry } from '../../../domain';
-import { IAuditLogAppendResult, IAuditLogRepositoryPort } from '../../ports';
+import { IAuditLogRepositoryPort } from '../../ports';
 import { IngestAuditLogUseCase } from '../ingest-audit-log.use-case';
 
 // A fake audit repository recording every appended entry; programmable to throw.
@@ -16,12 +16,12 @@ class FakeAuditLogRepository implements IAuditLogRepositoryPort {
     this.throwOnAppend = error;
   }
 
-  public append(entry: AuditLogEntry): Promise<IAuditLogAppendResult> {
+  public append(entry: AuditLogEntry): Promise<void> {
     if (this.throwOnAppend) {
       return Promise.reject(this.throwOnAppend);
     }
     this.appended.push(entry);
-    return Promise.resolve({ inserted: true });
+    return Promise.resolve();
   }
 
   public listByActor(): Promise<AuditLogEntry[]> {
