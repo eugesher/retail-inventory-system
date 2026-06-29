@@ -27,6 +27,7 @@ import {
   ITransactionScope,
   RESERVATION_REPOSITORY,
   RESERVATION_TTL_MINUTES,
+  OCC_RETRY_ATTEMPTS,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_MOVEMENT_REPOSITORY,
@@ -81,6 +82,8 @@ export class AllocateStockUseCase {
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
     private readonly publisher: IStockEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @Inject(RESERVATION_TTL_MINUTES)
     private readonly ttlMinutes: number,
     @InjectPinoLogger(AllocateStockUseCase.name)
@@ -100,7 +103,11 @@ export class AllocateStockUseCase {
     const allocated = await this.stockCache.withInvalidation(
       () =>
         runWithStockWriteRetry(
-          { transactionPort: this.transactionPort, logger: this.logger },
+          {
+            transactionPort: this.transactionPort,
+            logger: this.logger,
+            maxAttempts: this.maxAttempts,
+          },
           (scope) => this.allocateOnce(scope, cartId, orderId, lines),
           { correlationId },
         ),

@@ -15,6 +15,11 @@ export class StockWriteConflictError extends Error {
   constructor(
     public readonly variantId: number,
     public readonly stockLocationId: string,
+    // The optimistic-lock version our compare-and-swap targeted (the `from` version we
+    // read the row at and lost the race against), surfaced so `runWithStockWriteRetry`
+    // can log it on the `info` retry trace (ADR-036). `null` on a first-touch INSERT race
+    // (no prior version existed) and on the reservation UNIQUE-triple translation.
+    public readonly expectedVersion: number | null = null,
   ) {
     super(`Optimistic write conflict on stock level (variant ${variantId} @ ${stockLocationId})`);
     this.name = 'StockWriteConflictError';

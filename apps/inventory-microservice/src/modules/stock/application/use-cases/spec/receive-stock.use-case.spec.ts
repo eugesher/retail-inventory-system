@@ -54,6 +54,7 @@ describe('ReceiveStockUseCase', () => {
       movements,
       cache,
       publisher,
+      5, // OCC_RETRY_ATTEMPTS budget
       makePinoLoggerMock() as unknown as PinoLogger,
     );
   });

@@ -22,6 +22,7 @@ import {
   IStockRepositoryPort,
   ITransactionPort,
   ITransactionScope,
+  OCC_RETRY_ATTEMPTS,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_MOVEMENT_REPOSITORY,
@@ -130,6 +131,8 @@ export class RestockFromReturnUseCase {
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
     private readonly publisher: IStockEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(RestockFromReturnUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -165,7 +168,11 @@ export class RestockFromReturnUseCase {
     const outcome = await this.stockCache.withInvalidation(
       () =>
         runWithStockWriteRetry(
-          { transactionPort: this.transactionPort, logger: this.logger },
+          {
+            transactionPort: this.transactionPort,
+            logger: this.logger,
+            maxAttempts: this.maxAttempts,
+          },
           (scope) => this.restockOnce(scope, returnRequestId, lines, actorId),
           { correlationId },
         ),

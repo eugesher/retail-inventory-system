@@ -14,6 +14,7 @@ import {
   IStockRepositoryPort,
   ITransactionPort,
   ITransactionScope,
+  OCC_RETRY_ATTEMPTS,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_MOVEMENT_REPOSITORY,
@@ -73,6 +74,8 @@ export class CancelAllocationUseCase {
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
     private readonly publisher: IStockEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(CancelAllocationUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -92,7 +95,11 @@ export class CancelAllocationUseCase {
     const cancelled = await this.stockCache.withInvalidation(
       () =>
         runWithStockWriteRetry(
-          { transactionPort: this.transactionPort, logger: this.logger },
+          {
+            transactionPort: this.transactionPort,
+            logger: this.logger,
+            maxAttempts: this.maxAttempts,
+          },
           (scope) => this.cancelOnce(scope, orderId, lines, reasonCode, actorId),
           { correlationId },
         ),

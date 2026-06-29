@@ -59,6 +59,10 @@ describe('applyOnHandChange (shared stock mutator)', () => {
       movementRepository: movements,
       stockCache: cache,
       logger: makePinoLoggerMock() as unknown as PinoLogger,
+      // The bounded OCC retry budget is now injected (OCC_RETRY_ATTEMPTS, ADR-036), not a
+      // hardcoded constant. The default tests use 5; the budget-specific block below
+      // overrides it to prove the loop honors the injected value.
+      maxAttempts: 5,
     };
   });
 
@@ -125,23 +129,59 @@ describe('applyOnHandChange (shared stock mutator)', () => {
     expect(persisted?.quantityOnHand).toBe(3);
   });
 
-  it('exhausts the bounded retry budget and surfaces a STOCK_WRITE_CONFLICT (409)', async () => {
+  it('exhausts the injected retry budget and surfaces a STOCK_WRITE_CONFLICT (409)', async () => {
     seedLevel(repository, 10);
     repository.conflictsBeforeSuccess = 99; // always conflict
 
-    const error = await applyOnHandChange(deps, {
-      variantId: VARIANT_ID,
-      stockLocationId: LOCATION,
-      delta: 5,
-    }).catch((e: unknown) => e);
+    // A non-default budget (4, not the env default 5) proves the loop counts down the
+    // INJECTED value, not a hardcoded constant.
+    const error = await applyOnHandChange(
+      { ...deps, maxAttempts: 4 },
+      { variantId: VARIANT_ID, stockLocationId: LOCATION, delta: 5 },
+    ).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(InventoryDomainException);
     expect((error as InventoryDomainException).code).toBe(
       InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
     );
-    // Bounded: it tried the max number of times, never more.
-    expect(transaction.calls).toBe(5);
+    // Bounded by the injected budget — tried exactly 4 times, never more.
+    expect(transaction.calls).toBe(4);
     expect(cache.invalidations).toHaveLength(0);
+  });
+
+  describe('honors the injected OCC retry budget (OCC_RETRY_ATTEMPTS, ADR-036)', () => {
+    it('succeeds when conflicts stay within budget (budget 2, one conflict then success)', async () => {
+      seedLevel(repository, 10);
+      repository.conflictsBeforeSuccess = 1; // one lost CAS, the second attempt wins
+
+      const { level } = await applyOnHandChange(
+        { ...deps, maxAttempts: 2 },
+        { variantId: VARIANT_ID, stockLocationId: LOCATION, delta: 5 },
+      );
+
+      expect(level.quantityOnHand).toBe(15);
+      // Exactly two attempts: the conflict plus the success — the budget was enough.
+      expect(transaction.calls).toBe(2);
+      expect(cache.invalidations).toHaveLength(1);
+    });
+
+    it('exhausts at exactly the budget (budget 2, two conflicts) → STOCK_WRITE_CONFLICT', async () => {
+      seedLevel(repository, 10);
+      repository.conflictsBeforeSuccess = 2; // both attempts lose the CAS
+
+      const error = await applyOnHandChange(
+        { ...deps, maxAttempts: 2 },
+        { variantId: VARIANT_ID, stockLocationId: LOCATION, delta: 5 },
+      ).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(InventoryDomainException);
+      expect((error as InventoryDomainException).code).toBe(
+        InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
+      );
+      // Stopped at the budget, not the default 5.
+      expect(transaction.calls).toBe(2);
+      expect(cache.invalidations).toHaveLength(0);
+    });
   });
 
   describe('the optional ledger movement leg (ADR-030 §2)', () => {

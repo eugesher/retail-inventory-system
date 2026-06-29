@@ -259,3 +259,6 @@ not this foundation.)
   diverges from.
 - [ADR-017](017-architecture-lint-via-eslint-boundaries.md) — the domain /
   application / infrastructure import boundaries the repository port respects.
+- [ADR-036](036-idempotency-key-store-and-enforced-occ.md) — makes this protocol's
+  retry budget configurable: the hardcoded `MAX_WRITE_ATTEMPTS = 5` becomes the
+  env-driven `OCC_RETRY_ATTEMPTS` (default 5), injected through DI.

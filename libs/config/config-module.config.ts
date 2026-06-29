@@ -46,6 +46,20 @@ export const configModuleConfig = {
     // fails boot (the `RESERVATION_TTL_MINUTES` precedent).
     RETURN_WINDOW_DAYS: Joi.number().integer().positive().default(30),
 
+    // Idempotency-key retention (hours) — a stored idempotency record becomes eligible
+    // for the purge sweep once `created_at + IDEMPOTENCY_KEY_TTL_HOURS` has passed
+    // (ADR-036). The retail idempotency store + its scheduled sweeper read it. Defaulted,
+    // so a missing var never fails boot (the `RESERVATION_TTL_MINUTES` precedent).
+    IDEMPOTENCY_KEY_TTL_HOURS: Joi.number().integer().min(1).default(24),
+
+    // Bounded retry budget for optimistic-concurrency (version-checked) writes. On a lost
+    // compare-and-swap the write re-reads under a fresh transaction and retries up to this
+    // many attempts before surfacing a 409 (`STOCK_WRITE_CONFLICT` inventory-side, the
+    // forthcoming `VERSION_MISMATCH` for Cart/Order/Fulfillment/ReturnRequest) — ADR-036.
+    // Default 5 keeps high-contention writes converging. Defaulted, so a missing var never
+    // fails boot (the `RESERVATION_TTL_MINUTES` precedent).
+    OCC_RETRY_ATTEMPTS: Joi.number().integer().min(1).default(5),
+
     // Ops mailbox for system-only notifications with no customer recipient
     // (e.g. the inventory low-stock alert). Defaulted so a missing var never fails boot.
     OPS_NOTIFICATIONS_EMAIL: Joi.string().email().default('ops@example.com'),

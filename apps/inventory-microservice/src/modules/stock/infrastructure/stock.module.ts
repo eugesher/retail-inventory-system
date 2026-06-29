@@ -10,6 +10,7 @@ import {
 } from '@retail-inventory-system/messaging';
 
 import {
+  OCC_RETRY_ATTEMPTS,
   RESERVATION_REPOSITORY,
   RESERVATION_TTL_MINUTES,
   STOCK_CACHE,
@@ -99,6 +100,16 @@ import {
       provide: RESERVATION_TTL_MINUTES,
       useFactory: (config: ConfigService): number =>
         config.get<number>('RESERVATION_TTL_MINUTES') ?? 15,
+      inject: [ConfigService],
+    },
+
+    // The bounded optimistic-concurrency retry budget, resolved from `OCC_RETRY_ATTEMPTS`
+    // (Joi default 5) so every stock write use case injects a plain number rather than
+    // reading env (ADR-036; the `RESERVATION_TTL_MINUTES` precedent above). Threaded into
+    // `runWithStockWriteRetry` via the per-use-case retry deps.
+    {
+      provide: OCC_RETRY_ATTEMPTS,
+      useFactory: (config: ConfigService): number => config.get<number>('OCC_RETRY_ATTEMPTS') ?? 5,
       inject: [ConfigService],
     },
 
