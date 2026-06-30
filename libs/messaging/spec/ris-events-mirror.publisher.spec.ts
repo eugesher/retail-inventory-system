@@ -1,6 +1,6 @@
 import { ClientProxy } from '@nestjs/microservices';
 import { PinoLogger } from 'nestjs-pino';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 
 import { ICorrelationPayload } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
@@ -40,5 +40,25 @@ describe('RisEventsMirrorPublisher', () => {
     await expect(publisher.mirror('retail.order.placed', payload)).resolves.toBeUndefined();
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  // A down broker does NOT reject the emit — amqp-connection-manager buffers the publish
+  // and the Observable stays pending. The bounded `timeout` is what stops that from hanging
+  // the already-committed mutation (above all a staff login/refund whose only publish is
+  // this mirror). Simulated with `NEVER` (an emit that never settles) + fake timers.
+  it('bounds a hanging emit with a timeout and swallows it (never blocks the caller)', async () => {
+    jest.useFakeTimers();
+    try {
+      emit.mockReturnValue(NEVER);
+
+      const pending = publisher.mirror('retail.order.placed', payload);
+      await jest.advanceTimersByTimeAsync(5_000);
+
+      await expect(pending).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.error).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

@@ -51,7 +51,7 @@ export class FirehoseConsumer {
     @Payload() payload: Record<string, unknown>,
     @Ctx() context: RmqContext,
   ): Promise<void> {
-    // The wildcard `@EventPattern('#.#')` is what binds the queue to `ris.events`, but
+    // The lone-`#` `@EventPattern` binds the queue to `ris.events`, but
     // `context.getPattern()` would return that wildcard. The CONCRETE routing key the
     // producer emitted under lives on the raw AMQP message metadata — cast the loosely
     // typed amqplib message to the one field we read.
@@ -59,7 +59,12 @@ export class FirehoseConsumer {
     const routingKey = message.fields.routingKey;
     const correlationId = typeof payload?.correlationId === 'string' ? payload.correlationId : '';
 
-    this.logger.info({ correlationId, routingKey }, 'Consuming ris.events firehose message');
+    // `debug`, not `info`: this fires for EVERY event on the whole-platform firehose, and
+    // the per-branch ingest use cases already log the same routingKey/correlationId on
+    // success. Only the failure path below warns (always on). `correlationId` rides inline
+    // — `@EventPattern` handlers are not request-scoped, so `PinoLogger.assign()` would
+    // throw (ADR-011 §7).
+    this.logger.debug({ correlationId, routingKey }, 'Consuming ris.events firehose message');
 
     try {
       if (routingKey === ROUTING_KEYS.AUDIT_STAFF_ACTION) {

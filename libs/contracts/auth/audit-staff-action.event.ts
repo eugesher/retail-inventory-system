@@ -1,4 +1,5 @@
 import { ICorrelationPayload } from '../microservices';
+import { IAuditLogEvent } from './audit-log-publisher.port';
 
 // The wire contract for the cross-cutting staff-action audit stream (ADR-035).
 //
@@ -52,4 +53,31 @@ export interface IAuditStaffActionEvent extends ICorrelationPayload {
 
   // Pins the wire shape so the ingest can branch on a schema bump without guessing.
   eventVersion: 'v1';
+}
+
+// Maps the in-process `IAuditLogEvent` onto the `IAuditStaffActionEvent` wire shape
+// (the field table documented above). Pure and transport-free so BOTH real
+// `AUDIT_LOG_PUBLISHER` adapters (api-gateway `auth`, retail `orders`) share this one
+// mapping instead of each carrying a byte-identical private `toWire` copy that must be
+// kept in lockstep. `before`/`after`: explicit payload keys win; otherwise the whole
+// payload becomes `after` and `before` is null. `ipAddress` is always null (no call site
+// captures it today); `occurredAt` defaults to now when the event omits it.
+export function toAuditStaffActionEvent(event: IAuditLogEvent): IAuditStaffActionEvent {
+  const before = (event.payload.before as Record<string, unknown> | undefined) ?? null;
+  const after =
+    (event.payload.after as Record<string, unknown> | undefined) ?? event.payload ?? null;
+
+  return {
+    actorId: event.actorId,
+    actorType: event.actorKind === 'staff' ? 'staff-user' : 'system',
+    action: event.name,
+    entityType: event.targetKind,
+    entityId: event.targetId,
+    before,
+    after,
+    occurredAt: (event.occurredAt ?? new Date()).toISOString(),
+    ipAddress: null,
+    correlationId: event.correlationId ?? '',
+    eventVersion: 'v1',
+  };
 }

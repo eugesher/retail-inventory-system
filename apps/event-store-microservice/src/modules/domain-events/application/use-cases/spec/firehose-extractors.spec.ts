@@ -14,15 +14,15 @@ describe('firehose-extractors', () => {
       ['notification.template.author', 'notification-microservice'],
       ['notifications.delivery.failed', 'notification-microservice'],
     ])('maps the first routing-key token of %s to %s', (routingKey, expected) => {
-      expect(resolveProducer(routingKey)).toBe(expected);
+      expect(resolveProducer(routingKey.split('.'))).toBe(expected);
     });
 
     it('falls back to the raw first token for an unmapped producer prefix', () => {
-      expect(resolveProducer('payments.charge.captured')).toBe('payments');
+      expect(resolveProducer('payments.charge.captured'.split('.'))).toBe('payments');
     });
 
     it('falls back to the empty string for an empty routing key', () => {
-      expect(resolveProducer('')).toBe('');
+      expect(resolveProducer(''.split('.'))).toBe('');
     });
   });
 
@@ -33,11 +33,11 @@ describe('firehose-extractors', () => {
       ['inventory.stock-level.initialized', 'stock-level'],
       ['catalog.variant.created', 'variant'],
     ])('returns the second routing-key token of %s as %s', (routingKey, expected) => {
-      expect(resolveAggregateType(routingKey)).toBe(expected);
+      expect(resolveAggregateType(routingKey.split('.'))).toBe(expected);
     });
 
     it('falls back to the empty string when there is no second token', () => {
-      expect(resolveAggregateType('audit')).toBe('');
+      expect(resolveAggregateType('audit'.split('.'))).toBe('');
     });
   });
 

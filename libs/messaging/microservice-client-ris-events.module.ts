@@ -16,7 +16,7 @@ import { RisEventsMirrorPublisher } from './ris-events-mirror.publisher';
 // `wildcards: true`, `emit(routingKey, payload)` publishes to `ris.events`
 // using `routingKey` as the AMQP topic routing key. No queue is asserted on the
 // producer side; the event store binds the single `event_store_firehose_queue`
-// with `#.#` (every event) and dispatches by routing key.
+// with the catch-all `#` (every event) and dispatches by routing key.
 //
 // The module exports both the registered `ClientsModule` (so consumers can
 // inject the `RIS_EVENTS_PUBLISHER` `ClientProxy` directly — the real audit-log

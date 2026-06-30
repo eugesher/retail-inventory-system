@@ -5,7 +5,7 @@ import { DomainEventsModule } from './domain-events';
 import { FirehoseConsumer } from './firehose.consumer';
 
 // The `audit-and-events` bounded context aggregates the event store's two sibling
-// modules: `domain-events/` (the `#.#` firehose sink — every business event) and
+// modules: `domain-events/` (the `#` firehose sink — every business event) and
 // `audit-log/` (the staff audit trail). Aggregating them here keeps `app.module.ts`
 // importing one context module rather than each sibling (the catalog `app.module.ts`
 // two-module precedent, kept to a single import).
