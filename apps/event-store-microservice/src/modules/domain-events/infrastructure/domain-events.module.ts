@@ -7,7 +7,7 @@ import { DOMAIN_EVENT_REPOSITORY } from '../application/ports';
 import { DomainEventEntity, DomainEventTypeormRepository } from './persistence';
 
 // The `domain-events` module of the event store's `audit-and-events` context — the
-// sink for the `#.#` event firehose (every business event published in the system,
+// sink for the `#` event firehose (every business event published in the system,
 // ADR-035). It owns the append-only `domain_event` table (ADR-034 isolated
 // `ris_eventstore` schema).
 //

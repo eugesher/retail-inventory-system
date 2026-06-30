@@ -15,7 +15,7 @@ export class DomainEventMapper {
       payload: entity.payload,
       eventVersion: entity.eventVersion,
       producer: entity.producer,
-      correlationId: entity.correlationId ?? null,
+      correlationId: entity.correlationId,
       occurredAt: entity.occurredAt,
     });
   }
@@ -31,7 +31,10 @@ export class DomainEventMapper {
       payload: domain.payload,
       eventVersion: domain.eventVersion,
       producer: domain.producer,
-      correlationId: domain.correlationId,
+      // The `correlation_id` column is `NOT NULL DEFAULT ''`; coalesce a null domain value
+      // to `''` so the idempotency UNIQUE dedupes (and an explicit NULL never reaches the
+      // non-null column). The ingest already coalesces, so this is the second guard.
+      correlationId: domain.correlationId ?? '',
       occurredAt: domain.occurredAt,
     };
   }

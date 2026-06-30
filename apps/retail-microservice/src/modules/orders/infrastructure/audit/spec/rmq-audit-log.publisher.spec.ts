@@ -1,10 +1,5 @@
-import { ClientProxy } from '@nestjs/microservices';
-import { PinoLogger } from 'nestjs-pino';
-import { of, throwError } from 'rxjs';
-
 import { IAuditLogEvent, IAuditStaffActionEvent } from '@retail-inventory-system/contracts';
-import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
-import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
+import { ROUTING_KEYS, RisEventsMirrorPublisher } from '@retail-inventory-system/messaging';
 
 import { RmqAuditLogPublisher } from '../rmq-audit-log.publisher';
 
@@ -30,34 +25,34 @@ const buildRefundEvent = (overrides: Partial<IAuditLogEvent> = {}): IAuditLogEve
 });
 
 describe('RmqAuditLogPublisher (retail orders)', () => {
-  let emit: jest.Mock;
-  let client: ClientProxy;
-  let logger: PinoLoggerMock;
+  let mirror: jest.Mock;
+  let risEvents: RisEventsMirrorPublisher;
   let publisher: RmqAuditLogPublisher;
 
   beforeEach(() => {
-    emit = jest.fn().mockReturnValue(of(undefined));
-    client = { emit } as unknown as ClientProxy;
-    logger = makePinoLoggerMock();
-    publisher = new RmqAuditLogPublisher(client, logger as unknown as PinoLogger);
+    // The shared mirror publisher owns the emit + best-effort swallow (covered by its own
+    // spec); here we only assert this adapter maps + delegates to it.
+    mirror = jest.fn().mockResolvedValue(undefined);
+    risEvents = { mirror } as unknown as RisEventsMirrorPublisher;
+    publisher = new RmqAuditLogPublisher(risEvents);
   });
 
-  const firstEmit = (): [string, IAuditStaffActionEvent] =>
-    emit.mock.calls[0] as [string, IAuditStaffActionEvent];
-  const emittedWire = (): IAuditStaffActionEvent => firstEmit()[1];
+  const firstMirror = (): [string, IAuditStaffActionEvent] =>
+    mirror.mock.calls[0] as [string, IAuditStaffActionEvent];
+  const mirroredWire = (): IAuditStaffActionEvent => firstMirror()[1];
 
-  it('emits a RefundIssued onto the audit.staff.action routing key', async () => {
+  it('mirrors a RefundIssued onto the audit.staff.action routing key', async () => {
     await publisher.publish(buildRefundEvent());
 
-    expect(emit).toHaveBeenCalledTimes(1);
-    expect(firstEmit()[0]).toBe(ROUTING_KEYS.AUDIT_STAFF_ACTION);
-    expect(emittedWire().action).toBe('RefundIssued');
+    expect(mirror).toHaveBeenCalledTimes(1);
+    expect(firstMirror()[0]).toBe(ROUTING_KEYS.AUDIT_STAFF_ACTION);
+    expect(mirroredWire().action).toBe('RefundIssued');
   });
 
   it('maps a null targetKind to a null entityType and keeps the targetId as entityId', async () => {
     await publisher.publish(buildRefundEvent());
 
-    const wire = emittedWire();
+    const wire = mirroredWire();
     expect(wire.entityType).toBeNull();
     expect(wire.entityId).toBe('4321');
     expect(wire.actorType).toBe('staff-user');
@@ -68,7 +63,7 @@ describe('RmqAuditLogPublisher (retail orders)', () => {
   it('records the whole refund payload as `after` (before null)', async () => {
     await publisher.publish(buildRefundEvent());
 
-    const wire = emittedWire();
+    const wire = mirroredWire();
     expect(wire.before).toBeNull();
     expect(wire.after).toMatchObject({ refundId: 12, amountMinor: 1500, currency: 'USD' });
   });
@@ -76,18 +71,10 @@ describe('RmqAuditLogPublisher (retail orders)', () => {
   it('maps the auto-refund-from-cancel system actor (null actorId) — still audited', async () => {
     await publisher.publish(buildRefundEvent({ name: 'RefundIssued', actorId: null }));
 
-    const wire = emittedWire();
+    const wire = mirroredWire();
     // The refund use case audits with actorKind 'staff' even for the system path,
     // so the wire actorType stays 'staff-user'; the null actorId signals the origin.
     expect(wire.actorType).toBe('staff-user');
     expect(wire.actorId).toBeNull();
-  });
-
-  it('swallows a rejected emit (best-effort post-commit) and warn-logs it', async () => {
-    emit.mockReturnValue(throwError(() => new Error('broker down')));
-
-    await expect(publisher.publish(buildRefundEvent())).resolves.toBeUndefined();
-    expect(logger.warn).toHaveBeenCalledTimes(1);
-    expect(logger.error).not.toHaveBeenCalled();
   });
 });
