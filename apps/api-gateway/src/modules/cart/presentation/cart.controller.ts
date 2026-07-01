@@ -3,13 +3,13 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Param,
   ParseIntPipe,
   Patch,
   Post,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -21,11 +21,13 @@ import {
   ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 
 import { CurrentUser } from '@retail-inventory-system/auth';
 import { CartView, ICurrentUser, OrderView } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
+import { IdempotencyKey } from '../../../common/decorators';
 import {
   AddToCartUseCase,
   ChangeCartLineQuantityUseCase,
@@ -171,27 +173,38 @@ export class CartController {
 
   @Post(':cartId/place')
   @ApiOperation({
-    summary: 'Place the cart as an order (owner-checked, authorize-on-place)',
+    summary: 'Place the cart as an order (owner-checked, authorize-on-place, idempotent)',
   })
   @ApiParam({ name: 'cartId', type: String, example: '11111111-1111-4111-8111-111111111111' })
   @ApiHeader({
     name: 'Idempotency-Key',
-    required: false,
-    description: 'Accepted + logged but not deduped (repeat-safety is via cart state)',
+    required: true,
+    description:
+      'Required (ADR-036). Same key + same body replays the stored order (200 + Idempotent-Replay: true); same key + different body → 422; a missing key → 400.',
   })
   @ApiCreatedResponse({
     description: 'The placed order (with the authorized payment)',
     type: OrderView,
   })
+  @ApiOkResponse({
+    description: 'A replayed place (same Idempotency-Key + body) — carries Idempotent-Replay: true',
+    type: OrderView,
+  })
   @ApiProduces('application/json')
+  // A fresh place is `201 Created`; a replay returns the stored order with `200 OK` +
+  // the `Idempotent-Replay: true` marker header. Because the status is dynamic, this
+  // route owns its response via `@Res` (the passthrough path would let Nest overwrite
+  // the status back to the route default `201`) — errors thrown before `res.json` still
+  // flow through the gateway's exception filters (ADR-036).
   public async placeOrder(
     @Param('cartId') cartId: string,
     @Body() dto: PlaceOrderRequestDto,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @IdempotencyKey() idempotencyKey: string,
     @CurrentUser() user: ICurrentUser,
     @CorrelationId() correlationId: string,
-  ): Promise<OrderView> {
-    return this.placeCartOrderUseCase.execute(
+    @Res() res: Response,
+  ): Promise<void> {
+    const result = await this.placeCartOrderUseCase.execute(
       {
         cartId,
         customerId: user.id,
@@ -202,5 +215,10 @@ export class CartController {
       },
       correlationId,
     );
+
+    if (result.replayed) {
+      res.setHeader('Idempotent-Replay', 'true');
+    }
+    res.status(result.replayed ? HttpStatus.OK : HttpStatus.CREATED).json(result.view);
   }
 }

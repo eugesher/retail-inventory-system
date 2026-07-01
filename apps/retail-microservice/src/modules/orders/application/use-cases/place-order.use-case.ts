@@ -1,8 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
+import { bodyFingerprint } from '@retail-inventory-system/common';
 import {
   CartStatusEnum,
+  IIdempotentResult,
   IPlaceOrderPayload,
   OrderView,
   VariantWithProductView,
@@ -17,6 +19,7 @@ import {
   Payment,
 } from '../../domain';
 import {
+  IIdempotencyStorePort,
   IOrderCartReaderPort,
   IOrderCatalogGatewayPort,
   IOrderCustomerContactReaderPort,
@@ -27,6 +30,7 @@ import {
   IPaymentRepositoryPort,
   ITransactionPort,
   ADDRESS_REPOSITORY,
+  IDEMPOTENCY_STORE,
   ORDER_CART_READER,
   ORDER_CATALOG_GATEWAY,
   ORDER_CUSTOMER_CONTACT_READER,
@@ -60,11 +64,19 @@ const PROVISIONAL_ORDER_NUMBER = 'PENDING';
 // must never rewrite a placed order, so the line freezes the catalog values at
 // place-time rather than referencing the live catalog row.
 //
-// **Repeat-place idempotency is driven by cart state, not the `Idempotency-Key`**
-// (Q10 / ADR-028 §6): a placed cart is `converted`; re-placing it returns the order
-// it already converted into (via `source_cart_id`) rather than creating a second
-// order. The `Idempotency-Key` header is accepted + logged but NOT deduped in this
-// capability (a persisted idempotency store is a later capability).
+// **Repeat-place idempotency has two layers (ADR-036).** First the request-level
+// `Idempotency-Key`: `execute` fingerprints the canonical body (`bodyFingerprint`),
+// looks the `(scope='place-order', key)` pair up in the `IDEMPOTENCY_STORE`, and on a
+// same-key/same-body hit **replays the stored `OrderView` before any side effect** —
+// no inventory, no payment, no `emitEvents` (a replay must be side-effect-free beyond
+// returning the original response). A same-key/*different*-body hit is a client
+// key-reuse bug → `422`; a missing key is a `400` backstop (the gateway enforces the
+// header at the edge). On a store miss the place runs, and its `OrderView` is persisted
+// (outside the transaction — the view is only complete after payment authorization) so
+// the next identical retry replays. Second, cart state remains the **durable** backstop
+// (ADR-028 §6): a placed cart is `converted`, so a re-place with a *new* key returns the
+// order it already converted into (via `source_cart_id`) — this survives even a lost
+// idempotency record. Key-store first; on a miss the converted-cart guard still applies.
 @Injectable()
 export class PlaceOrderUseCase {
   constructor(
@@ -86,15 +98,110 @@ export class PlaceOrderUseCase {
     private readonly publisher: IOrderEventsPublisherPort,
     @Inject(ORDER_CUSTOMER_CONTACT_READER)
     private readonly customerContactReader: IOrderCustomerContactReaderPort,
+    @Inject(IDEMPOTENCY_STORE)
+    private readonly idempotencyStore: IIdempotencyStorePort,
     private readonly authorizePayment: AuthorizePaymentUseCase,
     @InjectPinoLogger(PlaceOrderUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
 
-  public async execute(payload: IPlaceOrderPayload): Promise<OrderView> {
+  // The scope namespaces the client key by operation, so the same `Idempotency-Key`
+  // reused for a place and (later) a capture cannot collide in the store (ADR-036).
+  private static readonly SCOPE = 'place-order';
+
+  public async execute(payload: IPlaceOrderPayload): Promise<IIdempotentResult<OrderView>> {
+    const { cartId, idempotencyKey, correlationId } = payload;
+
+    // Defensive backstop for the gateway's required-header edge check: the header is an
+    // HTTP concern the gateway rejects with `IDEMPOTENCY_KEY_REQUIRED`, but a direct RMQ
+    // caller that bypassed the gateway still fails fast here (ADR-036).
+    if (!idempotencyKey) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED,
+        'An Idempotency-Key is required to place an order',
+      );
+    }
+
+    // Fingerprint the CANONICAL body — the client-controlled place command minus
+    // transport/identity noise (`correlationId`, `idempotencyKey`, and the
+    // owner-injected `customerId`), so a retry under a fresh correlation id still
+    // matches (ADR-036, the "what the body is" rule).
+    const fingerprint = bodyFingerprint(PlaceOrderUseCase.canonicalBody(payload));
+
+    // 1. Key-store lookup FIRST. A hit with a matching fingerprint is a replay: return
+    //    the stored `OrderView` WITHOUT touching inventory/payment and WITHOUT
+    //    re-emitting events — this branch returns before `place`, which owns the whole
+    //    place flow including `emitEvents`. A hit with a different fingerprint is one key
+    //    reused for a different body → 422.
+    const prior = await this.idempotencyStore.find(PlaceOrderUseCase.SCOPE, idempotencyKey);
+    if (prior) {
+      if (prior.requestFingerprint === fingerprint) {
+        this.logger.debug(
+          { correlationId, cartId, idempotencyKey },
+          'Idempotent replay — returning the stored place response (no re-execution, no events)',
+        );
+        return { view: prior.responseBody as unknown as OrderView, replayed: true };
+      }
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED,
+        `Idempotency-Key ${idempotencyKey} was already used for a place-order request with a different body`,
+      );
+    }
+
+    // 2. Miss — run the place flow (the converted-cart backstop still applies inside).
+    const view = await this.place(payload);
+
+    // 3. Persist the stored response OUTSIDE the place transaction: the `OrderView` is
+    //    only complete after payment authorization + the re-read (both post-commit).
+    //    `save` swallows a concurrent duplicate-PK insert (a simultaneous identical place
+    //    that committed first), so the authoritative re-read below converges both racers
+    //    on ONE order.
+    await this.idempotencyStore.save({
+      scope: PlaceOrderUseCase.SCOPE,
+      key: idempotencyKey,
+      requestFingerprint: fingerprint,
+      // The place route is `201 Created`; a replay downgrades to `200` at the gateway.
+      responseStatus: HttpStatus.CREATED,
+      responseBody: view as unknown as Record<string, unknown>,
+    });
+
+    const stored = await this.idempotencyStore.find(PlaceOrderUseCase.SCOPE, idempotencyKey);
+    if (stored && (stored.responseBody as { id?: number }).id !== view.id) {
+      // Our `save` lost the composite-PK race to a concurrent identical place; return the
+      // winner's stored order so both racers converge on one response. There is no second
+      // order in production — the cart-conversion CAS already guarantees exactly one
+      // order was ever created for the cart (the CAS-loses guard inside `place`).
+      this.logger.debug(
+        { correlationId, cartId, idempotencyKey },
+        'Idempotent replay — a concurrent place stored first; returning the winning order',
+      );
+      return { view: stored.responseBody as unknown as OrderView, replayed: true };
+    }
+    return { view, replayed: false };
+  }
+
+  // Builds the stable logical body the fingerprint covers: the client-controlled place
+  // command only. `correlationId` / `idempotencyKey` (transport + the dedup anchor) and
+  // the owner-injected `customerId` (a session property, not request content) are
+  // excluded, so the same intent under a fresh correlation id fingerprints identically
+  // (ADR-036). The gateway and this service must hash the same logical object to agree.
+  private static canonicalBody(payload: IPlaceOrderPayload): Record<string, unknown> {
+    return {
+      cartId: payload.cartId,
+      shippingAddress: payload.shippingAddress,
+      billingAddress: payload.billingAddress,
+      paymentMethod: payload.paymentMethod,
+    };
+  }
+
+  // The place flow proper (run on a store miss): owner + state guard, catalog snapshot,
+  // the one-transaction persist + allocate, inline payment authorization, and the
+  // post-commit events. Returns the `OrderView`; a `converted` cart short-circuits to the
+  // already-placed order (the durable cart-state backstop — no allocate, no payment, no
+  // events).
+  private async place(payload: IPlaceOrderPayload): Promise<OrderView> {
     const { cartId, customerId, idempotencyKey, correlationId } = payload;
 
-    // Q10: the `Idempotency-Key` is accepted + logged but NOT deduped here.
     this.logger.info({ correlationId, cartId, customerId, idempotencyKey }, 'Placing order');
 
     // 1. Owner + state guard.

@@ -3,6 +3,7 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 
 import {
   FulfillmentView,
+  IIdempotentResult,
   IPage,
   IPlaceOrderPayload,
   IRetailFulfillmentCreatePayload,
@@ -64,8 +65,13 @@ export class OrdersController {
     private readonly listRefunds: ListRefundsForOrderUseCase,
   ) {}
 
+  // Resolves to the idempotency envelope `{ view, replayed }` (ADR-036): the gateway
+  // reads `replayed` to set the `Idempotent-Replay: true` response header + a `200`
+  // status on a served replay, and surfaces `view` (the `OrderView`) as the body.
   @MessagePattern(ROUTING_KEYS.RETAIL_CART_PLACE)
-  public handlePlace(@Payload() payload: IPlaceOrderPayload): Promise<OrderView> {
+  public handlePlace(
+    @Payload() payload: IPlaceOrderPayload,
+  ): Promise<IIdempotentResult<OrderView>> {
     return this.placeOrder.execute(payload);
   }
 

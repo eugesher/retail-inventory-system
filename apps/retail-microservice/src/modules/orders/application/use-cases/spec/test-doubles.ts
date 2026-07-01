@@ -29,6 +29,9 @@ import {
 import {
   IAddressRepositoryPort,
   IFulfillmentRepositoryPort,
+  IIdempotencyRecord,
+  IIdempotencyRecordInput,
+  IIdempotencyStorePort,
   IOrderCartReaderPort,
   IOrderCartSnapshot,
   IOrderCatalogGatewayPort,
@@ -662,6 +665,78 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
     });
   }
 }
+
+// In-memory `IDEMPOTENCY_STORE` double for the Place Order replay / 422 / store /
+// concurrent-first-writer specs. `find` returns a stored record or null; `save` inserts
+// unless the `(scope, key)` PK already holds a row, in which case it swallows the
+// duplicate as a no-op (the real adapter's ER_DUP_ENTRY behavior). To exercise the
+// concurrent race, arm a pre-committed "winner" via `armConcurrentWinner`: the FIRST
+// `find` misses (the winner's row is not yet visible), our `save` collides and is
+// swallowed, and the post-save `find` reveals the winner's stored body — so the use case
+// converges on the winner's order rather than its own freshly built one.
+export class FakeIdempotencyStore implements IIdempotencyStorePort {
+  public readonly saved: IIdempotencyRecordInput[] = [];
+  public findCalls = 0;
+  private readonly rows = new Map<string, IIdempotencyRecord>();
+  private winner: IIdempotencyRecord | null = null;
+
+  private static keyOf(scope: string, key: string): string {
+    return `${scope}::${key}`;
+  }
+
+  // Seed a record visible immediately — the straightforward replay / 422 cases.
+  public seed(record: IIdempotencyRecord): void {
+    this.rows.set(FakeIdempotencyStore.keyOf(record.scope, record.key), record);
+  }
+
+  // Arm a concurrent winner: hidden from the first `find` (the miss), revealed on the
+  // post-save `find`, and holding the PK so our own `save` is swallowed.
+  public armConcurrentWinner(record: IIdempotencyRecord): void {
+    this.winner = record;
+  }
+
+  public find(scope: string, key: string): Promise<IIdempotencyRecord | null> {
+    this.findCalls += 1;
+    const k = FakeIdempotencyStore.keyOf(scope, key);
+    if (this.winner && this.findCalls > 1) {
+      this.rows.set(k, this.winner);
+    }
+    return Promise.resolve(this.rows.get(k) ?? null);
+  }
+
+  public save(record: IIdempotencyRecordInput): Promise<void> {
+    this.saved.push(record);
+    const k = FakeIdempotencyStore.keyOf(record.scope, record.key);
+    // A concurrent winner (or a prior row) holds the PK → swallow the duplicate as a
+    // no-op, exactly as the real adapter swallows ER_DUP_ENTRY.
+    if (this.winner || this.rows.has(k)) {
+      return Promise.resolve();
+    }
+    this.rows.set(k, {
+      ...record,
+      createdAt: new Date('2026-06-10T00:00:00.000Z'),
+      expiresAt: new Date('2026-06-11T00:00:00.000Z'),
+    });
+    return Promise.resolve();
+  }
+}
+
+// Builds a stored idempotency record fixture for the replay / reuse / concurrent specs.
+// `responseBody` is an `OrderView`-shaped object (only the fields the specs assert are
+// populated); `requestFingerprint` defaults to a canonical placeholder the tests can
+// match or deliberately diverge from.
+export const buildIdempotencyRecord = (
+  overrides: Partial<IIdempotencyRecord> = {},
+): IIdempotencyRecord => ({
+  scope: 'place-order',
+  key: 'idem-1',
+  requestFingerprint: 'fingerprint-placeholder',
+  responseStatus: 201,
+  responseBody: { id: 777, orderNumber: 'ORD-2026-00000777' },
+  createdAt: new Date('2026-06-10T00:00:00.000Z'),
+  expiresAt: new Date('2026-06-11T00:00:00.000Z'),
+  ...overrides,
+});
 
 // A `VariantWithProductView` fixture builder for the snapshot assertions.
 export const buildVariant = (
