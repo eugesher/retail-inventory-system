@@ -15,7 +15,7 @@ import { DomainEventEntity } from '../modules/domain-events';
 // The event-store microservice — the sixth deployable — persists the event firehose
 // and the staff audit log to an ISOLATED logical database `ris_eventstore` (ADR-034),
 // not the shared operational `retail_db` the other five services join (the contrast
-// with the notification service's shared-DB choice, ADR-033). The write-heavy `#.#`
+// with the notification service's shared-DB choice, ADR-033). The write-heavy `#`
 // firehose must not pressure live checkout/inventory reads, so it gets its own schema
 // + migration history + connection.
 //
@@ -25,8 +25,8 @@ import { DomainEventEntity } from '../modules/domain-events';
 // `audit_log_entry`); the matching tables are created by the eventstore migration
 // pipeline (`migration:run:eventstore`). The `AuditAndEventsModule` aggregates the two
 // context modules (`domain-events/` + `audit-log/`), each of which binds its repository
-// port via `DatabaseModule.forFeature`. The service still boots and idles with no
-// handlers bound until the firehose consumer is wired (a later capability).
+// port via `DatabaseModule.forFeature`, and registers the `FirehoseConsumer` that binds
+// the `event_store_firehose_queue` (`#`) to `ris.events` and ingests the whole firehose.
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),

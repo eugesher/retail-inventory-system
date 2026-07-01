@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Repository } from 'typeorm';
 
-import { IAuditLogAppendResult, IAuditLogRepositoryPort } from '../../application/ports';
+import { IAuditLogRepositoryPort } from '../../application/ports';
 import { AuditLogEntry } from '../../domain';
 import { AuditLogEntryEntity } from './audit-log-entry.entity';
 import { AuditLogEntryMapper } from './audit-log-entry.mapper';
@@ -21,7 +21,7 @@ export class AuditLogEntryTypeormRepository implements IAuditLogRepositoryPort {
     private readonly auditLogRepository: Repository<AuditLogEntryEntity>,
   ) {}
 
-  public async append(entry: AuditLogEntry): Promise<IAuditLogAppendResult> {
+  public async append(entry: AuditLogEntry): Promise<void> {
     // INSERT, not `save`: an audit entry is born with a null id and is never updated.
     // Audit has no natural dedupe key (two identical staff actions are two real events),
     // so there is no UNIQUE to collide on — every insert is a fresh autoincrement row.
@@ -30,7 +30,6 @@ export class AuditLogEntryTypeormRepository implements IAuditLogRepositoryPort {
     // — they coincide for scalar columns but diverge on the JSON `before` / `after`
     // snapshots; the mapper already produced a concrete, well-formed row.
     await this.auditLogRepository.insert(partial as QueryDeepPartialEntity<AuditLogEntryEntity>);
-    return { inserted: true };
   }
 
   public async listByActor(actorId: string): Promise<AuditLogEntry[]> {

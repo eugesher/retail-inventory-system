@@ -128,7 +128,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  price / tax_category                                     │ │
 │  cart / cart_line                                         │ │
 │  order / order_line / address / payment                   │ │
-│  refund                                                   │ │
+│  refund / idempotency_key                                 │ │
 │  fulfillment / fulfillment_line                           │ │
 │  return_request / return_line                             │ │
 └───────────────────────────────────────────────────────────┘ │

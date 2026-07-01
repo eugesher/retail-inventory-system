@@ -44,12 +44,13 @@ export class DomainEventEntity {
   @Column({ type: 'varchar', length: 32 })
   public producer: string;
 
-  // Nullable per the wire contract, BUT the ingest coalesces an empty wire
-  // `correlationId` to `''` (not NULL) so a redelivery actually collides on the
-  // idempotency UNIQUE (MySQL treats NULLs as distinct) — that coalescing is the
-  // ingest use case's job in a later capability; the column stays nullable here.
-  @Column({ type: 'varchar', length: 64, nullable: true })
-  public correlationId: string | null;
+  // `NOT NULL DEFAULT ''` (not nullable) so the idempotency UNIQUE actually collides on a
+  // redelivery — MySQL treats NULLs as distinct, so a NULL correlation id would slip past
+  // the dedupe. Keeping the column non-null makes that correct by construction regardless
+  // of the writer; the ingest's `?? ''` coalescing is then belt-and-braces. (The WIRE
+  // contract stays nullable — this is the storage anchor, not the wire shape.)
+  @Column({ type: 'varchar', length: 64, default: '' })
+  public correlationId: string;
 
   @Column({ type: 'timestamp', precision: 3 })
   public occurredAt: Date;

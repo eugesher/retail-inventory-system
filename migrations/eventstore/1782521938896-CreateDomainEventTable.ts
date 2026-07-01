@@ -18,11 +18,13 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // The composite UNIQUE `(producer, event_type, aggregate_id, occurred_at,
 // correlation_id)` is the IDEMPOTENCY ANCHOR against RabbitMQ at-least-once redelivery
 // (ADR-020): a redelivered event collides and the repository swallows the
-// `ER_DUP_ENTRY` as a no-op. MySQL treats NULLs as DISTINCT in a UNIQUE index, so the
-// ingest coalesces an empty wire `correlationId` to `''` (not NULL) before append so a
-// redelivery actually collides — the column stays nullable per the wire contract, the
-// coalescing lives in the ingest use case (a later capability). The three secondary
-// indexes back future query paths (by aggregate, by event type, by correlation).
+// `ER_DUP_ENTRY` as a no-op. MySQL treats NULLs as DISTINCT in a UNIQUE index, so a NULL
+// `correlation_id` would slip past the dedupe on every redelivery. Rather than leaning on
+// a single `?? ''` line in the ingest use case to prevent that, `correlation_id` is
+// `NOT NULL DEFAULT ''`: the dedupe key is correct BY CONSTRUCTION for any writer (a
+// backfill, a replay tool, a test fixture), and the use-case coalescing becomes
+// belt-and-braces. The three secondary indexes back future query paths (by aggregate, by
+// event type, by correlation).
 //
 // No FK on any column: the firehose references no other schema and lives in its own
 // isolated database.
@@ -37,7 +39,7 @@ export class CreateDomainEventTable1782521938896 implements MigrationInterface {
         payload         JSON         NOT NULL,
         event_version   VARCHAR(8)   NOT NULL,
         producer        VARCHAR(32)  NOT NULL,
-        correlation_id  VARCHAR(64)  NULL,
+        correlation_id  VARCHAR(64)  NOT NULL DEFAULT '',
         occurred_at     TIMESTAMP(3) NOT NULL,
         received_at     TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         CONSTRAINT UC_DOMAIN_EVENT_IDEMPOTENCY

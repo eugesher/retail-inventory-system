@@ -58,14 +58,18 @@ export class IngestDomainEventUseCase {
       return;
     }
 
+    // Split the dotted routing key once and derive both the producer (first token) and the
+    // aggregate type (second token) from the same array.
+    const tokens = routingKey.split('.');
+
     try {
       const event = DomainEvent.create({
         eventType: routingKey,
-        aggregateType: resolveAggregateType(routingKey),
+        aggregateType: resolveAggregateType(tokens),
         aggregateId: resolveAggregateId(payload),
         payload,
         eventVersion: typeof payload.eventVersion === 'string' ? payload.eventVersion : 'v1',
-        producer: resolveProducer(routingKey),
+        producer: resolveProducer(tokens),
         correlationId,
         occurredAt,
       });
