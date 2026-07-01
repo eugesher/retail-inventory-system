@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
 
 import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
@@ -14,6 +15,8 @@ import {
 import {
   ADDRESS_REPOSITORY,
   FULFILLMENT_REPOSITORY,
+  IDEMPOTENCY_KEY_TTL_HOURS,
+  IDEMPOTENCY_STORE,
   ORDER_CART_READER,
   ORDER_CUSTOMER_CONTACT_READER,
   ORDER_CATALOG_GATEWAY,
@@ -42,6 +45,7 @@ import {
   ShipFulfillmentUseCase,
 } from '../application/use-cases';
 import { OrderCancelledConsumer } from './consumers';
+import { IdempotencyKeyEntity, IdempotencyStoreTypeormRepository } from './idempotency';
 import {
   OrderCatalogRabbitmqAdapter,
   OrderCommitSaleRabbitmqAdapter,
@@ -120,6 +124,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
       FulfillmentEntity,
       FulfillmentLineEntity,
       RefundEntity,
+      IdempotencyKeyEntity,
     ]),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
@@ -143,6 +148,24 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     { provide: FULFILLMENT_REPOSITORY, useExisting: FulfillmentTypeormRepository },
     RefundTypeormRepository,
     { provide: REFUND_REPOSITORY, useExisting: RefundTypeormRepository },
+
+    // The request-level idempotency store (ADR-036) — the stored-response dedup
+    // substrate for the money-/stock-moving HTTP writes. Direct-implement repository
+    // (the append-only `domain_event` precedent), bound to the `IDEMPOTENCY_STORE`
+    // port. No use case consumes it yet (the replay wiring lands separately); this
+    // task boots the store, resolves the port, and migrates the table.
+    IdempotencyStoreTypeormRepository,
+    { provide: IDEMPOTENCY_STORE, useExisting: IdempotencyStoreTypeormRepository },
+    // The retention horizon (hours) the store reads to compute `expires_at`, resolved
+    // from `IDEMPOTENCY_KEY_TTL_HOURS` (Joi default 24) so the adapter injects a plain
+    // number rather than reading env (ADR-017; the inventory `RESERVATION_TTL_MINUTES`
+    // / `OCC_RETRY_ATTEMPTS` precedent).
+    {
+      provide: IDEMPOTENCY_KEY_TTL_HOURS,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('IDEMPOTENCY_KEY_TTL_HOURS') ?? 24,
+      inject: [ConfigService],
+    },
 
     TypeormTransactionAdapter,
     { provide: TRANSACTION_PORT, useExisting: TypeormTransactionAdapter },
