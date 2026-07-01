@@ -152,8 +152,8 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     // The request-level idempotency store (ADR-036) — the stored-response dedup
     // substrate for the money-/stock-moving HTTP writes. Direct-implement repository
     // (the append-only `domain_event` precedent), bound to the `IDEMPOTENCY_STORE`
-    // port. No use case consumes it yet (the replay wiring lands separately); this
-    // task boots the store, resolves the port, and migrates the table.
+    // port. `PlaceOrderUseCase` consumes it (find → replay/422 → run → save); the
+    // remaining money moves (capture / ship / refund) adopt the same pattern.
     IdempotencyStoreTypeormRepository,
     { provide: IDEMPOTENCY_STORE, useExisting: IdempotencyStoreTypeormRepository },
     // The retention horizon (hours) the store reads to compute `expires_at`, resolved

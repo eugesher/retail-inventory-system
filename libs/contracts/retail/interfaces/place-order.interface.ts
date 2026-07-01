@@ -29,10 +29,13 @@ export interface IAddressInput {
 // owner-check (ADR-028 §7). `shippingAddress` / `billingAddress` are the snapshot
 // bundles. `paymentMethod` is an optional opaque method token forwarded to the
 // `PAYMENT_GATEWAY` (the fake ignores it beyond echoing a default).
-// `idempotencyKey` is **accepted and logged but not deduped** in this capability —
-// repeat-place safety comes from cart state (a placed cart is `converted`;
-// re-placing returns the order it converted into via `source_cart_id`), Q10 /
-// ADR-028 §6. A persisted idempotency store is a later capability.
+// `idempotencyKey` is the client-supplied `Idempotency-Key` header, now **required
+// and deduplicated** (ADR-036): the retail `PlaceOrderUseCase` fingerprints the
+// canonical body and replays the stored `OrderView` on a same-key/same-body retry,
+// rejects a same-key/different-body reuse with `422`, and treats a missing key as a
+// `400` backstop (the gateway enforces the header at the edge). Cart state remains
+// the durable second layer — a re-place with a *new* key on an already-`converted`
+// cart still returns the order it converted into via `source_cart_id` (ADR-028 §6).
 export interface IPlaceOrderPayload extends ICorrelationPayload {
   cartId: string;
   customerId: string;

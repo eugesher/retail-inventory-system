@@ -69,6 +69,14 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_LINE_NO_PRICE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED]: HttpStatus.CONFLICT,
+
+  // Request-level idempotency (ADR-036). A missing required `Idempotency-Key` is a
+  // malformed request → 400 (the retail-side backstop for the gateway edge check); a
+  // key replayed with a *different* body is a client key-reuse bug → 422
+  // (Unprocessable Entity). The gateway's `throwRpcError` forwards any 400–599 that
+  // carries a typed `code`, so both reach the client with their code intact.
+  [OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED]: HttpStatus.BAD_REQUEST,
+  [OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED]: HttpStatus.UNPROCESSABLE_ENTITY,
   // Fulfillment / cancel conflicts → 409: an illegal shipment-status transition, a
   // create that would over-ship a line, an order not in a fulfillable state, or a
   // cancel of an already-shipped order.

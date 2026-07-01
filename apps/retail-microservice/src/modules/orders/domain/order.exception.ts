@@ -60,6 +60,18 @@ export enum OrderErrorCodeEnum {
   // `authorized` and the capture surfaces a 409.
   ORDER_PAYMENT_NOT_CAPTURED = 'ORDER_PAYMENT_NOT_CAPTURED',
 
+  // --- Request-level idempotency (ADR-036) ---
+  // Place Order was invoked with no `Idempotency-Key`. The header is required on the
+  // money-/stock-moving write; the gateway rejects a missing header at the edge with
+  // `IDEMPOTENCY_KEY_REQUIRED`, and this is the retail-side backstop for a direct RMQ
+  // caller that bypassed the gateway — 400.
+  ORDER_IDEMPOTENCY_KEY_REQUIRED = 'ORDER_IDEMPOTENCY_KEY_REQUIRED',
+  // The same `Idempotency-Key` was replayed with a *different* request body (a
+  // different canonical fingerprint) — a client reused one key for two distinct
+  // orders, surfaced loudly rather than silently honored with the wrong cached
+  // response — 422.
+  ORDER_IDEMPOTENCY_KEY_REUSED = 'ORDER_IDEMPOTENCY_KEY_REUSED',
+
   // A line's opaque `variantId` must be a positive integer — 400.
   ORDER_LINE_VARIANT_INVALID = 'ORDER_LINE_VARIANT_INVALID',
   // A line quantity must be a positive integer — 400.
