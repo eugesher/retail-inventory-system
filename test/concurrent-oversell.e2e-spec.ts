@@ -448,4 +448,76 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
       expect(level.available).toBe(0);
     });
   });
+
+  // Third act: the no-oversell invariant holds under a concurrent DOUBLE place (ADR-036). A
+  // single buyer holds the one unit, then fires TWO Place requests at the same cart at the
+  // same instant under ONE `Idempotency-Key` — a double-submit. The cart-conversion
+  // compare-and-swap (`markConverted WHERE status='active'`) is the guard: exactly one request
+  // converts-and-allocates, and the loser's transaction rolls back (it surfaces a `409`, or an
+  // InnoDB deadlock `500` if the two writers cross on the cart-row lock — a retry then resolves
+  // the winner's order via the converted-cart idempotency path). Either way the loser writes
+  // NO order and NO allocation, so once the race is converged the ledger holds exactly ONE
+  // `allocation` movement — the concurrent double-submit never double-allocates.
+  describe('concurrent double-place does not double-allocate', () => {
+    let variantId: number;
+
+    // Fire one place, capturing the outcome without throwing on a non-2xx (the concurrent
+    // loser's 409/500 is an expected race outcome, not a test error).
+    const place = async (racer: IRacer, key: string): Promise<IRaceOutcome> => {
+      const res = await server()
+        .post(`/api/cart/${racer.cartId}/place`)
+        .set('Authorization', `Bearer ${racer.token}`)
+        .set('Idempotency-Key', key)
+        .send({ shippingAddress: ADDRESS, billingAddress: ADDRESS, paymentMethod: 'tok_visa' });
+      return { status: res.status, body: res.body as Record<string, unknown> };
+    };
+
+    it('two concurrent places on one cart → one order, exactly one allocation movement', async () => {
+      variantId = await provisionVariant('double-place', 1);
+
+      const buyer: IRacer = {
+        token: await customerLogin(CUSTOMER_EMAIL, CUSTOMER_PASSWORD),
+        cartId: '',
+      };
+      buyer.cartId = await openCart(buyer.token);
+
+      // Hold the single unit.
+      const add = await addLine(buyer, variantId, 1);
+      expect(add.status).toBe(HttpStatus.OK);
+
+      // Two places at once, same cart, same key — a concurrent double-submit. At least one
+      // wins; the other loses the cart-conversion CAS (409) or deadlocks (500) and rolls back.
+      const key = `oversell-${stamp}-double-place`;
+      const [a, b] = await Promise.all([place(buyer, key), place(buyer, key)]);
+      const winners = [a, b].filter((o) => o.status >= 200 && o.status < 300);
+      expect(winners.length).toBeGreaterThanOrEqual(1);
+
+      // Converge the race: a definitive follow-up place under the SAME key returns the winner's
+      // order — a store replay (200) or the converted-cart resolve (201) — WITHOUT allocating
+      // again. This is the "a retry resolves the winner's order" contract the place flow
+      // documents, and it yields the canonical order id regardless of how the race resolved.
+      const settled = await place(buyer, key);
+      expect(settled.status).toBeGreaterThanOrEqual(200);
+      expect(settled.status).toBeLessThan(300);
+      const orderId = (settled.body as { id: number }).id;
+      // Every 2xx racer resolved to that same one order — one logical place, one order.
+      for (const w of winners) {
+        expect((w.body as { id: number }).id).toBe(orderId);
+      }
+
+      // The invariant: exactly ONE allocation row for the whole race — no duplicate under the
+      // concurrent double-place, and it references the single order.
+      const allocations = (await listMovements(variantId)).filter((m) => m.type === 'allocation');
+      expect(allocations).toHaveLength(1);
+      expect(allocations[0].quantity).toBe(-1);
+      expect(allocations[0].referenceId).toBe(String(orderId));
+
+      // Stock is consistent: the held unit became allocated exactly once, nothing negative.
+      const level = await warehouseLevel(variantId);
+      expect(level.quantityOnHand).toBe(1);
+      expect(level.quantityAllocated).toBe(1);
+      expect(level.quantityReserved).toBe(0);
+      expect(level.available).toBe(0);
+    });
+  });
 });
