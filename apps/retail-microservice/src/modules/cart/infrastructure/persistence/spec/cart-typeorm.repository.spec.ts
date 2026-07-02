@@ -5,6 +5,7 @@ import { CartStatusEnum } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { Cart, CartLine } from '../../../domain';
+import { CartWriteConflictError } from '../../../application/use-cases/cart-write-conflict.error';
 import { CartEntity } from '../cart.entity';
 import { CartLineEntity } from '../cart-line.entity';
 import { CartLineMapper } from '../cart-line.mapper';
@@ -242,6 +243,76 @@ describe('CartTypeormRepository', () => {
       expect(result.id).toBe('cart-uuid-1');
       expect(result.version).toBe(5);
       expect(result.lines[0].id).toBe(42);
+    });
+
+    it('version-checks the root with a CAS when expectedVersion is supplied (ADR-036)', async () => {
+      const cart = buildDomainCartWithLine(); // version 4
+
+      const deleteBuilder = {
+        delete: jest.fn().mockReturnThis(),
+        from: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 0 }),
+      };
+      lineRepo.createQueryBuilder.mockReturnValue(deleteBuilder as never);
+      lineRepo.save.mockResolvedValue([] as never);
+
+      // The transaction-bound cart repo takes the CAS `update` path (not `save`).
+      const txnCartRepo: { save: jest.Mock; update: jest.Mock } = {
+        save: jest.fn(),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+      };
+      const manager = {
+        getRepository: jest.fn((entity) => (entity === CartLineEntity ? lineRepo : txnCartRepo)),
+      } as unknown as EntityManager;
+      cartRepo.manager.transaction.mockImplementation(
+        async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
+      );
+      cartRepo.findOne.mockResolvedValue({
+        id: 'cart-uuid-1',
+        customerId: 'cust-1',
+        currency: 'USD',
+        status: CartStatusEnum.ACTIVE,
+        expiresAt: null,
+        version: 5,
+        lines: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      } as unknown as CartEntity);
+
+      const result = await repository.save(cart, 4);
+
+      // The root UPDATE is conditioned on id + the expected version; the plain
+      // `save` insert path is NOT taken.
+      expect(txnCartRepo.update).toHaveBeenCalledTimes(1);
+      expect(txnCartRepo.update).toHaveBeenCalledWith(
+        { id: 'cart-uuid-1', version: 4 },
+        expect.anything(),
+      );
+      expect(txnCartRepo.save).not.toHaveBeenCalled();
+      expect(result.version).toBe(5);
+    });
+
+    it('throws CartWriteConflictError carrying the current version when the CAS matches zero rows', async () => {
+      const cart = buildDomainCartWithLine(); // version 4
+
+      const txnCartRepo = {
+        save: jest.fn(),
+        update: jest.fn().mockResolvedValue({ affected: 0 }),
+      };
+      const manager = {
+        getRepository: jest.fn(() => txnCartRepo),
+      } as unknown as EntityManager;
+      cartRepo.manager.transaction.mockImplementation(
+        async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
+      );
+      // The post-rollback fresh read of the committed current version.
+      cartRepo.findOne.mockResolvedValue({ id: 'cart-uuid-1', version: 7 } as CartEntity);
+
+      await expect(repository.save(cart, 4)).rejects.toMatchObject({ currentVersion: 7 });
+      await expect(repository.save(cart, 4)).rejects.toBeInstanceOf(CartWriteConflictError);
     });
   });
 });

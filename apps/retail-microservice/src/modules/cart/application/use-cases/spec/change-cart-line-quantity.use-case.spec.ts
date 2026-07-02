@@ -17,6 +17,9 @@ const OWNER_ID = '00000000-0000-4000-a000-000000000002';
 const OTHER_ID = '00000000-0000-4000-a000-000000000099';
 const LINE_ID = 5000;
 const VARIANT_ID = 1;
+const MAX_ATTEMPTS = 5;
+// The seeded cart starts at version 1 (see `seedCartWithLine`).
+const SEED_VERSION = 1;
 
 const seedCartWithLine = (repository: InMemoryCartRepository): void => {
   repository.seed(
@@ -55,6 +58,7 @@ describe('ChangeCartLineQuantityUseCase', () => {
       repository,
       inventory,
       publisher,
+      MAX_ATTEMPTS,
       logger as unknown as PinoLogger,
     );
     seedCartWithLine(repository);
@@ -183,5 +187,79 @@ describe('ChangeCartLineQuantityUseCase', () => {
     ).rejects.toMatchObject({ code: CartErrorCodeEnum.CART_ACCESS_FORBIDDEN });
 
     expect(inventory.reserveCalls).toHaveLength(0);
+  });
+
+  describe('optimistic concurrency (ADR-036)', () => {
+    it('honors a matching If-Match version and persists at the bumped version', async () => {
+      const view = await useCase.execute({
+        cartId: CART_ID,
+        customerId: OWNER_ID,
+        lineId: LINE_ID,
+        quantity: 2,
+        expectedVersion: SEED_VERSION,
+        correlationId: 'corr-ok',
+      });
+
+      expect(view.lines[0].quantity).toBe(2);
+      expect(view.version).toBe(SEED_VERSION + 1);
+      expect(inventory.reserveCalls).toHaveLength(1);
+    });
+
+    it('rejects a stale If-Match with 409 VERSION_MISMATCH and does NOT retry or touch stock', async () => {
+      await expect(
+        useCase.execute({
+          cartId: CART_ID,
+          customerId: OWNER_ID,
+          lineId: LINE_ID,
+          quantity: 2,
+          expectedVersion: SEED_VERSION - 1, // stale — the cart is at SEED_VERSION
+          correlationId: 'corr-stale',
+        }),
+      ).rejects.toMatchObject({
+        code: CartErrorCodeEnum.CART_VERSION_MISMATCH,
+        details: { currentVersion: SEED_VERSION },
+      });
+
+      expect(inventory.reserveCalls).toHaveLength(0);
+      expect(repository.saved).toHaveLength(0);
+      expect(publisher.lineQuantityChanged).toHaveLength(0);
+    });
+
+    it('retries a lost race (no If-Match) and succeeds within the budget', async () => {
+      repository.conflictsBeforeSuccess = 1;
+
+      const view = await useCase.execute({
+        cartId: CART_ID,
+        customerId: OWNER_ID,
+        lineId: LINE_ID,
+        quantity: 2,
+        correlationId: 'corr-retry',
+      });
+
+      expect(view.lines[0].quantity).toBe(2);
+      expect(inventory.reserveCalls).toHaveLength(2);
+      expect(repository.saved).toHaveLength(1);
+      expect(publisher.lineQuantityChanged).toHaveLength(1);
+    });
+
+    it('surfaces 409 VERSION_MISMATCH with the current version after the retry budget is exhausted', async () => {
+      repository.conflictsBeforeSuccess = 99;
+
+      await expect(
+        useCase.execute({
+          cartId: CART_ID,
+          customerId: OWNER_ID,
+          lineId: LINE_ID,
+          quantity: 2,
+          correlationId: 'corr-exhaust',
+        }),
+      ).rejects.toMatchObject({
+        code: CartErrorCodeEnum.CART_VERSION_MISMATCH,
+        details: { currentVersion: SEED_VERSION + MAX_ATTEMPTS },
+      });
+
+      expect(inventory.reserveCalls).toHaveLength(MAX_ATTEMPTS);
+      expect(repository.saved).toHaveLength(0);
+    });
   });
 });

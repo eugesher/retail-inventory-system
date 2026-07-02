@@ -17,6 +17,9 @@ const OTHER_ID = '00000000-0000-4000-a000-000000000099';
 const LINE_ID = 5000;
 const LINE_VARIANT_ID = 1;
 const OTHER_LINE_ID = 5001;
+const MAX_ATTEMPTS = 5;
+// The seeded cart starts at version 2 (see `seedCartWithTwoLines`).
+const SEED_VERSION = 2;
 
 const seedCartWithTwoLines = (repository: InMemoryCartRepository): void => {
   repository.seed(
@@ -62,6 +65,7 @@ describe('RemoveFromCartUseCase', () => {
       repository,
       inventory,
       publisher,
+      MAX_ATTEMPTS,
       logger as unknown as PinoLogger,
     );
     seedCartWithTwoLines(repository);
@@ -145,5 +149,77 @@ describe('RemoveFromCartUseCase', () => {
     ).rejects.toMatchObject({ code: CartErrorCodeEnum.CART_ACCESS_FORBIDDEN });
 
     expect(inventory.releaseCalls).toHaveLength(0);
+  });
+
+  describe('optimistic concurrency (ADR-036)', () => {
+    it('honors a matching If-Match version and persists at the bumped version', async () => {
+      const view = await useCase.execute({
+        cartId: CART_ID,
+        customerId: OWNER_ID,
+        lineId: LINE_ID,
+        expectedVersion: SEED_VERSION,
+        correlationId: 'corr-ok',
+      });
+
+      expect(view.lines).toHaveLength(1);
+      expect(view.version).toBe(SEED_VERSION + 1);
+      expect(inventory.releaseCalls).toHaveLength(1);
+    });
+
+    it('rejects a stale If-Match with 409 VERSION_MISMATCH and does NOT retry, save, or release', async () => {
+      await expect(
+        useCase.execute({
+          cartId: CART_ID,
+          customerId: OWNER_ID,
+          lineId: LINE_ID,
+          expectedVersion: SEED_VERSION - 1, // stale
+          correlationId: 'corr-stale',
+        }),
+      ).rejects.toMatchObject({
+        code: CartErrorCodeEnum.CART_VERSION_MISMATCH,
+        details: { currentVersion: SEED_VERSION },
+      });
+
+      expect(repository.saved).toHaveLength(0);
+      expect(inventory.releaseCalls).toHaveLength(0);
+      expect(publisher.lineRemoved).toHaveLength(0);
+    });
+
+    it('retries a lost race (no If-Match) and releases exactly once after the winning save', async () => {
+      repository.conflictsBeforeSuccess = 1;
+
+      const view = await useCase.execute({
+        cartId: CART_ID,
+        customerId: OWNER_ID,
+        lineId: LINE_ID,
+        correlationId: 'corr-retry',
+      });
+
+      expect(view.lines).toHaveLength(1);
+      // Exactly one successful persist; the best-effort release runs once, outside
+      // the retry loop, so a retried attempt never double-releases.
+      expect(repository.saved).toHaveLength(1);
+      expect(inventory.releaseCalls).toHaveLength(1);
+      expect(publisher.lineRemoved).toHaveLength(1);
+    });
+
+    it('surfaces 409 VERSION_MISMATCH with the current version after the retry budget is exhausted', async () => {
+      repository.conflictsBeforeSuccess = 99;
+
+      await expect(
+        useCase.execute({
+          cartId: CART_ID,
+          customerId: OWNER_ID,
+          lineId: LINE_ID,
+          correlationId: 'corr-exhaust',
+        }),
+      ).rejects.toMatchObject({
+        code: CartErrorCodeEnum.CART_VERSION_MISMATCH,
+        details: { currentVersion: SEED_VERSION + MAX_ATTEMPTS },
+      });
+
+      expect(repository.saved).toHaveLength(0);
+      expect(inventory.releaseCalls).toHaveLength(0);
+    });
   });
 });

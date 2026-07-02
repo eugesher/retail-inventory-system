@@ -10,9 +10,11 @@ import {
   ICartEventsPublisherPort,
   ICartInventoryGatewayPort,
   ICartRepositoryPort,
+  OCC_RETRY_ATTEMPTS,
 } from '../ports';
 import { loadOwnedCart } from './cart-access';
 import { toCartView } from './cart-view.factory';
+import { assertCartVersion, runWithCartWriteRetry } from './cart-write';
 
 // Drops a line from the cart. An unknown line id is a 404
 // (`CART_LINE_NOT_FOUND`). The repository reconciles the removed row away inside
@@ -31,25 +33,42 @@ export class RemoveFromCartUseCase {
     private readonly inventory: ICartInventoryGatewayPort,
     @Inject(CART_EVENTS_PUBLISHER)
     private readonly publisher: ICartEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(RemoveFromCartUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
 
   public async execute(payload: IRetailCartRemoveLinePayload): Promise<CartView> {
-    const { cartId, customerId, lineId, correlationId } = payload;
+    const { cartId, customerId, lineId, expectedVersion, correlationId } = payload;
 
     this.logger.info({ correlationId, cartId, lineId }, 'Removing line from cart');
 
-    const cart = await loadOwnedCart(this.repository, cartId, customerId);
+    // OCC (ADR-036): read-version → mutate → version-checked persist, inside the
+    // bounded retry (single attempt when the client pinned `If-Match`). The
+    // best-effort release runs AFTER the confirmed removal, outside the loop, so a
+    // retried attempt never double-releases.
+    const { saved, occurredAt, variantId } = await runWithCartWriteRetry(
+      { logger: this.logger, maxAttempts: expectedVersion !== undefined ? 1 : this.maxAttempts },
+      async () => {
+        const cart = await loadOwnedCart(this.repository, cartId, customerId);
+        assertCartVersion(cart, expectedVersion);
 
-    // Capture the line's `variantId` BEFORE `removeLine` drops it (the release
-    // selector needs it). `removeLine` throws `CART_LINE_NOT_FOUND` when the line
-    // is missing, so a failed lookup never reaches the release call below.
-    const variantId = cart.lines.find((line) => line.id === lineId)?.variantId;
-    cart.removeLine(lineId);
+        // Capture the line's `variantId` BEFORE `removeLine` drops it (the release
+        // selector needs it). `removeLine` throws `CART_LINE_NOT_FOUND` when the
+        // line is missing, so a failed lookup never reaches the release below.
+        const removedVariantId = cart.lines.find((line) => line.id === lineId)?.variantId;
+        const versionAtLoad = cart.version;
+        cart.removeLine(lineId);
 
-    const saved = await this.repository.save(cart);
-    const occurredAt = (cart.pullDomainEvents()[0]?.occurredAt ?? new Date()).toISOString();
+        const persisted = await this.repository.save(cart, versionAtLoad);
+        const eventOccurredAt = (
+          cart.pullDomainEvents()[0]?.occurredAt ?? new Date()
+        ).toISOString();
+        return { saved: persisted, occurredAt: eventOccurredAt, variantId: removedVariantId };
+      },
+      { cartId, correlationId },
+    );
 
     // Best-effort release: the line is gone, so return its held units to
     // `available`. A failure here is warn-logged and swallowed — never fails the

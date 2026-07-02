@@ -46,6 +46,17 @@ export enum CartErrorCodeEnum {
   // added in its current pricing state. A cart line must carry a real price
   // snapshot, so the operation is rejected rather than persisting a zero price.
   CART_VARIANT_NOT_PRICED = 'CART_VARIANT_NOT_PRICED',
+  // Optimistic-concurrency conflict on a cart write → 409 (ADR-036). Two writers
+  // raced the same cart: either the client's `If-Match` version was already stale
+  // at load, or a concurrent writer advanced the row and the bounded retry budget
+  // was exhausted. The **member name** carries the `CART_` prefix (the module
+  // convention) but the **wire value** is the uniform cross-service
+  // `VERSION_MISMATCH` — so a client branches on one code regardless of which
+  // aggregate lost the race (cart / order / fulfillment / return) — and the
+  // exception's `details.currentVersion` carries the row's now-current version so
+  // the caller can refetch-and-retry (the inventory `STOCK_WRITE_CONFLICT` /
+  // `{ available }` precedent, ADR-030 §6).
+  CART_VERSION_MISMATCH = 'VERSION_MISMATCH',
 }
 
 // One concrete throwable for the cart bounded context, carrying a typed `code`
@@ -54,9 +65,20 @@ export enum CartErrorCodeEnum {
 // string-match the message.
 export class CartDomainException extends DomainException {
   public readonly code: CartErrorCodeEnum;
+  // Optional structured payload forwarded through the RPC filter and the gateway
+  // error util (the inventory `{ available }` precedent, ADR-030 §6), so a client
+  // branches on data rather than parsing the human message. The OCC conflict
+  // carries `{ currentVersion }` here so the caller can refetch-and-retry.
+  // Frozen-shaped (`Readonly`) because it is read, never mutated, downstream.
+  public readonly details?: Readonly<Record<string, unknown>>;
 
-  constructor(code: CartErrorCodeEnum, message: string) {
+  constructor(
+    code: CartErrorCodeEnum,
+    message: string,
+    details?: Readonly<Record<string, unknown>>,
+  ) {
     super(message);
     this.code = code;
+    this.details = details;
   }
 }
