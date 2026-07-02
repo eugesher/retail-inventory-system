@@ -176,8 +176,11 @@ Authorization: Bearer {{accessToken}}
 # Captures the order's authorized payment (authorized -> captured). The owning
 # customer captures its own; staff with order:capture may capture any. The optional
 # body { amountMinor } defaults to the order grand total (partial capture is a later
-# capability); the `Idempotency-Key` header is accepted + logged but NOT deduped.
-# Response (200) is OrderView with paymentStatus='captured' and payment.status='captured'.
+# capability); the `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036) — the
+# same key + body replays the stored order (200 + `Idempotent-Replay: true`, no second
+# gateway call), a different body is 422, a missing key is 400. Re-capturing an
+# already-captured payment under a NEW key is also idempotent (the natural payment-state
+# backstop). Response (200) is OrderView with paymentStatus='captured' and payment.status='captured'.
 POST {{baseUrl}}/orders/{{orderId}}/payments/capture
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{$guid}}

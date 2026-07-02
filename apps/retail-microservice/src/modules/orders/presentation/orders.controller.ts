@@ -85,8 +85,13 @@ export class OrdersController {
     return this.listMyOrders.execute(payload);
   }
 
+  // Resolves to the idempotency envelope `{ view, replayed }` (ADR-036): the gateway reads
+  // `replayed` to set the `Idempotent-Replay: true` header on a served replay and surfaces
+  // `view` (the `OrderView`) as the body. Capture stays a `200` route in both cases.
   @MessagePattern(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURE)
-  public handleCapture(@Payload() payload: IRetailPaymentCapturePayload): Promise<OrderView> {
+  public handleCapture(
+    @Payload() payload: IRetailPaymentCapturePayload,
+  ): Promise<IIdempotentResult<OrderView>> {
     return this.capturePayment.execute(payload);
   }
 
@@ -104,10 +109,13 @@ export class OrdersController {
     return this.listFulfillments.execute(payload);
   }
 
+  // Resolves to the idempotency envelope `{ view, replayed }` (ADR-036) — a served replay
+  // returns the stored `FulfillmentView` (no re-capture, no re-issued commit-sale). Ship
+  // stays a `200` route in both cases.
   @MessagePattern(ROUTING_KEYS.RETAIL_FULFILLMENT_SHIP)
   public handleShipFulfillment(
     @Payload() payload: IRetailFulfillmentShipPayload,
-  ): Promise<FulfillmentView> {
+  ): Promise<IIdempotentResult<FulfillmentView>> {
     return this.shipFulfillment.execute(payload);
   }
 
@@ -123,8 +131,14 @@ export class OrdersController {
     return this.cancelOrder.execute(payload);
   }
 
+  // Resolves to the idempotency envelope `{ view, replayed }` (ADR-036) — a served replay
+  // returns the stored `RefundView` before the gateway call AND before the audit emit (no
+  // second `audit_log_entry`). A fresh refund is `201`; a replay downgrades to `200` at the
+  // gateway.
   @MessagePattern(ROUTING_KEYS.RETAIL_REFUND_ISSUE)
-  public handleIssueRefund(@Payload() payload: IRetailRefundIssuePayload): Promise<RefundView> {
+  public handleIssueRefund(
+    @Payload() payload: IRetailRefundIssuePayload,
+  ): Promise<IIdempotentResult<RefundView>> {
     return this.issueRefund.execute(payload);
   }
 

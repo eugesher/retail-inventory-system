@@ -23,9 +23,11 @@
 # gateway; the retail service is the single enforcement point. A non-owner non-staff
 # caller gets 403; an unauthenticated caller 401.
 #
-# The `Idempotency-Key` header on Ship is ACCEPTED + LOGGED but NOT deduped; a
-# non-pending re-ship is a 409. Typed upstream codes (FULFILLMENT_* / ORDER_*) surface
-# as 400/404/409.
+# The `Idempotency-Key` header on Ship is REQUIRED and DEDUPLICATED (ADR-036): the same
+# key + same body replays the stored ship (200 + `Idempotent-Replay: true`, no re-capture,
+# no re-issued commit-sale), a different body is 422, a missing key is 400. A non-pending
+# re-ship under a NEW key is still a 409 (the natural backstop). Typed upstream codes
+# (FULFILLMENT_* / ORDER_*) surface as 400/404/409/422.
 #
 # All routes sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With the
 # default dev environment that resolves to http://localhost:3000/api.
@@ -209,8 +211,11 @@ Authorization: Bearer {{accessToken}}
 # is free-text metadata. This CAPTURES the order's authorized payment inline (so the
 # inventory + retail services must be running), advances the order's fulfillment axis to
 # `shipped` and each line's status, then commits the sale to inventory. The
-# `Idempotency-Key` header is accepted + logged but NOT deduped. Response (200) is the
-# shipped FulfillmentView (status='shipped', trackingNumber + shippedAt stamped).
+# `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036): re-sending this exact
+# request with the SAME key + body replays the stored ship (200 + `Idempotent-Replay: true`,
+# no re-capture / no re-committed sale); a missing key is 400. `{{$guid}}` mints a fresh key
+# each run, so each run is a fresh ship. Response (200) is the shipped FulfillmentView
+# (status='shipped', trackingNumber + shippedAt stamped).
 POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{$guid}}
