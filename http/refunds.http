@@ -38,7 +38,9 @@
 #   3. Run `loginCustomer` -> @customerToken (customer@example.com / customer1234; the owner).
 #   4. CASE 1 (manual goodwill refund, no return): `createCart` -> `addLine` -> `placeOrder`
 #      -> `capturePayment` (captures @paymentId) -> `issueRefund` (partial) ->
-#      `listRefunds`.
+#      `issueRefundReplay` (200 + `Idempotent-Replay: true`, SAME @refundKey + body — no
+#      second refund AND no second audit row) -> `issueRefundDifferentBody` (422, SAME
+#      @refundKey + a changed amount) -> `listRefunds`.
 #   5. CASE 2 (auto-refund-from-cancel): `createCartB` -> `addLineB` -> `placeOrderB` ->
 #      `capturePaymentB` (capture WITHOUT shipping) -> `cancelOrderB`. Cancel flags the
 #      captured payment for refund and emits retail.order.cancelled; the retail
@@ -163,6 +165,9 @@ Content-Type: application/json
 
 ###
 
+# Capture the refund key ONCE so `issueRefund` and `issueRefundReplay` share it.
+@refundKey = {{$guid}}
+
 # @name issueRefund
 # POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
 # Issues a PARTIAL goodwill refund (1000 of the 4999 captured) — no return involved. The
@@ -175,12 +180,52 @@ Content-Type: application/json
 # replay. Response (201) is RefundView with status='issued' and a gatewayReference.
 POST {{baseUrl}}/orders/{{orderId}}/refunds
 Authorization: Bearer {{accessToken}}
-Idempotency-Key: {{$guid}}
+Idempotency-Key: {{refundKey}}
 Content-Type: application/json
 
 {
   "paymentId": {{paymentId}},
   "amountMinor": 1000,
+  "reason": "Goodwill price adjustment"
+}
+
+###
+
+# @name issueRefundReplay
+# POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
+# The REPLAY: the SAME @refundKey + the SAME body. The store short-circuits BEFORE the
+# gateway call AND BEFORE the audit emit, so there is NO second gateway reversal and — the
+# refund-specific guarantee — NO second `audit_log_entry` row (one logical refund = exactly
+# one audit record). Response is the stored RefundView with 200 (not 201) + the header
+# `Idempotent-Replay: true`; confirm the refund id + gatewayReference match `issueRefund`.
+POST {{baseUrl}}/orders/{{orderId}}/refunds
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{refundKey}}
+Content-Type: application/json
+
+{
+  "paymentId": {{paymentId}},
+  "amountMinor": 1000,
+  "reason": "Goodwill price adjustment"
+}
+
+###
+
+# @name issueRefundDifferentBody
+# POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
+# The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @refundKey but a CHANGED amountMinor
+# (2000 instead of 1000). The stored fingerprint no longer matches, so the request is
+# rejected WITHOUT executing:
+#   422 { statusCode: 422, code: "IDEMPOTENCY_KEY_REUSED" }
+# The 422 fires before any gateway call, so no over-refund can slip through this reuse.
+POST {{baseUrl}}/orders/{{orderId}}/refunds
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{refundKey}}
+Content-Type: application/json
+
+{
+  "paymentId": {{paymentId}},
+  "amountMinor": 2000,
   "reason": "Goodwill price adjustment"
 }
 

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, LessThan, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
 import {
@@ -40,10 +40,12 @@ const MS_PER_HOUR = 60 * 60 * 1000;
 // The single `@InjectRepository(IdempotencyKeyEntity)` site. It implements
 // `IIdempotencyStorePort` DIRECTLY — deliberately NOT extending `BaseTypeormRepository`,
 // whose public `save` / `softDelete` would contradict the immutable, append-only
-// stored-response record (the `DomainEventTypeormRepository` precedent, ADR-035). The
-// only mutating verb is `save`, which uses `insert` (never `save`-with-id semantics),
-// so there is no UPDATE or DELETE expression at the persistence layer either. Returns
-// domain types only — no TypeORM leak past this file (ADR-017).
+// stored-response record (the `DomainEventTypeormRepository` precedent, ADR-035). A
+// stored-response ROW is never UPDATE-d in place — `save` uses `insert` (never
+// `save`-with-id semantics). The ONE DELETE is `deleteExpired`, the TTL purge sweep: the
+// store is live-ephemeral (ADR-036), so a bounded range delete of already-expired rows is
+// a sanctioned housekeeping op, not a mutation of a live record. Returns domain types
+// only — no TypeORM leak past this file (ADR-017).
 @Injectable()
 export class IdempotencyStoreTypeormRepository implements IIdempotencyStorePort {
   constructor(
@@ -90,6 +92,18 @@ export class IdempotencyStoreTypeormRepository implements IIdempotencyStorePort 
       }
       throw error;
     }
+  }
+
+  // The TTL purge sweep (ADR-036), driven by the retail `IdempotencyPurgeScheduler`. A
+  // single bounded `DELETE FROM idempotency_key WHERE expires_at < ?` scanning the
+  // `expires_at` index — it only removes rows whose retention horizon has already elapsed,
+  // so it is safe to run concurrently with live inserts (an in-flight, not-yet-expired
+  // record is never in range). `now` is passed in rather than read here so the sweep and
+  // its tests share one deterministic clock. `affected` is `number | null | undefined`
+  // depending on driver — coalesce a missing count to 0.
+  public async deleteExpired(now: Date): Promise<number> {
+    const result = await this.idempotencyKeyRepository.delete({ expiresAt: LessThan(now) });
+    return result.affected ?? 0;
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is supplied

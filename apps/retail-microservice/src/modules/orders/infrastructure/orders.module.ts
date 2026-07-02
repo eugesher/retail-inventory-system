@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
@@ -43,10 +44,15 @@ import {
   ListRefundsForOrderUseCase,
   MarkDeliveredUseCase,
   PlaceOrderUseCase,
+  PurgeExpiredIdempotencyKeysUseCase,
   ShipFulfillmentUseCase,
 } from '../application/use-cases';
 import { OrderCancelledConsumer } from './consumers';
-import { IdempotencyKeyEntity, IdempotencyStoreTypeormRepository } from './idempotency';
+import {
+  IdempotencyKeyEntity,
+  IdempotencyPurgeScheduler,
+  IdempotencyStoreTypeormRepository,
+} from './idempotency';
 import {
   OrderCatalogRabbitmqAdapter,
   OrderCommitSaleRabbitmqAdapter,
@@ -135,6 +141,11 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     // `RmqAuditLogPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy` to
     // emit `audit.staff.action` for the always-audit refund money movements (ADR-035).
     MicroserviceClientRisEventsModule,
+    // Discovers the `@Cron` on `IdempotencyPurgeScheduler` so the TTL sweep fires on its
+    // timer (ADR-036). Registered here — the only retail module with a scheduled job —
+    // the notification `NotificationsModule` precedent (a global module, wired once in the
+    // module that owns the scheduler, not the app root).
+    ScheduleModule.forRoot(),
   ],
   controllers: [OrdersController, OrderCancelledConsumer],
   providers: [
@@ -157,6 +168,11 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
     // remaining money moves (capture / ship / refund) adopt the same pattern.
     IdempotencyStoreTypeormRepository,
     { provide: IDEMPOTENCY_STORE, useExisting: IdempotencyStoreTypeormRepository },
+    // The TTL purge: a use case that deletes rows past `expires_at` (via
+    // `IDEMPOTENCY_STORE.deleteExpired`) and the `@nestjs/schedule` driver that fires it
+    // every ten minutes, keeping the store bounded to its retention window (ADR-036).
+    PurgeExpiredIdempotencyKeysUseCase,
+    IdempotencyPurgeScheduler,
     // The retention horizon (hours) the store reads to compute `expires_at`, resolved
     // from `IDEMPOTENCY_KEY_TTL_HOURS` (Joi default 24) so the adapter injects a plain
     // number rather than reading env (ADR-017; the inventory `RESERVATION_TTL_MINUTES`

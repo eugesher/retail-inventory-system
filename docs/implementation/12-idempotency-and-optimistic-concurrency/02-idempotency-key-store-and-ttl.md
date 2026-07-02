@@ -148,6 +148,50 @@ is enforced in exactly one place.
 Removing expired rows is a background concern, kept off the read and write hot paths. A
 scheduled sweep — the notification retry-sweeper precedent, built on `@nestjs/schedule` —
 periodically deletes every `idempotency_key` row whose `expires_at` is in the past, using the
-`expires_at` index. This section is expanded with the sweep's cadence and wiring when that
-component lands; until then the table grows bounded only by traffic, and `find` correctly
-treats any straggler expired row as a harmless replay.
+`expires_at` index.
+
+**Why a sweep, and why `find` never deletes.** The store is *live-ephemeral*: a row matters
+only until its retention horizon, then it is dead weight. Concentrating every deletion in one
+background sweep keeps the two hot paths (`find` on every idempotent request, `save` on every
+first execution) free of any expiry branch — `find` returns a straggler expired row and it is
+served as a harmless replay (the operation already ran once; replaying its stored response
+changes nothing), and the sweep reclaims that row shortly after. This is a deliberate
+single-writer-of-deletes design: TTL logic lives in exactly one place, so it cannot drift
+between the read path and the delete path.
+
+**The three moving parts.**
+
+- **The port method** — `IIdempotencyStorePort.deleteExpired(now: Date): Promise<number>`.
+  It returns the number of rows removed. `now` is an **explicit parameter**, not a wall-clock
+  read inside the adapter: the scheduler passes the current instant, and a test passes a
+  future instant to force a deterministic deletion without touching the system clock (the
+  seam the concurrency e2e leans on — "leave a row, advance simulated time, observe
+  deletion"). The adapter issues a single bounded `DELETE FROM idempotency_key WHERE
+  expires_at < now` scanning the `expires_at` index. Because it can only ever touch rows
+  whose horizon has already elapsed, it is safe to run concurrently with live inserts — an
+  in-flight, not-yet-expired record is never in range. This is the one DELETE the otherwise
+  append-only, insert-only repository issues; a stored-response row is still never updated in
+  place.
+
+- **The application use case** — `PurgeExpiredIdempotencyKeysUseCase.execute(now = new Date())`
+  calls `deleteExpired(now)` and logs the outcome (`info` when it removed rows, `debug` when
+  the sweep found nothing). It holds no schedule of its own, so it is trivially unit-testable
+  against an in-memory store double.
+
+- **The infrastructure scheduler** — `IdempotencyPurgeScheduler` carries the
+  `@Cron(CronExpression.EVERY_10_MINUTES)` decorator (discovered by `ScheduleModule.forRoot()`,
+  wired in `orders.module.ts`) and invokes the use case, guarding the tick so a thrown sweep
+  logs and lets the next tick retry rather than crashing the scheduler loop. The schedule
+  decorator stays in `infrastructure/`, never in the use case — the notification
+  `DeliveryRetryScheduler` precedent ([ADR-004](../../adr/004-adopt-hexagonal-architecture-per-service.md) /
+  [ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md)).
+
+**Cadence rationale.** The retention window (`IDEMPOTENCY_KEY_TTL_HOURS`, default 24h) is what
+actually bounds a row's lifetime; the ten-minute interval only decides how *promptly* an
+already-expired row is reclaimed. A coarse cadence keeps the table bounded without a tight
+delete loop, and — because `find` treats a straggler as a harmless replay — a row lingering a
+few minutes past its horizon is never a correctness problem, only a few unused bytes.
+
+The manual `.http` walkthroughs that demonstrate the replay / `422` / `If-Match` surface this
+store backs are documented in
+[07-http-files-updated-idempotency-blocks.md](07-http-files-updated-idempotency-blocks.md).
