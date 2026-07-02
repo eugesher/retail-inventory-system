@@ -48,6 +48,8 @@ const makeHarness = async (order: Order): Promise<IHarness> => {
     fulfillmentRepository,
     publisher,
     customerContactReader,
+    // OCC_RETRY_ATTEMPTS budget (ADR-036).
+    5,
     logger,
   );
   return { useCase, orderRepository, fulfillmentRepository, publisher, customerContactReader };

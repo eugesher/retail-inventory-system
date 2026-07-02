@@ -25,6 +25,7 @@ import {
   ITransactionPort,
   ITransactionScope,
 } from '../../ports';
+import { ReturnWriteConflictError } from '../return-write-conflict.error';
 
 // Re-reconstitutes a return request with a concrete id (and concrete line ids), the way a
 // real repository's save → re-read would. Used both to persist a freshly-opened request
@@ -70,10 +71,29 @@ export class FakeReturnRequestRepository implements IReturnRequestRepositoryPort
   private readonly store = new Map<number, ReturnRequest>();
   private sequence = 0;
   public readonly saved: ReturnRequest[] = [];
+  // OCC simulation (ADR-036): when > 0, the next N version-checked saves
+  // (`expectedVersion` supplied) reject with `ReturnWriteConflictError` and decrement —
+  // the retry helper re-reads + retries. Set it above the injected budget to prove
+  // retry-exhausted → `VERSION_MISMATCH`, or below it to prove retry-then-success.
+  public conflictsBeforeSuccess = 0;
 
   // Jest-free, non-`async` (returns `Promise.resolve(...)`) so the require-await /
   // no-floating lint rules stay satisfied — the orders `test-doubles` convention.
-  public save(request: ReturnRequest): Promise<ReturnRequest> {
+  public save(
+    request: ReturnRequest,
+    _scope?: ITransactionScope,
+    expectedVersion?: number,
+  ): Promise<ReturnRequest> {
+    // A version-checked CAS that loses the race — mirrors the real repo throwing
+    // `ReturnWriteConflictError`, which the retry helper catches. It rejects WITHOUT
+    // storing, so the retry re-reads the pristine (pre-transition) request.
+    if (expectedVersion !== undefined && this.conflictsBeforeSuccess > 0) {
+      this.conflictsBeforeSuccess -= 1;
+      const current = this.store.get(request.id!);
+      return Promise.reject(
+        new ReturnWriteConflictError(request.id!, current ? current.version : expectedVersion),
+      );
+    }
     const id = request.id ?? ++this.sequence;
     const persisted = reconstituteWithId(request, id);
     this.store.set(id, persisted);

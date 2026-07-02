@@ -8,12 +8,14 @@ import {
   IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  OCC_RETRY_ATTEMPTS,
   RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
 } from '../ports';
 import { loadReturnById } from './return-access';
 import { resolveCustomerEmail } from './resolve-customer-email';
+import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
 // Receive Return walks an `authorized` RMA → `received` (warehouse
@@ -32,6 +34,8 @@ export class ReceiveReturnUseCase {
     private readonly publisher: IReturnEventsPublisherPort,
     @Inject(RETURN_CUSTOMER_CONTACT_READER)
     private readonly customerContactReader: IReturnCustomerContactReaderPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(ReceiveReturnUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -41,9 +45,19 @@ export class ReceiveReturnUseCase {
 
     this.logger.info({ correlationId, rmaId, actorId }, 'Receiving return request');
 
-    const request = await loadReturnById(this.repository, rmaId);
-    request.receive();
-    const saved = await this.repository.save(request);
+    // Version-checked CAS under the bounded OCC retry (ADR-036): re-read the RMA afresh
+    // each attempt, walk `authorized → received`, and save with the version pinned. A
+    // lost CAS retries; a non-`authorized` start is a terminal domain 409, never retried.
+    const saved = await runWithReturnWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      async () => {
+        const request = await loadReturnById(this.repository, rmaId);
+        const versionAtLoad = request.version;
+        request.receive();
+        return this.repository.save(request, undefined, versionAtLoad);
+      },
+      { rmaId, correlationId },
+    );
 
     await this.emitReceived(saved, correlationId);
 

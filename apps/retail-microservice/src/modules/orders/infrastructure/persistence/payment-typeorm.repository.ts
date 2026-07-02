@@ -63,8 +63,10 @@ export class PaymentTypeormRepository
   }
 
   // One payment per order in this capability — returns the most recent defensively.
-  public async findByOrderId(orderId: number): Promise<Payment | null> {
-    const entity = await this.paymentRepository.findOne({
+  // Scope-aware so a retried transaction (capture / ship / cancel, ADR-036) re-loads
+  // the payment within its own attempt's transaction.
+  public async findByOrderId(orderId: number, scope?: ITransactionScope): Promise<Payment | null> {
+    const entity = await this.paymentRepo(scope).findOne({
       where: { orderId },
       order: { id: 'DESC' },
     });

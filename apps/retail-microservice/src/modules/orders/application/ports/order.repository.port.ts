@@ -31,7 +31,14 @@ export interface IOrderPage {
 //   the human-facing `order_number` from the generated id on first insert (the
 //   "re-read the saved graph, then finalize a derived field" idiom). It accepts an
 //   optional `scope` so Place Order's order + address + cart-conversion writes share
-//   one transaction (ADR-017 §6); without a scope it opens its own transaction.
+//   one transaction (ADR-017 §6); without a scope it opens its own transaction. It
+//   also accepts an optional `expectedVersion`: when supplied (a status transition on
+//   an existing order — capture / ship / deliver / cancel) the root write is an
+//   optimistic compare-and-swap on `version` (`UPDATE … WHERE id = ? AND version = ?`,
+//   ADR-036) — a zero-rows result throws the internal `OrderWriteConflictError` the
+//   retry helper catches; absent (the place insert, or the inline authorize-on-place
+//   write on a brand-new order with no concurrent writer) the root persists via the
+//   plain managed save that still advances `@VersionColumn`.
 // - `attachAddresses` finalizes the two snapshot-address FK columns from a
 //   targeted UPDATE once both `address` rows exist (the same "finalize a derived
 //   column after the row is written" idiom `order_number` uses) — the order is
@@ -47,7 +54,7 @@ export interface IOrderPage {
 export interface IOrderRepositoryPort {
   findById(id: number, scope?: ITransactionScope): Promise<Order | null>;
   findBySourceCartId(cartId: string): Promise<Order | null>;
-  save(order: Order, scope?: ITransactionScope): Promise<Order>;
+  save(order: Order, scope?: ITransactionScope, expectedVersion?: number): Promise<Order>;
   attachAddresses(
     orderId: number,
     billingAddressId: string,

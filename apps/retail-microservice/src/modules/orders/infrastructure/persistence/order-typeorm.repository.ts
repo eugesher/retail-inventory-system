@@ -14,6 +14,7 @@ import {
   IOrderRepositoryPort,
   ITransactionScope,
 } from '../../application/ports';
+import { OrderWriteConflictError } from '../../application/use-cases/order-write-conflict.error';
 import { OrderEntity } from './order.entity';
 import { OrderLineEntity } from './order-line.entity';
 import { OrderLineMapper } from './order-line.mapper';
@@ -95,18 +96,46 @@ export class OrderTypeormRepository
     };
   }
 
-  public async save(order: Order, scope?: ITransactionScope): Promise<Order> {
+  public async save(
+    order: Order,
+    scope?: ITransactionScope,
+    expectedVersion?: number,
+  ): Promise<Order> {
     // One transaction for the root + its lines: a half-written graph (the header
     // committed but a line missing) would corrupt the totals the order view reports.
     // When the caller already owns a transaction (`scope`), join it — the place flow
     // commits the order, addresses, and cart conversion atomically — else open one.
+    // When `expectedVersion` is supplied (a status transition on an existing order) the
+    // root write is an optimistic compare-and-swap (ADR-036); otherwise it is a plain
+    // insert (place) or a managed save (the inline authorize-on-place write).
     let orderId: number;
-    if (scope) {
-      orderId = await this.persistGraph(scope as unknown as EntityManager, order);
-    } else {
-      orderId = await this.orderRepository.manager.transaction((manager) =>
-        this.persistGraph(manager, order),
-      );
+    try {
+      if (scope) {
+        orderId = await this.persistGraph(
+          scope as unknown as EntityManager,
+          order,
+          expectedVersion,
+        );
+      } else {
+        orderId = await this.orderRepository.manager.transaction((manager) =>
+          this.persistGraph(manager, order, expectedVersion),
+        );
+      }
+    } catch (error) {
+      if (error instanceof OrderWriteConflictError) {
+        // The transaction rolled back on the lost CAS. Read the row's now-current
+        // version on a fresh query (the default manager, NOT the rolled-back scope's
+        // snapshot — a plain SELECT never blocks on the zero-row UPDATE's row lock) so
+        // the conflict signal carries the accurate committed version the caller should
+        // refetch. A vanished row (never in practice — an order is not deleted) falls
+        // back to the version we targeted.
+        const current = await this.orderRepository.findOne({ where: { id: error.orderId } });
+        throw new OrderWriteConflictError(
+          error.orderId,
+          current ? Number(current.version) : expectedVersion!,
+        );
+      }
+      throw error;
     }
 
     // Re-read the full graph (within the same scope when transactional) so the
@@ -144,7 +173,11 @@ export class OrderTypeormRepository
   // without touching `order_number`; the lines are re-persisted too because a line's
   // `status` advances as shipments go out (the Ship operation, ADR-031), so a re-save
   // is no longer guaranteed to leave the lines untouched.
-  private async persistGraph(manager: EntityManager, order: Order): Promise<number> {
+  private async persistGraph(
+    manager: EntityManager,
+    order: Order,
+    expectedVersion: number | undefined,
+  ): Promise<number> {
     const orderRepo = manager.getRepository(OrderEntity);
     const lineRepo = manager.getRepository(OrderLineEntity);
 
@@ -164,18 +197,69 @@ export class OrderTypeormRepository
     }
 
     const existingId = order.id;
-    const rootPartial = OrderMapper.toEntity(order);
-    delete rootPartial.orderNumber;
-    await orderRepo.save({ ...rootPartial, id: existingId });
+    await this.persistRoot(orderRepo, order, existingId, expectedVersion);
 
     // The line money/identity columns are immutable place-time snapshots, but a
     // line's `status` advances as the order ships (`OrderLine.markFulfillment`, the
     // Ship operation — ADR-031). Each line already carries its concrete id, so
     // re-persisting upserts in place (a status-column UPDATE) without inserting
-    // duplicates — the price snapshot is re-written with identical values.
+    // duplicates — the price snapshot is re-written with identical values. This runs
+    // only after the root CAS succeeded, so a losing attempt writes no lines.
     await this.persistLines(lineRepo, order, existingId);
     this.logger.debug({ orderId: existingId }, 'Order updated');
     return existingId;
+  }
+
+  // Persists the order root on a re-save. When `expectedVersion` is supplied it is an
+  // optimistic compare-and-swap on the root `version` (ADR-036): the root version is
+  // the aggregate's OCC anchor, so every status transition bumps it via
+  // `version = version + 1`, and the `WHERE id = ? AND version = expectedVersion`
+  // predicate makes a concurrent writer (who already bumped it) match zero rows — a
+  // retryable `OrderWriteConflictError` rather than a silent lost update. Two
+  // concurrent order writes therefore serialize through this single UPDATE. When
+  // `expectedVersion` is absent the write is the plain managed save (the inline
+  // authorize-on-place path, running on a brand-new order with no concurrent writer)
+  // — TypeORM still advances `@VersionColumn`. `order_number` is immutable, so it is
+  // never written on a re-save.
+  private async persistRoot(
+    orderRepo: Repository<OrderEntity>,
+    order: Order,
+    existingId: number,
+    expectedVersion: number | undefined,
+  ): Promise<void> {
+    if (expectedVersion === undefined) {
+      const rootPartial = OrderMapper.toEntity(order);
+      delete rootPartial.orderNumber;
+      await orderRepo.save({ ...rootPartial, id: existingId });
+      return;
+    }
+
+    const result = await orderRepo.update(
+      { id: existingId, version: expectedVersion },
+      {
+        customerId: order.customerId,
+        currency: order.currency,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        fulfillmentStatus: order.fulfillmentStatus,
+        subtotalMinor: order.subtotalMinor,
+        taxTotalMinor: order.taxTotalMinor,
+        discountTotalMinor: order.discountTotalMinor,
+        shippingTotalMinor: order.shippingTotalMinor,
+        grandTotalMinor: order.grandTotalMinor,
+        billingAddressId: order.billingAddressId,
+        shippingAddressId: order.shippingAddressId,
+        sourceCartId: order.sourceCartId,
+        placedAt: order.placedAt,
+        version: (): string => 'version + 1',
+      },
+    );
+
+    if (!result.affected) {
+      // Signal a lost race; the outer `save` re-reads the committed version and
+      // rethrows a conflict carrying it (kept out of this snapshot-bound tx).
+      throw new OrderWriteConflictError(existingId, expectedVersion);
+    }
   }
 
   private async persistLines(

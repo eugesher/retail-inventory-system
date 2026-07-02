@@ -85,6 +85,10 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_NOT_FULFILLABLE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_INVALID_FULFILLMENT_TRANSITION]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE]: HttpStatus.CONFLICT,
+  // Optimistic-concurrency conflict → 409: an order status write lost its bounded
+  // retry budget to a concurrent writer (ADR-036 — the wire code is the uniform
+  // `VERSION_MISMATCH`, and the exception carries `details.currentVersion`).
+  [OrderErrorCodeEnum.ORDER_VERSION_MISMATCH]: HttpStatus.CONFLICT,
   // Refund conflicts → 409: an illegal refund-status transition, a refund that would
   // over-refund the payment, or a refund against a non-captured payment.
   [OrderErrorCodeEnum.REFUND_INVALID_STATUS_TRANSITION]: HttpStatus.CONFLICT,
@@ -103,10 +107,16 @@ export class OrdersRpcExceptionFilter implements RpcExceptionFilter<OrderDomainE
   public catch(exception: OrderDomainException): Observable<never> {
     const statusCode = ORDER_ERROR_STATUS[exception.code] ?? HttpStatus.INTERNAL_SERVER_ERROR;
 
+    // `details` rides along only when present (e.g. `{ currentVersion }` on a
+    // `VERSION_MISMATCH`, ADR-036) — the gateway's `throwRpcError` forwards an
+    // object-valued `details` verbatim and harmlessly drops an absent one, so a
+    // client reads `details.currentVersion` end-to-end (the cart `{ currentVersion }`
+    // / inventory `{ available }` forwarding precedent).
     return throwError(() => ({
       statusCode,
       message: exception.message,
       code: exception.code,
+      ...(exception.details !== undefined ? { details: exception.details } : {}),
     }));
   }
 }

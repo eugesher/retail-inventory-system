@@ -62,6 +62,8 @@ const makeHarness = async (
     orderRepository,
     publisher,
     store,
+    // OCC_RETRY_ATTEMPTS budget (ADR-036).
+    5,
     logger,
   );
 

@@ -18,6 +18,7 @@ import {
   IPaymentRepositoryPort,
   ITransactionPort,
   IDEMPOTENCY_STORE,
+  OCC_RETRY_ATTEMPTS,
   ORDER_EVENTS_PUBLISHER,
   ORDER_REPOSITORY,
   PAYMENT_GATEWAY,
@@ -25,6 +26,7 @@ import {
   TRANSACTION_PORT,
 } from '../ports';
 import { loadAuthorizedOrder } from './order-access';
+import { runWithOrderWriteRetry } from './order-write';
 import { toOrderView } from './order-view.factory';
 
 // Capture Payment is the explicit, second half of the authorize-then-capture policy
@@ -73,6 +75,8 @@ export class CapturePaymentUseCase {
     private readonly publisher: IOrderEventsPublisherPort,
     @Inject(IDEMPOTENCY_STORE)
     private readonly idempotencyStore: IIdempotencyStorePort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(CapturePaymentUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -226,21 +230,41 @@ export class CapturePaymentUseCase {
     }
 
     // Short follow-up transaction: advance the Payment and the order's payment axis
-    // atomically.
-    await this.transactionPort.runInTransaction(async (scope) => {
-      payment.capture(result.capturedAt);
-      await this.paymentRepository.save(payment, scope);
+    // atomically, under the bounded OCC retry (ADR-036). The gateway `capture` above
+    // ran ONCE, outside the loop — a retry never re-charges. Each attempt re-loads the
+    // payment + order INSIDE its own transaction (so a lost order CAS re-reads fresh,
+    // committed state and the domain mutators stay valid on the retry), captures the
+    // order's version at load, and version-checked-CAS-saves the order. A concurrent
+    // capture that already captured the payment surfaces `PAYMENT_INVALID_STATUS_TRANSITION`
+    // (a terminal domain 409, never retried); a lost order CAS retries then
+    // `409 VERSION_MISMATCH` at exhaustion.
+    await runWithOrderWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      () =>
+        this.transactionPort.runInTransaction(async (scope) => {
+          const freshPayment = await this.paymentRepository.findByOrderId(orderId, scope);
+          if (!freshPayment) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.ORDER_INVALID_PAYMENT_TRANSITION,
+              `Order ${orderId} has no payment to capture`,
+            );
+          }
+          freshPayment.capture(result.capturedAt);
+          await this.paymentRepository.save(freshPayment, scope);
 
-      const fresh = await this.orderRepository.findById(orderId, scope);
-      if (!fresh) {
-        throw new OrderDomainException(
-          OrderErrorCodeEnum.ORDER_NOT_FOUND,
-          `Order ${orderId} not found while capturing payment`,
-        );
-      }
-      fresh.markPaymentCaptured();
-      await this.orderRepository.save(fresh, scope);
-    });
+          const fresh = await this.orderRepository.findById(orderId, scope);
+          if (!fresh) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.ORDER_NOT_FOUND,
+              `Order ${orderId} not found while capturing payment`,
+            );
+          }
+          const versionAtLoad = fresh.version;
+          fresh.markPaymentCaptured();
+          await this.orderRepository.save(fresh, scope, versionAtLoad);
+        }),
+      { orderId, correlationId },
+    );
 
     // Re-read so the view carries the advanced `paymentStatus` + the captured payment.
     // The two reads hit different tables with no data dependency, so run them
