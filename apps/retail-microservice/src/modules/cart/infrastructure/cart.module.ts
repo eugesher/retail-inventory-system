@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
@@ -14,6 +15,7 @@ import {
   CART_EVENTS_PUBLISHER,
   CART_INVENTORY_GATEWAY,
   CART_REPOSITORY,
+  OCC_RETRY_ATTEMPTS,
 } from '../application/ports';
 import {
   AddToCartUseCase,
@@ -69,6 +71,16 @@ import { CartController, CartRpcExceptionFilter } from '../presentation';
 
     CartRabbitmqPublisher,
     { provide: CART_EVENTS_PUBLISHER, useExisting: CartRabbitmqPublisher },
+
+    // The bounded optimistic-concurrency retry budget, resolved from
+    // `OCC_RETRY_ATTEMPTS` (Joi default 5) so every cart mutator injects a plain
+    // number rather than reading env (ADR-036; the inventory `stock.module.ts`
+    // precedent). Threaded into `runWithCartWriteRetry`.
+    {
+      provide: OCC_RETRY_ATTEMPTS,
+      useFactory: (config: ConfigService): number => config.get<number>('OCC_RETRY_ATTEMPTS') ?? 5,
+      inject: [ConfigService],
+    },
 
     CreateCartUseCase,
     GetCartUseCase,

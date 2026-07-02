@@ -27,11 +27,18 @@ export interface ICartGetQuery {
   customerId: string;
 }
 
+// `expectedVersion` (the three line commands) is the optional optimistic-
+// concurrency precondition read from the `If-Match: <version>` header (ADR-036).
+// The controller parses it with `@IfMatch()` and threads it here; the adapter
+// spreads it onto the wire payload, and the retail use case turns it into a
+// `409 VERSION_MISMATCH` when the loaded cart version differs (no retry — the
+// client's view is stale). Absent, the retail bounded retry governs the outcome.
 export interface ICartAddLineCommand {
   cartId: string;
   customerId: string;
   variantId: number;
   quantity: number;
+  expectedVersion?: number;
 }
 
 export interface ICartChangeLineQuantityCommand {
@@ -39,12 +46,14 @@ export interface ICartChangeLineQuantityCommand {
   customerId: string;
   lineId: number;
   quantity: number;
+  expectedVersion?: number;
 }
 
 export interface ICartRemoveLineCommand {
   cartId: string;
   customerId: string;
   lineId: number;
+  expectedVersion?: number;
 }
 
 // Claim carries the guest-ownership proof (`fromCustomerId`, the guest id the

@@ -11,9 +11,11 @@ import {
   ICartEventsPublisherPort,
   ICartInventoryGatewayPort,
   ICartRepositoryPort,
+  OCC_RETRY_ATTEMPTS,
 } from '../ports';
 import { loadOwnedCart } from './cart-access';
 import { toCartView } from './cart-view.factory';
+import { assertCartVersion, runWithCartWriteRetry } from './cart-write';
 
 // Sets a cart line's quantity to a new positive value. A `0` is rejected at the
 // domain (`CART_LINE_QUANTITY_INVALID`) — removal is the explicit op; an unknown
@@ -32,40 +34,55 @@ export class ChangeCartLineQuantityUseCase {
     private readonly inventory: ICartInventoryGatewayPort,
     @Inject(CART_EVENTS_PUBLISHER)
     private readonly publisher: ICartEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(ChangeCartLineQuantityUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
 
   public async execute(payload: IRetailCartChangeLineQuantityPayload): Promise<CartView> {
-    const { cartId, customerId, lineId, quantity, correlationId } = payload;
+    const { cartId, customerId, lineId, quantity, expectedVersion, correlationId } = payload;
 
     this.logger.info({ correlationId, cartId, lineId, quantity }, 'Changing cart line quantity');
 
-    const cart = await loadOwnedCart(this.repository, cartId, customerId);
+    // OCC (ADR-036): read-version → reserve → mutate → version-checked persist,
+    // inside the bounded retry (single attempt when the client pinned `If-Match`).
+    const { saved, occurredAt } = await runWithCartWriteRetry(
+      { logger: this.logger, maxAttempts: expectedVersion !== undefined ? 1 : this.maxAttempts },
+      async () => {
+        const cart = await loadOwnedCart(this.repository, cartId, customerId);
+        assertCartVersion(cart, expectedVersion);
 
-    // Resolve the line up front so the reserve can carry its `variantId` (the same
-    // `CART_LINE_NOT_FOUND` guard the domain `changeLineQuantity` enforces). Then
-    // re-reserve the absolute new quantity BEFORE mutating/saving — a rejection
-    // (e.g. raising the quantity past available stock → `INVENTORY_OUT_OF_STOCK`,
-    // 409) leaves the cart untouched.
-    const line = cart.lines.find((candidate) => candidate.id === lineId);
-    if (!line) {
-      throw new CartDomainException(
-        CartErrorCodeEnum.CART_LINE_NOT_FOUND,
-        `Cart ${cartId}: no line with id ${lineId}`,
-      );
-    }
-    await this.inventory.reserveStock({
-      variantId: line.variantId,
-      quantity,
-      cartId,
-      correlationId,
-    });
+        // Resolve the line up front so the reserve can carry its `variantId` (the
+        // same `CART_LINE_NOT_FOUND` guard the domain `changeLineQuantity`
+        // enforces). Then re-reserve the absolute new quantity BEFORE
+        // mutating/saving — a rejection (e.g. raising the quantity past available
+        // stock → `INVENTORY_OUT_OF_STOCK`, 409) leaves the cart untouched.
+        const line = cart.lines.find((candidate) => candidate.id === lineId);
+        if (!line) {
+          throw new CartDomainException(
+            CartErrorCodeEnum.CART_LINE_NOT_FOUND,
+            `Cart ${cartId}: no line with id ${lineId}`,
+          );
+        }
+        await this.inventory.reserveStock({
+          variantId: line.variantId,
+          quantity,
+          cartId,
+          correlationId,
+        });
 
-    cart.changeLineQuantity(lineId, quantity);
+        const versionAtLoad = cart.version;
+        cart.changeLineQuantity(lineId, quantity);
 
-    const saved = await this.repository.save(cart);
-    const occurredAt = (cart.pullDomainEvents()[0]?.occurredAt ?? new Date()).toISOString();
+        const persisted = await this.repository.save(cart, versionAtLoad);
+        const eventOccurredAt = (
+          cart.pullDomainEvents()[0]?.occurredAt ?? new Date()
+        ).toISOString();
+        return { saved: persisted, occurredAt: eventOccurredAt };
+      },
+      { cartId, correlationId },
+    );
 
     try {
       await this.publisher.publishCartLineQuantityChanged({

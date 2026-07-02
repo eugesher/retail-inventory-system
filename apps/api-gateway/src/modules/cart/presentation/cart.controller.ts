@@ -27,7 +27,7 @@ import { CurrentUser } from '@retail-inventory-system/auth';
 import { CartView, ICurrentUser, OrderView } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
-import { IdempotencyKey } from '../../../common/decorators';
+import { IdempotencyKey, IfMatch } from '../../../common/decorators';
 import {
   AddToCartUseCase,
   ChangeCartLineQuantityUseCase,
@@ -102,16 +102,29 @@ export class CartController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Add a variant line to the cart (owner-checked)' })
   @ApiParam({ name: 'cartId', type: String, example: '11111111-1111-4111-8111-111111111111' })
+  @ApiHeader({
+    name: 'If-Match',
+    required: false,
+    description:
+      'Optional optimistic-concurrency precondition (ADR-036). Supply the cart `version` you read; a stale version → 409 { code: VERSION_MISMATCH, details.currentVersion } with no retry. Absent → the write retries a lost race up to the OCC budget.',
+  })
   @ApiOkResponse({ description: 'The updated cart', type: CartView })
   @ApiProduces('application/json')
   public async addLine(
     @Param('cartId') cartId: string,
     @Body() dto: AddLineRequestDto,
+    @IfMatch() expectedVersion: number | undefined,
     @CurrentUser() user: ICurrentUser,
     @CorrelationId() correlationId: string,
   ): Promise<CartView> {
     return this.addToCartUseCase.execute(
-      { cartId, customerId: user.id, variantId: dto.variantId, quantity: dto.quantity },
+      {
+        cartId,
+        customerId: user.id,
+        variantId: dto.variantId,
+        quantity: dto.quantity,
+        expectedVersion,
+      },
       correlationId,
     );
   }
@@ -120,17 +133,24 @@ export class CartController {
   @ApiOperation({ summary: 'Change a line quantity (owner-checked)' })
   @ApiParam({ name: 'cartId', type: String, example: '11111111-1111-4111-8111-111111111111' })
   @ApiParam({ name: 'lineId', type: Number, example: 5000 })
+  @ApiHeader({
+    name: 'If-Match',
+    required: false,
+    description:
+      'Optional optimistic-concurrency precondition (ADR-036). Supply the cart `version` you read; a stale version → 409 { code: VERSION_MISMATCH, details.currentVersion } with no retry. Absent → the write retries a lost race up to the OCC budget.',
+  })
   @ApiOkResponse({ description: 'The updated cart', type: CartView })
   @ApiProduces('application/json')
   public async changeLineQuantity(
     @Param('cartId') cartId: string,
     @Param('lineId', ParseIntPipe) lineId: number,
     @Body() dto: ChangeLineQuantityRequestDto,
+    @IfMatch() expectedVersion: number | undefined,
     @CurrentUser() user: ICurrentUser,
     @CorrelationId() correlationId: string,
   ): Promise<CartView> {
     return this.changeCartLineQuantityUseCase.execute(
-      { cartId, customerId: user.id, lineId, quantity: dto.quantity },
+      { cartId, customerId: user.id, lineId, quantity: dto.quantity, expectedVersion },
       correlationId,
     );
   }
@@ -139,16 +159,23 @@ export class CartController {
   @ApiOperation({ summary: 'Remove a line from the cart (owner-checked)' })
   @ApiParam({ name: 'cartId', type: String, example: '11111111-1111-4111-8111-111111111111' })
   @ApiParam({ name: 'lineId', type: Number, example: 5000 })
+  @ApiHeader({
+    name: 'If-Match',
+    required: false,
+    description:
+      'Optional optimistic-concurrency precondition (ADR-036). Supply the cart `version` you read; a stale version → 409 { code: VERSION_MISMATCH, details.currentVersion } with no retry. Absent → the write retries a lost race up to the OCC budget.',
+  })
   @ApiOkResponse({ description: 'The updated cart', type: CartView })
   @ApiProduces('application/json')
   public async removeLine(
     @Param('cartId') cartId: string,
     @Param('lineId', ParseIntPipe) lineId: number,
+    @IfMatch() expectedVersion: number | undefined,
     @CurrentUser() user: ICurrentUser,
     @CorrelationId() correlationId: string,
   ): Promise<CartView> {
     return this.removeFromCartUseCase.execute(
-      { cartId, customerId: user.id, lineId },
+      { cartId, customerId: user.id, lineId, expectedVersion },
       correlationId,
     );
   }

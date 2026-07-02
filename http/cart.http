@@ -28,6 +28,14 @@
 # The guest flow (bottom of the file) is independent: `guestSession` mints a
 # guest token + @guestCustomerId, and `claimCart` documents promoting a guest
 # cart to a registered customer with the fromCustomerId ownership proof.
+#
+# Optimistic concurrency (ADR-036): the three line routes (add/change/remove)
+# accept an OPTIONAL `If-Match: <version>` header carrying the cart `version` the
+# client last read (CartView.version). When present and stale, the write is
+# rejected 409 { code: "VERSION_MISMATCH", details: { currentVersion } } with NO
+# retry. When absent, a lost race is retried up to the OCC budget before the same
+# 409. The `changeLineQuantityStaleIfMatch` block at the end demonstrates the
+# stale-precondition rejection.
 
 @baseUrl = {{ENV_BASE_URL}}
 
@@ -101,6 +109,7 @@ Content-Type: application/json
 
 ###
 @lineId = {{addLine.response.body.$.lines[0].id}}
+@cartVersion = {{addLine.response.body.$.version}}
 
 ###
 
@@ -112,10 +121,13 @@ Content-Type: application/json
 # raising it past available stock is a 409 INVENTORY_OUT_OF_STOCK. Body
 # (ChangeLineQuantityRequestDto):
 #   quantity: positive int
-# Response is the updated CartView.
+# The OPTIONAL `If-Match` header pins the cart version read from addLine
+# (@cartVersion). Matching → the write proceeds; stale → 409 VERSION_MISMATCH.
+# Response is the updated CartView (version bumped).
 PATCH {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
+If-Match: {{cartVersion}}
 
 {
   "quantity": 1
@@ -128,9 +140,28 @@ Content-Type: application/json
 # Drops the line from the cart. An unknown line id is 404. After the cart write
 # the retail use case RELEASES the line's stock hold (inventory.reservation.release)
 # best-effort — a release failure is logged and swallowed, never fails the remove.
-# Response is the updated CartView (now with an empty lines array).
+# `If-Match` is also honored here (optional). Response is the updated CartView
+# (now with an empty lines array).
 DELETE {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
 Authorization: Bearer {{accessToken}}
+
+###
+
+# @name changeLineQuantityStaleIfMatch
+# PATCH /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
+# Demonstrates the optimistic-concurrency precondition (ADR-036). `If-Match: 0`
+# is a deliberately stale version (the cart has moved past 0 after the add), so
+# the write is rejected WITHOUT retrying:
+#   409 { statusCode: 409, code: "VERSION_MISMATCH", details: { currentVersion } }
+# The client should refetch the cart (GET), read the new `version`, and retry.
+PATCH {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+If-Match: 0
+
+{
+  "quantity": 3
+}
 
 ###
 
