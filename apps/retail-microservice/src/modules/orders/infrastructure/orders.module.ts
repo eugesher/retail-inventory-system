@@ -17,6 +17,7 @@ import {
   FULFILLMENT_REPOSITORY,
   IDEMPOTENCY_KEY_TTL_HOURS,
   IDEMPOTENCY_STORE,
+  OCC_RETRY_ATTEMPTS,
   ORDER_CART_READER,
   ORDER_CUSTOMER_CONTACT_READER,
   ORDER_CATALOG_GATEWAY,
@@ -164,6 +165,16 @@ import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
       provide: IDEMPOTENCY_KEY_TTL_HOURS,
       useFactory: (config: ConfigService): number =>
         config.get<number>('IDEMPOTENCY_KEY_TTL_HOURS') ?? 24,
+      inject: [ConfigService],
+    },
+    // The bounded optimistic-concurrency retry budget (ADR-036), resolved from
+    // `OCC_RETRY_ATTEMPTS` (Joi default 5) so the order status use cases inject a
+    // plain number rather than reading env (ADR-017; the inventory / cart
+    // `OCC_RETRY_ATTEMPTS` precedent). It caps `runWithOrderWriteRetry`'s retries on a
+    // lost version CAS before the write surfaces a `409 VERSION_MISMATCH`.
+    {
+      provide: OCC_RETRY_ATTEMPTS,
+      useFactory: (config: ConfigService): number => config.get<number>('OCC_RETRY_ATTEMPTS') ?? 5,
       inject: [ConfigService],
     },
 

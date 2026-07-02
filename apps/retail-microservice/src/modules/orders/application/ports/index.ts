@@ -3,6 +3,7 @@ export * from './customer-contact-reader.port';
 export * from './fulfillment.repository.port';
 export * from './idempotency-key-ttl.token';
 export * from './idempotency-store.port';
+export * from './occ-retry-attempts.token';
 export * from './order.repository.port';
 export * from './order-cart-reader.port';
 export * from './order-catalog.gateway.port';

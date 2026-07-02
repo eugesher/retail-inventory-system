@@ -103,6 +103,8 @@ const makeHarness = (
     restockGateway,
     publisher,
     customerContactReader,
+    // OCC_RETRY_ATTEMPTS budget (ADR-036).
+    5,
     logger,
   );
   return { useCase, repository, restockGateway, publisher, customerContactReader };

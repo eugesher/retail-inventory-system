@@ -28,7 +28,14 @@ const makeHarness = (): {
   const repository = new FakeReturnRequestRepository();
   const publisher = new SpyReturnEventsPublisher();
   const customerContactReader = new FakeReturnCustomerContactReader();
-  const useCase = new AuthorizeReturnUseCase(repository, publisher, customerContactReader, logger);
+  const useCase = new AuthorizeReturnUseCase(
+    repository,
+    publisher,
+    customerContactReader,
+    // OCC_RETRY_ATTEMPTS budget (ADR-036).
+    5,
+    logger,
+  );
   return { useCase, repository, publisher, customerContactReader };
 };
 
@@ -80,5 +87,36 @@ describe('AuthorizeReturnUseCase', () => {
       code: ReturnErrorCodeEnum.RETURN_INVALID_STATUS_TRANSITION,
     });
     expect(publisher.authorized).toHaveLength(0);
+  });
+
+  // Optimistic concurrency (ADR-036): the transition is a version-checked CAS; a
+  // concurrent writer that advanced the version makes it lose. A lost race within budget
+  // retries (re-read → re-transition → save); exhausting the budget surfaces the uniform
+  // `409 VERSION_MISMATCH`.
+  describe('optimistic concurrency', () => {
+    it('retries a lost version CAS then authorizes successfully', async () => {
+      const { useCase, repository, publisher } = makeHarness();
+      const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.REQUESTED));
+      repository.conflictsBeforeSuccess = 2; // < budget → converges
+
+      const view = await useCase.execute(payload(seeded.id!));
+
+      expect(view.status).toBe(ReturnStatusEnum.AUTHORIZED);
+      expect(publisher.authorized).toHaveLength(1);
+    });
+
+    it('surfaces 409 VERSION_MISMATCH with details.currentVersion when the budget is exhausted', async () => {
+      const { useCase, repository, publisher } = makeHarness();
+      const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.REQUESTED));
+      repository.conflictsBeforeSuccess = 99; // > budget → exhausted
+
+      await expect(useCase.execute(payload(seeded.id!))).rejects.toMatchObject({
+        code: ReturnErrorCodeEnum.RETURN_VERSION_MISMATCH,
+        // The RMA's current committed version (the seed, never advanced — every CAS lost).
+        details: { currentVersion: 1 },
+      });
+      // No event fired — the transition never committed.
+      expect(publisher.authorized).toHaveLength(0);
+    });
   });
 });

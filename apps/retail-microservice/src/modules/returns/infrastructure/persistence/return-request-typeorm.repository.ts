@@ -6,6 +6,7 @@ import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import { ReturnRequest } from '../../domain';
 import { IReturnRequestRepositoryPort, ITransactionScope } from '../../application/ports';
+import { ReturnWriteConflictError } from '../../application/use-cases/return-write-conflict.error';
 import { ReturnRequestEntity } from './return-request.entity';
 import { ReturnLineEntity } from './return-line.entity';
 import { ReturnLineMapper } from './return-line.mapper';
@@ -48,18 +49,41 @@ export class ReturnRequestTypeormRepository
   public async save(
     returnRequest: ReturnRequest,
     scope?: ITransactionScope,
+    expectedVersion?: number,
   ): Promise<ReturnRequest> {
     // One transaction for the root + its lines: a half-written graph (the header
     // committed but a line missing) would misreport which quantities are coming back.
-    // When the caller already owns a transaction (`scope`), join it — Inspect/Close
-    // commit the RMA, the refund, and the payment atomically — else open one.
+    // When the caller already owns a transaction (`scope`), join it — Inspect commits
+    // the RMA + the inspection columns atomically — else open one. When `expectedVersion`
+    // is supplied (a status transition on an existing RMA) the root write is an
+    // optimistic compare-and-swap on `version` (ADR-036); otherwise it is a plain insert
+    // (the Open path, no live row to race).
     let id: number;
-    if (scope) {
-      id = await this.persistGraph(scope as unknown as EntityManager, returnRequest);
-    } else {
-      id = await this.returnRequestRepository.manager.transaction((manager) =>
-        this.persistGraph(manager, returnRequest),
-      );
+    try {
+      if (scope) {
+        id = await this.persistGraph(
+          scope as unknown as EntityManager,
+          returnRequest,
+          expectedVersion,
+        );
+      } else {
+        id = await this.returnRequestRepository.manager.transaction((manager) =>
+          this.persistGraph(manager, returnRequest, expectedVersion),
+        );
+      }
+    } catch (error) {
+      if (error instanceof ReturnWriteConflictError) {
+        // The transaction rolled back on the lost CAS. Read the row's now-current
+        // version on a fresh query (the default manager, NOT the rolled-back scope's
+        // snapshot — a plain SELECT never blocks on the zero-row UPDATE's row lock) so
+        // the conflict signal carries the accurate committed version.
+        const current = await this.returnRequestRepository.findOne({ where: { id: error.rmaId } });
+        throw new ReturnWriteConflictError(
+          error.rmaId,
+          current ? Number(current.version) : expectedVersion!,
+        );
+      }
+      throw error;
     }
 
     // Re-read the full graph (within the same scope when transactional) so the returned
@@ -109,6 +133,7 @@ export class ReturnRequestTypeormRepository
   private async persistGraph(
     manager: EntityManager,
     returnRequest: ReturnRequest,
+    expectedVersion: number | undefined,
   ): Promise<number> {
     const requestRepo = manager.getRepository(ReturnRequestEntity);
     const lineRepo = manager.getRepository(ReturnLineEntity);
@@ -126,12 +151,54 @@ export class ReturnRequestTypeormRepository
     }
 
     const existingId = returnRequest.id;
-    const rootPartial = ReturnRequestMapper.toEntity(returnRequest);
-    delete rootPartial.rmaNumber;
-    await requestRepo.save({ ...rootPartial, id: existingId });
+    await this.persistRoot(requestRepo, returnRequest, existingId, expectedVersion);
 
+    // This runs only after the root CAS succeeded, so a losing attempt writes no lines.
     await this.persistLines(lineRepo, returnRequest, existingId);
     return existingId;
+  }
+
+  // Persists the return-request root on a re-save. When `expectedVersion` is supplied it
+  // is an optimistic compare-and-swap on the root `version` (ADR-036): every status
+  // transition bumps it via `version = version + 1`, and the
+  // `WHERE id = ? AND version = expectedVersion` predicate makes a concurrent writer
+  // (who already bumped it) match zero rows — a retryable `ReturnWriteConflictError`
+  // rather than a silent lost update. When `expectedVersion` is absent the write is the
+  // plain managed save (TypeORM still advances `@VersionColumn`). `rma_number` is
+  // immutable, so it is never written on a re-save.
+  private async persistRoot(
+    requestRepo: Repository<ReturnRequestEntity>,
+    returnRequest: ReturnRequest,
+    existingId: number,
+    expectedVersion: number | undefined,
+  ): Promise<void> {
+    if (expectedVersion === undefined) {
+      const rootPartial = ReturnRequestMapper.toEntity(returnRequest);
+      delete rootPartial.rmaNumber;
+      await requestRepo.save({ ...rootPartial, id: existingId });
+      return;
+    }
+
+    const result = await requestRepo.update(
+      { id: existingId, version: expectedVersion },
+      {
+        orderId: returnRequest.orderId,
+        customerId: returnRequest.customerId,
+        status: returnRequest.status,
+        reasonCategory: returnRequest.reasonCategory,
+        notes: returnRequest.notes,
+        requestedAt: returnRequest.requestedAt,
+        authorizedAt: returnRequest.authorizedAt,
+        closedAt: returnRequest.closedAt,
+        version: (): string => 'version + 1',
+      },
+    );
+
+    if (!result.affected) {
+      // Signal a lost race; the outer `save` re-reads the committed version and rethrows
+      // a conflict carrying it (kept out of this snapshot-bound tx).
+      throw new ReturnWriteConflictError(existingId, expectedVersion);
+    }
   }
 
   private async persistLines(

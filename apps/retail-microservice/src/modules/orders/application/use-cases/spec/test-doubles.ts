@@ -54,6 +54,7 @@ import {
   ITransactionPort,
   ITransactionScope,
 } from '../../ports';
+import { OrderWriteConflictError } from '../order-write-conflict.error';
 
 // Jest-free so the production build (which excludes `*.spec.ts` but not
 // `test-doubles.ts`) stays clean — the catalog/inventory/cart convention. Methods
@@ -82,6 +83,35 @@ export class CommitFailingTransactionPort implements ITransactionPort {
   public async runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
     await work(FAKE_SCOPE);
     throw this.error;
+  }
+}
+
+// A fake repository whose in-memory state can be snapshotted and restored — the seam a
+// rollback-aware transaction port needs to simulate a rolled-back attempt.
+export interface ISnapshotableFake {
+  snapshot(): () => void;
+}
+
+// A rollback-aware transaction port for the OCC retry specs (ADR-036): it snapshots the
+// given fakes BEFORE running the work and restores them if the work throws — simulating
+// a real transaction's rollback. Without it a fake save that partially wrote (e.g. the
+// ship flow persisted the fulfillment + payment before the order CAS threw) would leave
+// that write visible to the retry, so the re-read domain object would be in a state its
+// mutator rejects. With it, a lost order CAS rolls the whole attempt back and the retry
+// re-reads pristine state — exactly as the real DB transaction behaves.
+export class RollbackFakeTransactionPort implements ITransactionPort {
+  constructor(private readonly fakes: ISnapshotableFake[]) {}
+
+  public async runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
+    const restores = this.fakes.map((fake) => fake.snapshot());
+    try {
+      return await work(FAKE_SCOPE);
+    } catch (error) {
+      for (const restore of restores) {
+        restore();
+      }
+      throw error;
+    }
   }
 }
 
@@ -212,9 +242,26 @@ export class FakeCatalogGateway implements IOrderCatalogGatewayPort {
 // merged state — enough to exercise the place + authorize orchestration.
 export class FakeOrderRepository implements IOrderRepositoryPort {
   public saveCount = 0;
+  // OCC simulation (ADR-036): when > 0, the next N version-checked saves
+  // (`expectedVersion` supplied) reject with `OrderWriteConflictError` and decrement —
+  // the retry helper re-reads + retries. Set it above the injected budget to prove
+  // retry-exhausted → `VERSION_MISMATCH`, or below it to prove retry-then-success.
+  public conflictsBeforeSuccess = 0;
   private seq = 0;
   private readonly byId = new Map<number, Order>();
   private readonly addresses = new Map<number, { billing: string; shipping: string }>();
+
+  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
+  public snapshot(): () => void {
+    const copy = new Map(this.byId);
+    const addrCopy = new Map(this.addresses);
+    return (): void => {
+      this.byId.clear();
+      for (const [k, v] of copy) this.byId.set(k, v);
+      this.addresses.clear();
+      for (const [k, v] of addrCopy) this.addresses.set(k, v);
+    };
+  }
 
   public findById(id: number): Promise<Order | null> {
     const order = this.byId.get(id);
@@ -230,8 +277,17 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
     return Promise.resolve(null);
   }
 
-  public save(order: Order): Promise<Order> {
+  public save(order: Order, _scope?: ITransactionScope, expectedVersion?: number): Promise<Order> {
     this.saveCount += 1;
+    // A version-checked CAS that loses the race (the simulated conflict) — mirrors the
+    // real repo throwing `OrderWriteConflictError`, which the retry helper catches.
+    if (expectedVersion !== undefined && this.conflictsBeforeSuccess > 0) {
+      this.conflictsBeforeSuccess -= 1;
+      const current = this.byId.get(order.id!);
+      return Promise.reject(
+        new OrderWriteConflictError(order.id!, current ? current.version : expectedVersion),
+      );
+    }
     const id = order.id ?? ++this.seq;
     const orderNumber =
       order.id === null ? `ORD-2026-${String(id).padStart(8, '0')}` : order.orderNumber;
@@ -334,6 +390,15 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
     const stored = this.rebuild(payment, id);
     this.byId.set(id, stored);
     return Promise.resolve(stored);
+  }
+
+  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
+  public snapshot(): () => void {
+    const copy = new Map(this.byId);
+    return (): void => {
+      this.byId.clear();
+      for (const [k, v] of copy) this.byId.set(k, v);
+    };
   }
 
   public findById(id: number): Promise<Payment | null> {
@@ -613,6 +678,15 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
     const stored = this.rebuild(fulfillment, id);
     this.byId.set(id, stored);
     return Promise.resolve(this.rebuild(stored, id));
+  }
+
+  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
+  public snapshot(): () => void {
+    const copy = new Map(this.byId);
+    return (): void => {
+      this.byId.clear();
+      for (const [k, v] of copy) this.byId.set(k, v);
+    };
   }
 
   public findById(id: number): Promise<Fulfillment | null> {

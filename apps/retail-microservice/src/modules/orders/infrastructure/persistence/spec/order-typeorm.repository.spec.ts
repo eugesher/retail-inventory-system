@@ -5,6 +5,7 @@ import { OrderPaymentStatusEnum, OrderStatusEnum } from '@retail-inventory-syste
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { Order, OrderLine } from '../../../domain';
+import { OrderWriteConflictError } from '../../../application/use-cases/order-write-conflict.error';
 import { OrderEntity } from '../order.entity';
 import { OrderLineEntity } from '../order-line.entity';
 import { OrderLineMapper } from '../order-line.mapper';
@@ -227,6 +228,90 @@ describe('OrderTypeormRepository', () => {
       expect(savedPartial.orderNumber).toBeUndefined();
       expect(txnOrderRepo.update).not.toHaveBeenCalled();
       expect(result.paymentStatus).toBe(OrderPaymentStatusEnum.AUTHORIZED);
+    });
+  });
+
+  describe('save (existing order, version-checked CAS — ADR-036)', () => {
+    const buildAuthorizedOrder = (): Order =>
+      Order.reconstitute({
+        id: 1,
+        orderNumber: 'ORD-2026-00000001',
+        customerId: 'cust-1',
+        currency: 'USD',
+        status: OrderStatusEnum.PENDING,
+        paymentStatus: OrderPaymentStatusEnum.AUTHORIZED,
+        fulfillmentStatus: 'unfulfilled' as never,
+        lines: [makeLine(10, 7)],
+        subtotalMinor: 3000,
+        grandTotalMinor: 3000,
+        billingAddressId: null,
+        shippingAddressId: null,
+        sourceCartId: null,
+        placedAt: new Date('2026-06-10T00:00:00Z'),
+        version: 1,
+      });
+
+    it('runs a version-checked UPDATE (WHERE id + version, SET version = version + 1) and re-reads on success', async () => {
+      const order = buildAuthorizedOrder();
+      const txnOrderRepo = {
+        save: jest.fn(),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+      };
+      const txnLineRepo = { save: jest.fn().mockResolvedValue([]) };
+      const manager = {
+        getRepository: jest.fn((entity) =>
+          entity === OrderLineEntity ? txnLineRepo : txnOrderRepo,
+        ),
+      } as unknown as EntityManager;
+      orderRepo.manager.transaction.mockImplementation(
+        async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
+      );
+      orderRepo.findOne.mockResolvedValue(reloadedOrderEntity({ version: 2 }));
+
+      // Pass the loaded version (1) as the expected CAS anchor.
+      const result = await repository.save(order, undefined, 1);
+
+      // The CAS targets the exact (id, version) row and increments the version by a SQL
+      // expression — never the managed `save` (which would not version-check).
+      expect(txnOrderRepo.save).not.toHaveBeenCalled();
+      expect(txnOrderRepo.update).toHaveBeenCalledTimes(1);
+      const [where, patch] = txnOrderRepo.update.mock.calls[0] as [
+        Record<string, unknown>,
+        Record<string, unknown>,
+      ];
+      expect(where).toEqual({ id: 1, version: 1 });
+      expect(typeof patch.version).toBe('function');
+      expect((patch.version as () => string)()).toBe('version + 1');
+      expect(result.version).toBe(2);
+    });
+
+    it('throws OrderWriteConflictError carrying the re-read current version when the CAS matches zero rows', async () => {
+      const order = buildAuthorizedOrder();
+      const txnOrderRepo = {
+        save: jest.fn(),
+        update: jest.fn().mockResolvedValue({ affected: 0 }),
+      };
+      const txnLineRepo = { save: jest.fn() };
+      const manager = {
+        getRepository: jest.fn((entity) =>
+          entity === OrderLineEntity ? txnLineRepo : txnOrderRepo,
+        ),
+      } as unknown as EntityManager;
+      orderRepo.manager.transaction.mockImplementation(
+        async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
+      );
+      // The conflict re-read (default manager) reveals the version the winner left behind.
+      orderRepo.findOne.mockResolvedValue(reloadedOrderEntity({ version: 9 }));
+
+      await expect(repository.save(order, undefined, 1)).rejects.toBeInstanceOf(
+        OrderWriteConflictError,
+      );
+      await expect(repository.save(order, undefined, 1)).rejects.toMatchObject({
+        orderId: 1,
+        currentVersion: 9,
+      });
+      // A losing attempt never writes the lines.
+      expect(txnLineRepo.save).not.toHaveBeenCalled();
     });
   });
 

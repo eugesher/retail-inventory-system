@@ -16,9 +16,13 @@ export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
 // - `findById` is the by-id load path.
 // - `findByOrderId` resolves the single payment for an order — one payment per order
 //   in this capability (split-payment / multi-capture are later capabilities), so a
-//   single `Payment | null` is the right shape, not an array.
+//   single `Payment | null` is the right shape, not an array. It accepts an optional
+//   `scope` so a use case that retries its transaction on an optimistic conflict
+//   (capture / ship / cancel, ADR-036) re-loads the payment INSIDE each attempt's
+//   transaction — a fresh domain object per attempt keeps its mutators
+//   (`capture` / `void` / `flagForRefund`) valid on a retry.
 export interface IPaymentRepositoryPort {
   save(payment: Payment, scope?: ITransactionScope): Promise<Payment>;
   findById(id: number): Promise<Payment | null>;
-  findByOrderId(orderId: number): Promise<Payment | null>;
+  findByOrderId(orderId: number, scope?: ITransactionScope): Promise<Payment | null>;
 }

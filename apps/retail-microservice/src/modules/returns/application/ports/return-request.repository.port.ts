@@ -21,7 +21,12 @@ export const RETURN_REQUEST_REPOSITORY = Symbol('RETURN_REQUEST_REPOSITORY');
 // - `save` upserts the root together with its lines and re-reads the saved graph so
 //   the generated BIGINT id + `return_line.id`s come back concrete and the
 //   `rma_number` is finalized to `RMA-<year>-<pad8(id)>` (the "re-read the saved
-//   graph, then finalize a derived field" idiom the order repo follows).
+//   graph, then finalize a derived field" idiom the order repo follows). It accepts an
+//   optional `expectedVersion`: when supplied (a status transition on an existing RMA)
+//   the root write is an optimistic compare-and-swap on `version`
+//   (`UPDATE … WHERE id = ? AND version = ?`, ADR-036) — a zero-rows result throws the
+//   internal `ReturnWriteConflictError` the retry helper catches; absent (the Open
+//   insert) the root persists via the plain managed save.
 // - `findById` is the by-id load path (the lifecycle preconditions resolve an RMA by
 //   id).
 // - `listByOrderId` lists an order's return requests newest-first (by `requested_at`
@@ -30,7 +35,11 @@ export const RETURN_REQUEST_REPOSITORY = Symbol('RETURN_REQUEST_REPOSITORY');
 // `nextRmaSequence()` is intentionally absent — the RMA number derives from the
 // generated id (the order-number precedent), so there is no sequence table.
 export interface IReturnRequestRepositoryPort {
-  save(returnRequest: ReturnRequest, scope?: ITransactionScope): Promise<ReturnRequest>;
+  save(
+    returnRequest: ReturnRequest,
+    scope?: ITransactionScope,
+    expectedVersion?: number,
+  ): Promise<ReturnRequest>;
   findById(id: number, scope?: ITransactionScope): Promise<ReturnRequest | null>;
   listByOrderId(orderId: number): Promise<ReturnRequest[]>;
 }

@@ -7,10 +7,12 @@ import { ReturnRequest } from '../../domain';
 import {
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  OCC_RETRY_ATTEMPTS,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
 } from '../ports';
 import { loadReturnById } from './return-access';
+import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
 // Close Return walks an `inspected` RMA → `closed` (staff `order:return-authorize`, gated
@@ -27,6 +29,8 @@ export class CloseReturnUseCase {
     private readonly repository: IReturnRequestRepositoryPort,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(CloseReturnUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -36,9 +40,19 @@ export class CloseReturnUseCase {
 
     this.logger.info({ correlationId, rmaId, actorId }, 'Closing return request');
 
-    const request = await loadReturnById(this.repository, rmaId);
-    request.close(new Date());
-    const saved = await this.repository.save(request);
+    // Version-checked CAS under the bounded OCC retry (ADR-036): re-read the RMA afresh
+    // each attempt, walk `inspected → closed`, and save with the version pinned. A lost
+    // CAS retries; a non-`inspected` start is a terminal domain 409, never retried.
+    const saved = await runWithReturnWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      async () => {
+        const request = await loadReturnById(this.repository, rmaId);
+        const versionAtLoad = request.version;
+        request.close(new Date());
+        return this.repository.save(request, undefined, versionAtLoad);
+      },
+      { rmaId, correlationId },
+    );
 
     await this.emitClosed(saved, correlationId);
 

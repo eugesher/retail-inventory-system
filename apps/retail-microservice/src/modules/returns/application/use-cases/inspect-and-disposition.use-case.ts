@@ -24,6 +24,7 @@ import {
   IReturnRequestRepositoryPort,
   ITransactionPort,
   INVENTORY_RESTOCK_GATEWAY,
+  OCC_RETRY_ATTEMPTS,
   RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_ORDER_READER,
@@ -33,6 +34,7 @@ import {
 import { loadReturnById } from './return-access';
 import { resolveCustomerEmail } from './resolve-customer-email';
 import { retryThenLogForReplay } from './retry-then-log-for-replay';
+import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
 // How many times Restock from Return is attempted after the local inspection commit
@@ -89,6 +91,8 @@ export class InspectAndDispositionUseCase {
     private readonly publisher: IReturnEventsPublisherPort,
     @Inject(RETURN_CUSTOMER_CONTACT_READER)
     private readonly customerContactReader: IReturnCustomerContactReaderPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(InspectAndDispositionUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -105,30 +109,51 @@ export class InspectAndDispositionUseCase {
     const request = await loadReturnById(this.repository, rmaId);
 
     // Validate the inspection set against the RMA's lines BEFORE opening a transaction: an
-    // unknown line is a 404, an incomplete/duplicated set a 400. `lineById` holds the
-    // pre-loaded aggregate's `ReturnLine` references, so mutating them below mutates the
-    // request that gets saved.
+    // unknown line is a 404, an incomplete/duplicated set a 400. This pure check runs on
+    // the pre-loaded aggregate (the line-id set is immutable across the RMA's life, so it
+    // does not need the fresh version).
     const lineById = new Map<number, ReturnLine>(request.lines.map((line) => [line.id!, line]));
     this.assertInspectionCoversEveryLine(lines, lineById);
 
     const inspectedAt = new Date();
 
-    // Transactional inspection (the cross-cutting consistency rule): record each line's
-    // outcome + walk the status in ONE unit of work. `markInspected` enforces the
-    // `received → inspected` transition (409 otherwise) and is reached inside the scope, so
-    // a wrong status rolls everything back. `save(scope)` re-persists the root + the lines'
-    // newly-set inspection columns and re-reads the graph with concrete ids.
-    const saved = await this.transactionPort.runInTransaction<ReturnRequest>(async (scope) => {
-      for (const input of lines) {
-        lineById.get(input.returnLineId)!.inspect({
-          condition: input.condition,
-          disposition: input.disposition,
-          lineRefundAmountMinor: input.lineRefundAmountMinor,
-        });
-      }
-      request.markInspected();
-      return this.repository.save(request, scope);
-    });
+    // Transactional inspection under the bounded OCC retry (ADR-036, the cross-cutting
+    // consistency rule): record each line's outcome + walk the status in ONE unit of
+    // work. The RMA is RE-LOADED fresh INSIDE each attempt (the `ReturnLine.inspect`
+    // mutation is inspect-once, so a retry must start from an un-inspected re-read), its
+    // version captured, and the root saved with the version-checked CAS — a concurrent
+    // transition that advanced the version makes the CAS lose and the whole unit of work
+    // retry. `markInspected` enforces the `received → inspected` transition (a terminal
+    // 409 otherwise, never retried) and is reached inside the scope, so a wrong status
+    // rolls everything back. `save(scope, versionAtLoad)` re-persists the root + the
+    // lines' newly-set inspection columns and re-reads the graph with concrete ids.
+    const saved = await runWithReturnWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      () =>
+        this.transactionPort.runInTransaction<ReturnRequest>(async (scope) => {
+          const fresh = await this.repository.findById(rmaId, scope);
+          if (!fresh) {
+            throw new ReturnDomainException(
+              ReturnErrorCodeEnum.RETURN_NOT_FOUND,
+              `Return request ${rmaId} vanished while inspecting`,
+            );
+          }
+          const versionAtLoad = fresh.version;
+          const freshLineById = new Map<number, ReturnLine>(
+            fresh.lines.map((line) => [line.id!, line]),
+          );
+          for (const input of lines) {
+            freshLineById.get(input.returnLineId)!.inspect({
+              condition: input.condition,
+              disposition: input.disposition,
+              lineRefundAmountMinor: input.lineRefundAmountMinor,
+            });
+          }
+          fresh.markInspected();
+          return this.repository.save(fresh, scope, versionAtLoad);
+        }),
+      { rmaId, correlationId },
+    );
 
     // AFTER the local commit: restock the `restock`-disposition lines (the only ones that
     // re-enter sellable inventory). Read off the SAVED aggregate so the line ids are

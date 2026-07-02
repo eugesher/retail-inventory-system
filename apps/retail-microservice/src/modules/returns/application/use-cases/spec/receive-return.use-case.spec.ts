@@ -25,7 +25,14 @@ const makeHarness = (): {
   const repository = new FakeReturnRequestRepository();
   const publisher = new SpyReturnEventsPublisher();
   const customerContactReader = new FakeReturnCustomerContactReader();
-  const useCase = new ReceiveReturnUseCase(repository, publisher, customerContactReader, logger);
+  const useCase = new ReceiveReturnUseCase(
+    repository,
+    publisher,
+    customerContactReader,
+    // OCC_RETRY_ATTEMPTS budget (ADR-036).
+    5,
+    logger,
+  );
   return { useCase, repository, publisher, customerContactReader };
 };
 

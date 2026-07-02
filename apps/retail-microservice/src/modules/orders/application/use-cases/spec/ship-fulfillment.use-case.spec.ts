@@ -33,6 +33,7 @@ import {
   FakePaymentRepository,
   FakeTransactionPort,
   makeWireError,
+  RollbackFakeTransactionPort,
   SpyOrderEventsPublisher,
 } from './test-doubles';
 
@@ -71,11 +72,14 @@ const makeHarness = async (
     fulfillmentLines?: { orderLineId: number; quantity: number }[];
     captureOk?: boolean;
     store?: FakeIdempotencyStore;
+    // Arms the OCC retry path (ADR-036): the order repo loses this many version CAS
+    // races before succeeding, and the transaction port becomes rollback-aware so each
+    // lost attempt's fulfillment/payment writes are undone (as a real tx rolls back).
+    occConflicts?: number;
   } = {},
 ): Promise<IHarness> => {
   const order = opts.order ?? SINGLE_LINE_ORDER();
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
-  const transactionPort = new FakeTransactionPort();
   const orderRepository = new FakeOrderRepository();
   const fulfillmentRepository = new FakeFulfillmentRepository();
   const paymentRepository = new FakePaymentRepository();
@@ -84,6 +88,14 @@ const makeHarness = async (
   const publisher = new SpyOrderEventsPublisher();
   const customerContactReader = new FakeCustomerContactReader();
   const store = opts.store ?? new FakeIdempotencyStore();
+  // A rollback-aware port for the OCC specs (undoes an attempt's writes on a lost CAS),
+  // else the plain immediate-run port for every existing test.
+  const transactionPort = opts.occConflicts
+    ? new RollbackFakeTransactionPort([orderRepository, fulfillmentRepository, paymentRepository])
+    : new FakeTransactionPort();
+  if (opts.occConflicts) {
+    orderRepository.conflictsBeforeSuccess = opts.occConflicts;
+  }
 
   await orderRepository.save(order);
   const payment =
@@ -109,6 +121,8 @@ const makeHarness = async (
     publisher,
     customerContactReader,
     store,
+    // OCC_RETRY_ATTEMPTS budget (ADR-036).
+    5,
     logger,
   );
   return {
@@ -435,6 +449,50 @@ describe('ShipFulfillmentUseCase', () => {
       expect(replayed).toBe(true);
       expect(view).toEqual(winnerView);
       expect(h.store.saved).toHaveLength(1);
+    });
+  });
+
+  // The order-header write inside Ship is a version-checked compare-and-swap (ADR-036):
+  // a concurrent order writer (e.g. a sibling fulfillment's ship, or a capture) advancing
+  // the order version makes THIS ship's CAS lose. The bounded retry re-runs the whole
+  // unit of work against fresh state (the rollback-aware fake tx undoes the losing
+  // attempt's fulfillment/payment writes, as a real transaction does). This is the
+  // "same-transition CAS loss → VERSION_MISMATCH" half of the two-legitimate-409s model;
+  // the cross-transition ship-vs-cancel loser keeps its precise domain 409 (proved by the
+  // "rejects shipping a non-pending fulfillment" precondition test above — never retried,
+  // never swallowed).
+  describe('optimistic concurrency (ADR-036)', () => {
+    it('retries a lost order-version CAS then ships successfully', async () => {
+      // Lose the CAS twice (< the budget of 5), then win.
+      const h = await makeHarness({ occConflicts: 2 });
+
+      const { view } = await h.useCase.execute(shipPayload(h.fulfillmentId));
+
+      expect(view.status).toBe(FulfillmentStatusEnum.SHIPPED);
+      // The gateway capture ran exactly ONCE (before the retry loop — a retry never
+      // re-charges), and Commit Sale ran once after the eventual commit.
+      expect(h.paymentGateway.captureCount).toBe(1);
+      expect(h.commitSaleGateway.calls).toHaveLength(1);
+      const order = await h.orderRepository.findById(ORDER_ID);
+      expect(order?.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.SHIPPED);
+      expect(order?.paymentStatus).toBe(OrderPaymentStatusEnum.CAPTURED);
+    });
+
+    it('surfaces 409 VERSION_MISMATCH when the order CAS keeps losing past the budget', async () => {
+      // Lose every attempt (> the budget of 5) → the retry is exhausted.
+      const h = await makeHarness({ occConflicts: 99 });
+
+      await expect(h.useCase.execute(shipPayload(h.fulfillmentId))).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_VERSION_MISMATCH,
+        // The order's current committed version (the seed, never advanced — every CAS
+        // lost), carried through so the client can refetch.
+        details: { currentVersion: 2 },
+      });
+      // The gateway captured once (before the loop), but nothing local ever committed:
+      // the fulfillment stayed pending and Commit Sale never ran.
+      const fulfillment = await h.fulfillmentRepository.findById(h.fulfillmentId);
+      expect(fulfillment?.status).toBe(FulfillmentStatusEnum.PENDING);
+      expect(h.commitSaleGateway.calls).toHaveLength(0);
     });
   });
 });

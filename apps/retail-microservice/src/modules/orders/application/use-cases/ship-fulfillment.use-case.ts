@@ -32,6 +32,7 @@ import {
   IPaymentRepositoryPort,
   ITransactionPort,
   IDEMPOTENCY_STORE,
+  OCC_RETRY_ATTEMPTS,
   ORDER_COMMIT_SALE_GATEWAY,
   ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
@@ -42,6 +43,7 @@ import {
 } from '../ports';
 import { countsTowardShipped, sumLineQuantitiesByOrderLine } from './fulfillment-quantities';
 import { loadAuthorizedOrder } from './order-access';
+import { runWithOrderWriteRetry } from './order-write';
 import { toFulfillmentView } from './fulfillment-view.factory';
 import { resolveCustomerEmail } from './resolve-customer-email';
 import { retryThenLogForReplay } from './retry-then-log-for-replay';
@@ -126,6 +128,8 @@ export class ShipFulfillmentUseCase {
     private readonly customerContactReader: IOrderCustomerContactReaderPort,
     @Inject(IDEMPOTENCY_STORE)
     private readonly idempotencyStore: IIdempotencyStorePort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(ShipFulfillmentUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -280,60 +284,79 @@ export class ShipFulfillmentUseCase {
 
     const shippedAt = new Date();
 
-    // Local transaction: advance the fulfillment → shipped, record the capture on the
-    // Payment + order's payment axis (when one happened), flip the shipped lines, and
-    // advance the order's fulfillment axis — atomically. Returns the persisted shipped
-    // fulfillment so the post-commit steps run on concrete ids.
-    const shippedFulfillment = await this.transactionPort.runInTransaction<Fulfillment>(
-      async (scope) => {
-        // Re-read the fulfillment under a pessimistic write lock — the first statement in
-        // the transaction, so a concurrent Cancel of the same order serialises here: if
-        // the Cancel committed first, this CURRENT read observes the now-`cancelled`
-        // fulfillment and `fresh.ship()` below rejects it (the
-        // single-writer-per-status-transition guard, ADR-031); if this Ship wins, the
-        // Cancel blocks on the lock until this commits and then sees the `shipped` status.
-        const fresh = await this.fulfillmentRepository.findByIdForUpdate(fulfillmentId, scope);
-        if (!fresh) {
-          throw new OrderDomainException(
-            OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND,
-            `Fulfillment ${fulfillmentId} vanished while shipping`,
-          );
-        }
-        // The domain enforces the state guard + tracking-on-ship (the authority); under
-        // the lock the guard now sees a concurrent transition (a non-`pending` status →
-        // FULFILLMENT_INVALID_STATUS_TRANSITION).
-        fresh.ship({ trackingNumber, carrier: carrier ?? null, shippedAt });
-        const shipped = await this.fulfillmentRepository.save(fresh, scope);
+    // Local transaction under the bounded OCC retry (ADR-036): advance the fulfillment
+    // → shipped, record the capture on the Payment + order's payment axis (when one
+    // happened), flip the shipped lines, and advance the order's fulfillment axis —
+    // atomically. The out-of-process gateway `capture` above ran ONCE, outside the loop
+    // — a retry never re-charges. The fulfillment + order are (re-)loaded INSIDE the
+    // callback, so a lost order CAS (a concurrent Ship of a SIBLING fulfillment, or a
+    // Capture, advancing the order version) re-runs the whole unit of work against
+    // fresh, committed state; the order write is the version-checked CAS, and the
+    // per-fulfillment `SELECT … FOR UPDATE` still serialises the same-fulfillment
+    // ship-vs-cancel race (a cross-transition loser gets its domain 409, never
+    // retried). Returns the persisted shipped fulfillment so the post-commit steps run
+    // on concrete ids.
+    const shippedFulfillment = await runWithOrderWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      () =>
+        this.transactionPort.runInTransaction<Fulfillment>(async (scope) => {
+          // Re-read the fulfillment under a pessimistic write lock — the first statement in
+          // the transaction, so a concurrent Cancel of the same order serialises here: if
+          // the Cancel committed first, this CURRENT read observes the now-`cancelled`
+          // fulfillment and `fresh.ship()` below rejects it (the
+          // single-writer-per-status-transition guard, ADR-031); if this Ship wins, the
+          // Cancel blocks on the lock until this commits and then sees the `shipped` status.
+          const fresh = await this.fulfillmentRepository.findByIdForUpdate(fulfillmentId, scope);
+          if (!fresh) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND,
+              `Fulfillment ${fulfillmentId} vanished while shipping`,
+            );
+          }
+          // The domain enforces the state guard + tracking-on-ship (the authority); under
+          // the lock the guard now sees a concurrent transition (a non-`pending` status →
+          // FULFILLMENT_INVALID_STATUS_TRANSITION).
+          fresh.ship({ trackingNumber, carrier: carrier ?? null, shippedAt });
+          const shipped = await this.fulfillmentRepository.save(fresh, scope);
 
-        if (capture.capturedAt) {
-          payment.capture(capture.capturedAt);
-          await this.paymentRepository.save(payment, scope);
-        }
+          if (capture.capturedAt) {
+            // The gateway captured once (before the loop). Applying the capture to the
+            // in-memory `payment` is guarded so a retry (which reuses this object) does
+            // not double-mutate an already-captured payment; the version-less payment row
+            // is re-saved so the winning attempt persists the captured status.
+            if (payment.status === PaymentStatusEnum.AUTHORIZED) {
+              payment.capture(capture.capturedAt);
+            }
+            await this.paymentRepository.save(payment, scope);
+          }
 
-        const freshOrder = await this.orderRepository.findById(orderId, scope);
-        if (!freshOrder) {
-          throw new OrderDomainException(
-            OrderErrorCodeEnum.ORDER_NOT_FOUND,
-            `Order ${orderId} vanished while shipping`,
-          );
-        }
-        if (capture.capturedAt) {
-          freshOrder.markPaymentCaptured();
-        }
+          const freshOrder = await this.orderRepository.findById(orderId, scope);
+          if (!freshOrder) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.ORDER_NOT_FOUND,
+              `Order ${orderId} vanished while shipping`,
+            );
+          }
+          const versionAtLoad = freshOrder.version;
+          if (capture.capturedAt) {
+            freshOrder.markPaymentCaptured();
+          }
 
-        // Roll-up: sum each order line's shipped quantity across the order's
-        // `shipped`/`delivered` fulfillments (the just-shipped one is now `shipped` and
-        // included) — a `pending` sibling is planned but NOT shipped, so it must not
-        // count toward the roll-up.
-        const fulfillments = await this.fulfillmentRepository.listByOrderId(orderId, scope);
-        const shippedByLine = sumLineQuantitiesByOrderLine(fulfillments, countsTowardShipped);
+          // Roll-up: sum each order line's shipped quantity across the order's
+          // `shipped`/`delivered` fulfillments (the just-shipped one is now `shipped` and
+          // included) — a `pending` sibling is planned but NOT shipped, so it must not
+          // count toward the roll-up.
+          const fulfillments = await this.fulfillmentRepository.listByOrderId(orderId, scope);
+          const shippedByLine = sumLineQuantitiesByOrderLine(fulfillments, countsTowardShipped);
 
-        const next = ShipFulfillmentUseCase.advanceLinesAndRollUp(freshOrder, shippedByLine);
-        freshOrder.advanceFulfillment(next);
-        await this.orderRepository.save(freshOrder, scope);
+          const next = ShipFulfillmentUseCase.advanceLinesAndRollUp(freshOrder, shippedByLine);
+          freshOrder.advanceFulfillment(next);
+          // The order header write is the version-checked CAS.
+          await this.orderRepository.save(freshOrder, scope, versionAtLoad);
 
-        return shipped;
-      },
+          return shipped;
+        }),
+      { orderId, correlationId },
     );
 
     // AFTER the local commit: physically decrement the inventory. Retried on failure;

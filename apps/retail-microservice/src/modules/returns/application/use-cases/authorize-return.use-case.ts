@@ -11,12 +11,14 @@ import {
   IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  OCC_RETRY_ATTEMPTS,
   RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
 } from '../ports';
 import { loadReturnById } from './return-access';
 import { resolveCustomerEmail } from './resolve-customer-email';
+import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
 // Authorize Return walks a `requested` RMA → `authorized` (staff `order:return-authorize`,
@@ -36,6 +38,8 @@ export class AuthorizeReturnUseCase {
     private readonly publisher: IReturnEventsPublisherPort,
     @Inject(RETURN_CUSTOMER_CONTACT_READER)
     private readonly customerContactReader: IReturnCustomerContactReaderPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(AuthorizeReturnUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -45,9 +49,20 @@ export class AuthorizeReturnUseCase {
 
     this.logger.info({ correlationId, rmaId, actorId }, 'Authorizing return request');
 
-    const request = await loadReturnById(this.repository, rmaId);
-    request.authorize(new Date());
-    const saved = await this.repository.save(request);
+    // Version-checked CAS under the bounded OCC retry (ADR-036): re-read the RMA afresh
+    // each attempt, walk `requested → authorized`, and save with the version pinned. A
+    // concurrent transition that advanced the version makes the CAS lose and the attempt
+    // retry; a non-`requested` start is a terminal domain 409, never retried.
+    const saved = await runWithReturnWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      async () => {
+        const request = await loadReturnById(this.repository, rmaId);
+        const versionAtLoad = request.version;
+        request.authorize(new Date());
+        return this.repository.save(request, undefined, versionAtLoad);
+      },
+      { rmaId, correlationId },
+    );
 
     await this.emitAuthorized(saved, correlationId);
 
