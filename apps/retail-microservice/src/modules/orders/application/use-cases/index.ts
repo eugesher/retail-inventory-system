@@ -12,6 +12,7 @@ export * from './list-refunds.use-case';
 export * from './mark-delivered.use-case';
 export * from './order-view.factory';
 export * from './place-order.use-case';
+export * from './purge-expired-idempotency-keys.use-case';
 export * from './refund-view.factory';
 export * from './resolve-customer-email';
 export * from './ship-fulfillment.use-case';

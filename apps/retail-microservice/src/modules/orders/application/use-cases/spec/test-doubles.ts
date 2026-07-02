@@ -793,6 +793,20 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
     });
     return Promise.resolve();
   }
+
+  // The TTL purge: drop every seeded row whose `expiresAt` is strictly before `now`,
+  // returning the count removed — the in-memory mirror of the real adapter's bounded
+  // `DELETE … WHERE expires_at < now`. A row exactly at `now` is retained (strict `<`).
+  public deleteExpired(now: Date): Promise<number> {
+    let deleted = 0;
+    for (const [k, record] of this.rows) {
+      if (record.expiresAt.getTime() < now.getTime()) {
+        this.rows.delete(k);
+        deleted += 1;
+      }
+    }
+    return Promise.resolve(deleted);
+  }
 }
 
 // Builds a stored idempotency record fixture for the replay / reuse / concurrent specs.

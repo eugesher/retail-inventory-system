@@ -1,4 +1,4 @@
-import { Repository } from 'typeorm';
+import { LessThan, Repository } from 'typeorm';
 
 import { IIdempotencyRecordInput, ITransactionScope } from '../../../application/ports';
 import { IdempotencyKeyEntity } from '../idempotency-key.entity';
@@ -65,12 +65,12 @@ describe('IdempotencyKeyMapper', () => {
 });
 
 describe('IdempotencyStoreTypeormRepository', () => {
-  let keyRepo: jest.Mocked<Pick<Repository<IdempotencyKeyEntity>, 'findOne' | 'insert'>>;
+  let keyRepo: jest.Mocked<Pick<Repository<IdempotencyKeyEntity>, 'findOne' | 'insert' | 'delete'>>;
   let repository: IdempotencyStoreTypeormRepository;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    keyRepo = { findOne: jest.fn(), insert: jest.fn() } as never;
+    keyRepo = { findOne: jest.fn(), insert: jest.fn(), delete: jest.fn() } as never;
     repository = new IdempotencyStoreTypeormRepository(
       keyRepo as unknown as Repository<IdempotencyKeyEntity>,
       TTL_HOURS,
@@ -177,6 +177,25 @@ describe('IdempotencyStoreTypeormRepository', () => {
       expect(scopedRepo.insert).toHaveBeenCalledTimes(1);
       // The default-manager repo was bypassed.
       expect(keyRepo.insert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteExpired', () => {
+    it('deletes rows with expires_at < now and returns the affected count', async () => {
+      const now = new Date('2026-07-01T12:00:00Z');
+      keyRepo.delete.mockResolvedValue({ affected: 3, raw: {} } as never);
+
+      const removed = await repository.deleteExpired(now);
+
+      expect(removed).toBe(3);
+      // The bounded range predicate — a strict `expires_at < now`, scanning the index.
+      expect(keyRepo.delete).toHaveBeenCalledWith({ expiresAt: LessThan(now) });
+    });
+
+    it('coalesces a missing affected count (driver-dependent) to 0', async () => {
+      keyRepo.delete.mockResolvedValue({ raw: {} } as never);
+
+      await expect(repository.deleteExpired(new Date())).resolves.toBe(0);
     });
   });
 });

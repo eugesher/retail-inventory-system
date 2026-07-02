@@ -58,4 +58,14 @@ export interface IIdempotencyStorePort {
   // ER_DUP_ENTRY-translation precedent). The optional `scope` joins the caller's
   // transaction when the record is persisted in-band with the write.
   save(record: IIdempotencyRecordInput, scope?: ITransactionScope): Promise<void>;
+
+  // Delete every stored-response row whose `expires_at` has passed, returning the number
+  // of rows removed. This is the housekeeping counterpart to the never-expire `find`: the
+  // store is live-ephemeral (ADR-036), so a scheduled sweep is the SOLE authority that
+  // removes rows once their TTL horizon has elapsed. `now` is an explicit parameter (not
+  // a wall-clock read inside the adapter) so the scheduled sweep passes the current
+  // instant while a test can pass a future one to force deletion deterministically. The
+  // underlying statement is a single bounded `DELETE … WHERE expires_at < now`, safe to
+  // run concurrently with live inserts because it can only touch already-expired rows.
+  deleteExpired(now: Date): Promise<number>;
 }

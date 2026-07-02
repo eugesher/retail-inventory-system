@@ -29,6 +29,10 @@
 # re-ship under a NEW key is still a 409 (the natural backstop). Typed upstream codes
 # (FULFILLMENT_* / ORDER_*) surface as 400/404/409/422.
 #
+# Ship captures its key ONCE into @shipKey so `shipFulfillment` and `shipFulfillmentReplay`
+# share it (the shared-key idiom — a bare {{$guid}} regenerates per request and would never
+# demonstrate a replay). Re-run `shipFulfillment` for a fresh key + a fresh ship.
+#
 # All routes sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With the
 # default dev environment that resolves to http://localhost:3000/api.
 #
@@ -47,8 +51,10 @@
 #      @customerToken (customer@example.com / customer1234), used to place the order.
 #   4. Run `createCart` -> `addLineOne` -> `addLineTwo` -> `placeOrder` to obtain an
 #      @orderId plus the two order line ids. Then `createFulfillment` (captures
-#      @fulfillmentId), `listFulfillments`, `shipFulfillment`, `markDelivered`, and
-#      finally `getOrder` to observe all three advanced statuses.
+#      @fulfillmentId), `listFulfillments`, `shipFulfillment`, then `shipFulfillmentReplay`
+#      (200 + `Idempotent-Replay: true`, SAME @shipKey + body) and `shipFulfillmentDifferentBody`
+#      (422, SAME @shipKey + a changed body), `markDelivered`, and finally `getOrder` to
+#      observe all three advanced statuses.
 
 @baseUrl = {{ENV_BASE_URL}}
 
@@ -205,6 +211,9 @@ Authorization: Bearer {{accessToken}}
 
 ###
 
+# Capture the ship key ONCE so `shipFulfillment` and `shipFulfillmentReplay` share it.
+@shipKey = {{$guid}}
+
 # @name shipFulfillment
 # POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
 # Ships the pending fulfillment. trackingNumber is required to mark it shipped; carrier
@@ -212,18 +221,54 @@ Authorization: Bearer {{accessToken}}
 # inventory + retail services must be running), advances the order's fulfillment axis to
 # `shipped` and each line's status, then commits the sale to inventory. The
 # `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036): re-sending this exact
-# request with the SAME key + body replays the stored ship (200 + `Idempotent-Replay: true`,
-# no re-capture / no re-committed sale); a missing key is 400. `{{$guid}}` mints a fresh key
-# each run, so each run is a fresh ship. Response (200) is the shipped FulfillmentView
-# (status='shipped', trackingNumber + shippedAt stamped).
+# request with the SAME @shipKey + body replays the stored ship (200 + `Idempotent-Replay: true`,
+# no re-capture / no re-committed sale); a missing key is 400. Response (200) is the shipped
+# FulfillmentView (status='shipped', trackingNumber + shippedAt stamped).
 POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
 Authorization: Bearer {{accessToken}}
-Idempotency-Key: {{$guid}}
+Idempotency-Key: {{shipKey}}
 Content-Type: application/json
 
 {
   "trackingNumber": "1Z999AA10123456784",
   "carrier": "UPS"
+}
+
+###
+
+# @name shipFulfillmentReplay
+# POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+# The REPLAY: the SAME @shipKey + the SAME body. The store returns the stored
+# FulfillmentView WITHOUT a second payment capture and WITHOUT a second inventory
+# commit-sale — 200 + the header `Idempotent-Replay: true`. Contrast with re-shipping under
+# a NEW key, which would hit the natural backstop and 409 (the fulfillment is no longer
+# pending).
+POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{shipKey}}
+Content-Type: application/json
+
+{
+  "trackingNumber": "1Z999AA10123456784",
+  "carrier": "UPS"
+}
+
+###
+
+# @name shipFulfillmentDifferentBody
+# POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+# The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @shipKey but a CHANGED body (a different
+# trackingNumber + carrier). The stored fingerprint no longer matches, so the request is
+# rejected WITHOUT executing:
+#   422 { statusCode: 422, code: "IDEMPOTENCY_KEY_REUSED" }
+POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{shipKey}}
+Content-Type: application/json
+
+{
+  "trackingNumber": "1Z999AA99999999999",
+  "carrier": "FedEx"
 }
 
 ###
