@@ -19,9 +19,13 @@ import { ICorrelationPayload } from '../../microservices';
 // `amountMinor` is the amount to refund in integer minor units (cents); the use case
 // validates it against the refundable ceiling (`payment.amountMinor −
 // payment.refundedAmountMinor`). `reason` is the required human-supplied refund reason
-// (recorded on the `refund` row + the audit log). `idempotencyKey` is **accepted + logged
-// but not deduped** (ADR-032) — the gateway-reference natural idempotency + the
-// `refunded_amount_minor` ceiling are what prevent an over-refund on replay.
+// (recorded on the `refund` row + the audit log). `idempotencyKey` is **required and
+// deduped** (ADR-036) — the use case fingerprints `{orderId, paymentId, amountMinor, reason}`
+// and replays the stored `RefundView` on a same-key/same-body hit (before the gateway call
+// AND before the audit emit), `422` on a different body, `400` when absent (the manual
+// endpoint forwards the client header; the auto-refund-from-cancel consumer synthesizes a
+// deterministic `order-cancelled:<orderId>:<paymentId>` key). The gateway-reference natural
+// idempotency + the `refunded_amount_minor` ceiling remain the backstop against an over-refund.
 //
 // `actorId` is the resolved caller for the audit row. It is the staff caller's id for the
 // manual endpoint, and **`null` for the system-initiated auto-refund-from-cancel path** (a

@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   FulfillmentView,
+  IIdempotentResult,
   IPage,
   IRetailFulfillmentCreatePayload,
   IRetailFulfillmentDeliverPayload,
@@ -76,9 +77,9 @@ export class OrdersRabbitmqAdapter implements IOrdersGatewayPort {
   public async capturePayment(
     command: IPaymentCaptureCommand,
     correlationId: string,
-  ): Promise<OrderView> {
+  ): Promise<IIdempotentResult<OrderView>> {
     return firstValueFrom(
-      this.client.send<OrderView, IRetailPaymentCapturePayload>(
+      this.client.send<IIdempotentResult<OrderView>, IRetailPaymentCapturePayload>(
         ROUTING_KEYS.RETAIL_PAYMENT_CAPTURE,
         { ...command, correlationId },
       ),
@@ -100,9 +101,9 @@ export class OrdersRabbitmqAdapter implements IOrdersGatewayPort {
   public async shipFulfillment(
     command: IFulfillmentShipCommand,
     correlationId: string,
-  ): Promise<FulfillmentView> {
+  ): Promise<IIdempotentResult<FulfillmentView>> {
     return firstValueFrom(
-      this.client.send<FulfillmentView, IRetailFulfillmentShipPayload>(
+      this.client.send<IIdempotentResult<FulfillmentView>, IRetailFulfillmentShipPayload>(
         ROUTING_KEYS.RETAIL_FULFILLMENT_SHIP,
         { ...command, correlationId },
       ),
@@ -160,12 +161,12 @@ export class OrdersRabbitmqAdapter implements IOrdersGatewayPort {
   public async issueRefund(
     command: IRefundIssueCommand,
     correlationId: string,
-  ): Promise<RefundView> {
+  ): Promise<IIdempotentResult<RefundView>> {
     return firstValueFrom(
-      this.client.send<RefundView, IRetailRefundIssuePayload>(ROUTING_KEYS.RETAIL_REFUND_ISSUE, {
-        ...command,
-        correlationId,
-      }),
+      this.client.send<IIdempotentResult<RefundView>, IRetailRefundIssuePayload>(
+        ROUTING_KEYS.RETAIL_REFUND_ISSUE,
+        { ...command, correlationId },
+      ),
     );
   }
 

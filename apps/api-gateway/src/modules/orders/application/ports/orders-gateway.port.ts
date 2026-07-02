@@ -1,4 +1,10 @@
-import { FulfillmentView, IPage, OrderView, RefundView } from '@retail-inventory-system/contracts';
+import {
+  FulfillmentView,
+  IIdempotentResult,
+  IPage,
+  OrderView,
+  RefundView,
+} from '@retail-inventory-system/contracts';
 
 export const ORDERS_GATEWAY_PORT = Symbol('ORDERS_GATEWAY_PORT');
 
@@ -60,7 +66,7 @@ export interface IFulfillmentCreateCommand {
 }
 
 // `retail.fulfillment.ship` — ship a `pending` fulfillment (ship-triggered capture).
-// `idempotencyKey` is accepted + forwarded, not deduped (the cart-state analogue).
+// `idempotencyKey` is required + forwarded + deduped retail-side (ADR-036).
 export interface IFulfillmentShipCommand {
   orderId: number;
   fulfillmentId: number;
@@ -140,15 +146,20 @@ export interface IRefundListQuery {
 // The gateway-side seam onto the retail microservice's order read + capture +
 // fulfillment + cancel + refund RPCs. The concrete implementation (`OrdersRabbitmqAdapter`)
 // is the only holder of a `ClientProxy`; use cases and the controllers depend on this
-// interface (ADR-009). `getOrder` / `capturePayment` / `cancelOrder` / `cancelLine`
-// resolve the retail `OrderView`; `listMyOrders` an `IPage<OrderView>`;
-// `createFulfillment` / `shipFulfillment` / `markDelivered` a single `FulfillmentView`;
-// `listFulfillments` a `FulfillmentView[]`; `issueRefund` a single `RefundView`;
-// `listRefunds` a `RefundView[]`. All are surfaced over HTTP unchanged.
+// interface (ADR-009). `getOrder` / `cancelOrder` / `cancelLine` resolve the retail
+// `OrderView`; `listMyOrders` an `IPage<OrderView>`; `createFulfillment` / `markDelivered`
+// a single `FulfillmentView`; `listFulfillments` a `FulfillmentView[]`; `listRefunds` a
+// `RefundView[]`. The three idempotent write ops — `capturePayment` / `shipFulfillment` /
+// `issueRefund` — resolve the `IIdempotentResult<TView>` envelope (ADR-036): the `replayed`
+// flag lets the controller set `Idempotent-Replay: true` + a `200` status on a served
+// replay. All are surfaced over HTTP unchanged (the controller unwraps `view` as the body).
 export interface IOrdersGatewayPort {
   getOrder(query: IOrderGetQuery, correlationId: string): Promise<OrderView>;
   listMyOrders(query: IOrderListQuery, correlationId: string): Promise<IPage<OrderView>>;
-  capturePayment(command: IPaymentCaptureCommand, correlationId: string): Promise<OrderView>;
+  capturePayment(
+    command: IPaymentCaptureCommand,
+    correlationId: string,
+  ): Promise<IIdempotentResult<OrderView>>;
   createFulfillment(
     command: IFulfillmentCreateCommand,
     correlationId: string,
@@ -156,7 +167,7 @@ export interface IOrdersGatewayPort {
   shipFulfillment(
     command: IFulfillmentShipCommand,
     correlationId: string,
-  ): Promise<FulfillmentView>;
+  ): Promise<IIdempotentResult<FulfillmentView>>;
   markDelivered(
     command: IFulfillmentDeliverCommand,
     correlationId: string,
@@ -164,6 +175,9 @@ export interface IOrdersGatewayPort {
   listFulfillments(query: IFulfillmentListQuery, correlationId: string): Promise<FulfillmentView[]>;
   cancelOrder(command: IOrderCancelCommand, correlationId: string): Promise<OrderView>;
   cancelLine(command: IOrderLineCancelCommand, correlationId: string): Promise<OrderView>;
-  issueRefund(command: IRefundIssueCommand, correlationId: string): Promise<RefundView>;
+  issueRefund(
+    command: IRefundIssueCommand,
+    correlationId: string,
+  ): Promise<IIdempotentResult<RefundView>>;
   listRefunds(query: IRefundListQuery, correlationId: string): Promise<RefundView[]>;
 }

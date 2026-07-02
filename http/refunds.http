@@ -6,11 +6,13 @@
 # over RabbitMQ (ADR-009 / ADR-032):
 #   - POST /api/orders/:orderId/refunds   (Bearer — order:refund, staff-only)
 #       Issue a refund against the order's CAPTURED payment. Body { paymentId, amountMinor,
-#       reason } + an `Idempotency-Key` header (accepted + logged, NOT deduped). The retail
-#       service validates the captured precondition + the refundable ceiling
-#       (payment.amountMinor - payment.refundedAmountMinor) and reverses the payment via the
-#       (fake) gateway. Returns the issued RefundView (201; a partial refund leaves the
-#       payment `captured`, a full one flips it `refunded`).
+#       reason } + a REQUIRED, DEDUPLICATED `Idempotency-Key` header (ADR-036): the same key +
+#       same body replays the stored refund (200 + `Idempotent-Replay: true`, before the
+#       gateway call AND before the audit — no second audit row), a different body is 422, a
+#       missing key is 400. The retail service validates the captured precondition + the
+#       refundable ceiling (payment.amountMinor - payment.refundedAmountMinor) and reverses the
+#       payment via the (fake) gateway. Returns the issued RefundView (201 fresh, 200 replay; a
+#       partial refund leaves the payment `captured`, a full one flips it `refunded`).
 #   - GET  /api/orders/:orderId/refunds   (Bearer — owner OR order:read)
 #       List the order's refunds newest-first. Returns RefundView[] (200).
 #
@@ -166,9 +168,11 @@ Content-Type: application/json
 # Issues a PARTIAL goodwill refund (1000 of the 4999 captured) — no return involved. The
 # retail service checks the captured precondition + the refundable ceiling, reverses the
 # amount via the (fake) gateway, accumulates payment.refunded_amount_minor, and (since this
-# is partial) leaves the payment `captured`. The `Idempotency-Key` is accepted + logged but
-# NOT deduped — the refundable-amount ceiling is what prevents an over-refund on replay.
-# Response (201) is RefundView with status='issued' and a gatewayReference.
+# is partial) leaves the payment `captured`. The `Idempotency-Key` is REQUIRED and
+# DEDUPLICATED (ADR-036) — the same key + body replays the stored refund (200 +
+# `Idempotent-Replay: true`, before the gateway AND before the audit); the refundable-amount
+# ceiling + the already-issued match remain the backstop against an over-refund on a new-key
+# replay. Response (201) is RefundView with status='issued' and a gatewayReference.
 POST {{baseUrl}}/orders/{{orderId}}/refunds
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{$guid}}

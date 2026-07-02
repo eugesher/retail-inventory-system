@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Param, ParseIntPipe, Post, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -11,11 +11,13 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 
 import { CurrentUser, RequiresPermission } from '@retail-inventory-system/auth';
 import { ICurrentUser, PermissionCodeEnum, RefundView } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
+import { IdempotencyKey } from '../../../common/decorators';
 import { IssueRefundUseCase, ListRefundsUseCase } from '../application/use-cases';
 import { IssueRefundRequestDto } from './dto';
 
@@ -53,20 +55,31 @@ export class RefundsController {
   @ApiParam({ name: 'orderId', type: Number, example: 1 })
   @ApiHeader({
     name: 'Idempotency-Key',
-    required: false,
+    required: true,
     description:
-      'Accepted + logged but not deduped (the refundable-amount ceiling prevents over-refund)',
+      'Required (ADR-036). Same key + same body replays the stored refund (200 + Idempotent-Replay: true); same key + different body → 422; a missing key → 400.',
   })
   @ApiCreatedResponse({ description: 'The issued (or failed) refund', type: RefundView })
+  @ApiOkResponse({
+    description:
+      'A replayed refund (same Idempotency-Key + body) — carries Idempotent-Replay: true',
+    type: RefundView,
+  })
   @ApiProduces('application/json')
+  // A fresh issue is `201 Created`; a replay returns the stored refund with `200 OK` + the
+  // `Idempotent-Replay: true` marker header. Because the status is dynamic, this route owns
+  // its response via `@Res` (the passthrough path would let Nest overwrite the status back to
+  // the route default `201`) — errors thrown before `res.json` still flow through the
+  // gateway's exception filters (ADR-036, the place-order precedent).
   public async issueRefund(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: IssueRefundRequestDto,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @IdempotencyKey() idempotencyKey: string,
     @CurrentUser() user: ICurrentUser,
     @CorrelationId() correlationId: string,
-  ): Promise<RefundView> {
-    return this.issueRefundUseCase.execute(
+    @Res() res: Response,
+  ): Promise<void> {
+    const result = await this.issueRefundUseCase.execute(
       orderId,
       user,
       {
@@ -77,6 +90,11 @@ export class RefundsController {
       },
       correlationId,
     );
+
+    if (result.replayed) {
+      res.setHeader('Idempotent-Replay', 'true');
+    }
+    res.status(result.replayed ? HttpStatus.OK : HttpStatus.CREATED).json(result.view);
   }
 
   @Get(':orderId/refunds')

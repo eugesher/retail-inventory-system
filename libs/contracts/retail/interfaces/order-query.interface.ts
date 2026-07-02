@@ -36,9 +36,11 @@ export interface IRetailOrderListPayload extends ICorrelationPayload {
 // `retail.payment.capture` — captures the order's authorized payment (owner-checked,
 // or a staff `order:capture` override via `isStaffCapture`). `amountMinor` is optional
 // and defaults to the order's `grandTotalMinor` (partial capture is a later
-// capability). `idempotencyKey` is **accepted + logged but not deduped** (Q10) —
-// re-capturing an already-`captured` payment is idempotent by payment state, returning
-// the current state rather than erroring.
+// capability). `idempotencyKey` is **required and deduped** (ADR-036) — the use case
+// fingerprints `{orderId, amountMinor}` and replays the stored `OrderView` on a
+// same-key/same-body hit, `422` on a different body, `400` when absent; re-capturing an
+// already-`captured` payment under a NEW key stays idempotent by payment state, returning
+// the current state rather than erroring (the natural backstop).
 export interface IRetailPaymentCapturePayload extends ICorrelationPayload {
   orderId: number;
   actorId: string;

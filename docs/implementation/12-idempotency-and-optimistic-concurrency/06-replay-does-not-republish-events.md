@@ -4,9 +4,13 @@ Request-level idempotency is only safe if a replay is **side-effect-free** beyon
 returning the original response. Place Order authorizes a payment, allocates stock,
 and publishes `retail.order.placed` (+ the reserved `retail.payment.authorized`).
 A client retry that re-ran any of those — or merely re-emitted the events — would
-double-charge, double-allocate, or double-notify. This document explains where the
-replay short-circuit sits in the Place Order flow, how an operator observes a replay,
-and why the events are deliberately **not** re-emitted.
+double-charge, double-allocate, or double-notify. The same danger applies to the three
+other mutating operations — Capture Payment, Ship Fulfillment, and Issue Refund — which
+take money, decrement stock, and (for a refund) write an audit row. This document explains
+where the replay short-circuit sits, how an operator observes a replay, and why the events
+(and the refund audit) are deliberately **not** re-emitted. It uses Place Order as the
+worked example; a dedicated section below covers how the identical contract applies to the
+other three.
 
 The governing decision is
 [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md); the requirement and
@@ -88,6 +92,58 @@ handling is a convergence step — `IDEMPOTENCY_STORE.save` swallows an `ER_DUP_
 `(scope, key)`, and an authoritative re-read after the save returns the race-winner's
 stored response so both callers converge on one order.
 
+## The four covered operations
+
+The same store-backed replay contract now guards all four mutating operations. Each
+`*UseCase.execute` runs the identical three ordered steps — require the key, fingerprint the
+canonical body, look the `(scope, key)` pair up first — and returns the
+`IIdempotentResult<TView>` envelope so the gateway can set `Idempotent-Replay: true` on a
+served replay. The scope namespaces the client key by operation, so one `Idempotency-Key`
+reused across two operations can never collide in the store.
+
+| Operation | Scope | Response view | Fresh status | Canonical body (fingerprinted) | Natural backstop |
+| --- | --- | --- | --- | --- | --- |
+| Place Order | `place-order` | `OrderView` | `201` | `cartId`, `shippingAddress`, `billingAddress`, `paymentMethod` | cart `converted` state |
+| Capture Payment | `capture-payment` | `OrderView` | `200` | `orderId`, `amountMinor` | payment already `captured` |
+| Ship Fulfillment | `ship-fulfillment` | `FulfillmentView` | `200` | `orderId`, `fulfillmentId`, `trackingNumber`, `carrier` | non-`pending` re-ship 409 + `fulfillmentId`-idempotent commit-sale |
+| Issue Refund | `issue-refund` | `RefundView` | `201` | `orderId`, `paymentId`, `amountMinor`, `reason` | already-`issued` match + refundable ceiling |
+
+The canonical body always excludes the transport `correlationId`, the `idempotencyKey`
+itself, and the owner/staff-injected identity (the `customerId` for place, the `actorId` +
+staff-override flags for the others) — so a retry under a fresh correlation id, or by a
+differently-resolved caller, still fingerprints identically. Each `execute` extracts the real
+work into a private method (`place` / `capture` / `ship` / `issue`) that owns the whole flow
+including its emits; the replay `return` sits upstream of that method, so a replay runs none
+of it. On a store miss the work runs, then the response view is persisted under `(scope,
+key)`; a concurrent duplicate `save` is swallowed and an authoritative re-read converges both
+racers on the winner's stored response (the natural backstop guarantees the same entity
+either way).
+
+### Two guarantees that hold for all four on replay
+
+- **No re-execution and no re-emit.** Because the emit lives inside the private work method
+  and the replay returns before it, none of the operations re-publish their events on a
+  replay: no `retail.order.placed`, `retail.payment.captured`, `retail.fulfillment.shipped`,
+  or `retail.refund.issued`. Capture and Ship never re-call the payment gateway, and Ship
+  never re-issues `inventory.stock.commit-sale`.
+- **Refund never re-audits.** Issue Refund is the one operation that writes an
+  `audit_log_entry` on every money movement (the always-audit rule). The replay short-circuit
+  sits **before** that audit write, so one logical refund produces exactly one audit row no
+  matter how many times the client retries the same key. A replay that re-audited would
+  corrupt the audit trail with a phantom second refund event — the precise failure the audit
+  exists to rule out.
+
+### The system-initiated refund path
+
+Issue Refund has a second caller besides the staff endpoint: the auto-refund-from-cancel
+consumer, which reacts to a cancelled order whose captured payment was flagged for refund.
+That path carries no client `Idempotency-Key`, so it synthesizes a **deterministic** one —
+`order-cancelled:<orderId>:<paymentId>` — before delegating to the use case. There is at most
+one auto-refund per cancelled order, so a redelivered cancellation collapses to a store
+replay rather than a second refund. This layers exact replay on top of the pre-existing
+refundable-remainder guard (which already no-ops a redelivery once the payment is fully
+refunded).
+
 ## Observability — telling a replay from a fresh place
 
 Two signals let an operator (and the client) distinguish a served replay from a fresh
@@ -109,6 +165,13 @@ The required header is enforced at the edge by a reusable `@IdempotencyKey()` pa
 decorator (in the gateway's `common/`): an absent/blank `Idempotency-Key` yields
 `400 { code: 'IDEMPOTENCY_KEY_REQUIRED' }` before any RPC is dispatched. The retail-side
 `ORDER_IDEMPOTENCY_KEY_REQUIRED` is the backstop for a caller that bypasses the gateway.
+
+The Capture, Ship, and Refund routes reuse the same decorator and set the same
+`Idempotent-Replay: true` header on a replay. Capture and Ship are `200` for both a fresh
+call and a replay, so they keep `@HttpCode(200)` and add the header via
+`@Res({ passthrough: true })` (the return value stays the body). Issue Refund has a dynamic
+status — `201` fresh, `200` on a replay — so, like Place Order, it owns its response via
+`@Res` and writes `res.status(...).json(view)` explicitly.
 
 ## Why events are not re-emitted
 

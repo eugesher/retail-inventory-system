@@ -1,6 +1,7 @@
 import { PinoLogger } from 'nestjs-pino';
 
 import {
+  IIdempotentResult,
   IRetailOrderCancelledEvent,
   IRetailRefundIssuePayload,
   PaymentStatusEnum,
@@ -52,7 +53,7 @@ const cancelledEvent = (
 
 interface IHarness {
   consumer: OrderCancelledConsumer;
-  execute: jest.Mock<Promise<RefundView>, [IRetailRefundIssuePayload]>;
+  execute: jest.Mock<Promise<IIdempotentResult<RefundView>>, [IRetailRefundIssuePayload]>;
   paymentRepository: FakePaymentRepository;
 }
 
@@ -64,11 +65,12 @@ const makeHarness = async (payment: Payment | null = capturedPayment()): Promise
   }
 
   // The `IssueRefundUseCase` double — a jest spy whose resolved value the consumer ignores
-  // (it only awaits the call). Cast through `unknown` so the spy satisfies the concrete
-  // constructor parameter type without re-implementing the whole class.
+  // (it only awaits the call). The use case now resolves the `IIdempotentResult` envelope
+  // (ADR-036). Cast through `unknown` so the spy satisfies the concrete constructor parameter
+  // type without re-implementing the whole class.
   const execute = jest
-    .fn<Promise<RefundView>, [IRetailRefundIssuePayload]>()
-    .mockResolvedValue({} as RefundView);
+    .fn<Promise<IIdempotentResult<RefundView>>, [IRetailRefundIssuePayload]>()
+    .mockResolvedValue({ view: {} as RefundView, replayed: false });
   const issueRefund = { execute } as unknown as IssueRefundUseCase;
 
   const consumer = new OrderCancelledConsumer(issueRefund, paymentRepository, logger);
@@ -88,6 +90,9 @@ describe('OrderCancelledConsumer', () => {
       amountMinor: CAPTURED_AMOUNT,
       reason: 'order-cancelled',
       actorId: null,
+      // The system path synthesizes a deterministic Idempotency-Key so a redelivered cancel
+      // collapses to a store replay (ADR-036).
+      idempotencyKey: `order-cancelled:${ORDER_ID}:${PAYMENT_ID}`,
       correlationId: CORRELATION,
     });
   });
