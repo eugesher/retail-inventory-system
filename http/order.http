@@ -19,7 +19,7 @@
 # The `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036) on BOTH Place Order
 # and Capture Payment: the same key + the same body replays the stored response with 200 +
 # the response header `Idempotent-Replay: true` (no second order / no second gateway call,
-# no re-emitted events); the same key + a different body is 422 (IDEMPOTENCY_KEY_REUSED); a
+# no re-emitted events); the same key + a different body is 422 (ORDER_IDEMPOTENCY_KEY_REUSED); a
 # missing key is 400 (IDEMPOTENCY_KEY_REQUIRED). Cart state is the durable second layer for
 # place — a re-place with a NEW key on an already-`converted` cart still returns the order
 # it converted into; re-capture safety under a NEW key still comes from payment state.
@@ -126,7 +126,7 @@ Content-Type: application/json
 # payment inline, and returns the OrderView. The `Idempotency-Key` header is REQUIRED
 # (a missing header is 400 IDEMPOTENCY_KEY_REQUIRED). Replaying the SAME key + body
 # returns the stored order with 200 + `Idempotent-Replay: true` (no second order, no
-# re-emitted events); the SAME key + a DIFFERENT body is 422 (IDEMPOTENCY_KEY_REUSED).
+# re-emitted events); the SAME key + a DIFFERENT body is 422 (ORDER_IDEMPOTENCY_KEY_REUSED).
 # Body (PlaceOrderRequestDto):
 #   shippingAddress, billingAddress: { recipientName, line1, line2?, city, region,
 #                                      postalCode, country (2-char), phone? }
@@ -206,7 +206,7 @@ Content-Type: application/json
 # The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @placeKey but a CHANGED body (a different
 # shipping recipient). The stored fingerprint no longer matches, so the request is rejected
 # WITHOUT executing:
-#   422 { statusCode: 422, code: "IDEMPOTENCY_KEY_REUSED" }
+#   422 { statusCode: 422, code: "ORDER_IDEMPOTENCY_KEY_REUSED" }
 # (a client bug — one key reused for two distinct requests — surfaced rather than silently
 # honored with the wrong cached response).
 POST {{baseUrl}}/cart/{{cartId}}/place

@@ -216,7 +216,7 @@ Content-Type: application/json
 # The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @refundKey but a CHANGED amountMinor
 # (2000 instead of 1000). The stored fingerprint no longer matches, so the request is
 # rejected WITHOUT executing:
-#   422 { statusCode: 422, code: "IDEMPOTENCY_KEY_REUSED" }
+#   422 { statusCode: 422, code: "ORDER_IDEMPOTENCY_KEY_REUSED" }
 # The 422 fires before any gateway call, so no over-refund can slip through this reuse.
 POST {{baseUrl}}/orders/{{orderId}}/refunds
 Authorization: Bearer {{accessToken}}

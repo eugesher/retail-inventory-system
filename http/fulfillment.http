@@ -260,7 +260,7 @@ Content-Type: application/json
 # The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @shipKey but a CHANGED body (a different
 # trackingNumber + carrier). The stored fingerprint no longer matches, so the request is
 # rejected WITHOUT executing:
-#   422 { statusCode: 422, code: "IDEMPOTENCY_KEY_REUSED" }
+#   422 { statusCode: 422, code: "ORDER_IDEMPOTENCY_KEY_REUSED" }
 POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{shipKey}}
