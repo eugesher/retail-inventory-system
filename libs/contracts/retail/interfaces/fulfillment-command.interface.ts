@@ -47,8 +47,11 @@ export interface IRetailFulfillmentListPayload extends ICorrelationPayload {
 // shipped — the tracking-on-ship policy), the order's fulfillment axis + the shipped
 // `OrderLine` statuses, then calls `inventory.stock.commit-sale` after the local
 // commit (ADR-031). `trackingNumber` / `carrier` are the shipment metadata;
-// `idempotencyKey` is accepted + logged but not deduped (the cart-state idempotency
-// analogue — a non-`pending` re-ship is a 409). `actorId` is the resolved caller.
+// `idempotencyKey` is **required and deduped** (ADR-036) — the use case fingerprints
+// `{orderId, fulfillmentId, trackingNumber, carrier}` and replays the stored
+// `FulfillmentView` on a same-key/same-body hit (no re-capture, no re-issued commit-sale),
+// `422` on a different body, `400` when absent; a non-`pending` re-ship under a NEW key is
+// still a 409. `actorId` is the resolved caller.
 export interface IRetailFulfillmentShipPayload extends ICorrelationPayload {
   orderId: number;
   fulfillmentId: number;

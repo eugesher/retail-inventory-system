@@ -19,11 +19,11 @@ import { ReturnsRefundsE2ESpecDataSource } from './data-source/returns-refunds.e
 //   - a PARTIAL refund leaves the payment `captured` and accumulates `refunded_amount_minor`;
 //   - the FINAL refund that exhausts the captured total flips the payment to `refunded`;
 //   - DOUBLE-ISSUE IDEMPOTENCY: re-issuing the SAME `(paymentId, amountMinor, reason)` with
-//     the same `Idempotency-Key` returns the SAME refund (HTTP 201, the natural already-issued
-//     short-circuit — no second gateway call, no second row), so only ONE effective refund
-//     takes hold and the cumulative `refunded_amount_minor` never doubles. (Per ADR-032 the
-//     header itself is accepted + logged but not deduped — the dedupe is the already-issued
-//     `(payment, amount, reason)` match plus the refundable ceiling.)
+//     the same `Idempotency-Key` replays the stored refund (HTTP 200 + `Idempotent-Replay:
+//     true`, ADR-036 — no second gateway call, no second audit row, no second row), so only
+//     ONE effective refund takes hold and the cumulative `refunded_amount_minor` never
+//     doubles. The `Idempotency-Key` is required + deduped by the store; the already-issued
+//     `(payment, amount, reason)` match plus the refundable ceiling remain the backstop.
 //   - the refundable CEILING rejects an over-refund: a request beyond the remaining
 //     refundable amount is `409 REFUND_EXCEEDS_REFUNDABLE`, so the cumulative refund can never
 //     exceed the captured `amount_minor`.
@@ -317,14 +317,17 @@ describe('Manual refunds: partial, full, over-refund ceiling + double-issue idem
     expect((await getOrder(order.id)).payment?.status).toBe('captured');
   });
 
-  it('double-issue idempotency: the SAME refund re-issued returns the same row, never doubling', async () => {
+  it('double-issue idempotency: the SAME key + body replays the stored refund (200 + Idempotent-Replay), never doubling', async () => {
     const replay = await issueRefund(
       { paymentId, amountMinor: PARTIAL_MINOR, reason: PARTIAL_REASON },
       IDEMPOTENCY_KEY,
     );
-    // The natural already-issued short-circuit returns the existing refund (201), not a new
-    // one — same id, no second gateway charge.
-    expect(replay.status).toBe(HttpStatus.CREATED);
+    // Request-level idempotency (ADR-036): the same Idempotency-Key + body replays the
+    // stored refund from the idempotency store — HTTP 200 + `Idempotent-Replay: true`, before
+    // the gateway call and before a second audit row (the fresh issue was 201). Same id, no
+    // second gateway charge. The natural already-issued short-circuit remains the backstop.
+    expect(replay.status).toBe(HttpStatus.OK);
+    expect(replay.headers['idempotent-replay']).toBe('true');
     const replayed = replay.body as IRefundBody;
     expect(replayed.id).toBe(firstRefundId);
     expect(replayed.status).toBe('issued');

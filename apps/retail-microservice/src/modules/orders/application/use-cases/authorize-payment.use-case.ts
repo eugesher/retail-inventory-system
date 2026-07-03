@@ -98,6 +98,12 @@ export class AuthorizePaymentUseCase {
         );
       }
       order.markPaymentAuthorized();
+      // The plain managed save (no `expectedVersion`): authorize-on-place runs inline
+      // immediately after Place Order committed, on a brand-new order no second actor
+      // can yet reach, so there is no concurrent writer to lose a CAS to. `@VersionColumn`
+      // still advances the row's version. The version-checked CAS + retry is reserved for
+      // the transitions a second actor genuinely races (capture / ship / deliver / cancel,
+      // ADR-036).
       await this.orderRepository.save(order, scope);
 
       return savedPayment;

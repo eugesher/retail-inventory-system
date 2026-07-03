@@ -13,9 +13,11 @@ import {
   ICartEventsPublisherPort,
   ICartInventoryGatewayPort,
   ICartRepositoryPort,
+  OCC_RETRY_ATTEMPTS,
 } from '../ports';
 import { loadOwnedCart } from './cart-access';
 import { toCartView } from './cart-view.factory';
+import { assertCartVersion, runWithCartWriteRetry } from './cart-write';
 
 // Adds a variant to the cart (or increments the existing line for that variant —
 // the domain's increment-existing rule, ADR-028 §1). The unit price is
@@ -38,48 +40,78 @@ export class AddToCartUseCase {
     private readonly inventory: ICartInventoryGatewayPort,
     @Inject(CART_EVENTS_PUBLISHER)
     private readonly publisher: ICartEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(AddToCartUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
 
   public async execute(payload: IRetailCartAddLinePayload): Promise<CartView> {
-    const { cartId, customerId, variantId, quantity, correlationId } = payload;
+    const { cartId, customerId, variantId, quantity, expectedVersion, correlationId } = payload;
 
     this.logger.info({ correlationId, cartId, variantId, quantity }, 'Adding line to cart');
 
-    const cart = await loadOwnedCart(this.repository, cartId, customerId);
+    // OCC (ADR-036): read-version → reserve → mutate → version-checked persist, all
+    // inside the bounded retry so a lost race re-reads the cart AND re-computes the
+    // absolute reserve target (which depends on the now-current line quantity).
+    // When the client pinned an `If-Match` version the budget collapses to a single
+    // attempt — a stale precondition is a `409`, not a silently-retried write.
+    const { saved, occurredAt } = await runWithCartWriteRetry(
+      { logger: this.logger, maxAttempts: expectedVersion !== undefined ? 1 : this.maxAttempts },
+      async () => {
+        const cart = await loadOwnedCart(this.repository, cartId, customerId);
+        assertCartVersion(cart, expectedVersion);
 
-    // Snapshot the applicable price in the cart's currency. `null` = unknown or
-    // unpriced variant — the line cannot be priced, so the add is rejected.
-    const price = await this.catalog.selectApplicablePrice(variantId, cart.currency, correlationId);
-    if (price === null) {
-      throw new CartDomainException(
-        CartErrorCodeEnum.CART_VARIANT_NOT_PRICED,
-        `Variant ${variantId} has no applicable ${cart.currency} price; cannot add to cart`,
-      );
-    }
+        // Snapshot the applicable price in the cart's currency. `null` = unknown or
+        // unpriced variant — the line cannot be priced, so the add is rejected.
+        const price = await this.catalog.selectApplicablePrice(
+          variantId,
+          cart.currency,
+          correlationId,
+        );
+        if (price === null) {
+          throw new CartDomainException(
+            CartErrorCodeEnum.CART_VARIANT_NOT_PRICED,
+            `Variant ${variantId} has no applicable ${cart.currency} price; cannot add to cart`,
+          );
+        }
 
-    // Reserve the line's ABSOLUTE target quantity (existing line qty + this add —
-    // `addLine` increments an existing line) BEFORE mutating or saving the cart.
-    // The reserve RPC is idempotent-by-absolute-quantity, so a repeat add re-sets
-    // the hold to the new total and refreshes the TTL. An out-of-stock target
-    // rejects with `INVENTORY_OUT_OF_STOCK` (409, carrying `details.available`) and
-    // the cart is never touched. Reserve-before-save is deliberate: "reserved but
-    // save failed" merely over-holds stock until release/TTL, whereas "saved but
-    // not reserved" would reopen the oversell hole.
-    const existing = cart.lines.find((line) => line.variantId === variantId);
-    const targetQty = (existing?.quantity ?? 0) + quantity;
-    await this.inventory.reserveStock({ variantId, quantity: targetQty, cartId, correlationId });
+        // Reserve the line's ABSOLUTE target quantity (existing line qty + this add
+        // — `addLine` increments an existing line) BEFORE mutating or saving the
+        // cart. The reserve RPC is idempotent-by-absolute-quantity, so a repeat add
+        // (or a retry after a lost race) re-sets the hold to the new total and
+        // refreshes the TTL. An out-of-stock target rejects with
+        // `INVENTORY_OUT_OF_STOCK` (409, carrying `details.available`) and the cart
+        // is never touched. Reserve-before-save is deliberate: "reserved but save
+        // failed" merely over-holds stock until release/TTL, whereas "saved but not
+        // reserved" would reopen the oversell hole.
+        const existing = cart.lines.find((line) => line.variantId === variantId);
+        const targetQty = (existing?.quantity ?? 0) + quantity;
+        await this.inventory.reserveStock({
+          variantId,
+          quantity: targetQty,
+          cartId,
+          correlationId,
+        });
 
-    cart.addLine({
-      variantId,
-      quantity,
-      unitPriceSnapshotMinor: price.amountMinor,
-      currencySnapshot: cart.currency,
-    });
+        // Capture the version as read BEFORE the mutation bumps the in-memory
+        // token; the persist compare-and-swaps against it.
+        const versionAtLoad = cart.version;
+        cart.addLine({
+          variantId,
+          quantity,
+          unitPriceSnapshotMinor: price.amountMinor,
+          currencySnapshot: cart.currency,
+        });
 
-    const saved = await this.repository.save(cart);
-    const occurredAt = (cart.pullDomainEvents()[0]?.occurredAt ?? new Date()).toISOString();
+        const persisted = await this.repository.save(cart, versionAtLoad);
+        const eventOccurredAt = (
+          cart.pullDomainEvents()[0]?.occurredAt ?? new Date()
+        ).toISOString();
+        return { saved: persisted, occurredAt: eventOccurredAt };
+      },
+      { cartId, correlationId },
+    );
 
     try {
       await this.publisher.publishCartLineAdded({
@@ -97,8 +129,14 @@ export class AddToCartUseCase {
       );
     }
 
+    const savedLine = saved.lines.find((line) => line.variantId === variantId);
     this.logger.info(
-      { correlationId, cartId, variantId, unitPriceSnapshotMinor: price.amountMinor },
+      {
+        correlationId,
+        cartId,
+        variantId,
+        unitPriceSnapshotMinor: savedLine?.unitPriceSnapshotMinor,
+      },
       'Line added to cart',
     );
     return toCartView(saved);

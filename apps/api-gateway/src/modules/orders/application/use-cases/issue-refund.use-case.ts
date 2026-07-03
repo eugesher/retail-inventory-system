@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { ICurrentUser, RefundView } from '@retail-inventory-system/contracts';
+import { ICurrentUser, IIdempotentResult, RefundView } from '@retail-inventory-system/contracts';
 
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
@@ -12,11 +12,13 @@ import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 // (ADR-024). This use case folds `@CurrentUser().id` into `actorId` (the staff caller,
 // recorded on the audit row); the manual endpoint always sends a real actor string (the
 // system-`null` actor is reserved for the retail auto-refund-from-cancel consumer, which
-// never crosses the gateway, ADR-032). The `Idempotency-Key` is forwarded (accepted +
-// logged, not deduped) — the gateway-reference natural idempotency + the
-// `refunded_amount_minor` ceiling are what prevent an over-refund on replay. The retail
-// use case validates the captured precondition + the refundable ceiling and returns the
-// `RefundView` (`status='issued'`, or `status='failed'` on a gateway decline).
+// never crosses the gateway, ADR-032). The **required** `Idempotency-Key` (ADR-036) is
+// forwarded and deduped retail-side (the gateway-reference natural idempotency + the
+// `refunded_amount_minor` ceiling remain the backstop against an over-refund). The use case
+// resolves the `IIdempotentResult<RefundView>` envelope so the controller can set the
+// `Idempotent-Replay: true` header + a `200` status on a served replay (a fresh issue is
+// `201`). The retail use case validates the captured precondition + the refundable ceiling
+// and returns the `RefundView` (`status='issued'`, or `status='failed'` on a gateway decline).
 @Injectable()
 export class IssueRefundUseCase {
   constructor(
@@ -29,9 +31,9 @@ export class IssueRefundUseCase {
   public async execute(
     orderId: number,
     user: ICurrentUser,
-    body: { paymentId: number; amountMinor: number; reason: string; idempotencyKey?: string },
+    body: { paymentId: number; amountMinor: number; reason: string; idempotencyKey: string },
     correlationId: string,
-  ): Promise<RefundView> {
+  ): Promise<IIdempotentResult<RefundView>> {
     this.logger.assign({ correlationId });
 
     try {
@@ -45,7 +47,7 @@ export class IssueRefundUseCase {
         },
         'Issuing refund',
       );
-      const refund = await this.ordersGateway.issueRefund(
+      const result = await this.ordersGateway.issueRefund(
         {
           orderId,
           paymentId: body.paymentId,
@@ -56,8 +58,11 @@ export class IssueRefundUseCase {
         },
         correlationId,
       );
-      this.logger.info({ refundId: refund.id, status: refund.status }, 'Refund issued');
-      return refund;
+      this.logger.info(
+        { refundId: result.view.id, status: result.view.status, replayed: result.replayed },
+        result.replayed ? 'Refund issue replayed from idempotency store' : 'Refund issued',
+      );
+      return result;
     } catch (error) {
       this.logger.error(error, 'Error issuing refund');
       throwRpcError(error);

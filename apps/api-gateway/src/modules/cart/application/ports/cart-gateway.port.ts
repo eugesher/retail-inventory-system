@@ -1,4 +1,9 @@
-import { CartView, IAddressInput, OrderView } from '@retail-inventory-system/contracts';
+import {
+  CartView,
+  IAddressInput,
+  IIdempotentResult,
+  OrderView,
+} from '@retail-inventory-system/contracts';
 
 export const CART_GATEWAY_PORT = Symbol('CART_GATEWAY_PORT');
 
@@ -22,11 +27,18 @@ export interface ICartGetQuery {
   customerId: string;
 }
 
+// `expectedVersion` (the three line commands) is the optional optimistic-
+// concurrency precondition read from the `If-Match: <version>` header (ADR-036).
+// The controller parses it with `@IfMatch()` and threads it here; the adapter
+// spreads it onto the wire payload, and the retail use case turns it into a
+// `409 VERSION_MISMATCH` when the loaded cart version differs (no retry — the
+// client's view is stale). Absent, the retail bounded retry governs the outcome.
 export interface ICartAddLineCommand {
   cartId: string;
   customerId: string;
   variantId: number;
   quantity: number;
+  expectedVersion?: number;
 }
 
 export interface ICartChangeLineQuantityCommand {
@@ -34,12 +46,14 @@ export interface ICartChangeLineQuantityCommand {
   customerId: string;
   lineId: number;
   quantity: number;
+  expectedVersion?: number;
 }
 
 export interface ICartRemoveLineCommand {
   cartId: string;
   customerId: string;
   lineId: number;
+  expectedVersion?: number;
 }
 
 // Claim carries the guest-ownership proof (`fromCustomerId`, the guest id the
@@ -52,10 +66,11 @@ export interface ICartClaimCommand {
 }
 
 // Place Order carries the two snapshot address bundles + the optional opaque
-// payment method, plus the `idempotencyKey` read from the `Idempotency-Key` header
-// (accepted + forwarded, NOT deduped — Q10). `customerId` is the folded
-// `@CurrentUser().id`; the retail use case re-asserts `cart.customerId ===
-// customerId` (the owner-check).
+// payment method, plus the `idempotencyKey` read from the required `Idempotency-Key`
+// header (ADR-036 — the gateway enforces the header at the edge; retail fingerprints
+// the body, replays a same-key/same-body retry, and rejects a same-key/different-body
+// reuse with `422`). `customerId` is the folded `@CurrentUser().id`; the retail use
+// case re-asserts `cart.customerId === customerId` (the owner-check).
 export interface ICartPlaceCommand {
   cartId: string;
   customerId: string;
@@ -79,7 +94,12 @@ export interface ICartGatewayPort {
   ): Promise<CartView>;
   removeLine(command: ICartRemoveLineCommand, correlationId: string): Promise<CartView>;
   claim(command: ICartClaimCommand, correlationId: string): Promise<CartView>;
-  // Place resolves to the retail `OrderView` (the placed order + its lines + the
-  // authorized payment), surfaced over HTTP unchanged.
-  placeOrder(command: ICartPlaceCommand, correlationId: string): Promise<OrderView>;
+  // Place resolves to the idempotency envelope `{ view, replayed }` (ADR-036): `view`
+  // is the retail `OrderView` (the placed order + its lines + the authorized payment)
+  // and `replayed` tells the controller whether the response was served from the
+  // idempotency store, so it can add `Idempotent-Replay: true` + a `200` status.
+  placeOrder(
+    command: ICartPlaceCommand,
+    correlationId: string,
+  ): Promise<IIdempotentResult<OrderView>>;
 }

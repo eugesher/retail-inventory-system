@@ -29,6 +29,18 @@ export enum ReturnErrorCodeEnum {
   // amount — thrown by `ReturnLine.inspect`, 400. (The Inspect use case also raises it
   // for cross-aggregate inspection breaches in a later capability.)
   RETURN_INSPECTION_INVALID = 'RETURN_INSPECTION_INVALID',
+  // Optimistic-concurrency conflict on a return-request status write → 409 (ADR-036).
+  // Two staff raced the same RMA's lifecycle and the bounded retry budget was exhausted
+  // — the root `version` moved under the writer on every attempt. The **member name**
+  // keeps the `RETURN_` prefix (the module convention) but the **wire value** is the
+  // uniform cross-service `VERSION_MISMATCH` — so a client branches on one code
+  // regardless of which aggregate lost the race (cart / order / fulfillment / return) —
+  // and the exception's `details.currentVersion` carries the row's now-current version
+  // so the caller can refetch-and-retry (the cart `CART_VERSION_MISMATCH` / order
+  // `ORDER_VERSION_MISMATCH` precedent). Distinct from `RETURN_INVALID_STATUS_TRANSITION`
+  // (a state the transition genuinely forbids) — both mean "you lost the race", but only
+  // the CAS loss is retried.
+  RETURN_VERSION_MISMATCH = 'VERSION_MISMATCH',
 
   // --- Thrown by the use cases (later tasks) ---
   // The return request being read/operated on does not exist — 404 (the read +
@@ -65,9 +77,20 @@ export enum ReturnErrorCodeEnum {
 // the message.
 export class ReturnDomainException extends DomainException {
   public readonly code: ReturnErrorCodeEnum;
+  // Optional structured payload forwarded through the RPC filter and the gateway error
+  // util (the cart `{ currentVersion }` / order `{ currentVersion }` precedent), so a
+  // client branches on data rather than parsing the human message. The OCC conflict
+  // carries `{ currentVersion }` here so the caller can refetch-and-retry. Frozen-shaped
+  // (`Readonly`) because it is read, never mutated, downstream.
+  public readonly details?: Readonly<Record<string, unknown>>;
 
-  constructor(code: ReturnErrorCodeEnum, message: string) {
+  constructor(
+    code: ReturnErrorCodeEnum,
+    message: string,
+    details?: Readonly<Record<string, unknown>>,
+  ) {
     super(message);
     this.code = code;
+    this.details = details;
   }
 }

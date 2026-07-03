@@ -12,6 +12,7 @@ import {
 
 import {
   INVENTORY_RESTOCK_GATEWAY,
+  OCC_RETRY_ATTEMPTS,
   RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_ORDER_READER,
@@ -105,6 +106,16 @@ import { ReturnsController, ReturnRpcExceptionFilter } from '../presentation';
     {
       provide: RETURN_WINDOW_DAYS,
       useFactory: (config: ConfigService): number => config.get<number>('RETURN_WINDOW_DAYS') ?? 30,
+      inject: [ConfigService],
+    },
+    // The bounded optimistic-concurrency retry budget (ADR-036), resolved from
+    // `OCC_RETRY_ATTEMPTS` (Joi default 5) so the RMA lifecycle use cases inject a plain
+    // number rather than reading env (ADR-017; the `RETURN_WINDOW_DAYS` precedent). It
+    // caps `runWithReturnWriteRetry`'s retries on a lost version CAS before the write
+    // surfaces a `409 VERSION_MISMATCH`.
+    {
+      provide: OCC_RETRY_ATTEMPTS,
+      useFactory: (config: ConfigService): number => config.get<number>('OCC_RETRY_ATTEMPTS') ?? 5,
       inject: [ConfigService],
     },
 

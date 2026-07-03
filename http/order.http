@@ -16,10 +16,18 @@
 # a gate on the owning customer. A non-owner non-staff caller gets 403; an
 # unauthenticated caller 401.
 #
-# The `Idempotency-Key` header is ACCEPTED + LOGGED but NOT deduped. Repeat-place
-# safety comes from cart state (a placed cart is `converted`, and re-placing it
-# returns the order it already converted into); re-capture safety comes from payment
-# state (capturing an already-captured payment returns the current captured state).
+# The `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036) on BOTH Place Order
+# and Capture Payment: the same key + the same body replays the stored response with 200 +
+# the response header `Idempotent-Replay: true` (no second order / no second gateway call,
+# no re-emitted events); the same key + a different body is 422 (ORDER_IDEMPOTENCY_KEY_REUSED); a
+# missing key is 400 (IDEMPOTENCY_KEY_REQUIRED). Cart state is the durable second layer for
+# place — a re-place with a NEW key on an already-`converted` cart still returns the order
+# it converted into; re-capture safety under a NEW key still comes from payment state.
+#
+# To SEE a replay, each idempotent request captures its key ONCE into a request variable
+# (@placeKey / @captureKey) so the original and its `*Replay` sibling share one key — a bare
+# {{$guid}} regenerates per request and would only ever look like two fresh calls. Re-run
+# the original block for a fresh key (and a fresh 201/200).
 #
 # All routes sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With
 # the default .env.local that resolves to http://localhost:3000/api.
@@ -34,8 +42,11 @@
 #      @accessToken (customer@example.com / customer1234).
 #   3. Run `createCart` (captures @cartId), then `addLineOne` + `addLineTwo` to put
 #      two seeded variants in the cart (variant 1 @ 4999, variant 3 @ 19999).
-#   4. Run `placeOrder` (captures @orderId). Then exercise `getOrder`, `listMyOrders`,
-#      `capturePayment`, and `placeOrderAgain`.
+#   4. Run `placeOrder` (captures @orderId). Then run `placeOrderReplay` (200 +
+#      `Idempotent-Replay: true`, the SAME @placeKey + body) and `placeOrderDifferentBody`
+#      (422, the SAME @placeKey + a changed body) to observe the dedup outcomes. Then
+#      exercise `getOrder`, `listMyOrders`, `capturePayment` (+ `capturePaymentReplay`),
+#      and `placeOrderAgain`.
 
 @baseUrl = {{ENV_BASE_URL}}
 
@@ -101,6 +112,10 @@ Content-Type: application/json
 
 ###
 
+# Capture the place key ONCE so `placeOrder` and `placeOrderReplay` share it (the
+# shared-key idiom; a bare {{$guid}} regenerates per request).
+@placeKey = {{$guid}}
+
 # @name placeOrder
 # POST /api/cart/:cartId/place  (Bearer + owner-check)
 # Converts the cart one-shot into an Order, snapshots the addresses, ALLOCATES the
@@ -108,8 +123,11 @@ Content-Type: application/json
 # cart-conversion CAS, via inventory.reservation.allocate — so the inventory
 # microservice must be running; an unallocatable line rolls the whole place back
 # with 409 INVENTORY_OUT_OF_STOCK, no order row, cart stays active), authorizes
-# payment inline, and returns the OrderView. The `Idempotency-Key` header is accepted
-# + logged but NOT deduped. Body (PlaceOrderRequestDto):
+# payment inline, and returns the OrderView. The `Idempotency-Key` header is REQUIRED
+# (a missing header is 400 IDEMPOTENCY_KEY_REQUIRED). Replaying the SAME key + body
+# returns the stored order with 200 + `Idempotent-Replay: true` (no second order, no
+# re-emitted events); the SAME key + a DIFFERENT body is 422 (ORDER_IDEMPOTENCY_KEY_REUSED).
+# Body (PlaceOrderRequestDto):
 #   shippingAddress, billingAddress: { recipientName, line1, line2?, city, region,
 #                                      postalCode, country (2-char), phone? }
 #   paymentMethod?: opaque method token forwarded to the gateway
@@ -117,7 +135,7 @@ Content-Type: application/json
 #   fulfillmentStatus='unfulfilled', lines[...], grandTotalMinor, payment{ status='authorized' } }.
 POST {{baseUrl}}/cart/{{cartId}}/place
 Authorization: Bearer {{accessToken}}
-Idempotency-Key: {{$guid}}
+Idempotency-Key: {{placeKey}}
 Content-Type: application/json
 
 {
@@ -147,6 +165,77 @@ Content-Type: application/json
 
 ###
 
+# @name placeOrderReplay
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# The REPLAY: the SAME @placeKey + the SAME body as `placeOrder`. The store recognizes the
+# key and its matching fingerprint and short-circuits BEFORE any side effect — no second
+# order, no re-allocation, no re-authorization, no re-emitted events. Response is the stored
+# OrderView with 200 (not 201) and the header `Idempotent-Replay: true`. Confirm the id +
+# orderNumber match `placeOrder`.
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{placeKey}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "line2": "Suite 400",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US",
+    "phone": "+1-415-555-0100"
+  },
+  "billingAddress": {
+    "recipientName": "Jane Buyer",
+    "line1": "1 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "paymentMethod": "tok_visa"
+}
+
+###
+
+# @name placeOrderDifferentBody
+# POST /api/cart/:cartId/place  (Bearer + owner-check)
+# The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @placeKey but a CHANGED body (a different
+# shipping recipient). The stored fingerprint no longer matches, so the request is rejected
+# WITHOUT executing:
+#   422 { statusCode: 422, code: "ORDER_IDEMPOTENCY_KEY_REUSED" }
+# (a client bug — one key reused for two distinct requests — surfaced rather than silently
+# honored with the wrong cached response).
+POST {{baseUrl}}/cart/{{cartId}}/place
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{placeKey}}
+Content-Type: application/json
+
+{
+  "shippingAddress": {
+    "recipientName": "Someone Else",
+    "line1": "500 Howard St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "billingAddress": {
+    "recipientName": "Someone Else",
+    "line1": "500 Howard St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postalCode": "94105",
+    "country": "US"
+  },
+  "paymentMethod": "tok_visa"
+}
+
+###
+
 # @name getOrder
 # GET /api/orders/:orderId  (Bearer; owner OR staff order:read)
 # Reads the placed order with its lines + payment. The owning customer reads its own;
@@ -165,16 +254,37 @@ Authorization: Bearer {{accessToken}}
 
 ###
 
+# Capture the capture key ONCE so `capturePayment` and `capturePaymentReplay` share it.
+@captureKey = {{$guid}}
+
 # @name capturePayment
 # POST /api/orders/:orderId/payments/capture  (Bearer; owner OR staff order:capture)
 # Captures the order's authorized payment (authorized -> captured). The owning
 # customer captures its own; staff with order:capture may capture any. The optional
 # body { amountMinor } defaults to the order grand total (partial capture is a later
-# capability); the `Idempotency-Key` header is accepted + logged but NOT deduped.
-# Response (200) is OrderView with paymentStatus='captured' and payment.status='captured'.
+# capability); the `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036) — the
+# same key + body replays the stored order (200 + `Idempotent-Replay: true`, no second
+# gateway call), a different body is 422, a missing key is 400. Re-capturing an
+# already-captured payment under a NEW key is also idempotent (the natural payment-state
+# backstop). Response (200) is OrderView with paymentStatus='captured' and payment.status='captured'.
 POST {{baseUrl}}/orders/{{orderId}}/payments/capture
 Authorization: Bearer {{accessToken}}
-Idempotency-Key: {{$guid}}
+Idempotency-Key: {{captureKey}}
+Content-Type: application/json
+
+{}
+
+###
+
+# @name capturePaymentReplay
+# POST /api/orders/:orderId/payments/capture  (Bearer; owner OR staff order:capture)
+# The REPLAY: the SAME @captureKey + the SAME (empty) body. The store returns the stored
+# OrderView WITHOUT a second gateway capture and WITHOUT re-emitting `retail.payment.captured`
+# — 200 + the header `Idempotent-Replay: true`. (Because capture is already a 200 both fresh
+# and on replay, the header is the ONLY on-the-wire difference.)
+POST {{baseUrl}}/orders/{{orderId}}/payments/capture
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{captureKey}}
 Content-Type: application/json
 
 {}
@@ -183,10 +293,12 @@ Content-Type: application/json
 
 # @name placeOrderAgain
 # POST /api/cart/:cartId/place  (Bearer + owner-check)
-# Repeats the place on the now-converted cart with a NEW Idempotency-Key. The header
-# is not what makes this safe — the cart is already `converted`, so the retail service
-# returns the SAME order (same id + orderNumber, the existing payment) instead of
-# creating a second one. Key-based dedupe is a later capability.
+# Repeats the place on the now-converted cart with a NEW Idempotency-Key. The new key
+# MISSES the idempotency store, but the durable cart-state backstop still applies — the
+# cart is already `converted`, so the retail service returns the SAME order (same id +
+# orderNumber, the existing payment) instead of creating a second one. Because it is a
+# store miss (a fresh key), this is 201 with no `Idempotent-Replay` header (unlike
+# `placeOrderReplay`, which reuses the original key for a true 200 replay).
 POST {{baseUrl}}/cart/{{cartId}}/place
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{$guid}}

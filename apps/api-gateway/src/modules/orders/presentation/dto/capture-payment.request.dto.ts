@@ -1,11 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsOptional, Min } from 'class-validator';
 
-// Request body for `POST /api/orders/:orderId/payments/capture`. Both fields are
-// optional: `amountMinor` defaults downstream to the order's `grandTotalMinor`
-// (partial capture is a later capability), and the `Idempotency-Key` is read from the
-// header (not the body) — accepted + forwarded, not deduped (Q10). A supplied
-// `amountMinor` must be a positive integer count of minor units (cents).
+// Request body for `POST /api/orders/:orderId/payments/capture`. `amountMinor` is
+// optional and defaults downstream to the order's `grandTotalMinor` (partial capture is a
+// later capability). The `Idempotency-Key` is read from the header (not the body) — it is
+// **required and deduped** (ADR-036, via the `@IdempotencyKey()` decorator): same key +
+// same body replays the stored order, a different body is 422, a missing key is 400. A
+// supplied `amountMinor` must be a positive integer count of minor units (cents).
 export class CapturePaymentRequestDto {
   @ApiPropertyOptional({
     example: 29997,

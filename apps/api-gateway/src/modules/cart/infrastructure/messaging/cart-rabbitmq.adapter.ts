@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   CartView,
+  IIdempotentResult,
   IPlaceOrderPayload,
   IRetailCartAddLinePayload,
   IRetailCartChangeLineQuantityPayload,
@@ -98,12 +99,15 @@ export class CartRabbitmqAdapter implements ICartGatewayPort {
     );
   }
 
-  public async placeOrder(command: ICartPlaceCommand, correlationId: string): Promise<OrderView> {
+  public async placeOrder(
+    command: ICartPlaceCommand,
+    correlationId: string,
+  ): Promise<IIdempotentResult<OrderView>> {
     return firstValueFrom(
-      this.client.send<OrderView, IPlaceOrderPayload>(ROUTING_KEYS.RETAIL_CART_PLACE, {
-        ...command,
-        correlationId,
-      }),
+      this.client.send<IIdempotentResult<OrderView>, IPlaceOrderPayload>(
+        ROUTING_KEYS.RETAIL_CART_PLACE,
+        { ...command, correlationId },
+      ),
     );
   }
 }

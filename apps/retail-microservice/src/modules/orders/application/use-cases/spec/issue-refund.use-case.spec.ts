@@ -1,5 +1,6 @@
 import { PinoLogger } from 'nestjs-pino';
 
+import { bodyFingerprint } from '@retail-inventory-system/common';
 import {
   IRetailRefundIssuePayload,
   PaymentStatusEnum,
@@ -10,9 +11,11 @@ import { makePinoLoggerMock } from '@retail-inventory-system/observability/testi
 import { OrderErrorCodeEnum, Payment } from '../../../domain';
 import { IssueRefundUseCase } from '../issue-refund.use-case';
 import {
+  buildIdempotencyRecord,
   buildOrderFixture,
   FAKE_CUSTOMER_EMAIL,
   FakeCustomerContactReader,
+  FakeIdempotencyStore,
   FakeOrderRepository,
   FakePaymentGateway,
   FakePaymentRepository,
@@ -36,6 +39,7 @@ interface IHarness {
   publisher: SpyOrderEventsPublisher;
   customerContactReader: FakeCustomerContactReader;
   audit: SpyAuditLogPublisher;
+  store: FakeIdempotencyStore;
 }
 
 // Builds a captured payment with tunable refund accounting (the refundable ceiling +
@@ -60,6 +64,7 @@ const capturedPayment = (
 const makeHarness = async (
   payment: Payment = capturedPayment(),
   gateway: FakePaymentGateway = new FakePaymentGateway(),
+  store: FakeIdempotencyStore = new FakeIdempotencyStore(),
 ): Promise<IHarness> => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const transactionPort = new FakeTransactionPort();
@@ -82,6 +87,7 @@ const makeHarness = async (
     publisher,
     customerContactReader,
     audit,
+    store,
     logger,
   );
 
@@ -93,6 +99,7 @@ const makeHarness = async (
     publisher,
     customerContactReader,
     audit,
+    store,
   };
 };
 
@@ -109,11 +116,23 @@ const issuePayload = (
   ...overrides,
 });
 
+// The canonical body the use case fingerprints — the client-controlled refund command
+// (`orderId` / `paymentId` / `amountMinor` / `reason`) minus `correlationId` /
+// `idempotencyKey` / the resolved `actorId` (ADR-036). Recomputed here so a seeded record's
+// fingerprint matches (a replay) or deliberately diverges (a 422).
+const fingerprintOf = (payload: IRetailRefundIssuePayload): string =>
+  bodyFingerprint({
+    orderId: payload.orderId,
+    paymentId: payload.paymentId,
+    amountMinor: payload.amountMinor,
+    reason: payload.reason,
+  });
+
 describe('IssueRefundUseCase', () => {
   it('issues a full refund: flips the payment to refunded, clears the flag, refund issued', async () => {
     const h = await makeHarness(capturedPayment({ flaggedForRefund: true }));
 
-    const view = await h.useCase.execute(issuePayload());
+    const { view } = await h.useCase.execute(issuePayload());
 
     expect(view.status).toBe(RefundStatusEnum.ISSUED);
     expect(view.amountMinor).toBe(CAPTURED_AMOUNT);
@@ -146,7 +165,7 @@ describe('IssueRefundUseCase', () => {
   it('issues a partial refund: leaves the payment captured and bumps refundedAmountMinor', async () => {
     const h = await makeHarness();
 
-    const view = await h.useCase.execute(issuePayload({ amountMinor: 400 }));
+    const { view } = await h.useCase.execute(issuePayload({ amountMinor: 400 }));
 
     expect(view.status).toBe(RefundStatusEnum.ISSUED);
     expect(view.amountMinor).toBe(400);
@@ -193,7 +212,7 @@ describe('IssueRefundUseCase', () => {
     const decliningGateway = new FakePaymentGateway(true, true, false);
     const h = await makeHarness(capturedPayment(), decliningGateway);
 
-    const view = await h.useCase.execute(issuePayload());
+    const { view } = await h.useCase.execute(issuePayload());
 
     expect(view.status).toBe(RefundStatusEnum.FAILED);
     expect(view.gatewayReference).toBeNull();
@@ -246,13 +265,15 @@ describe('IssueRefundUseCase', () => {
     });
   });
 
-  it('is idempotent: re-issuing the same refund makes only one gateway call', async () => {
+  it('is naturally idempotent: a NEW-key re-issue of the same refund makes only one gateway call', async () => {
     const h = await makeHarness(capturedPayment({ flaggedForRefund: true }));
 
-    const first = await h.useCase.execute(issuePayload());
-    // The second call replays the same (payment, amount, reason) — the payment is now
-    // `refunded`, but the natural-idempotency guard short-circuits to the existing refund.
-    const second = await h.useCase.execute(issuePayload());
+    const { view: first } = await h.useCase.execute(issuePayload());
+    // The second call under a DIFFERENT key is a store miss, so it exercises the natural
+    // already-issued guard (not the store replay): the payment is now `refunded`, but the
+    // matching `(payment, amount, reason)` short-circuits to the existing refund — no second
+    // gateway call, no second audit.
+    const { view: second } = await h.useCase.execute(issuePayload({ idempotencyKey: 'idem-2' }));
 
     expect(first.id).toBe(second.id);
     expect(second.status).toBe(RefundStatusEnum.ISSUED);
@@ -278,5 +299,140 @@ describe('IssueRefundUseCase', () => {
       code: OrderErrorCodeEnum.REFUND_PAYMENT_NOT_CAPTURED,
     });
     expect(h.paymentGateway.refundCount).toBe(0);
+  });
+
+  describe('request-level idempotency (ADR-036)', () => {
+    it('replays the stored response before the gateway AND before the audit emit', async () => {
+      const store = new FakeIdempotencyStore();
+      // A prior refund under the same key + canonical body — its stored RefundView is what
+      // the replay must return verbatim.
+      const priorView = { id: 555, status: 'issued', amountMinor: CAPTURED_AMOUNT };
+      store.seed(
+        buildIdempotencyRecord({
+          scope: 'issue-refund',
+          key: 'idem-1',
+          requestFingerprint: fingerprintOf(issuePayload()),
+          responseBody: priorView,
+        }),
+      );
+      const h = await makeHarness(capturedPayment(), new FakePaymentGateway(), store);
+
+      const { view, replayed } = await h.useCase.execute(issuePayload());
+
+      expect(replayed).toBe(true);
+      expect(view).toEqual(priorView);
+      // A replay is side-effect-free — and crucially it does NOT re-audit (no second
+      // audit_log_entry), does NOT re-call the gateway, does NOT re-emit, and writes no new
+      // refund row or store record.
+      expect(h.paymentGateway.refundCount).toBe(0);
+      expect(h.audit.events).toHaveLength(0);
+      expect(h.publisher.refundIssued).toHaveLength(0);
+      expect(h.refundRepository.saveCount).toBe(0);
+      // Reserve-first: the replay short-circuits on the reserve lookup — nothing is
+      // finalized (this call created no pending row of its own).
+      expect(h.store.finalized).toHaveLength(0);
+    });
+
+    it('rejects a reused key with a different body (different fingerprint) as 422', async () => {
+      const store = new FakeIdempotencyStore();
+      store.seed(
+        buildIdempotencyRecord({
+          scope: 'issue-refund',
+          key: 'idem-1',
+          requestFingerprint: 'a-different-body-fingerprint',
+        }),
+      );
+      const h = await makeHarness(capturedPayment(), new FakePaymentGateway(), store);
+
+      await expect(h.useCase.execute(issuePayload())).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED,
+      });
+      // Rejected before any refund work — no gateway call, no audit row.
+      expect(h.paymentGateway.refundCount).toBe(0);
+      expect(h.audit.events).toHaveLength(0);
+    });
+
+    it('rejects a missing Idempotency-Key with ORDER_IDEMPOTENCY_KEY_REQUIRED (400 backstop)', async () => {
+      const h = await makeHarness();
+
+      await expect(
+        h.useCase.execute(issuePayload({ idempotencyKey: undefined })),
+      ).rejects.toMatchObject({ code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED });
+      expect(h.paymentGateway.refundCount).toBe(0);
+    });
+
+    it('reserves the key then finalizes the stored response after a fresh issue (miss), returned not replayed', async () => {
+      const h = await makeHarness();
+
+      const { view, replayed } = await h.useCase.execute(issuePayload());
+
+      expect(replayed).toBe(false);
+      // The refund ran (a fresh execution): one gateway call, one audit row.
+      expect(h.paymentGateway.refundCount).toBe(1);
+      expect(h.audit.events).toHaveLength(1);
+      // Reserve-first: the key was reserved with the fingerprint BEFORE the gateway call,
+      // then finalized with the RefundView body + the 201 status AFTER the refund committed.
+      expect(h.store.reserved).toHaveLength(1);
+      expect(h.store.reserved[0]).toMatchObject({
+        scope: 'issue-refund',
+        key: 'idem-1',
+        requestFingerprint: fingerprintOf(issuePayload()),
+      });
+      expect(h.store.finalized).toHaveLength(1);
+      expect(h.store.finalized[0]).toMatchObject({
+        scope: 'issue-refund',
+        key: 'idem-1',
+        responseStatus: 201,
+      });
+      expect((h.store.finalized[0].responseBody as { id?: number }).id).toBe(view.id);
+      // A successful, finalized refund is NOT released.
+      expect(h.store.released).toHaveLength(0);
+    });
+
+    it('turns away a concurrent same-key submit (in-flight reservation) with 409 IN_PROGRESS, no second refund', async () => {
+      const store = new FakeIdempotencyStore();
+      // A concurrent identical submit already reserved the key and is mid-refund (a pending
+      // row, not yet finalized). This is the exact case the reserve-first hardening closes:
+      // the racing duplicate must be turned away BEFORE it can call the (non-idempotent)
+      // gateway refund a second time.
+      await store.reserve({
+        scope: 'issue-refund',
+        key: 'idem-1',
+        requestFingerprint: fingerprintOf(issuePayload()),
+      });
+      const h = await makeHarness(capturedPayment(), new FakePaymentGateway(), store);
+
+      await expect(h.useCase.execute(issuePayload())).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_IN_PROGRESS,
+      });
+      // Turned away before any refund work — no second gateway call, no audit row.
+      expect(h.paymentGateway.refundCount).toBe(0);
+      expect(h.audit.events).toHaveLength(0);
+    });
+
+    it('replays a concurrent winner that already completed under the same key + body', async () => {
+      const store = new FakeIdempotencyStore();
+      // A simultaneous identical refund committed + finalized first (a DISTINCT stored body).
+      // Our reserve loses the composite PK to the completed row and replays it.
+      const winnerView = { id: 999, status: 'issued', amountMinor: CAPTURED_AMOUNT };
+      store.seed(
+        buildIdempotencyRecord({
+          scope: 'issue-refund',
+          key: 'idem-1',
+          requestFingerprint: fingerprintOf(issuePayload()),
+          responseBody: winnerView,
+        }),
+      );
+      const h = await makeHarness(capturedPayment(), new FakePaymentGateway(), store);
+
+      const { view, replayed } = await h.useCase.execute(issuePayload());
+
+      // The winner's stored response is replayed — the racers converge on one response and
+      // this one never calls the gateway.
+      expect(replayed).toBe(true);
+      expect(view).toEqual(winnerView);
+      expect(h.paymentGateway.refundCount).toBe(0);
+      expect(h.store.finalized).toHaveLength(0);
+    });
   });
 });

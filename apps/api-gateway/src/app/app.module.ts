@@ -23,6 +23,7 @@ import { InventoryModule } from '../modules/inventory';
 import { NotificationsModule } from '../modules/notifications';
 import { OrdersModule } from '../modules/orders';
 import { ReturnsModule } from '../modules/returns';
+import { OptimisticLockExceptionFilter } from '../common/filters';
 import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.filter';
 
 @Module({
@@ -41,6 +42,9 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
   ],
   providers: [
     { provide: APP_FILTER, useClass: DuplicateKeyExceptionFilter },
+    // Normalizes a gateway-local TypeORM optimistic-lock failure into the uniform
+    // `409 { code: VERSION_MISMATCH, currentVersion }` (ADR-036 §3).
+    { provide: APP_FILTER, useClass: OptimisticLockExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

@@ -27,8 +27,13 @@ import { IssueRefundUseCase } from '../../application/use-cases';
 // has fully refunded the capture, `refundedAmountMinor === amountMinor` and the payment is
 // `refunded` with the flag cleared; a redelivery then computes `refundable === 0` and
 // no-ops here. The idempotency falls straight out of the payment-row accounting — no new
-// state is needed (and `IssueRefundUseCase`'s own already-issued short-circuit is a second
-// line of defence against a concurrent duplicate).
+// state is needed. Two further layers back it up: `IssueRefundUseCase`'s own already-issued
+// short-circuit, and the request-level idempotency store keyed on the **deterministic**
+// `order-cancelled:<orderId>:<paymentId>` key this consumer passes (ADR-036) — so a
+// *sequential* redelivery collapses to an exact replay, and a *concurrent* redelivery
+// (the reserve-first refund flow) is turned away with `IN_PROGRESS` rather than
+// double-refunding. Both outcomes are swallowed as best-effort below; the flag stays the
+// durable retry anchor.
 //
 // **Best-effort** (the flag is the durable retry anchor): a downstream failure is
 // warn-logged and swallowed so the handler never throws. The cancel has already committed,
@@ -107,12 +112,20 @@ export class OrderCancelledConsumer {
     // system-initiated origin (no human caller); `reason: 'order-cancelled'` records why on
     // the `refund` row + the audit log. The use case re-checks captured + ceiling + the
     // already-issued idempotency, so a racing duplicate is also safe.
+    //
+    // The `IssueRefundUseCase` now requires an `Idempotency-Key` (ADR-036 — the manual
+    // endpoint supplies the client header). The system path has no client key, so it
+    // synthesizes a **deterministic** one from `(orderId, paymentId)`: there is at most one
+    // auto-refund per cancelled order, so a redelivered `retail.order.cancelled` collapses to
+    // a store replay rather than a second refund. This layers exact-replay on top of the
+    // refundable-remainder guard (which already no-ops a redelivery once fully refunded).
     await this.issueRefund.execute({
       orderId,
       paymentId: payment.id!,
       amountMinor: refundable,
       reason: 'order-cancelled',
       actorId: null,
+      idempotencyKey: `order-cancelled:${orderId}:${payment.id}`,
       correlationId,
     });
   }

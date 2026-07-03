@@ -1,10 +1,12 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
+import { bodyFingerprint } from '@retail-inventory-system/common';
 import {
   FulfillmentStatusEnum,
   FulfillmentView,
   ICommitSalePayload,
+  IIdempotentResult,
   IRetailFulfillmentShipPayload,
   OrderFulfillmentStatusEnum,
   OrderLineStatusEnum,
@@ -20,6 +22,7 @@ import {
 } from '../../domain';
 import {
   FULFILLMENT_REPOSITORY,
+  IIdempotencyStorePort,
   IFulfillmentRepositoryPort,
   IOrderCommitSaleGatewayPort,
   IOrderCustomerContactReaderPort,
@@ -28,6 +31,8 @@ import {
   IPaymentGatewayPort,
   IPaymentRepositoryPort,
   ITransactionPort,
+  IDEMPOTENCY_STORE,
+  OCC_RETRY_ATTEMPTS,
   ORDER_COMMIT_SALE_GATEWAY,
   ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
@@ -38,6 +43,7 @@ import {
 } from '../ports';
 import { countsTowardShipped, sumLineQuantitiesByOrderLine } from './fulfillment-quantities';
 import { loadAuthorizedOrder } from './order-access';
+import { runWithOrderWriteRetry } from './order-write';
 import { toFulfillmentView } from './fulfillment-view.factory';
 import { resolveCustomerEmail } from './resolve-customer-email';
 import { retryThenLogForReplay } from './retry-then-log-for-replay';
@@ -91,6 +97,16 @@ interface ICaptureOutcome {
 // its cumulative shipped quantity (across `shipped`/`delivered` fulfillments) reaches
 // the ordered quantity, else `partially-shipped`; the order axis is `shipped` iff every
 // line is fully shipped, else `partially-shipped`.
+//
+// **Two idempotency layers (ADR-036).** First the request-level `Idempotency-Key`:
+// `execute` fingerprints the canonical body (`bodyFingerprint`), looks the
+// `(scope='ship-fulfillment', key)` pair up in the `IDEMPOTENCY_STORE`, and on a
+// same-key/same-body hit **replays the stored `FulfillmentView` before any side effect** —
+// no capture, no commit-sale, no `retail.fulfillment.shipped`/`retail.payment.captured`
+// emit (the replay returns before `ship`, which owns the whole flow). A same-key/*different*-
+// body hit → `422`; a missing key → `400` backstop. Second, the natural idempotency remains
+// the backstop: a non-`pending` re-ship is a `409` and Commit Sale is `fulfillmentId`-
+// idempotent inventory-side, so a new-key retry never double-decrements.
 @Injectable()
 export class ShipFulfillmentUseCase {
   constructor(
@@ -110,11 +126,101 @@ export class ShipFulfillmentUseCase {
     private readonly publisher: IOrderEventsPublisherPort,
     @Inject(ORDER_CUSTOMER_CONTACT_READER)
     private readonly customerContactReader: IOrderCustomerContactReaderPort,
+    @Inject(IDEMPOTENCY_STORE)
+    private readonly idempotencyStore: IIdempotencyStorePort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(ShipFulfillmentUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
 
-  public async execute(payload: IRetailFulfillmentShipPayload): Promise<FulfillmentView> {
+  // The scope namespaces the client key by operation, so the same `Idempotency-Key`
+  // reused across two operations cannot collide in the store (ADR-036).
+  private static readonly SCOPE = 'ship-fulfillment';
+
+  public async execute(
+    payload: IRetailFulfillmentShipPayload,
+  ): Promise<IIdempotentResult<FulfillmentView>> {
+    const { idempotencyKey, correlationId, orderId, fulfillmentId } = payload;
+
+    // Defensive backstop for the gateway's required-header edge check: a direct RMQ
+    // caller that bypassed the gateway still fails fast here (ADR-036).
+    if (!idempotencyKey) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED,
+        'An Idempotency-Key is required to ship a fulfillment',
+      );
+    }
+
+    // Fingerprint the CANONICAL body — the fulfillment id + the client-supplied tracking
+    // fields, minus transport/identity noise (`correlationId`, `idempotencyKey`, and the
+    // owner/staff ids), so a retry under a fresh correlation id still matches (ADR-036).
+    const fingerprint = bodyFingerprint(ShipFulfillmentUseCase.canonicalBody(payload));
+
+    // Key-store lookup FIRST. A matching-fingerprint hit replays the stored
+    // `FulfillmentView` WITHOUT re-running capture or commit-sale and WITHOUT re-emitting —
+    // this branch returns before `ship`, which owns the whole flow. A different-fingerprint
+    // hit → 422.
+    const prior = await this.idempotencyStore.find(ShipFulfillmentUseCase.SCOPE, idempotencyKey);
+    if (prior) {
+      if (prior.requestFingerprint === fingerprint) {
+        this.logger.debug(
+          { correlationId, orderId, fulfillmentId, idempotencyKey },
+          'Idempotent replay — returning the stored ship response (no re-execution, no events)',
+        );
+        return { view: prior.responseBody as unknown as FulfillmentView, replayed: true };
+      }
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED,
+        `Idempotency-Key ${idempotencyKey} was already used for a ship-fulfillment request with a different body`,
+      );
+    }
+
+    // Miss — run the ship (the natural non-`pending` guard + `fulfillmentId`-idempotent
+    // commit-sale still apply inside), then persist the stored response so the next
+    // identical retry replays.
+    const view = await this.ship(payload);
+    await this.idempotencyStore.save({
+      scope: ShipFulfillmentUseCase.SCOPE,
+      key: idempotencyKey,
+      requestFingerprint: fingerprint,
+      // The ship route is `200 OK`; the gateway forces `200` on any replay anyway.
+      responseStatus: HttpStatus.OK,
+      responseBody: view as unknown as Record<string, unknown>,
+    });
+
+    // Authoritative re-read: if a concurrent identical ship stored first, `save` swallowed
+    // our duplicate — return the winner's stored response so both racers converge.
+    const stored = await this.idempotencyStore.find(ShipFulfillmentUseCase.SCOPE, idempotencyKey);
+    if (stored && (stored.responseBody as { id?: number }).id !== view.id) {
+      this.logger.debug(
+        { correlationId, orderId, fulfillmentId, idempotencyKey },
+        'Idempotent replay — a concurrent ship stored first; returning the winning response',
+      );
+      return { view: stored.responseBody as unknown as FulfillmentView, replayed: true };
+    }
+    return { view, replayed: false };
+  }
+
+  // Builds the stable logical body the fingerprint covers: the fulfillment id + the
+  // client-supplied tracking fields. The owner-injected `actorId` / `isStaffFulfill` and the
+  // transport `correlationId` / `idempotencyKey` are excluded, so the same intent under a
+  // fresh correlation id fingerprints identically (ADR-036).
+  private static canonicalBody(payload: IRetailFulfillmentShipPayload): Record<string, unknown> {
+    return {
+      orderId: payload.orderId,
+      fulfillmentId: payload.fulfillmentId,
+      trackingNumber: payload.trackingNumber,
+      carrier: payload.carrier,
+    };
+  }
+
+  // The ship flow proper (run on a store miss): owner-or-staff authorization, the
+  // shippable-state guard, ship-triggered capture (before the local commit), the local
+  // transaction (advance the fulfillment + the order axes), the post-commit Commit Sale,
+  // and the post-commit `retail.fulfillment.shipped`/`retail.payment.captured` emits.
+  // Returns the shipped `FulfillmentView`.
+  private async ship(payload: IRetailFulfillmentShipPayload): Promise<FulfillmentView> {
     const {
       orderId,
       fulfillmentId,
@@ -135,9 +241,10 @@ export class ShipFulfillmentUseCase {
     const order = await loadAuthorizedOrder(this.orderRepository, orderId, actorId, isStaffFulfill);
 
     // Load the fulfillment + assert it is shippable: it must belong to this order and
-    // be `pending` (a non-`pending` re-ship is a 409 — the `Idempotency-Key` rides
-    // accepted-not-deduped, and Commit Sale's `fulfillmentId` idempotency covers a
-    // genuine retry inventory-side regardless).
+    // be `pending`. A same-key retry never reaches here — it replayed in `execute`; a
+    // NEW-key re-ship of an already-shipped fulfillment is a 409 (the natural backstop),
+    // and Commit Sale's `fulfillmentId` idempotency covers a genuine retry inventory-side
+    // regardless.
     const fulfillment = await this.fulfillmentRepository.findById(fulfillmentId);
     if (fulfillment?.orderId !== orderId) {
       throw new OrderDomainException(
@@ -177,60 +284,79 @@ export class ShipFulfillmentUseCase {
 
     const shippedAt = new Date();
 
-    // Local transaction: advance the fulfillment → shipped, record the capture on the
-    // Payment + order's payment axis (when one happened), flip the shipped lines, and
-    // advance the order's fulfillment axis — atomically. Returns the persisted shipped
-    // fulfillment so the post-commit steps run on concrete ids.
-    const shippedFulfillment = await this.transactionPort.runInTransaction<Fulfillment>(
-      async (scope) => {
-        // Re-read the fulfillment under a pessimistic write lock — the first statement in
-        // the transaction, so a concurrent Cancel of the same order serialises here: if
-        // the Cancel committed first, this CURRENT read observes the now-`cancelled`
-        // fulfillment and `fresh.ship()` below rejects it (the
-        // single-writer-per-status-transition guard, ADR-031); if this Ship wins, the
-        // Cancel blocks on the lock until this commits and then sees the `shipped` status.
-        const fresh = await this.fulfillmentRepository.findByIdForUpdate(fulfillmentId, scope);
-        if (!fresh) {
-          throw new OrderDomainException(
-            OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND,
-            `Fulfillment ${fulfillmentId} vanished while shipping`,
-          );
-        }
-        // The domain enforces the state guard + tracking-on-ship (the authority); under
-        // the lock the guard now sees a concurrent transition (a non-`pending` status →
-        // FULFILLMENT_INVALID_STATUS_TRANSITION).
-        fresh.ship({ trackingNumber, carrier: carrier ?? null, shippedAt });
-        const shipped = await this.fulfillmentRepository.save(fresh, scope);
+    // Local transaction under the bounded OCC retry (ADR-036): advance the fulfillment
+    // → shipped, record the capture on the Payment + order's payment axis (when one
+    // happened), flip the shipped lines, and advance the order's fulfillment axis —
+    // atomically. The out-of-process gateway `capture` above ran ONCE, outside the loop
+    // — a retry never re-charges. The fulfillment + order are (re-)loaded INSIDE the
+    // callback, so a lost order CAS (a concurrent Ship of a SIBLING fulfillment, or a
+    // Capture, advancing the order version) re-runs the whole unit of work against
+    // fresh, committed state; the order write is the version-checked CAS, and the
+    // per-fulfillment `SELECT … FOR UPDATE` still serialises the same-fulfillment
+    // ship-vs-cancel race (a cross-transition loser gets its domain 409, never
+    // retried). Returns the persisted shipped fulfillment so the post-commit steps run
+    // on concrete ids.
+    const shippedFulfillment = await runWithOrderWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      () =>
+        this.transactionPort.runInTransaction<Fulfillment>(async (scope) => {
+          // Re-read the fulfillment under a pessimistic write lock — the first statement in
+          // the transaction, so a concurrent Cancel of the same order serialises here: if
+          // the Cancel committed first, this CURRENT read observes the now-`cancelled`
+          // fulfillment and `fresh.ship()` below rejects it (the
+          // single-writer-per-status-transition guard, ADR-031); if this Ship wins, the
+          // Cancel blocks on the lock until this commits and then sees the `shipped` status.
+          const fresh = await this.fulfillmentRepository.findByIdForUpdate(fulfillmentId, scope);
+          if (!fresh) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND,
+              `Fulfillment ${fulfillmentId} vanished while shipping`,
+            );
+          }
+          // The domain enforces the state guard + tracking-on-ship (the authority); under
+          // the lock the guard now sees a concurrent transition (a non-`pending` status →
+          // FULFILLMENT_INVALID_STATUS_TRANSITION).
+          fresh.ship({ trackingNumber, carrier: carrier ?? null, shippedAt });
+          const shipped = await this.fulfillmentRepository.save(fresh, scope);
 
-        if (capture.capturedAt) {
-          payment.capture(capture.capturedAt);
-          await this.paymentRepository.save(payment, scope);
-        }
+          if (capture.capturedAt) {
+            // The gateway captured once (before the loop). Applying the capture to the
+            // in-memory `payment` is guarded so a retry (which reuses this object) does
+            // not double-mutate an already-captured payment; the version-less payment row
+            // is re-saved so the winning attempt persists the captured status.
+            if (payment.status === PaymentStatusEnum.AUTHORIZED) {
+              payment.capture(capture.capturedAt);
+            }
+            await this.paymentRepository.save(payment, scope);
+          }
 
-        const freshOrder = await this.orderRepository.findById(orderId, scope);
-        if (!freshOrder) {
-          throw new OrderDomainException(
-            OrderErrorCodeEnum.ORDER_NOT_FOUND,
-            `Order ${orderId} vanished while shipping`,
-          );
-        }
-        if (capture.capturedAt) {
-          freshOrder.markPaymentCaptured();
-        }
+          const freshOrder = await this.orderRepository.findById(orderId, scope);
+          if (!freshOrder) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.ORDER_NOT_FOUND,
+              `Order ${orderId} vanished while shipping`,
+            );
+          }
+          const versionAtLoad = freshOrder.version;
+          if (capture.capturedAt) {
+            freshOrder.markPaymentCaptured();
+          }
 
-        // Roll-up: sum each order line's shipped quantity across the order's
-        // `shipped`/`delivered` fulfillments (the just-shipped one is now `shipped` and
-        // included) — a `pending` sibling is planned but NOT shipped, so it must not
-        // count toward the roll-up.
-        const fulfillments = await this.fulfillmentRepository.listByOrderId(orderId, scope);
-        const shippedByLine = sumLineQuantitiesByOrderLine(fulfillments, countsTowardShipped);
+          // Roll-up: sum each order line's shipped quantity across the order's
+          // `shipped`/`delivered` fulfillments (the just-shipped one is now `shipped` and
+          // included) — a `pending` sibling is planned but NOT shipped, so it must not
+          // count toward the roll-up.
+          const fulfillments = await this.fulfillmentRepository.listByOrderId(orderId, scope);
+          const shippedByLine = sumLineQuantitiesByOrderLine(fulfillments, countsTowardShipped);
 
-        const next = ShipFulfillmentUseCase.advanceLinesAndRollUp(freshOrder, shippedByLine);
-        freshOrder.advanceFulfillment(next);
-        await this.orderRepository.save(freshOrder, scope);
+          const next = ShipFulfillmentUseCase.advanceLinesAndRollUp(freshOrder, shippedByLine);
+          freshOrder.advanceFulfillment(next);
+          // The order header write is the version-checked CAS.
+          await this.orderRepository.save(freshOrder, scope, versionAtLoad);
 
-        return shipped;
-      },
+          return shipped;
+        }),
+      { orderId, correlationId },
     );
 
     // AFTER the local commit: physically decrement the inventory. Retried on failure;

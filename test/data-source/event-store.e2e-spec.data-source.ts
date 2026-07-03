@@ -105,6 +105,23 @@ export class EventStoreE2ESpecDataSource extends DataSource {
     return Number(rows[0].n);
   }
 
+  // The idempotency oracle: exactly how many `domain_event` rows exist for one event type
+  // against one aggregate (e.g. `retail.order.placed` for a given order id). A replay must
+  // short-circuit BEFORE the event publisher (ADR-036), so two identical Place Order calls
+  // that resolve to one order leave this at 1 — the "one logical place = one event" proof.
+  // Keyed on `(event_type, aggregate_id)` rather than the correlation id so it holds even
+  // if the two requests carried different correlation ids.
+  public async countDomainEventsByTypeAndAggregateId(
+    eventType: string,
+    aggregateId: string,
+  ): Promise<number> {
+    const rows: Record<string, unknown>[] = await this.query(
+      `SELECT COUNT(*) AS n FROM domain_event WHERE event_type = ? AND aggregate_id = ?;`,
+      [eventType, aggregateId],
+    );
+    return Number(rows[0].n);
+  }
+
   // Exactly the composite UNIQUE `(producer, event_type, aggregate_id, occurred_at,
   // correlation_id)` — the idempotency anchor. A double-publish of the same wire event
   // must leave this at 1.

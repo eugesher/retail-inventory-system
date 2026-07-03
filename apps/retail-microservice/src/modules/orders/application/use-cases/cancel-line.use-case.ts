@@ -48,6 +48,14 @@ import { toOrderView } from './order-view.factory';
 // and this capability emits **no event** (Cancel Line has no past-tense surface). The
 // allocation release is best-effort with retry-then-log-for-replay (the Cancel Order /
 // Ship posture) — a failed release over-holds until manual intervention, never corrupts.
+//
+// **No optimistic-concurrency guard (ADR-036).** Cancel Line performs NO `Order`
+// (or `Fulfillment`) write — it reads the order to validate the unshipped remainder and
+// releases the inventory allocation via a cross-service RPC. With no local aggregate
+// write there is no lost update to guard against, so it takes no version-checked CAS
+// (unlike its sibling status transitions capture / ship / deliver / cancel-order). The
+// remainder is recomputed from the live `fulfillment` rows on every call, so a
+// concurrent ship is simply reflected in the next read.
 @Injectable()
 export class CancelLineUseCase {
   constructor(

@@ -69,6 +69,17 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_LINE_NO_PRICE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED]: HttpStatus.CONFLICT,
+
+  // Request-level idempotency (ADR-036). A missing required `Idempotency-Key` is a
+  // malformed request → 400 (the retail-side backstop for the gateway edge check); a
+  // key replayed with a *different* body is a client key-reuse bug → 422
+  // (Unprocessable Entity). The gateway's `throwRpcError` forwards any 400–599 that
+  // carries a typed `code`, so both reach the client with their code intact.
+  [OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED]: HttpStatus.BAD_REQUEST,
+  [OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED]: HttpStatus.UNPROCESSABLE_ENTITY,
+  // A concurrent same-key request is mid-flight (reserve-first refund, ADR-036) → 409:
+  // the client retries once the in-flight request finishes and then replays its result.
+  [OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_IN_PROGRESS]: HttpStatus.CONFLICT,
   // Fulfillment / cancel conflicts → 409: an illegal shipment-status transition, a
   // create that would over-ship a line, an order not in a fulfillable state, or a
   // cancel of an already-shipped order.
@@ -77,6 +88,10 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_NOT_FULFILLABLE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_INVALID_FULFILLMENT_TRANSITION]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE]: HttpStatus.CONFLICT,
+  // Optimistic-concurrency conflict → 409: an order status write lost its bounded
+  // retry budget to a concurrent writer (ADR-036 — the wire code is the uniform
+  // `VERSION_MISMATCH`, and the exception carries `details.currentVersion`).
+  [OrderErrorCodeEnum.ORDER_VERSION_MISMATCH]: HttpStatus.CONFLICT,
   // Refund conflicts → 409: an illegal refund-status transition, a refund that would
   // over-refund the payment, or a refund against a non-captured payment.
   [OrderErrorCodeEnum.REFUND_INVALID_STATUS_TRANSITION]: HttpStatus.CONFLICT,
@@ -95,10 +110,16 @@ export class OrdersRpcExceptionFilter implements RpcExceptionFilter<OrderDomainE
   public catch(exception: OrderDomainException): Observable<never> {
     const statusCode = ORDER_ERROR_STATUS[exception.code] ?? HttpStatus.INTERNAL_SERVER_ERROR;
 
+    // `details` rides along only when present (e.g. `{ currentVersion }` on a
+    // `VERSION_MISMATCH`, ADR-036) — the gateway's `throwRpcError` forwards an
+    // object-valued `details` verbatim and harmlessly drops an absent one, so a
+    // client reads `details.currentVersion` end-to-end (the cart `{ currentVersion }`
+    // / inventory `{ available }` forwarding precedent).
     return throwError(() => ({
       statusCode,
       message: exception.message,
       code: exception.code,
+      ...(exception.details !== undefined ? { details: exception.details } : {}),
     }));
   }
 }

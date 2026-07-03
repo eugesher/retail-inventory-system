@@ -25,6 +25,7 @@ import {
   ITransactionPort,
   ITransactionScope,
   RESERVATION_REPOSITORY,
+  OCC_RETRY_ATTEMPTS,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
   STOCK_MOVEMENT_REPOSITORY,
@@ -70,6 +71,8 @@ export class ReleaseReservationUseCase {
     private readonly stockCache: IStockCachePort,
     @Inject(STOCK_EVENTS_PUBLISHER)
     private readonly publisher: IStockEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(ReleaseReservationUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -119,7 +122,11 @@ export class ReleaseReservationUseCase {
     const releasedRows = await this.stockCache.withInvalidation(
       () =>
         runWithStockWriteRetry(
-          { transactionPort: this.transactionPort, logger: this.logger },
+          {
+            transactionPort: this.transactionPort,
+            logger: this.logger,
+            maxAttempts: this.maxAttempts,
+          },
           (scope) => this.releaseAll(scope, targetIds, reason, actorId),
           { correlationId },
         ),

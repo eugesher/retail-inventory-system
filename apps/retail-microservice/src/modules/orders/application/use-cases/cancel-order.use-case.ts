@@ -20,6 +20,7 @@ import {
   IOrderRepositoryPort,
   IPaymentRepositoryPort,
   ITransactionPort,
+  OCC_RETRY_ATTEMPTS,
   ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
   ORDER_INVENTORY_GATEWAY,
@@ -29,6 +30,7 @@ import {
 } from '../ports';
 import { releaseAllocationWithRetry } from './cancel-allocation-retry';
 import { loadAuthorizedOrder } from './order-access';
+import { runWithOrderWriteRetry } from './order-write';
 import { toOrderView } from './order-view.factory';
 import { resolveCustomerEmail } from './resolve-customer-email';
 
@@ -78,6 +80,8 @@ export class CancelOrderUseCase {
     private readonly publisher: IOrderEventsPublisherPort,
     @Inject(ORDER_CUSTOMER_CONTACT_READER)
     private readonly customerContactReader: IOrderCustomerContactReaderPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(CancelOrderUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -104,75 +108,83 @@ export class CancelOrderUseCase {
       );
     }
 
-    // The payment is loaded outside the transaction (its repository read is not
-    // scope-aware) and mutated + saved inside.
-    const payment = await this.paymentRepository.findByOrderId(orderId);
-
-    // Local transaction: cancel the order, cancel any `pending` fulfillments, and settle
-    // the payment — atomically. Returns whether a captured payment was flagged for refund
-    // (the post-commit event branches on it).
-    const paymentFlaggedForRefund = await this.transactionPort.runInTransaction<boolean>(
-      async (scope) => {
-        const freshOrder = await this.orderRepository.findById(orderId, scope);
-        if (!freshOrder) {
-          throw new OrderDomainException(
-            OrderErrorCodeEnum.ORDER_NOT_FOUND,
-            `Order ${orderId} vanished while cancelling`,
-          );
-        }
-
-        // Re-acquire the order's fulfillments under a pessimistic write lock — a CURRENT
-        // read that serialises against a concurrent Ship of the same order. The
-        // pre-transaction `hasShippedFulfillment` check above is a fast fail for the
-        // uncontended path; this in-transaction re-check under the lock is the guard that
-        // holds under contention: a Ship that is committing now blocks this read until it
-        // commits, and the freshly-observed `shipped` status then rejects the cancel
-        // (`ORDER_NOT_CANCELLABLE`). Conversely a Ship that starts while this holds the
-        // lock blocks until this commits and then sees the `cancelled` fulfillment
-        // (the single-writer-per-status-transition guard, ADR-031).
-        const locked: Fulfillment[] = [];
-        for (const planned of await this.fulfillmentRepository.listByOrderId(orderId, scope)) {
-          const lockedFulfillment = await this.fulfillmentRepository.findByIdForUpdate(
-            planned.id!,
-            scope,
-          );
-          if (lockedFulfillment) {
-            locked.push(lockedFulfillment);
+    // Local transaction under the bounded OCC retry (ADR-036): cancel the order, cancel
+    // any `pending` fulfillments, and settle the payment — atomically. Everything is
+    // (re-)loaded INSIDE the callback (the order + its fulfillments + the payment), so a
+    // lost order CAS re-runs the whole unit of work against fresh, committed state and
+    // the payment mutators stay valid on a retry. Returns whether a captured payment was
+    // flagged for refund (the post-commit event branches on it).
+    const paymentFlaggedForRefund = await runWithOrderWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      () =>
+        this.transactionPort.runInTransaction<boolean>(async (scope) => {
+          const freshOrder = await this.orderRepository.findById(orderId, scope);
+          if (!freshOrder) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.ORDER_NOT_FOUND,
+              `Order ${orderId} vanished while cancelling`,
+            );
           }
-        }
-        if (CancelOrderUseCase.hasShippedFulfillment(locked)) {
-          throw new OrderDomainException(
-            OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE,
-            `Order ${orderId} has a shipped or delivered fulfillment and cannot be cancelled`,
-          );
-        }
+          const versionAtLoad = freshOrder.version;
 
-        freshOrder.cancel();
-
-        // Cancel every `pending` fulfillment (a planned-but-not-shipped shipment).
-        for (const fulfillment of locked) {
-          if (fulfillment.status === FulfillmentStatusEnum.PENDING) {
-            fulfillment.cancel();
-            await this.fulfillmentRepository.save(fulfillment, scope);
+          // Re-acquire the order's fulfillments under a pessimistic write lock — a CURRENT
+          // read that serialises against a concurrent Ship of the same order. The
+          // pre-transaction `hasShippedFulfillment` check above is a fast fail for the
+          // uncontended path; this in-transaction re-check under the lock is the guard that
+          // holds under contention: a Ship that is committing now blocks this read until it
+          // commits, and the freshly-observed `shipped` status then rejects the cancel
+          // (`ORDER_NOT_CANCELLABLE`). Conversely a Ship that starts while this holds the
+          // lock blocks until this commits and then sees the `cancelled` fulfillment
+          // (the single-writer-per-status-transition guard, ADR-031).
+          const locked: Fulfillment[] = [];
+          for (const planned of await this.fulfillmentRepository.listByOrderId(orderId, scope)) {
+            const lockedFulfillment = await this.fulfillmentRepository.findByIdForUpdate(
+              planned.id!,
+              scope,
+            );
+            if (lockedFulfillment) {
+              locked.push(lockedFulfillment);
+            }
           }
-        }
-
-        let flagged = false;
-        if (payment) {
-          if (payment.status === PaymentStatusEnum.CAPTURED) {
-            payment.flagForRefund();
-            flagged = true;
-            await this.paymentRepository.save(payment, scope);
-          } else if (payment.status === PaymentStatusEnum.AUTHORIZED) {
-            payment.void();
-            await this.paymentRepository.save(payment, scope);
+          if (CancelOrderUseCase.hasShippedFulfillment(locked)) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE,
+              `Order ${orderId} has a shipped or delivered fulfillment and cannot be cancelled`,
+            );
           }
-          // A payment in any other state (already voided/refunded/failed) is left as-is.
-        }
 
-        await this.orderRepository.save(freshOrder, scope);
-        return flagged;
-      },
+          freshOrder.cancel();
+
+          // Cancel every `pending` fulfillment (a planned-but-not-shipped shipment).
+          for (const fulfillment of locked) {
+            if (fulfillment.status === FulfillmentStatusEnum.PENDING) {
+              fulfillment.cancel();
+              await this.fulfillmentRepository.save(fulfillment, scope);
+            }
+          }
+
+          // Re-load the payment within this attempt's transaction so its mutators
+          // (`flagForRefund` / `void`) stay valid on a retry.
+          const payment = await this.paymentRepository.findByOrderId(orderId, scope);
+          let flagged = false;
+          if (payment) {
+            if (payment.status === PaymentStatusEnum.CAPTURED) {
+              payment.flagForRefund();
+              flagged = true;
+              await this.paymentRepository.save(payment, scope);
+            } else if (payment.status === PaymentStatusEnum.AUTHORIZED) {
+              payment.void();
+              await this.paymentRepository.save(payment, scope);
+            }
+            // A payment in any other state (already voided/refunded/failed) is left as-is.
+          }
+
+          // The order header cancel is the version-checked CAS — a concurrent order
+          // writer that advanced the version makes it lose and the unit of work retry.
+          await this.orderRepository.save(freshOrder, scope, versionAtLoad);
+          return flagged;
+        }),
+      { orderId, correlationId },
     );
 
     // After the local commit: release the order's stock allocation. Best-effort with

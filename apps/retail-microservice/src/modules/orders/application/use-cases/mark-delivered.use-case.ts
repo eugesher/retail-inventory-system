@@ -15,12 +15,14 @@ import {
   IOrderEventsPublisherPort,
   IOrderRepositoryPort,
   ITransactionPort,
+  OCC_RETRY_ATTEMPTS,
   ORDER_CUSTOMER_CONTACT_READER,
   ORDER_EVENTS_PUBLISHER,
   ORDER_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
 import { loadAuthorizedOrder } from './order-access';
+import { runWithOrderWriteRetry } from './order-write';
 import { toFulfillmentView } from './fulfillment-view.factory';
 import { resolveCustomerEmail } from './resolve-customer-email';
 
@@ -50,6 +52,8 @@ export class MarkDeliveredUseCase {
     private readonly publisher: IOrderEventsPublisherPort,
     @Inject(ORDER_CUSTOMER_CONTACT_READER)
     private readonly customerContactReader: IOrderCustomerContactReaderPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(MarkDeliveredUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -85,45 +89,56 @@ export class MarkDeliveredUseCase {
 
     const deliveredAt = new Date();
 
-    // Local transaction: deliver the fulfillment, and — if it was the last outstanding
-    // one — roll the order up to `delivered` on both axes, atomically. Returns the
-    // delivered fulfillment so the post-commit emit runs on the concrete graph.
-    const delivered = await this.transactionPort.runInTransaction<Fulfillment>(async (scope) => {
-      // Re-read under a pessimistic write lock — the same single-writer-per-status-
-      // transition guard Ship and Cancel take (ADR-031). A concurrent Deliver of the
-      // same fulfillment serialises here: the loser blocks until the winner commits,
-      // then observes the now-`delivered` status and `fresh.markDelivered()` below
-      // rejects it (a non-`shipped` status → FULFILLMENT_INVALID_STATUS_TRANSITION), so
-      // the order roll-up never runs twice and no duplicate `delivered` event fires.
-      const fresh = await this.fulfillmentRepository.findByIdForUpdate(fulfillmentId, scope);
-      if (!fresh) {
-        throw new OrderDomainException(
-          OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND,
-          `Fulfillment ${fulfillmentId} vanished while delivering`,
-        );
-      }
-      // The domain enforces the `shipped → delivered` state guard (the authority).
-      fresh.markDelivered(deliveredAt);
-      const saved = await this.fulfillmentRepository.save(fresh, scope);
+    // Local transaction under the bounded OCC retry (ADR-036): deliver the fulfillment,
+    // and — if it was the last outstanding one — roll the order up to `delivered` on
+    // both axes, atomically. Everything is (re-)loaded INSIDE the callback, so a lost
+    // order CAS re-runs the whole unit of work against fresh, committed state. Returns
+    // the delivered fulfillment so the post-commit emit runs on the concrete graph.
+    const delivered = await runWithOrderWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      () =>
+        this.transactionPort.runInTransaction<Fulfillment>(async (scope) => {
+          // Re-read under a pessimistic write lock — the same single-writer-per-status-
+          // transition guard Ship and Cancel take (ADR-031). A concurrent Deliver of the
+          // same fulfillment serialises here: the loser blocks until the winner commits,
+          // then observes the now-`delivered` status and `fresh.markDelivered()` below
+          // rejects it (a non-`shipped` status → FULFILLMENT_INVALID_STATUS_TRANSITION), so
+          // the order roll-up never runs twice and no duplicate `delivered` event fires.
+          const fresh = await this.fulfillmentRepository.findByIdForUpdate(fulfillmentId, scope);
+          if (!fresh) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND,
+              `Fulfillment ${fulfillmentId} vanished while delivering`,
+            );
+          }
+          // The domain enforces the `shipped → delivered` state guard (the authority).
+          fresh.markDelivered(deliveredAt);
+          const saved = await this.fulfillmentRepository.save(fresh, scope);
 
-      // Roll the order up only when EVERY non-`cancelled` fulfillment is now delivered
-      // — the just-delivered one is included in this re-read, so the last delivery flips
-      // the order. A still-`pending` or still-`shipped` sibling leaves the order as-is.
-      const all = await this.fulfillmentRepository.listByOrderId(orderId, scope);
-      if (MarkDeliveredUseCase.everyFulfillmentDelivered(all)) {
-        const freshOrder = await this.orderRepository.findById(orderId, scope);
-        if (!freshOrder) {
-          throw new OrderDomainException(
-            OrderErrorCodeEnum.ORDER_NOT_FOUND,
-            `Order ${orderId} vanished while delivering`,
-          );
-        }
-        freshOrder.markDelivered();
-        await this.orderRepository.save(freshOrder, scope);
-      }
+          // Roll the order up only when EVERY non-`cancelled` fulfillment is now delivered
+          // — the just-delivered one is included in this re-read, so the last delivery flips
+          // the order. A still-`pending` or still-`shipped` sibling leaves the order as-is.
+          // The order header roll-up is the version-checked CAS (a concurrent order writer
+          // — e.g. delivering a sibling fulfillment — that advanced the version makes the
+          // CAS lose and the whole unit of work retry).
+          const all = await this.fulfillmentRepository.listByOrderId(orderId, scope);
+          if (MarkDeliveredUseCase.everyFulfillmentDelivered(all)) {
+            const freshOrder = await this.orderRepository.findById(orderId, scope);
+            if (!freshOrder) {
+              throw new OrderDomainException(
+                OrderErrorCodeEnum.ORDER_NOT_FOUND,
+                `Order ${orderId} vanished while delivering`,
+              );
+            }
+            const versionAtLoad = freshOrder.version;
+            freshOrder.markDelivered();
+            await this.orderRepository.save(freshOrder, scope, versionAtLoad);
+          }
 
-      return saved;
-    });
+          return saved;
+        }),
+      { orderId, correlationId },
+    );
 
     // Resolve the buyer's email so the delivery-confirmation consumer has a recipient
     // without a per-delivery RPC (ADR-033). Best-effort: a tombstoned/missing customer or a

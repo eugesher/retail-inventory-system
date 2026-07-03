@@ -1,7 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
+import { bodyFingerprint } from '@retail-inventory-system/common';
 import {
+  IIdempotentResult,
   IRetailPaymentCapturePayload,
   OrderView,
   PaymentStatusEnum,
@@ -9,11 +11,14 @@ import {
 
 import { Order, OrderDomainException, OrderErrorCodeEnum, Payment } from '../../domain';
 import {
+  IIdempotencyStorePort,
   IOrderEventsPublisherPort,
   IOrderRepositoryPort,
   IPaymentGatewayPort,
   IPaymentRepositoryPort,
   ITransactionPort,
+  IDEMPOTENCY_STORE,
+  OCC_RETRY_ATTEMPTS,
   ORDER_EVENTS_PUBLISHER,
   ORDER_REPOSITORY,
   PAYMENT_GATEWAY,
@@ -21,6 +26,7 @@ import {
   TRANSACTION_PORT,
 } from '../ports';
 import { loadAuthorizedOrder } from './order-access';
+import { runWithOrderWriteRetry } from './order-write';
 import { toOrderView } from './order-view.factory';
 
 // Capture Payment is the explicit, second half of the authorize-then-capture policy
@@ -36,11 +42,19 @@ import { toOrderView } from './order-view.factory';
 // customer) — else `ORDER_ACCESS_FORBIDDEN` (403). The permission code is a staff
 // override over the owner-check, not a customer gate.
 //
-// **Idempotent by payment state** (Q10): re-capturing an already-`captured` payment
-// returns the current `captured` state rather than erroring; the `Idempotency-Key` is
-// accepted + logged but not deduped. `amountMinor` is accepted for forward-compat,
-// but partial capture is a later capability — the gateway always captures the full
-// authorized amount, and the emitted event reports the payment row's actual amount.
+// **Two idempotency layers (ADR-036).** First the request-level `Idempotency-Key`:
+// `execute` fingerprints the canonical body (`bodyFingerprint`), looks the
+// `(scope='capture-payment', key)` pair up in the `IDEMPOTENCY_STORE`, and on a
+// same-key/same-body hit **replays the stored `OrderView` before any side effect** — no
+// gateway call, no transition, no `retail.payment.captured` emit (the replay returns
+// before `capture`, which owns the whole flow including the emit). A same-key/*different*-
+// body hit is a client key-reuse bug → `422`; a missing key is a `400` backstop (the
+// gateway enforces the header at the edge). Second, the natural idempotency remains the
+// backstop: re-capturing an already-`captured` payment returns the current `captured`
+// state rather than erroring (so a new-key re-capture is still safe). `amountMinor` is
+// accepted for forward-compat, but partial capture is a later capability — the gateway
+// always captures the full authorized amount, and the emitted event reports the payment
+// row's actual amount.
 //
 // The gateway `capture` call is **out-of-process**, so it runs outside the DB
 // transaction (the authorize-on-place rationale); only the two writes that follow —
@@ -59,15 +73,102 @@ export class CapturePaymentUseCase {
     private readonly orderRepository: IOrderRepositoryPort,
     @Inject(ORDER_EVENTS_PUBLISHER)
     private readonly publisher: IOrderEventsPublisherPort,
+    @Inject(IDEMPOTENCY_STORE)
+    private readonly idempotencyStore: IIdempotencyStorePort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(CapturePaymentUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
 
-  public async execute(payload: IRetailPaymentCapturePayload): Promise<OrderView> {
+  // The scope namespaces the client key by operation, so the same `Idempotency-Key`
+  // reused for a capture and (say) a ship cannot collide in the store (ADR-036).
+  private static readonly SCOPE = 'capture-payment';
+
+  public async execute(
+    payload: IRetailPaymentCapturePayload,
+  ): Promise<IIdempotentResult<OrderView>> {
+    const { idempotencyKey, correlationId, orderId } = payload;
+
+    // Defensive backstop for the gateway's required-header edge check: a direct RMQ
+    // caller that bypassed the gateway still fails fast here (ADR-036).
+    if (!idempotencyKey) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED,
+        'An Idempotency-Key is required to capture a payment',
+      );
+    }
+
+    // Fingerprint the CANONICAL body — the client-controlled capture command minus
+    // transport/identity noise (`correlationId`, `idempotencyKey`, and the owner/staff
+    // ids), so a retry under a fresh correlation id still matches (ADR-036).
+    const fingerprint = bodyFingerprint(CapturePaymentUseCase.canonicalBody(payload));
+
+    // Key-store lookup FIRST. A matching-fingerprint hit replays the stored `OrderView`
+    // WITHOUT touching the gateway and WITHOUT re-emitting — this branch returns before
+    // `capture`, which owns the whole flow. A different-fingerprint hit is one key reused
+    // for a different body → 422.
+    const prior = await this.idempotencyStore.find(CapturePaymentUseCase.SCOPE, idempotencyKey);
+    if (prior) {
+      if (prior.requestFingerprint === fingerprint) {
+        this.logger.debug(
+          { correlationId, orderId, idempotencyKey },
+          'Idempotent replay — returning the stored capture response (no re-execution, no events)',
+        );
+        return { view: prior.responseBody as unknown as OrderView, replayed: true };
+      }
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED,
+        `Idempotency-Key ${idempotencyKey} was already used for a capture-payment request with a different body`,
+      );
+    }
+
+    // Miss — run the capture (the natural payment-state idempotency still applies inside),
+    // then persist the stored response so the next identical retry replays.
+    const view = await this.capture(payload);
+    await this.idempotencyStore.save({
+      scope: CapturePaymentUseCase.SCOPE,
+      key: idempotencyKey,
+      requestFingerprint: fingerprint,
+      // The capture route is `200 OK`; the gateway forces `200` on any replay anyway.
+      responseStatus: HttpStatus.OK,
+      responseBody: view as unknown as Record<string, unknown>,
+    });
+
+    // Authoritative re-read: if a concurrent identical capture stored first, `save`
+    // swallowed our duplicate — return the winner's stored response so both racers
+    // converge (the natural payment-state idempotency guarantees the same order either way).
+    const stored = await this.idempotencyStore.find(CapturePaymentUseCase.SCOPE, idempotencyKey);
+    if (stored && (stored.responseBody as { id?: number }).id !== view.id) {
+      this.logger.debug(
+        { correlationId, orderId, idempotencyKey },
+        'Idempotent replay — a concurrent capture stored first; returning the winning response',
+      );
+      return { view: stored.responseBody as unknown as OrderView, replayed: true };
+    }
+    return { view, replayed: false };
+  }
+
+  // Builds the stable logical body the fingerprint covers: the client-controlled capture
+  // command only. `correlationId` / `idempotencyKey` and the owner-injected `actorId` /
+  // `isStaffCapture` are excluded, so the same intent under a fresh correlation id
+  // fingerprints identically (ADR-036). `amountMinor` may be `undefined` — the fingerprint
+  // helper drops undefined keys, so it hashes the same as an absent amount.
+  private static canonicalBody(payload: IRetailPaymentCapturePayload): Record<string, unknown> {
+    return {
+      orderId: payload.orderId,
+      amountMinor: payload.amountMinor,
+    };
+  }
+
+  // The capture flow proper (run on a store miss): owner-or-staff authorization, the
+  // natural payment-state idempotency, the out-of-process gateway capture, the short
+  // follow-up transaction, and the post-commit `retail.payment.captured` emit. Returns the
+  // `OrderView`.
+  private async capture(payload: IRetailPaymentCapturePayload): Promise<OrderView> {
     const { orderId, actorId, isStaffCapture, amountMinor, idempotencyKey, correlationId } =
       payload;
 
-    // Q10: the `Idempotency-Key` is accepted + logged but NOT deduped here.
     this.logger.info(
       { correlationId, orderId, actorId, isStaffCapture, idempotencyKey },
       'Capturing payment',
@@ -129,21 +230,41 @@ export class CapturePaymentUseCase {
     }
 
     // Short follow-up transaction: advance the Payment and the order's payment axis
-    // atomically.
-    await this.transactionPort.runInTransaction(async (scope) => {
-      payment.capture(result.capturedAt);
-      await this.paymentRepository.save(payment, scope);
+    // atomically, under the bounded OCC retry (ADR-036). The gateway `capture` above
+    // ran ONCE, outside the loop — a retry never re-charges. Each attempt re-loads the
+    // payment + order INSIDE its own transaction (so a lost order CAS re-reads fresh,
+    // committed state and the domain mutators stay valid on the retry), captures the
+    // order's version at load, and version-checked-CAS-saves the order. A concurrent
+    // capture that already captured the payment surfaces `PAYMENT_INVALID_STATUS_TRANSITION`
+    // (a terminal domain 409, never retried); a lost order CAS retries then
+    // `409 VERSION_MISMATCH` at exhaustion.
+    await runWithOrderWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      () =>
+        this.transactionPort.runInTransaction(async (scope) => {
+          const freshPayment = await this.paymentRepository.findByOrderId(orderId, scope);
+          if (!freshPayment) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.ORDER_INVALID_PAYMENT_TRANSITION,
+              `Order ${orderId} has no payment to capture`,
+            );
+          }
+          freshPayment.capture(result.capturedAt);
+          await this.paymentRepository.save(freshPayment, scope);
 
-      const fresh = await this.orderRepository.findById(orderId, scope);
-      if (!fresh) {
-        throw new OrderDomainException(
-          OrderErrorCodeEnum.ORDER_NOT_FOUND,
-          `Order ${orderId} not found while capturing payment`,
-        );
-      }
-      fresh.markPaymentCaptured();
-      await this.orderRepository.save(fresh, scope);
-    });
+          const fresh = await this.orderRepository.findById(orderId, scope);
+          if (!fresh) {
+            throw new OrderDomainException(
+              OrderErrorCodeEnum.ORDER_NOT_FOUND,
+              `Order ${orderId} not found while capturing payment`,
+            );
+          }
+          const versionAtLoad = fresh.version;
+          fresh.markPaymentCaptured();
+          await this.orderRepository.save(fresh, scope, versionAtLoad);
+        }),
+      { orderId, correlationId },
+    );
 
     // Re-read so the view carries the advanced `paymentStatus` + the captured payment.
     // The two reads hit different tables with no data dependency, so run them

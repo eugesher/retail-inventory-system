@@ -29,6 +29,12 @@ import {
 import {
   IAddressRepositoryPort,
   IFulfillmentRepositoryPort,
+  IIdempotencyFinalizeInput,
+  IIdempotencyRecord,
+  IIdempotencyRecordInput,
+  IIdempotencyReservation,
+  IIdempotencyReserveInput,
+  IIdempotencyStorePort,
   IOrderCartReaderPort,
   IOrderCartSnapshot,
   IOrderCatalogGatewayPort,
@@ -51,6 +57,7 @@ import {
   ITransactionPort,
   ITransactionScope,
 } from '../../ports';
+import { OrderWriteConflictError } from '../order-write-conflict.error';
 
 // Jest-free so the production build (which excludes `*.spec.ts` but not
 // `test-doubles.ts`) stays clean — the catalog/inventory/cart convention. Methods
@@ -79,6 +86,35 @@ export class CommitFailingTransactionPort implements ITransactionPort {
   public async runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
     await work(FAKE_SCOPE);
     throw this.error;
+  }
+}
+
+// A fake repository whose in-memory state can be snapshotted and restored — the seam a
+// rollback-aware transaction port needs to simulate a rolled-back attempt.
+export interface ISnapshotableFake {
+  snapshot(): () => void;
+}
+
+// A rollback-aware transaction port for the OCC retry specs (ADR-036): it snapshots the
+// given fakes BEFORE running the work and restores them if the work throws — simulating
+// a real transaction's rollback. Without it a fake save that partially wrote (e.g. the
+// ship flow persisted the fulfillment + payment before the order CAS threw) would leave
+// that write visible to the retry, so the re-read domain object would be in a state its
+// mutator rejects. With it, a lost order CAS rolls the whole attempt back and the retry
+// re-reads pristine state — exactly as the real DB transaction behaves.
+export class RollbackFakeTransactionPort implements ITransactionPort {
+  constructor(private readonly fakes: ISnapshotableFake[]) {}
+
+  public async runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
+    const restores = this.fakes.map((fake) => fake.snapshot());
+    try {
+      return await work(FAKE_SCOPE);
+    } catch (error) {
+      for (const restore of restores) {
+        restore();
+      }
+      throw error;
+    }
   }
 }
 
@@ -209,9 +245,26 @@ export class FakeCatalogGateway implements IOrderCatalogGatewayPort {
 // merged state — enough to exercise the place + authorize orchestration.
 export class FakeOrderRepository implements IOrderRepositoryPort {
   public saveCount = 0;
+  // OCC simulation (ADR-036): when > 0, the next N version-checked saves
+  // (`expectedVersion` supplied) reject with `OrderWriteConflictError` and decrement —
+  // the retry helper re-reads + retries. Set it above the injected budget to prove
+  // retry-exhausted → `VERSION_MISMATCH`, or below it to prove retry-then-success.
+  public conflictsBeforeSuccess = 0;
   private seq = 0;
   private readonly byId = new Map<number, Order>();
   private readonly addresses = new Map<number, { billing: string; shipping: string }>();
+
+  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
+  public snapshot(): () => void {
+    const copy = new Map(this.byId);
+    const addrCopy = new Map(this.addresses);
+    return (): void => {
+      this.byId.clear();
+      for (const [k, v] of copy) this.byId.set(k, v);
+      this.addresses.clear();
+      for (const [k, v] of addrCopy) this.addresses.set(k, v);
+    };
+  }
 
   public findById(id: number): Promise<Order | null> {
     const order = this.byId.get(id);
@@ -227,8 +280,17 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
     return Promise.resolve(null);
   }
 
-  public save(order: Order): Promise<Order> {
+  public save(order: Order, _scope?: ITransactionScope, expectedVersion?: number): Promise<Order> {
     this.saveCount += 1;
+    // A version-checked CAS that loses the race (the simulated conflict) — mirrors the
+    // real repo throwing `OrderWriteConflictError`, which the retry helper catches.
+    if (expectedVersion !== undefined && this.conflictsBeforeSuccess > 0) {
+      this.conflictsBeforeSuccess -= 1;
+      const current = this.byId.get(order.id!);
+      return Promise.reject(
+        new OrderWriteConflictError(order.id!, current ? current.version : expectedVersion),
+      );
+    }
     const id = order.id ?? ++this.seq;
     const orderNumber =
       order.id === null ? `ORD-2026-${String(id).padStart(8, '0')}` : order.orderNumber;
@@ -331,6 +393,15 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
     const stored = this.rebuild(payment, id);
     this.byId.set(id, stored);
     return Promise.resolve(stored);
+  }
+
+  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
+  public snapshot(): () => void {
+    const copy = new Map(this.byId);
+    return (): void => {
+      this.byId.clear();
+      for (const [k, v] of copy) this.byId.set(k, v);
+    };
   }
 
   public findById(id: number): Promise<Payment | null> {
@@ -612,6 +683,15 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
     return Promise.resolve(this.rebuild(stored, id));
   }
 
+  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
+  public snapshot(): () => void {
+    const copy = new Map(this.byId);
+    return (): void => {
+      this.byId.clear();
+      for (const [k, v] of copy) this.byId.set(k, v);
+    };
+  }
+
   public findById(id: number): Promise<Fulfillment | null> {
     const fulfillment = this.byId.get(id);
     return Promise.resolve(fulfillment ? this.rebuild(fulfillment, id) : null);
@@ -662,6 +742,173 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
     });
   }
 }
+
+// A stored row in the fake — pending-aware: a reserved-but-not-finalized row (ADR-036
+// reserve-first) carries a `null` response until `finalize` fills it in, mirroring the real
+// table's nullable `response_status` / `response_body`.
+interface IFakeStoredRow extends Omit<IIdempotencyRecord, 'responseStatus' | 'responseBody'> {
+  responseStatus: number | null;
+  responseBody: Record<string, unknown> | null;
+}
+
+// In-memory `IDEMPOTENCY_STORE` double. Supports BOTH idempotency flows:
+//  - `find`/`save` (place/capture/ship): `find` returns a completed record or null; `save`
+//    inserts unless the `(scope, key)` PK already holds a row, swallowing the duplicate (the
+//    real adapter's ER_DUP_ENTRY behavior). Arm a pre-committed "winner" via
+//    `armConcurrentWinner` for the concurrent-first-writer specs: the FIRST `find` misses,
+//    our `save` collides and is swallowed, and the post-save `find` reveals the winner's body.
+//  - `reserve`/`finalize`/`release` (refund, ADR-036 concurrency hardening): `reserve` inserts
+//    a pending row and returns `reserved` on a fresh key, `replay` on a matching-fingerprint
+//    completed row, `mismatch` on a different fingerprint, `in-progress` on a still-pending
+//    row; `finalize` fills the response in; `release` drops a still-pending row.
+export class FakeIdempotencyStore implements IIdempotencyStorePort {
+  public readonly saved: IIdempotencyRecordInput[] = [];
+  public readonly reserved: IIdempotencyReserveInput[] = [];
+  public readonly finalized: IIdempotencyFinalizeInput[] = [];
+  public readonly released: string[] = [];
+  public findCalls = 0;
+  public reserveCalls = 0;
+  private readonly rows = new Map<string, IFakeStoredRow>();
+  private winner: IIdempotencyRecord | null = null;
+
+  private static keyOf(scope: string, key: string): string {
+    return `${scope}::${key}`;
+  }
+
+  // Seed a completed record visible immediately — the straightforward replay / 422 cases.
+  public seed(record: IIdempotencyRecord): void {
+    this.rows.set(FakeIdempotencyStore.keyOf(record.scope, record.key), { ...record });
+  }
+
+  // Arm a concurrent winner: hidden from the first `find` (the miss), revealed on the
+  // post-save `find`, and holding the PK so our own `save` is swallowed.
+  public armConcurrentWinner(record: IIdempotencyRecord): void {
+    this.winner = record;
+  }
+
+  public find(scope: string, key: string): Promise<IIdempotencyRecord | null> {
+    this.findCalls += 1;
+    const k = FakeIdempotencyStore.keyOf(scope, key);
+    if (this.winner && this.findCalls > 1) {
+      this.rows.set(k, { ...this.winner });
+    }
+    const row = this.rows.get(k);
+    if (!row) {
+      return Promise.resolve(null);
+    }
+    // A pending (reserved, not finalized) row is not a replayable record — a miss for `find`.
+    if (row.responseBody === null) {
+      return Promise.resolve(null);
+    }
+    return Promise.resolve(FakeIdempotencyStore.toRecord(row));
+  }
+
+  public save(record: IIdempotencyRecordInput): Promise<void> {
+    this.saved.push(record);
+    const k = FakeIdempotencyStore.keyOf(record.scope, record.key);
+    // A concurrent winner (or a prior row) holds the PK → swallow the duplicate as a
+    // no-op, exactly as the real adapter swallows ER_DUP_ENTRY.
+    if (this.winner || this.rows.has(k)) {
+      return Promise.resolve();
+    }
+    this.rows.set(k, {
+      ...record,
+      createdAt: new Date('2026-06-10T00:00:00.000Z'),
+      expiresAt: new Date('2026-06-11T00:00:00.000Z'),
+    });
+    return Promise.resolve();
+  }
+
+  // Reserve-first (ADR-036): the atomic INSERT-a-pending-row front door the refund flow uses.
+  public reserve(input: IIdempotencyReserveInput): Promise<IIdempotencyReservation> {
+    this.reserveCalls += 1;
+    this.reserved.push(input);
+    const k = FakeIdempotencyStore.keyOf(input.scope, input.key);
+    const existing = this.rows.get(k);
+    if (!existing) {
+      this.rows.set(k, {
+        scope: input.scope,
+        key: input.key,
+        requestFingerprint: input.requestFingerprint,
+        responseStatus: null,
+        responseBody: null,
+        createdAt: new Date('2026-06-10T00:00:00.000Z'),
+        expiresAt: new Date('2026-06-11T00:00:00.000Z'),
+      });
+      return Promise.resolve({ outcome: 'reserved' });
+    }
+    if (existing.requestFingerprint !== input.requestFingerprint) {
+      return Promise.resolve({ outcome: 'mismatch' });
+    }
+    if (existing.responseBody === null) {
+      return Promise.resolve({ outcome: 'in-progress' });
+    }
+    return Promise.resolve({ outcome: 'replay', record: FakeIdempotencyStore.toRecord(existing) });
+  }
+
+  public finalize(input: IIdempotencyFinalizeInput): Promise<void> {
+    this.finalized.push(input);
+    const row = this.rows.get(FakeIdempotencyStore.keyOf(input.scope, input.key));
+    if (row) {
+      row.responseStatus = input.responseStatus;
+      row.responseBody = input.responseBody;
+    }
+    return Promise.resolve();
+  }
+
+  public release(scope: string, key: string): Promise<void> {
+    const k = FakeIdempotencyStore.keyOf(scope, key);
+    this.released.push(k);
+    // Only a still-pending row is released (the real adapter guards `response_body IS NULL`).
+    if (this.rows.get(k)?.responseBody === null) {
+      this.rows.delete(k);
+    }
+    return Promise.resolve();
+  }
+
+  // The TTL purge: drop every row whose `expiresAt` is strictly before `now`, returning the
+  // count removed — the in-memory mirror of the real adapter's bounded
+  // `DELETE … WHERE expires_at < now`. A row exactly at `now` is retained (strict `<`).
+  public deleteExpired(now: Date): Promise<number> {
+    let deleted = 0;
+    for (const [k, record] of this.rows) {
+      if (record.expiresAt.getTime() < now.getTime()) {
+        this.rows.delete(k);
+        deleted += 1;
+      }
+    }
+    return Promise.resolve(deleted);
+  }
+
+  private static toRecord(row: IFakeStoredRow): IIdempotencyRecord {
+    return {
+      scope: row.scope,
+      key: row.key,
+      requestFingerprint: row.requestFingerprint,
+      responseStatus: row.responseStatus!,
+      responseBody: row.responseBody!,
+      createdAt: row.createdAt,
+      expiresAt: row.expiresAt,
+    };
+  }
+}
+
+// Builds a stored idempotency record fixture for the replay / reuse / concurrent specs.
+// `responseBody` is an `OrderView`-shaped object (only the fields the specs assert are
+// populated); `requestFingerprint` defaults to a canonical placeholder the tests can
+// match or deliberately diverge from.
+export const buildIdempotencyRecord = (
+  overrides: Partial<IIdempotencyRecord> = {},
+): IIdempotencyRecord => ({
+  scope: 'place-order',
+  key: 'idem-1',
+  requestFingerprint: 'fingerprint-placeholder',
+  responseStatus: 201,
+  responseBody: { id: 777, orderNumber: 'ORD-2026-00000777' },
+  createdAt: new Date('2026-06-10T00:00:00.000Z'),
+  expiresAt: new Date('2026-06-11T00:00:00.000Z'),
+  ...overrides,
+});
 
 // A `VariantWithProductView` fixture builder for the snapshot assertions.
 export const buildVariant = (

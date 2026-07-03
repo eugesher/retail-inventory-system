@@ -34,6 +34,10 @@ const RETURN_ERROR_STATUS: Record<ReturnErrorCodeEnum, HttpStatus> = {
   [ReturnErrorCodeEnum.RETURN_ORDER_NOT_RETURNABLE]: HttpStatus.CONFLICT,
   [ReturnErrorCodeEnum.RETURN_WINDOW_EXPIRED]: HttpStatus.CONFLICT,
   [ReturnErrorCodeEnum.RETURN_QUANTITY_EXCEEDS_RETURNABLE]: HttpStatus.CONFLICT,
+  // Optimistic-concurrency conflict → 409: a return-request status write lost its
+  // bounded retry budget to a concurrent writer (ADR-036 — the wire code is the uniform
+  // `VERSION_MISMATCH`, and the exception carries `details.currentVersion`).
+  [ReturnErrorCodeEnum.RETURN_VERSION_MISMATCH]: HttpStatus.CONFLICT,
 };
 
 // Terminates a `ReturnDomainException` into the wire error shape the gateway's
@@ -47,10 +51,15 @@ export class ReturnRpcExceptionFilter implements RpcExceptionFilter<ReturnDomain
   public catch(exception: ReturnDomainException): Observable<never> {
     const statusCode = RETURN_ERROR_STATUS[exception.code] ?? HttpStatus.INTERNAL_SERVER_ERROR;
 
+    // `details` rides along only when present (e.g. `{ currentVersion }` on a
+    // `VERSION_MISMATCH`, ADR-036) — the gateway's `throwRpcError` forwards an
+    // object-valued `details` verbatim and harmlessly drops an absent one, so a client
+    // reads `details.currentVersion` end-to-end (the cart / order forwarding precedent).
     return throwError(() => ({
       statusCode,
       message: exception.message,
       code: exception.code,
+      ...(exception.details !== undefined ? { details: exception.details } : {}),
     }));
   }
 }

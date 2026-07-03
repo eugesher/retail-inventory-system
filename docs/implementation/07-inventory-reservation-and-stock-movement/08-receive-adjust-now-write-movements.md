@@ -79,8 +79,8 @@ its audit record commit or roll back together. Two properties fall out of the
   losing attempt therefore never writes a movement; only the winning attempt
   does.
 - **Exactly one row per successful mutation.** `runWithStockWriteRetry` re-runs
-  the *whole* attempt from a fresh read on a conflict (up to
-  `MAX_WRITE_ATTEMPTS = 5`). Because the append sits past the throwing persist,
+  the *whole* attempt from a fresh read on a conflict (up to the configurable
+  `OCC_RETRY_ATTEMPTS` budget, default 5). Because the append sits past the throwing persist,
   retries cost nothing in the ledger: a Receive that took three attempts to win
   the optimistic race still appends one `receipt`, never three. A below-zero
   Adjust throws `STOCK_RESULT_NEGATIVE` even earlier (in `changeOnHand`, before

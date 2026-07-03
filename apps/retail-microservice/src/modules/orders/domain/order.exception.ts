@@ -24,6 +24,20 @@ export enum OrderErrorCodeEnum {
   ORDER_TOTAL_MISMATCH = 'ORDER_TOTAL_MISMATCH',
   // The optimistic-concurrency token must be a non-negative integer — 400.
   ORDER_VERSION_INVALID = 'ORDER_VERSION_INVALID',
+  // Optimistic-concurrency conflict on an order status write → 409 (ADR-036). Two
+  // writers raced the same order (two staff editing one order, a capture racing a
+  // ship of a sibling fulfillment) and the bounded retry budget was exhausted — the
+  // root `version` moved under the writer on every attempt. The **member name** keeps
+  // the `ORDER_` prefix (the module convention) but the **wire value** is the uniform
+  // cross-service `VERSION_MISMATCH` — so a client branches on one code regardless of
+  // which aggregate lost the race (cart / order / fulfillment / return) — and the
+  // exception's `details.currentVersion` carries the row's now-current version so the
+  // caller can refetch-and-retry (the cart `CART_VERSION_MISMATCH` / inventory
+  // `STOCK_WRITE_CONFLICT` precedent). Distinct from a *cross-transition* domain
+  // conflict (`ORDER_NOT_CANCELLABLE` / `FULFILLMENT_INVALID_STATUS_TRANSITION`),
+  // which is the pessimistic-lock loser finding the state genuinely illegal after
+  // serialization — both mean "you lost the race", but only the CAS loss is retried.
+  ORDER_VERSION_MISMATCH = 'VERSION_MISMATCH',
   // A payment-status mutator was called from a state that does not allow it
   // (`markPaymentAuthorized` off non-`none`, `markPaymentCaptured` off
   // non-`authorized`) — a well-formed request the resource state forbids, 409.
@@ -59,6 +73,24 @@ export enum OrderErrorCodeEnum {
   // fake, but modeled, symmetric to `ORDER_PAYMENT_NOT_APPROVED`) — the payment stays
   // `authorized` and the capture surfaces a 409.
   ORDER_PAYMENT_NOT_CAPTURED = 'ORDER_PAYMENT_NOT_CAPTURED',
+
+  // --- Request-level idempotency (ADR-036) ---
+  // Place Order was invoked with no `Idempotency-Key`. The header is required on the
+  // money-/stock-moving write; the gateway rejects a missing header at the edge with
+  // `IDEMPOTENCY_KEY_REQUIRED`, and this is the retail-side backstop for a direct RMQ
+  // caller that bypassed the gateway — 400.
+  ORDER_IDEMPOTENCY_KEY_REQUIRED = 'ORDER_IDEMPOTENCY_KEY_REQUIRED',
+  // The same `Idempotency-Key` was replayed with a *different* request body (a
+  // different canonical fingerprint) — a client reused one key for two distinct
+  // orders, surfaced loudly rather than silently honored with the wrong cached
+  // response — 422.
+  ORDER_IDEMPOTENCY_KEY_REUSED = 'ORDER_IDEMPOTENCY_KEY_REUSED',
+  // A concurrent request with the same `Idempotency-Key` is already in flight (the
+  // reserve-first refund flow — ADR-036 concurrency hardening): the first submit atomically
+  // reserved the key and is mid-execution, so this racing duplicate is turned away BEFORE
+  // it can run the (non-idempotent) gateway refund a second time. The client refetches or
+  // retries once the in-flight request completes (then it replays the stored result) — 409.
+  ORDER_IDEMPOTENCY_KEY_IN_PROGRESS = 'ORDER_IDEMPOTENCY_KEY_IN_PROGRESS',
 
   // A line's opaque `variantId` must be a positive integer — 400.
   ORDER_LINE_VARIANT_INVALID = 'ORDER_LINE_VARIANT_INVALID',
@@ -183,9 +215,20 @@ export enum OrderErrorCodeEnum {
 // the message.
 export class OrderDomainException extends DomainException {
   public readonly code: OrderErrorCodeEnum;
+  // Optional structured payload forwarded through the RPC filter and the gateway
+  // error util (the cart `{ currentVersion }` / inventory `{ available }` precedent),
+  // so a client branches on data rather than parsing the human message. The OCC
+  // conflict carries `{ currentVersion }` here so the caller can refetch-and-retry.
+  // Frozen-shaped (`Readonly`) because it is read, never mutated, downstream.
+  public readonly details?: Readonly<Record<string, unknown>>;
 
-  constructor(code: OrderErrorCodeEnum, message: string) {
+  constructor(
+    code: OrderErrorCodeEnum,
+    message: string,
+    details?: Readonly<Record<string, unknown>>,
+  ) {
     super(message);
     this.code = code;
+    this.details = details;
   }
 }

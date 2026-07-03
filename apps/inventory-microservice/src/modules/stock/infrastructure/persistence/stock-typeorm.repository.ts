@@ -143,7 +143,14 @@ export class StockTypeormRepository
     );
 
     if (!result.affected) {
-      throw new StockWriteConflictError(stockLevel.variantId, stockLevel.stockLocationId);
+      // Carry the `from` version we lost the CAS against onto the retry signal (ADR-036)
+      // — the conflict path stays deliberately query-free (no re-read of the winning
+      // version), so only `expectedVersion` is surfaced.
+      throw new StockWriteConflictError(
+        stockLevel.variantId,
+        stockLevel.stockLocationId,
+        expectedVersion,
+      );
     }
 
     return this.reload(repo, stockLevel.id!);

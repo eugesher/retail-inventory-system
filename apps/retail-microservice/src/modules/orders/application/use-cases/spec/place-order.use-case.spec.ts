@@ -1,5 +1,6 @@
 import { PinoLogger } from 'nestjs-pino';
 
+import { bodyFingerprint } from '@retail-inventory-system/common';
 import {
   CartStatusEnum,
   IAddressInput,
@@ -17,6 +18,7 @@ import { IOrderCartSnapshot, ITransactionPort } from '../../ports';
 import { AuthorizePaymentUseCase } from '../authorize-payment.use-case';
 import { PlaceOrderUseCase } from '../place-order.use-case';
 import {
+  buildIdempotencyRecord,
   buildPrice,
   buildVariant,
   CommitFailingTransactionPort,
@@ -25,6 +27,7 @@ import {
   FakeCartReader,
   FakeCatalogGateway,
   FakeCustomerContactReader,
+  FakeIdempotencyStore,
   FakeOrderInventoryGateway,
   FakeOrderRepository,
   FakePaymentGateway,
@@ -81,6 +84,7 @@ interface IHarness {
   paymentRepository: FakePaymentRepository;
   paymentGateway: FakePaymentGateway;
   customerContactReader: FakeCustomerContactReader;
+  store: FakeIdempotencyStore;
   publisher: SpyOrderEventsPublisher;
   logger: PinoLoggerMock;
 }
@@ -91,6 +95,7 @@ const makeHarness = (
   approve = true,
   transactionPort: ITransactionPort = new FakeTransactionPort(),
   customerContactReader: FakeCustomerContactReader = new FakeCustomerContactReader(),
+  store: FakeIdempotencyStore = new FakeIdempotencyStore(),
 ): IHarness => {
   const logger = makePinoLoggerMock();
   const typedLogger = logger as unknown as PinoLogger;
@@ -120,6 +125,7 @@ const makeHarness = (
     transactionPort,
     publisher,
     customerContactReader,
+    store,
     authorize,
     typedLogger,
   );
@@ -133,10 +139,23 @@ const makeHarness = (
     paymentRepository,
     paymentGateway,
     customerContactReader,
+    store,
     publisher,
     logger,
   };
 };
+
+// The canonical body the use case fingerprints — the client-controlled place command
+// minus `correlationId` / `idempotencyKey` / the owner-injected `customerId` (ADR-036).
+// Recomputed here with the same helper so a seeded record's fingerprint matches (a
+// replay) or deliberately diverges (a 422).
+const fingerprintOf = (payload: IPlaceOrderPayload): string =>
+  bodyFingerprint({
+    cartId: payload.cartId,
+    shippingAddress: payload.shippingAddress,
+    billingAddress: payload.billingAddress,
+    paymentMethod: payload.paymentMethod,
+  });
 
 const placePayload = (overrides: Partial<IPlaceOrderPayload> = {}): IPlaceOrderPayload => ({
   cartId: 'cart-1',
@@ -154,7 +173,7 @@ describe('PlaceOrderUseCase', () => {
     it('snapshots lines from the catalog, places a pending order, and authorizes payment', async () => {
       const h = makeHarness(activeCart());
 
-      const view = await h.useCase.execute(placePayload());
+      const { view } = await h.useCase.execute(placePayload());
 
       // Order header: pending lifecycle, authorized payment, unfulfilled fulfillment
       // — the three orthogonal axes (ADR-028 §2).
@@ -270,7 +289,7 @@ describe('PlaceOrderUseCase', () => {
         new FakeCustomerContactReader(null, false),
       );
 
-      const view = await h.useCase.execute(placePayload());
+      const { view } = await h.useCase.execute(placePayload());
 
       expect(view.status).toBe(OrderStatusEnum.PENDING);
       expect(h.publisher.placed).toHaveLength(1);
@@ -422,11 +441,12 @@ describe('PlaceOrderUseCase', () => {
     it('returns the same order on a repeat place and does not create a duplicate', async () => {
       const h = makeHarness(activeCart());
 
-      const first = await h.useCase.execute(placePayload());
+      const { view: first } = await h.useCase.execute(placePayload());
       const saveCountAfterFirst = h.orderRepository.saveCount;
 
-      // The cart is now converted; a repeat place resolves the existing order.
-      const second = await h.useCase.execute(placePayload({ idempotencyKey: 'idem-2' }));
+      // The cart is now converted; a repeat place (a NEW key → a store miss) resolves the
+      // existing order via the durable cart-state backstop.
+      const { view: second } = await h.useCase.execute(placePayload({ idempotencyKey: 'idem-2' }));
 
       expect(second.id).toBe(first.id);
       expect(second.orderNumber).toBe(first.orderNumber);
@@ -436,6 +456,123 @@ describe('PlaceOrderUseCase', () => {
       expect(h.cartReader.convertedCount).toBe(1);
       expect(h.paymentGateway.authorizeCount).toBe(1);
       expect(second.payment).toBeDefined();
+    });
+  });
+
+  describe('request-level idempotency (ADR-036)', () => {
+    const withStore = (store: FakeIdempotencyStore): IHarness =>
+      makeHarness(
+        activeCart(),
+        catalogMaps(),
+        true,
+        new FakeTransactionPort(),
+        new FakeCustomerContactReader(),
+        store,
+      );
+
+    it('replays the stored response on a matching key + fingerprint, with no side effects', async () => {
+      const store = new FakeIdempotencyStore();
+      // A prior place under the same key + the same canonical body — its stored OrderView
+      // is what the replay must return verbatim.
+      const priorView = { id: 4242, orderNumber: 'ORD-2026-00004242', status: 'pending' };
+      store.seed(
+        buildIdempotencyRecord({
+          key: 'idem-1',
+          requestFingerprint: fingerprintOf(placePayload()),
+          responseBody: priorView,
+        }),
+      );
+      const h = withStore(store);
+
+      const { view, replayed } = await h.useCase.execute(placePayload());
+
+      expect(replayed).toBe(true);
+      expect(view).toEqual(priorView);
+      // A replay is side-effect-free beyond returning the stored response: no inventory,
+      // no payment, no events, no cart conversion, no order write, no second store write.
+      expect(h.inventory.allocateCalls).toHaveLength(0);
+      expect(h.paymentGateway.authorizeCount).toBe(0);
+      expect(h.publisher.placed).toHaveLength(0);
+      expect(h.publisher.authorized).toHaveLength(0);
+      expect(h.cartReader.convertedCount).toBe(0);
+      expect(h.orderRepository.saveCount).toBe(0);
+      expect(h.store.saved).toHaveLength(0);
+    });
+
+    it('rejects a reused key with a different body (different fingerprint) as 422', async () => {
+      const store = new FakeIdempotencyStore();
+      store.seed(
+        buildIdempotencyRecord({
+          key: 'idem-1',
+          requestFingerprint: 'a-different-body-fingerprint',
+        }),
+      );
+      const h = withStore(store);
+
+      await expect(h.useCase.execute(placePayload())).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED,
+      });
+      // The reuse is rejected before any place work runs.
+      expect(h.orderRepository.saveCount).toBe(0);
+      expect(h.inventory.allocateCalls).toHaveLength(0);
+      expect(h.paymentGateway.authorizeCount).toBe(0);
+    });
+
+    it('rejects a missing Idempotency-Key with ORDER_IDEMPOTENCY_KEY_REQUIRED (400 backstop)', async () => {
+      const h = makeHarness(activeCart());
+
+      await expect(
+        h.useCase.execute(placePayload({ idempotencyKey: undefined })),
+      ).rejects.toMatchObject({ code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED });
+      expect(h.orderRepository.saveCount).toBe(0);
+    });
+
+    it('persists the stored response after a fresh place (miss), returned not replayed', async () => {
+      const h = makeHarness(activeCart());
+
+      const { view, replayed } = await h.useCase.execute(placePayload());
+
+      expect(replayed).toBe(false);
+      // The place ran fully (a fresh execution).
+      expect(h.orderRepository.saveCount).toBeGreaterThan(0);
+      expect(h.publisher.placed).toHaveLength(1);
+      // The record was stored under (place-order, key) with the fingerprint + the OrderView
+      // as the response body + the 201 success status.
+      expect(h.store.saved).toHaveLength(1);
+      expect(h.store.saved[0]).toMatchObject({
+        scope: 'place-order',
+        key: 'idem-1',
+        requestFingerprint: fingerprintOf(placePayload()),
+        responseStatus: 201,
+      });
+      expect((h.store.saved[0].responseBody as { id?: number }).id).toBe(view.id);
+    });
+
+    it('converges on the concurrent winner: a duplicate save falls back to the stored winner as a replay', async () => {
+      const store = new FakeIdempotencyStore();
+      // A simultaneous identical place committed + stored first (a DIFFERENT order id). It
+      // is hidden from our first lookup (the miss) and revealed on the post-save re-read.
+      const winnerView = { id: 999, orderNumber: 'ORD-2026-00000999' };
+      store.armConcurrentWinner(
+        buildIdempotencyRecord({
+          key: 'idem-1',
+          requestFingerprint: fingerprintOf(placePayload()),
+          responseBody: winnerView,
+        }),
+      );
+      const h = withStore(store);
+
+      const { view, replayed } = await h.useCase.execute(placePayload());
+
+      // Our save lost the composite-PK race, so the winner's stored order is returned as a
+      // replay — the two racers converge on one response.
+      expect(replayed).toBe(true);
+      expect(view).toEqual(winnerView);
+      // Exactly one save was attempted (swallowed as the duplicate).
+      expect(h.store.saved).toHaveLength(1);
+      // In production the cart-conversion CAS is what guarantees exactly one order per cart
+      // (the loser's CAS fails and rolls back — see 'does not allocate when the
+      // cart-conversion CAS loses'); this test isolates the store's convergence step.
     });
   });
 });

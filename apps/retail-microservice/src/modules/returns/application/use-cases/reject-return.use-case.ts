@@ -7,10 +7,12 @@ import { ReturnRequest } from '../../domain';
 import {
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  OCC_RETRY_ATTEMPTS,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
 } from '../ports';
 import { loadReturnById } from './return-access';
+import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
 // Reject Return walks a `requested` RMA → `rejected` (staff `order:return-authorize`,
@@ -28,6 +30,8 @@ export class RejectReturnUseCase {
     private readonly repository: IReturnRequestRepositoryPort,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
+    @Inject(OCC_RETRY_ATTEMPTS)
+    private readonly maxAttempts: number,
     @InjectPinoLogger(RejectReturnUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -37,9 +41,20 @@ export class RejectReturnUseCase {
 
     this.logger.info({ correlationId, rmaId, actorId }, 'Rejecting return request');
 
-    const request = await loadReturnById(this.repository, rmaId);
-    request.reject(new Date(), reason ?? null);
-    const saved = await this.repository.save(request);
+    // Version-checked CAS under the bounded OCC retry (ADR-036): re-read the RMA afresh
+    // each attempt, walk `requested → rejected` (appending the reason to notes), and save
+    // with the version pinned. A lost CAS retries; a non-`requested` start is a terminal
+    // domain 409, never retried.
+    const saved = await runWithReturnWriteRetry(
+      { logger: this.logger, maxAttempts: this.maxAttempts },
+      async () => {
+        const request = await loadReturnById(this.repository, rmaId);
+        const versionAtLoad = request.version;
+        request.reject(new Date(), reason ?? null);
+        return this.repository.save(request, undefined, versionAtLoad);
+      },
+      { rmaId, correlationId },
+    );
 
     await this.emitRejected(saved, reason ?? null, correlationId);
 

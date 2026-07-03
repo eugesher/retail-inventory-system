@@ -1,5 +1,6 @@
 import { PinoLogger } from 'nestjs-pino';
 
+import { bodyFingerprint } from '@retail-inventory-system/common';
 import {
   FulfillmentStatusEnum,
   IRetailFulfillmentShipPayload,
@@ -19,10 +20,12 @@ import {
 } from '../../../domain';
 import { ShipFulfillmentUseCase } from '../ship-fulfillment.use-case';
 import {
+  buildIdempotencyRecord,
   buildOrderWithLinesFixture,
   buildPaymentFixture,
   FAKE_CUSTOMER_EMAIL,
   FakeCustomerContactReader,
+  FakeIdempotencyStore,
   FakeOrderCommitSaleGateway,
   FakeOrderRepository,
   FakeFulfillmentRepository,
@@ -30,6 +33,7 @@ import {
   FakePaymentRepository,
   FakeTransactionPort,
   makeWireError,
+  RollbackFakeTransactionPort,
   SpyOrderEventsPublisher,
 } from './test-doubles';
 
@@ -57,6 +61,7 @@ interface IHarness {
   commitSaleGateway: FakeOrderCommitSaleGateway;
   publisher: SpyOrderEventsPublisher;
   customerContactReader: FakeCustomerContactReader;
+  store: FakeIdempotencyStore;
   fulfillmentId: number;
 }
 
@@ -66,11 +71,15 @@ const makeHarness = async (
     payment?: Payment;
     fulfillmentLines?: { orderLineId: number; quantity: number }[];
     captureOk?: boolean;
+    store?: FakeIdempotencyStore;
+    // Arms the OCC retry path (ADR-036): the order repo loses this many version CAS
+    // races before succeeding, and the transaction port becomes rollback-aware so each
+    // lost attempt's fulfillment/payment writes are undone (as a real tx rolls back).
+    occConflicts?: number;
   } = {},
 ): Promise<IHarness> => {
   const order = opts.order ?? SINGLE_LINE_ORDER();
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
-  const transactionPort = new FakeTransactionPort();
   const orderRepository = new FakeOrderRepository();
   const fulfillmentRepository = new FakeFulfillmentRepository();
   const paymentRepository = new FakePaymentRepository();
@@ -78,6 +87,15 @@ const makeHarness = async (
   const commitSaleGateway = new FakeOrderCommitSaleGateway();
   const publisher = new SpyOrderEventsPublisher();
   const customerContactReader = new FakeCustomerContactReader();
+  const store = opts.store ?? new FakeIdempotencyStore();
+  // A rollback-aware port for the OCC specs (undoes an attempt's writes on a lost CAS),
+  // else the plain immediate-run port for every existing test.
+  const transactionPort = opts.occConflicts
+    ? new RollbackFakeTransactionPort([orderRepository, fulfillmentRepository, paymentRepository])
+    : new FakeTransactionPort();
+  if (opts.occConflicts) {
+    orderRepository.conflictsBeforeSuccess = opts.occConflicts;
+  }
 
   await orderRepository.save(order);
   const payment =
@@ -102,6 +120,9 @@ const makeHarness = async (
     commitSaleGateway,
     publisher,
     customerContactReader,
+    store,
+    // OCC_RETRY_ATTEMPTS budget (ADR-036).
+    5,
     logger,
   );
   return {
@@ -113,6 +134,7 @@ const makeHarness = async (
     commitSaleGateway,
     publisher,
     customerContactReader,
+    store,
     fulfillmentId: saved.id!,
   };
 };
@@ -127,16 +149,29 @@ const shipPayload = (
   carrier: 'UPS',
   actorId: OWNER_ID,
   isStaffFulfill: false,
+  idempotencyKey: 'idem-1',
   correlationId: 'corr-1',
   ...overrides,
 });
+
+// The canonical body the use case fingerprints — the fulfillment id + client-supplied
+// tracking fields, minus `correlationId` / `idempotencyKey` / the owner-injected `actorId`
+// / `isStaffFulfill` (ADR-036). Recomputed here so a seeded record's fingerprint matches (a
+// replay) or deliberately diverges (a 422).
+const fingerprintOf = (payload: IRetailFulfillmentShipPayload): string =>
+  bodyFingerprint({
+    orderId: payload.orderId,
+    fulfillmentId: payload.fulfillmentId,
+    trackingNumber: payload.trackingNumber,
+    carrier: payload.carrier,
+  });
 
 describe('ShipFulfillmentUseCase', () => {
   describe('commit sale (after the local commit)', () => {
     it('ships the fulfillment and calls Commit Sale with the shipped lines', async () => {
       const h = await makeHarness();
 
-      const view = await h.useCase.execute(shipPayload(h.fulfillmentId));
+      const { view } = await h.useCase.execute(shipPayload(h.fulfillmentId));
 
       expect(view.status).toBe(FulfillmentStatusEnum.SHIPPED);
       expect(view.trackingNumber).toBe('TRACK-123');
@@ -167,7 +202,7 @@ describe('ShipFulfillmentUseCase', () => {
 
       // The ship still resolves (the local commit is durable; the inventory decrement
       // awaits operator replay — idempotent on fulfillmentId).
-      const view = await h.useCase.execute(shipPayload(h.fulfillmentId));
+      const { view } = await h.useCase.execute(shipPayload(h.fulfillmentId));
 
       expect(view.status).toBe(FulfillmentStatusEnum.SHIPPED);
       // Bounded retries were exhausted (3 attempts) but never threw.
@@ -197,7 +232,7 @@ describe('ShipFulfillmentUseCase', () => {
         payment: buildPaymentFixture(900, ORDER_ID, PaymentStatusEnum.CAPTURED, 3000),
       });
 
-      const view = await h.useCase.execute(shipPayload(h.fulfillmentId));
+      const { view } = await h.useCase.execute(shipPayload(h.fulfillmentId));
 
       // No second gateway call, no captured event — but the sale still commits.
       expect(h.paymentGateway.captureCount).toBe(0);
@@ -274,8 +309,12 @@ describe('ShipFulfillmentUseCase', () => {
       const h = await makeHarness();
       await h.useCase.execute(shipPayload(h.fulfillmentId));
 
-      // Shipping the same (now shipped) fulfillment again.
-      await expect(h.useCase.execute(shipPayload(h.fulfillmentId))).rejects.toMatchObject({
+      // Shipping the same (now shipped) fulfillment again under a DIFFERENT key — a store
+      // miss, so it runs the natural non-`pending` guard (a same-key retry would replay the
+      // stored ship instead, which the idempotency block covers separately).
+      await expect(
+        h.useCase.execute(shipPayload(h.fulfillmentId, { idempotencyKey: 'idem-2' })),
+      ).rejects.toMatchObject({
         code: OrderErrorCodeEnum.FULFILLMENT_INVALID_STATUS_TRANSITION,
       });
     });
@@ -301,11 +340,159 @@ describe('ShipFulfillmentUseCase', () => {
     it('lets staff ship any order via the order:fulfill override', async () => {
       const h = await makeHarness();
 
-      const view = await h.useCase.execute(
+      const { view } = await h.useCase.execute(
         shipPayload(h.fulfillmentId, { actorId: STAFF_ID, isStaffFulfill: true }),
       );
 
       expect(view.status).toBe(FulfillmentStatusEnum.SHIPPED);
+    });
+  });
+
+  describe('request-level idempotency (ADR-036)', () => {
+    it('replays the stored response on a matching key + fingerprint, with no side effects', async () => {
+      const store = new FakeIdempotencyStore();
+      const h = await makeHarness({ store });
+      // A prior ship under the same key + canonical body — its stored FulfillmentView is what
+      // the replay must return verbatim.
+      const priorView = { id: h.fulfillmentId, status: 'shipped', trackingNumber: 'TRACK-123' };
+      store.seed(
+        buildIdempotencyRecord({
+          scope: 'ship-fulfillment',
+          key: 'idem-1',
+          requestFingerprint: fingerprintOf(shipPayload(h.fulfillmentId)),
+          responseBody: priorView,
+        }),
+      );
+
+      const { view, replayed } = await h.useCase.execute(shipPayload(h.fulfillmentId));
+
+      expect(replayed).toBe(true);
+      expect(view).toEqual(priorView);
+      // A replay is side-effect-free: no capture, no commit-sale, no events, no second store
+      // write.
+      expect(h.paymentGateway.captureCount).toBe(0);
+      expect(h.commitSaleGateway.calls).toHaveLength(0);
+      expect(h.publisher.fulfillmentShipped).toHaveLength(0);
+      expect(h.publisher.captured).toHaveLength(0);
+      expect(h.store.saved).toHaveLength(0);
+    });
+
+    it('rejects a reused key with a different body (different fingerprint) as 422', async () => {
+      const store = new FakeIdempotencyStore();
+      const h = await makeHarness({ store });
+      store.seed(
+        buildIdempotencyRecord({
+          scope: 'ship-fulfillment',
+          key: 'idem-1',
+          requestFingerprint: 'a-different-body-fingerprint',
+        }),
+      );
+
+      await expect(h.useCase.execute(shipPayload(h.fulfillmentId))).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED,
+      });
+      // Rejected before any ship work runs.
+      expect(h.paymentGateway.captureCount).toBe(0);
+      expect(h.commitSaleGateway.calls).toHaveLength(0);
+    });
+
+    it('rejects a missing Idempotency-Key with ORDER_IDEMPOTENCY_KEY_REQUIRED (400 backstop)', async () => {
+      const h = await makeHarness();
+
+      await expect(
+        h.useCase.execute(shipPayload(h.fulfillmentId, { idempotencyKey: undefined })),
+      ).rejects.toMatchObject({ code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED });
+      expect(h.paymentGateway.captureCount).toBe(0);
+      expect(h.commitSaleGateway.calls).toHaveLength(0);
+    });
+
+    it('persists the stored response after a fresh ship (miss), returned not replayed', async () => {
+      const h = await makeHarness();
+
+      const { view, replayed } = await h.useCase.execute(shipPayload(h.fulfillmentId));
+
+      expect(replayed).toBe(false);
+      // The ship ran (a fresh execution): capture + commit-sale happened.
+      expect(h.paymentGateway.captureCount).toBe(1);
+      expect(h.commitSaleGateway.calls).toHaveLength(1);
+      // The record was stored under (ship-fulfillment, key) with the fingerprint + the
+      // FulfillmentView body + the 200 success status.
+      expect(h.store.saved).toHaveLength(1);
+      expect(h.store.saved[0]).toMatchObject({
+        scope: 'ship-fulfillment',
+        key: 'idem-1',
+        requestFingerprint: fingerprintOf(shipPayload(h.fulfillmentId)),
+        responseStatus: 200,
+      });
+      expect((h.store.saved[0].responseBody as { id?: number }).id).toBe(view.id);
+    });
+
+    it('converges on the concurrent winner: a duplicate save falls back to the stored winner as a replay', async () => {
+      const store = new FakeIdempotencyStore();
+      const h = await makeHarness({ store });
+      // A simultaneous identical ship committed + stored first (a DISTINCT stored body). It is
+      // hidden from our first lookup (the miss) and revealed on the post-save re-read.
+      const winnerView = { id: 987654, status: 'shipped', trackingNumber: 'TRACK-123' };
+      store.armConcurrentWinner(
+        buildIdempotencyRecord({
+          scope: 'ship-fulfillment',
+          key: 'idem-1',
+          requestFingerprint: fingerprintOf(shipPayload(h.fulfillmentId)),
+          responseBody: winnerView,
+        }),
+      );
+
+      const { view, replayed } = await h.useCase.execute(shipPayload(h.fulfillmentId));
+
+      // Our save lost the composite-PK race, so the winner's stored response is returned as
+      // a replay — the two racers converge on one response.
+      expect(replayed).toBe(true);
+      expect(view).toEqual(winnerView);
+      expect(h.store.saved).toHaveLength(1);
+    });
+  });
+
+  // The order-header write inside Ship is a version-checked compare-and-swap (ADR-036):
+  // a concurrent order writer (e.g. a sibling fulfillment's ship, or a capture) advancing
+  // the order version makes THIS ship's CAS lose. The bounded retry re-runs the whole
+  // unit of work against fresh state (the rollback-aware fake tx undoes the losing
+  // attempt's fulfillment/payment writes, as a real transaction does). This is the
+  // "same-transition CAS loss → VERSION_MISMATCH" half of the two-legitimate-409s model;
+  // the cross-transition ship-vs-cancel loser keeps its precise domain 409 (proved by the
+  // "rejects shipping a non-pending fulfillment" precondition test above — never retried,
+  // never swallowed).
+  describe('optimistic concurrency (ADR-036)', () => {
+    it('retries a lost order-version CAS then ships successfully', async () => {
+      // Lose the CAS twice (< the budget of 5), then win.
+      const h = await makeHarness({ occConflicts: 2 });
+
+      const { view } = await h.useCase.execute(shipPayload(h.fulfillmentId));
+
+      expect(view.status).toBe(FulfillmentStatusEnum.SHIPPED);
+      // The gateway capture ran exactly ONCE (before the retry loop — a retry never
+      // re-charges), and Commit Sale ran once after the eventual commit.
+      expect(h.paymentGateway.captureCount).toBe(1);
+      expect(h.commitSaleGateway.calls).toHaveLength(1);
+      const order = await h.orderRepository.findById(ORDER_ID);
+      expect(order?.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.SHIPPED);
+      expect(order?.paymentStatus).toBe(OrderPaymentStatusEnum.CAPTURED);
+    });
+
+    it('surfaces 409 VERSION_MISMATCH when the order CAS keeps losing past the budget', async () => {
+      // Lose every attempt (> the budget of 5) → the retry is exhausted.
+      const h = await makeHarness({ occConflicts: 99 });
+
+      await expect(h.useCase.execute(shipPayload(h.fulfillmentId))).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_VERSION_MISMATCH,
+        // The order's current committed version (the seed, never advanced — every CAS
+        // lost), carried through so the client can refetch.
+        details: { currentVersion: 2 },
+      });
+      // The gateway captured once (before the loop), but nothing local ever committed:
+      // the fulfillment stayed pending and Commit Sale never ran.
+      const fulfillment = await h.fulfillmentRepository.findById(h.fulfillmentId);
+      expect(fulfillment?.status).toBe(FulfillmentStatusEnum.PENDING);
+      expect(h.commitSaleGateway.calls).toHaveLength(0);
     });
   });
 });

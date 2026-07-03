@@ -21,7 +21,13 @@ const makeHarness = (): {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const repository = new FakeReturnRequestRepository();
   const publisher = new SpyReturnEventsPublisher();
-  const useCase = new RejectReturnUseCase(repository, publisher, logger);
+  const useCase = new RejectReturnUseCase(
+    repository,
+    publisher,
+    // OCC_RETRY_ATTEMPTS budget (ADR-036).
+    5,
+    logger,
+  );
   return { useCase, repository, publisher };
 };
 

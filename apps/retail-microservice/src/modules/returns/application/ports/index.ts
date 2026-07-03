@@ -3,5 +3,6 @@ export * from './return-order-reader.port';
 export * from './customer-contact-reader.port';
 export * from './return-events.publisher.port';
 export * from './inventory-restock.gateway.port';
+export * from './occ-retry-attempts.token';
 export * from './return-window.token';
 export * from './transaction.port';

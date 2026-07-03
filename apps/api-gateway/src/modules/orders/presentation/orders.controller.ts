@@ -2,13 +2,13 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Param,
   ParseIntPipe,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -22,6 +22,7 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 
 import { CurrentUser, RequiresPermission } from '@retail-inventory-system/auth';
 import {
@@ -33,6 +34,7 @@ import {
 } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
+import { IdempotencyKey } from '../../../common/decorators';
 import {
   CancelLineUseCase,
   CancelOrderUseCase,
@@ -140,24 +142,34 @@ export class OrdersController {
   @ApiParam({ name: 'orderId', type: Number, example: 1 })
   @ApiHeader({
     name: 'Idempotency-Key',
-    required: false,
-    description: 'Accepted + logged but not deduped (re-capture is idempotent by payment state)',
+    required: true,
+    description:
+      'Required (ADR-036). Same key + same body replays the stored order (Idempotent-Replay: true); same key + different body → 422; a missing key → 400.',
   })
   @ApiOkResponse({ description: 'The order with the captured payment', type: OrderView })
   @ApiProduces('application/json')
+  // Capture is a `200` route for both a fresh capture and a replay, so it keeps
+  // `@HttpCode(200)` and uses `@Res({ passthrough: true })` only to add the
+  // `Idempotent-Replay: true` marker header on a served replay — the return value is still
+  // the response body and the status stays `200` (ADR-036).
   public async capturePayment(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: CapturePaymentRequestDto,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @IdempotencyKey() idempotencyKey: string,
     @CurrentUser() user: ICurrentUser,
     @CorrelationId() correlationId: string,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<OrderView> {
-    return this.capturePaymentUseCase.execute(
+    const result = await this.capturePaymentUseCase.execute(
       orderId,
       user,
       { amountMinor: dto.amountMinor, idempotencyKey },
       correlationId,
     );
+    if (result.replayed) {
+      res.setHeader('Idempotent-Replay', 'true');
+    }
+    return result.view;
   }
 
   @Post(':orderId/fulfillments')
@@ -209,26 +221,35 @@ export class OrdersController {
   @ApiParam({ name: 'fulfillmentId', type: Number, example: 1 })
   @ApiHeader({
     name: 'Idempotency-Key',
-    required: false,
-    description: 'Accepted + logged but not deduped (a non-pending re-ship is a 409)',
+    required: true,
+    description:
+      'Required (ADR-036). Same key + same body replays the stored ship (Idempotent-Replay: true); same key + different body → 422; a missing key → 400.',
   })
   @ApiOkResponse({ description: 'The shipped fulfillment', type: FulfillmentView })
   @ApiProduces('application/json')
+  // Ship is a `200` route for both a fresh ship and a replay (like Capture), so it keeps
+  // `@HttpCode(200)` and uses `@Res({ passthrough: true })` only to add the
+  // `Idempotent-Replay: true` marker header on a served replay (ADR-036).
   public async shipFulfillment(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Param('fulfillmentId', ParseIntPipe) fulfillmentId: number,
     @Body() dto: ShipFulfillmentRequestDto,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @IdempotencyKey() idempotencyKey: string,
     @CurrentUser() user: ICurrentUser,
     @CorrelationId() correlationId: string,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<FulfillmentView> {
-    return this.shipFulfillmentUseCase.execute(
+    const result = await this.shipFulfillmentUseCase.execute(
       orderId,
       fulfillmentId,
       user,
       { trackingNumber: dto.trackingNumber, carrier: dto.carrier, idempotencyKey },
       correlationId,
     );
+    if (result.replayed) {
+      res.setHeader('Idempotent-Replay', 'true');
+    }
+    return result.view;
   }
 
   @Post(':orderId/fulfillments/:fulfillmentId/deliver')
