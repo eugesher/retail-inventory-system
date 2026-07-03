@@ -77,6 +77,9 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   // carries a typed `code`, so both reach the client with their code intact.
   [OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED]: HttpStatus.BAD_REQUEST,
   [OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED]: HttpStatus.UNPROCESSABLE_ENTITY,
+  // A concurrent same-key request is mid-flight (reserve-first refund, ADR-036) → 409:
+  // the client retries once the in-flight request finishes and then replays its result.
+  [OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_IN_PROGRESS]: HttpStatus.CONFLICT,
   // Fulfillment / cancel conflicts → 409: an illegal shipment-status transition, a
   // create that would over-ship a line, an order not in a fulfillable state, or a
   // cancel of an already-shipped order.

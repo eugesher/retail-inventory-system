@@ -328,7 +328,9 @@ describe('IssueRefundUseCase', () => {
       expect(h.audit.events).toHaveLength(0);
       expect(h.publisher.refundIssued).toHaveLength(0);
       expect(h.refundRepository.saveCount).toBe(0);
-      expect(h.store.saved).toHaveLength(0);
+      // Reserve-first: the replay short-circuits on the reserve lookup — nothing is
+      // finalized (this call created no pending row of its own).
+      expect(h.store.finalized).toHaveLength(0);
     });
 
     it('rejects a reused key with a different body (different fingerprint) as 422', async () => {
@@ -359,7 +361,7 @@ describe('IssueRefundUseCase', () => {
       expect(h.paymentGateway.refundCount).toBe(0);
     });
 
-    it('persists the stored response after a fresh issue (miss), returned not replayed', async () => {
+    it('reserves the key then finalizes the stored response after a fresh issue (miss), returned not replayed', async () => {
       const h = await makeHarness();
 
       const { view, replayed } = await h.useCase.execute(issuePayload());
@@ -368,24 +370,52 @@ describe('IssueRefundUseCase', () => {
       // The refund ran (a fresh execution): one gateway call, one audit row.
       expect(h.paymentGateway.refundCount).toBe(1);
       expect(h.audit.events).toHaveLength(1);
-      // The record was stored under (issue-refund, key) with the fingerprint + the RefundView
-      // body + the 201 success status.
-      expect(h.store.saved).toHaveLength(1);
-      expect(h.store.saved[0]).toMatchObject({
+      // Reserve-first: the key was reserved with the fingerprint BEFORE the gateway call,
+      // then finalized with the RefundView body + the 201 status AFTER the refund committed.
+      expect(h.store.reserved).toHaveLength(1);
+      expect(h.store.reserved[0]).toMatchObject({
         scope: 'issue-refund',
         key: 'idem-1',
         requestFingerprint: fingerprintOf(issuePayload()),
+      });
+      expect(h.store.finalized).toHaveLength(1);
+      expect(h.store.finalized[0]).toMatchObject({
+        scope: 'issue-refund',
+        key: 'idem-1',
         responseStatus: 201,
       });
-      expect((h.store.saved[0].responseBody as { id?: number }).id).toBe(view.id);
+      expect((h.store.finalized[0].responseBody as { id?: number }).id).toBe(view.id);
+      // A successful, finalized refund is NOT released.
+      expect(h.store.released).toHaveLength(0);
     });
 
-    it('converges on the concurrent winner: a duplicate save falls back to the stored winner as a replay', async () => {
+    it('turns away a concurrent same-key submit (in-flight reservation) with 409 IN_PROGRESS, no second refund', async () => {
       const store = new FakeIdempotencyStore();
-      // A simultaneous identical refund committed + stored first (a DISTINCT stored body). It
-      // is hidden from our first lookup (the miss) and revealed on the post-save re-read.
+      // A concurrent identical submit already reserved the key and is mid-refund (a pending
+      // row, not yet finalized). This is the exact case the reserve-first hardening closes:
+      // the racing duplicate must be turned away BEFORE it can call the (non-idempotent)
+      // gateway refund a second time.
+      await store.reserve({
+        scope: 'issue-refund',
+        key: 'idem-1',
+        requestFingerprint: fingerprintOf(issuePayload()),
+      });
+      const h = await makeHarness(capturedPayment(), new FakePaymentGateway(), store);
+
+      await expect(h.useCase.execute(issuePayload())).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_IN_PROGRESS,
+      });
+      // Turned away before any refund work — no second gateway call, no audit row.
+      expect(h.paymentGateway.refundCount).toBe(0);
+      expect(h.audit.events).toHaveLength(0);
+    });
+
+    it('replays a concurrent winner that already completed under the same key + body', async () => {
+      const store = new FakeIdempotencyStore();
+      // A simultaneous identical refund committed + finalized first (a DISTINCT stored body).
+      // Our reserve loses the composite PK to the completed row and replays it.
       const winnerView = { id: 999, status: 'issued', amountMinor: CAPTURED_AMOUNT };
-      store.armConcurrentWinner(
+      store.seed(
         buildIdempotencyRecord({
           scope: 'issue-refund',
           key: 'idem-1',
@@ -397,11 +427,12 @@ describe('IssueRefundUseCase', () => {
 
       const { view, replayed } = await h.useCase.execute(issuePayload());
 
-      // Our save lost the composite-PK race, so the winner's stored response is returned as
-      // a replay — the two racers converge on one response.
+      // The winner's stored response is replayed — the racers converge on one response and
+      // this one never calls the gateway.
       expect(replayed).toBe(true);
       expect(view).toEqual(winnerView);
-      expect(h.store.saved).toHaveLength(1);
+      expect(h.paymentGateway.refundCount).toBe(0);
+      expect(h.store.finalized).toHaveLength(0);
     });
   });
 });

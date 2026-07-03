@@ -56,12 +56,19 @@ interface IPaymentSnapshot {
 // ceiling** `payment.amountMinor − payment.refundedAmountMinor` (`REFUND_EXCEEDS_REFUNDABLE`).
 //
 // **Two idempotency layers (ADR-036 + ADR-032).** First the request-level
-// `Idempotency-Key`: `execute` fingerprints the canonical body (`bodyFingerprint`), looks
-// the `(scope='issue-refund', key)` pair up in the `IDEMPOTENCY_STORE`, and on a
-// same-key/same-body hit **replays the stored `RefundView` before any side effect — and,
-// crucially, before the audit emit** (a replay must not write a second `audit_log_entry`).
-// A same-key/*different*-body hit → `422`; a missing key → `400` backstop (the manual
-// gateway route + the auto-refund-from-cancel consumer both supply a key — the consumer a
+// `Idempotency-Key`, enforced **reserve-first** (the concurrency hardening): `execute`
+// fingerprints the canonical body (`bodyFingerprint`) and atomically **reserves**
+// `(scope='issue-refund', key)` in the `IDEMPOTENCY_STORE` — an INSERT of a *pending* row —
+// BEFORE the gateway call. Unlike place/capture/ship (each serialized by a second guard —
+// the cart-conversion CAS / payment-state + order OCC / `SELECT … FOR UPDATE`), refund has
+// none and the gateway refund is not naturally idempotent, so a `find → refund → save` flow
+// would let two truly concurrent same-key submits BOTH refund. Reserve-first turns the loser
+// away: a same-key/same-body hit on a **completed** row **replays the stored `RefundView`
+// before any side effect — and, crucially, before the audit emit** (a replay must not write a
+// second `audit_log_entry`); a same-key/*different*-body hit → `422`; a same-key submit that
+// races a still-**in-flight** one → `409` (`ORDER_IDEMPOTENCY_KEY_IN_PROGRESS`), turned away
+// before it can refund a second time; a missing key → `400` backstop (the manual gateway
+// route + the auto-refund-from-cancel consumer both supply a key — the consumer a
 // deterministic one). Second, the **natural idempotency** remains the backstop (ADR-032):
 // an `issued` refund for the same `(paymentId, amountMinor, reason)` short-circuits to its
 // existing view, making **no** second gateway call. It runs *before* the captured-
@@ -130,51 +137,93 @@ export class IssueRefundUseCase {
     // `actorId`), so a retry under a fresh correlation id still matches (ADR-036).
     const fingerprint = bodyFingerprint(IssueRefundUseCase.canonicalBody(payload));
 
-    // Key-store lookup FIRST. A matching-fingerprint hit replays the stored `RefundView`
-    // WITHOUT calling the gateway, WITHOUT re-auditing, and WITHOUT re-emitting — this
-    // branch returns before `issue`, which owns the whole flow. A different-fingerprint
-    // hit → 422.
-    const prior = await this.idempotencyStore.find(IssueRefundUseCase.SCOPE, idempotencyKey);
-    if (prior) {
-      if (prior.requestFingerprint === fingerprint) {
-        this.logger.debug(
-          { correlationId, orderId, paymentId, idempotencyKey },
-          'Idempotent replay — returning the stored refund response (no gateway, no audit, no events)',
-        );
-        return { view: prior.responseBody as unknown as RefundView, replayed: true };
-      }
+    // RESERVE-FIRST (ADR-036 concurrency hardening). Refund is the one idempotent write with
+    // no *second* serializing guard (place has the cart-conversion CAS, capture the
+    // payment-state + order OCC, ship the `SELECT … FOR UPDATE`), and the gateway refund is
+    // not naturally idempotent — so a `find → refund → save` flow would let two truly
+    // concurrent same-key submits BOTH refund before either records the key. Instead, an
+    // atomic INSERT of a *pending* row claims `(scope, key)` BEFORE the gateway call:
+    //  - `replay`      — a completed row with a matching fingerprint already exists: return
+    //                    the stored `RefundView` WITHOUT the gateway, the audit, or the emit.
+    //  - `mismatch`    — one key reused for a different body → `422`.
+    //  - `in-progress` — a concurrent submit holds the key and is mid-refund → `409`; the
+    //                    client retries once it completes and then replays the result.
+    //  - `reserved`    — this call won the INSERT and owns the execution (below).
+    const reservation = await this.idempotencyStore.reserve({
+      scope: IssueRefundUseCase.SCOPE,
+      key: idempotencyKey,
+      requestFingerprint: fingerprint,
+    });
+
+    if (reservation.outcome === 'replay') {
+      this.logger.debug(
+        { correlationId, orderId, paymentId, idempotencyKey },
+        'Idempotent replay — returning the stored refund response (no gateway, no audit, no events)',
+      );
+      return { view: reservation.record!.responseBody as unknown as RefundView, replayed: true };
+    }
+    if (reservation.outcome === 'mismatch') {
       throw new OrderDomainException(
         OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED,
         `Idempotency-Key ${idempotencyKey} was already used for an issue-refund request with a different body`,
       );
     }
-
-    // Miss — run the refund (the natural already-issued short-circuit + the refundable
-    // ceiling still apply inside), then persist the stored response so the next identical
-    // retry replays. A declined refund is stored too — a retry replays the `failed` view
-    // rather than re-calling the gateway (a genuine retry-after-failure uses a new key).
-    const view = await this.issue(payload);
-    await this.idempotencyStore.save({
-      scope: IssueRefundUseCase.SCOPE,
-      key: idempotencyKey,
-      requestFingerprint: fingerprint,
-      // The refund route is `201 Created`; the gateway forces `200` on any replay.
-      responseStatus: HttpStatus.CREATED,
-      responseBody: view as unknown as Record<string, unknown>,
-    });
-
-    // Authoritative re-read: if a concurrent identical refund stored first, `save` swallowed
-    // our duplicate — return the winner's stored response so both racers converge (the
-    // natural already-issued guard guarantees the same refund either way).
-    const stored = await this.idempotencyStore.find(IssueRefundUseCase.SCOPE, idempotencyKey);
-    if (stored && (stored.responseBody as { id?: number }).id !== view.id) {
-      this.logger.debug(
-        { correlationId, orderId, paymentId, idempotencyKey },
-        'Idempotent replay — a concurrent refund stored first; returning the winning response',
+    if (reservation.outcome === 'in-progress') {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_IN_PROGRESS,
+        `Idempotency-Key ${idempotencyKey} is already being processed for a concurrent issue-refund request`,
       );
-      return { view: stored.responseBody as unknown as RefundView, replayed: true };
     }
+
+    // `reserved` — this call OWNS the execution. Run the refund (the natural already-issued
+    // short-circuit + the refundable ceiling still apply inside; a declined refund returns a
+    // `failed` view, not a throw). On ANY failure release the reservation so a legitimate
+    // retry can re-run — the natural already-issued guard remains the backstop for the rare
+    // gateway-succeeded-then-crashed window (unchanged by this hardening).
+    let view: RefundView;
+    try {
+      view = await this.issue(payload);
+    } catch (error) {
+      await this.releaseReservation(idempotencyKey, correlationId);
+      throw error;
+    }
+
+    // Finalize the reserved row with the captured response so the next identical retry
+    // replays. If finalize fails the refund has already committed — release the pending row
+    // so a retry is not blocked with `in-progress` (the retry re-runs and the natural
+    // already-issued guard returns THIS refund, no second gateway call), and still return
+    // the successful view.
+    try {
+      await this.idempotencyStore.finalize({
+        scope: IssueRefundUseCase.SCOPE,
+        key: idempotencyKey,
+        // The refund route is `201 Created`; the gateway forces `200` on any replay.
+        responseStatus: HttpStatus.CREATED,
+        responseBody: view as unknown as Record<string, unknown>,
+      });
+    } catch (error) {
+      this.logger.warn(
+        { err: error as Error, correlationId, orderId, paymentId, idempotencyKey },
+        'Failed to finalize the idempotency record after a committed refund; releasing the reservation for a safe retry',
+      );
+      await this.releaseReservation(idempotencyKey, correlationId);
+    }
+
     return { view, replayed: false };
+  }
+
+  // Releases the reservation this call took, best-effort: a failed release leaves a pending
+  // row the TTL purge reclaims, and the natural already-issued guard keeps a retry safe
+  // regardless — so a release hiccup never blocks the refund from returning.
+  private async releaseReservation(idempotencyKey: string, correlationId: string): Promise<void> {
+    try {
+      await this.idempotencyStore.release(IssueRefundUseCase.SCOPE, idempotencyKey);
+    } catch (error) {
+      this.logger.warn(
+        { err: error as Error, correlationId, idempotencyKey },
+        'Failed to release the idempotency reservation (will be reclaimed by the TTL purge)',
+      );
+    }
   }
 
   // Builds the stable logical body the fingerprint covers: the client-controlled refund

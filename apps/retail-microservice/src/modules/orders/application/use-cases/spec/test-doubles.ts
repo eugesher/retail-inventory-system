@@ -29,8 +29,11 @@ import {
 import {
   IAddressRepositoryPort,
   IFulfillmentRepositoryPort,
+  IIdempotencyFinalizeInput,
   IIdempotencyRecord,
   IIdempotencyRecordInput,
+  IIdempotencyReservation,
+  IIdempotencyReserveInput,
   IIdempotencyStorePort,
   IOrderCartReaderPort,
   IOrderCartSnapshot,
@@ -740,27 +743,41 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
   }
 }
 
-// In-memory `IDEMPOTENCY_STORE` double for the Place Order replay / 422 / store /
-// concurrent-first-writer specs. `find` returns a stored record or null; `save` inserts
-// unless the `(scope, key)` PK already holds a row, in which case it swallows the
-// duplicate as a no-op (the real adapter's ER_DUP_ENTRY behavior). To exercise the
-// concurrent race, arm a pre-committed "winner" via `armConcurrentWinner`: the FIRST
-// `find` misses (the winner's row is not yet visible), our `save` collides and is
-// swallowed, and the post-save `find` reveals the winner's stored body — so the use case
-// converges on the winner's order rather than its own freshly built one.
+// A stored row in the fake — pending-aware: a reserved-but-not-finalized row (ADR-036
+// reserve-first) carries a `null` response until `finalize` fills it in, mirroring the real
+// table's nullable `response_status` / `response_body`.
+interface IFakeStoredRow extends Omit<IIdempotencyRecord, 'responseStatus' | 'responseBody'> {
+  responseStatus: number | null;
+  responseBody: Record<string, unknown> | null;
+}
+
+// In-memory `IDEMPOTENCY_STORE` double. Supports BOTH idempotency flows:
+//  - `find`/`save` (place/capture/ship): `find` returns a completed record or null; `save`
+//    inserts unless the `(scope, key)` PK already holds a row, swallowing the duplicate (the
+//    real adapter's ER_DUP_ENTRY behavior). Arm a pre-committed "winner" via
+//    `armConcurrentWinner` for the concurrent-first-writer specs: the FIRST `find` misses,
+//    our `save` collides and is swallowed, and the post-save `find` reveals the winner's body.
+//  - `reserve`/`finalize`/`release` (refund, ADR-036 concurrency hardening): `reserve` inserts
+//    a pending row and returns `reserved` on a fresh key, `replay` on a matching-fingerprint
+//    completed row, `mismatch` on a different fingerprint, `in-progress` on a still-pending
+//    row; `finalize` fills the response in; `release` drops a still-pending row.
 export class FakeIdempotencyStore implements IIdempotencyStorePort {
   public readonly saved: IIdempotencyRecordInput[] = [];
+  public readonly reserved: IIdempotencyReserveInput[] = [];
+  public readonly finalized: IIdempotencyFinalizeInput[] = [];
+  public readonly released: string[] = [];
   public findCalls = 0;
-  private readonly rows = new Map<string, IIdempotencyRecord>();
+  public reserveCalls = 0;
+  private readonly rows = new Map<string, IFakeStoredRow>();
   private winner: IIdempotencyRecord | null = null;
 
   private static keyOf(scope: string, key: string): string {
     return `${scope}::${key}`;
   }
 
-  // Seed a record visible immediately — the straightforward replay / 422 cases.
+  // Seed a completed record visible immediately — the straightforward replay / 422 cases.
   public seed(record: IIdempotencyRecord): void {
-    this.rows.set(FakeIdempotencyStore.keyOf(record.scope, record.key), record);
+    this.rows.set(FakeIdempotencyStore.keyOf(record.scope, record.key), { ...record });
   }
 
   // Arm a concurrent winner: hidden from the first `find` (the miss), revealed on the
@@ -773,9 +790,17 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
     this.findCalls += 1;
     const k = FakeIdempotencyStore.keyOf(scope, key);
     if (this.winner && this.findCalls > 1) {
-      this.rows.set(k, this.winner);
+      this.rows.set(k, { ...this.winner });
     }
-    return Promise.resolve(this.rows.get(k) ?? null);
+    const row = this.rows.get(k);
+    if (!row) {
+      return Promise.resolve(null);
+    }
+    // A pending (reserved, not finalized) row is not a replayable record — a miss for `find`.
+    if (row.responseBody === null) {
+      return Promise.resolve(null);
+    }
+    return Promise.resolve(FakeIdempotencyStore.toRecord(row));
   }
 
   public save(record: IIdempotencyRecordInput): Promise<void> {
@@ -794,8 +819,55 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
     return Promise.resolve();
   }
 
-  // The TTL purge: drop every seeded row whose `expiresAt` is strictly before `now`,
-  // returning the count removed — the in-memory mirror of the real adapter's bounded
+  // Reserve-first (ADR-036): the atomic INSERT-a-pending-row front door the refund flow uses.
+  public reserve(input: IIdempotencyReserveInput): Promise<IIdempotencyReservation> {
+    this.reserveCalls += 1;
+    this.reserved.push(input);
+    const k = FakeIdempotencyStore.keyOf(input.scope, input.key);
+    const existing = this.rows.get(k);
+    if (!existing) {
+      this.rows.set(k, {
+        scope: input.scope,
+        key: input.key,
+        requestFingerprint: input.requestFingerprint,
+        responseStatus: null,
+        responseBody: null,
+        createdAt: new Date('2026-06-10T00:00:00.000Z'),
+        expiresAt: new Date('2026-06-11T00:00:00.000Z'),
+      });
+      return Promise.resolve({ outcome: 'reserved' });
+    }
+    if (existing.requestFingerprint !== input.requestFingerprint) {
+      return Promise.resolve({ outcome: 'mismatch' });
+    }
+    if (existing.responseBody === null) {
+      return Promise.resolve({ outcome: 'in-progress' });
+    }
+    return Promise.resolve({ outcome: 'replay', record: FakeIdempotencyStore.toRecord(existing) });
+  }
+
+  public finalize(input: IIdempotencyFinalizeInput): Promise<void> {
+    this.finalized.push(input);
+    const row = this.rows.get(FakeIdempotencyStore.keyOf(input.scope, input.key));
+    if (row) {
+      row.responseStatus = input.responseStatus;
+      row.responseBody = input.responseBody;
+    }
+    return Promise.resolve();
+  }
+
+  public release(scope: string, key: string): Promise<void> {
+    const k = FakeIdempotencyStore.keyOf(scope, key);
+    this.released.push(k);
+    // Only a still-pending row is released (the real adapter guards `response_body IS NULL`).
+    if (this.rows.get(k)?.responseBody === null) {
+      this.rows.delete(k);
+    }
+    return Promise.resolve();
+  }
+
+  // The TTL purge: drop every row whose `expiresAt` is strictly before `now`, returning the
+  // count removed — the in-memory mirror of the real adapter's bounded
   // `DELETE … WHERE expires_at < now`. A row exactly at `now` is retained (strict `<`).
   public deleteExpired(now: Date): Promise<number> {
     let deleted = 0;
@@ -806,6 +878,18 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
       }
     }
     return Promise.resolve(deleted);
+  }
+
+  private static toRecord(row: IFakeStoredRow): IIdempotencyRecord {
+    return {
+      scope: row.scope,
+      key: row.key,
+      requestFingerprint: row.requestFingerprint,
+      responseStatus: row.responseStatus!,
+      responseBody: row.responseBody!,
+      createdAt: row.createdAt,
+      expiresAt: row.expiresAt,
+    };
   }
 }
 

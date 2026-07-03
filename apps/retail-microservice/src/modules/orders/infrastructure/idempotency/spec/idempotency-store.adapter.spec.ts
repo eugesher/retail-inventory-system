@@ -1,4 +1,4 @@
-import { LessThan, Repository } from 'typeorm';
+import { IsNull, LessThan, Repository } from 'typeorm';
 
 import { IIdempotencyRecordInput, ITransactionScope } from '../../../application/ports';
 import { IdempotencyKeyEntity } from '../idempotency-key.entity';
@@ -65,12 +65,19 @@ describe('IdempotencyKeyMapper', () => {
 });
 
 describe('IdempotencyStoreTypeormRepository', () => {
-  let keyRepo: jest.Mocked<Pick<Repository<IdempotencyKeyEntity>, 'findOne' | 'insert' | 'delete'>>;
+  let keyRepo: jest.Mocked<
+    Pick<Repository<IdempotencyKeyEntity>, 'findOne' | 'insert' | 'delete' | 'update'>
+  >;
   let repository: IdempotencyStoreTypeormRepository;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    keyRepo = { findOne: jest.fn(), insert: jest.fn(), delete: jest.fn() } as never;
+    keyRepo = {
+      findOne: jest.fn(),
+      insert: jest.fn(),
+      delete: jest.fn(),
+      update: jest.fn(),
+    } as never;
     repository = new IdempotencyStoreTypeormRepository(
       keyRepo as unknown as Repository<IdempotencyKeyEntity>,
       TTL_HOURS,
@@ -196,6 +203,130 @@ describe('IdempotencyStoreTypeormRepository', () => {
       keyRepo.delete.mockResolvedValue({ raw: {} } as never);
 
       await expect(repository.deleteExpired(new Date())).resolves.toBe(0);
+    });
+  });
+
+  // Reserve-first (ADR-036 concurrency hardening) — the refund flow's atomic front door.
+  describe('reserve', () => {
+    it('inserts a pending row (null response) and returns "reserved" on a fresh key', async () => {
+      keyRepo.insert.mockResolvedValue({} as never);
+
+      const result = await repository.reserve({
+        scope: 'issue-refund',
+        key: 'client-key-abc',
+        requestFingerprint: 'a'.repeat(64),
+      });
+
+      expect(result.outcome).toBe('reserved');
+      const inserted = keyRepo.insert.mock.calls[0][0] as Partial<IdempotencyKeyEntity>;
+      expect(inserted.responseStatus).toBeNull();
+      expect(inserted.responseBody).toBeNull();
+      expect(inserted.requestFingerprint).toBe('a'.repeat(64));
+      expect(inserted.expiresAt).toBeInstanceOf(Date);
+      // The winning INSERT path takes no re-read.
+      expect(keyRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('returns "replay" with the stored record when a completed row + matching fingerprint exists', async () => {
+      keyRepo.insert.mockRejectedValue(dupErrorFlat());
+      keyRepo.findOne.mockResolvedValue(keyEntity({ requestFingerprint: 'a'.repeat(64) }));
+
+      const result = await repository.reserve({
+        scope: 'place-order',
+        key: 'client-key-abc',
+        requestFingerprint: 'a'.repeat(64),
+      });
+
+      expect(result.outcome).toBe('replay');
+      expect(result.record?.responseStatus).toBe(201);
+      expect(result.record?.responseBody).toEqual({
+        orderId: 7,
+        total: { amountMinor: 5997, currency: 'USD' },
+      });
+    });
+
+    it('returns "mismatch" when the existing row has a different fingerprint (ER_DUP nested)', async () => {
+      keyRepo.insert.mockRejectedValue(dupErrorNested());
+      keyRepo.findOne.mockResolvedValue(keyEntity({ requestFingerprint: 'b'.repeat(64) }));
+
+      const result = await repository.reserve({
+        scope: 'place-order',
+        key: 'client-key-abc',
+        requestFingerprint: 'a'.repeat(64),
+      });
+
+      expect(result.outcome).toBe('mismatch');
+      expect(result.record).toBeUndefined();
+    });
+
+    it('returns "in-progress" when a still-pending row (null response body) holds the key', async () => {
+      keyRepo.insert.mockRejectedValue(dupErrorFlat());
+      keyRepo.findOne.mockResolvedValue(
+        keyEntity({ requestFingerprint: 'a'.repeat(64), responseStatus: null, responseBody: null }),
+      );
+
+      const result = await repository.reserve({
+        scope: 'issue-refund',
+        key: 'client-key-abc',
+        requestFingerprint: 'a'.repeat(64),
+      });
+
+      expect(result.outcome).toBe('in-progress');
+    });
+
+    it('returns "in-progress" when the holder released the row between our insert and the re-read', async () => {
+      keyRepo.insert.mockRejectedValue(dupErrorFlat());
+      keyRepo.findOne.mockResolvedValue(null);
+
+      const result = await repository.reserve({
+        scope: 'issue-refund',
+        key: 'client-key-abc',
+        requestFingerprint: 'a'.repeat(64),
+      });
+
+      expect(result.outcome).toBe('in-progress');
+    });
+
+    it('rethrows a non-duplicate insert failure', async () => {
+      keyRepo.insert.mockRejectedValue(new Error('connection reset'));
+
+      await expect(
+        repository.reserve({ scope: 'issue-refund', key: 'k', requestFingerprint: 'a'.repeat(64) }),
+      ).rejects.toThrow('connection reset');
+    });
+  });
+
+  describe('finalize', () => {
+    it('updates the reserved row with the response status + body, keyed on the composite PK', async () => {
+      keyRepo.update.mockResolvedValue({ affected: 1, raw: {}, generatedMaps: [] } as never);
+
+      await repository.finalize({
+        scope: 'issue-refund',
+        key: 'client-key-abc',
+        responseStatus: 201,
+        responseBody: { id: 42, status: 'issued' },
+      });
+
+      expect(keyRepo.update).toHaveBeenCalledWith(
+        { scope: 'issue-refund', key: 'client-key-abc' },
+        { responseStatus: 201, responseBody: { id: 42, status: 'issued' } },
+      );
+    });
+  });
+
+  describe('release', () => {
+    it('deletes ONLY a still-pending row (response_body IS NULL) for the (scope, key)', async () => {
+      keyRepo.delete.mockResolvedValue({ affected: 1, raw: {} } as never);
+
+      await repository.release('issue-refund', 'client-key-abc');
+
+      // The `response_body IS NULL` guard means a finalize that already committed (a
+      // completed row) is never removed by a spurious release.
+      expect(keyRepo.delete).toHaveBeenCalledWith({
+        scope: 'issue-refund',
+        key: 'client-key-abc',
+        responseBody: IsNull(),
+      });
     });
   });
 });

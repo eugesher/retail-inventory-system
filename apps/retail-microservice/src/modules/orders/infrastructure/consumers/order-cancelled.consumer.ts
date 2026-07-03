@@ -30,7 +30,10 @@ import { IssueRefundUseCase } from '../../application/use-cases';
 // state is needed. Two further layers back it up: `IssueRefundUseCase`'s own already-issued
 // short-circuit, and the request-level idempotency store keyed on the **deterministic**
 // `order-cancelled:<orderId>:<paymentId>` key this consumer passes (ADR-036) — so a
-// redelivery that reaches the use case still collapses to an exact replay.
+// *sequential* redelivery collapses to an exact replay, and a *concurrent* redelivery
+// (the reserve-first refund flow) is turned away with `IN_PROGRESS` rather than
+// double-refunding. Both outcomes are swallowed as best-effort below; the flag stays the
+// durable retry anchor.
 //
 // **Best-effort** (the flag is the durable retry anchor): a downstream failure is
 // warn-logged and swallowed so the handler never throws. The cancel has already committed,

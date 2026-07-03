@@ -42,6 +42,50 @@ export interface IIdempotencyRecordInput {
   readonly responseBody: Record<string, unknown>;
 }
 
+// --- Reserve-first flow (ADR-036 concurrency hardening) ---
+// The `find → work → save` flow above is safe for retries but NOT for a truly
+// concurrent same-key double-submit: two racers both `find` a miss and both execute
+// before either `save`s. Place / capture / ship each have a *second* serializing guard
+// (the cart-conversion CAS, the payment-state + order OCC, the `SELECT … FOR UPDATE`),
+// so a redundant concurrent run is at worst a benign idempotent gateway op. **Refund has
+// no such guard and the gateway refund is not naturally idempotent**, so a concurrent
+// duplicate would double-refund. Refund therefore uses the reserve-first flow below: an
+// atomic INSERT of a *pending* row claims the `(scope, key)` before the gateway call, so a
+// concurrent duplicate loses the PK and is turned away (`in-progress`) BEFORE it can
+// refund a second time.
+
+// The shape a caller hands `reserve` — the identity + fingerprint of a not-yet-executed
+// operation. No response yet (the row is inserted `pending`, its response filled in by
+// `finalize`).
+export interface IIdempotencyReserveInput {
+  readonly scope: string;
+  readonly key: string;
+  readonly requestFingerprint: string;
+}
+
+// The response captured by `finalize` on the pending row the caller reserved.
+export interface IIdempotencyFinalizeInput {
+  readonly scope: string;
+  readonly key: string;
+  readonly responseStatus: number;
+  readonly responseBody: Record<string, unknown>;
+}
+
+// The outcome of a `reserve` attempt:
+//  - `reserved`    — this caller won the atomic INSERT and OWNS the execution; it must run
+//                    the work then `finalize` (or `release` on failure).
+//  - `replay`      — a COMPLETED row already exists with a matching fingerprint; `record`
+//                    carries the stored response to return verbatim (no re-execution).
+//  - `in-progress` — a PENDING row exists (a concurrent request holds the key and is
+//                    mid-execution) — the caller surfaces a `409` and the client retries.
+//  - `mismatch`    — a row exists with a DIFFERENT fingerprint — one key reused for two
+//                    bodies, a `422`.
+export interface IIdempotencyReservation {
+  readonly outcome: 'reserved' | 'replay' | 'in-progress' | 'mismatch';
+  // Present only on `replay` — the completed stored record to return verbatim.
+  readonly record?: IIdempotencyRecord;
+}
+
 export interface IIdempotencyStorePort {
   // Load a prior record for `(scope, key)`, or `null` when none exists. It does NOT
   // filter by expiry — the scheduled purge sweep is the sole authority that removes
@@ -68,4 +112,28 @@ export interface IIdempotencyStorePort {
   // underlying statement is a single bounded `DELETE … WHERE expires_at < now`, safe to
   // run concurrently with live inserts because it can only touch already-expired rows.
   deleteExpired(now: Date): Promise<number>;
+
+  // Reserve `(scope, key)` for execution via an atomic INSERT of a PENDING row (ADR-036
+  // concurrency hardening). This is the concurrency-safe front door the refund flow uses
+  // INSTEAD of `find`: a truly concurrent second submit loses the composite-PK INSERT and
+  // is turned away with `in-progress` BEFORE it runs any side effect, so the gateway
+  // refund is never called twice. `expires_at` is computed from the injected TTL, exactly
+  // as `save` does. See `IIdempotencyReservation` for the four outcomes.
+  reserve(
+    input: IIdempotencyReserveInput,
+    scope?: ITransactionScope,
+  ): Promise<IIdempotencyReservation>;
+
+  // Fill in the response on a row this caller previously `reserve`d, flipping it from
+  // `pending` to a completed, replayable record. Called once the reserved work has
+  // succeeded. A no-op if the row is gone (a concurrent `release`/purge) — the natural
+  // idempotency backstop covers that rare window.
+  finalize(input: IIdempotencyFinalizeInput, scope?: ITransactionScope): Promise<void>;
+
+  // Delete the PENDING row this caller `reserve`d, so a later retry can re-execute. Called
+  // when the reserved work threw (before it could `finalize`) — otherwise the key would
+  // stay `pending` until the TTL purge and block every retry with `in-progress`. Guarded
+  // to touch ONLY a still-pending row, so a finalize that actually committed is never
+  // removed by a spurious release.
+  release(scope: string, key: string): Promise<void>;
 }
