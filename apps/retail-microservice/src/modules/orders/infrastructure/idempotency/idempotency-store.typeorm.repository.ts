@@ -1,12 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, LessThan, Repository } from 'typeorm';
+import { EntityManager, IsNull, LessThan, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
 import {
   IDEMPOTENCY_KEY_TTL_HOURS,
+  IIdempotencyFinalizeInput,
   IIdempotencyRecord,
   IIdempotencyRecordInput,
+  IIdempotencyReservation,
+  IIdempotencyReserveInput,
   IIdempotencyStorePort,
   ITransactionScope,
 } from '../../application/ports';
@@ -64,7 +67,17 @@ export class IdempotencyStoreTypeormRepository implements IIdempotencyStorePort 
   // path query-simple and all TTL logic in one place.
   public async find(scope: string, key: string): Promise<IIdempotencyRecord | null> {
     const entity = await this.idempotencyKeyRepository.findOne({ where: { scope, key } });
-    return entity ? IdempotencyKeyMapper.toDomain(entity) : null;
+    if (!entity) {
+      return null;
+    }
+    // A pending (reserved-but-not-yet-finalized) row carries no response, so it is not a
+    // replayable record — treat it as a miss for the `find`/`save` flow. In practice the
+    // `find` callers (place/capture/ship) never write pending rows; this guard keeps `find`
+    // robust and lets `toDomain` assume a completed row (ADR-036 reserve-first, refund).
+    if (entity.responseBody === null) {
+      return null;
+    }
+    return IdempotencyKeyMapper.toDomain(entity);
   }
 
   public async save(record: IIdempotencyRecordInput, scope?: ITransactionScope): Promise<void> {
@@ -104,6 +117,84 @@ export class IdempotencyStoreTypeormRepository implements IIdempotencyStorePort 
   public async deleteExpired(now: Date): Promise<number> {
     const result = await this.idempotencyKeyRepository.delete({ expiresAt: LessThan(now) });
     return result.affected ?? 0;
+  }
+
+  // Reserve-first (ADR-036 concurrency hardening). An atomic INSERT of a PENDING row
+  // (NULL response) claims `(scope, key)` BEFORE the caller runs its side effect. The
+  // outcome tells the caller what to do:
+  //  - INSERT succeeds        → `reserved`: this caller owns the execution.
+  //  - INSERT hits ER_DUP_ENTRY → a row already holds the key; re-read and classify it:
+  //      · different fingerprint → `mismatch` (one key, two bodies → 422),
+  //      · still pending (NULL response) → `in-progress` (a concurrent submit holds it → 409),
+  //      · completed → `replay` (return the stored response verbatim).
+  // The re-read can miss (the holder `release`d between our INSERT and the SELECT) — a
+  // transient race reported as `in-progress` so the client simply retries (its next reserve
+  // finds the key free). `expires_at` is computed from the injected TTL exactly as `save`.
+  public async reserve(
+    input: IIdempotencyReserveInput,
+    scope?: ITransactionScope,
+  ): Promise<IIdempotencyReservation> {
+    const expiresAt = new Date(Date.now() + this.ttlHours * MS_PER_HOUR);
+    const pending: QueryDeepPartialEntity<IdempotencyKeyEntity> = {
+      scope: input.scope,
+      key: input.key,
+      requestFingerprint: input.requestFingerprint,
+      responseStatus: null,
+      responseBody: null,
+      expiresAt,
+    };
+
+    try {
+      await this.idempotencyRepo(scope).insert(pending);
+      return { outcome: 'reserved' };
+    } catch (error) {
+      if (!isDuplicateEntryError(error)) {
+        throw error;
+      }
+    }
+
+    // A row already holds the composite PK — classify it. A plain SELECT never blocks on
+    // the winner's row.
+    const existing = await this.idempotencyKeyRepository.findOne({
+      where: { scope: input.scope, key: input.key },
+    });
+    if (!existing) {
+      // The holder released (or the purge swept) the row between our INSERT and this read
+      // — report in-progress so the caller turns the client away to retry cleanly.
+      return { outcome: 'in-progress' };
+    }
+    if (existing.requestFingerprint !== input.requestFingerprint) {
+      return { outcome: 'mismatch' };
+    }
+    if (existing.responseBody === null) {
+      return { outcome: 'in-progress' };
+    }
+    return { outcome: 'replay', record: IdempotencyKeyMapper.toDomain(existing) };
+  }
+
+  // Fill the response onto a row previously `reserve`d, flipping it pending → completed. A
+  // targeted UPDATE keyed on the composite PK; a vanished row (a concurrent release/purge)
+  // updates zero rows and is a harmless no-op (the natural idempotency backstop covers it).
+  public async finalize(
+    input: IIdempotencyFinalizeInput,
+    scope?: ITransactionScope,
+  ): Promise<void> {
+    // The cast bridges the plain response fields to `update`'s `QueryDeepPartialEntity`
+    // (which widens the JSON `response_body` to allow a SQL expression) — the same bridge
+    // `save`/`reserve` use for `insert`.
+    const completion = {
+      responseStatus: input.responseStatus,
+      responseBody: input.responseBody,
+    } as QueryDeepPartialEntity<IdempotencyKeyEntity>;
+    await this.idempotencyRepo(scope).update({ scope: input.scope, key: input.key }, completion);
+  }
+
+  // Delete the PENDING row this caller reserved, so a later retry can re-execute. Guarded
+  // to `response_body IS NULL` so a `finalize` that actually committed (a completed row) is
+  // NEVER removed by a spurious release — a release racing a committed finalize deletes
+  // nothing and the completed row stays replayable.
+  public async release(scope: string, key: string): Promise<void> {
+    await this.idempotencyKeyRepository.delete({ scope, key, responseBody: IsNull() });
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is supplied

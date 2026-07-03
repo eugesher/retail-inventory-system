@@ -33,11 +33,17 @@ export class IdempotencyKeyEntity {
   @Column({ type: 'char', length: 64 })
   public requestFingerprint: string;
 
-  @Column({ type: 'int' })
-  public responseStatus: number;
+  // Nullable because the reserve-first refund flow (ADR-036 concurrency hardening) INSERTs
+  // a `pending` row — the `(scope, key)` claimed, the response not yet known — that a later
+  // `finalize` fills in. A row with a NULL `response_body` is pending (a concurrent submit
+  // holds the key); a non-NULL one is a completed, replayable record. The `find`/`save`
+  // flow (place/capture/ship) only ever writes completed rows, so both columns are always
+  // set for those.
+  @Column({ type: 'int', nullable: true })
+  public responseStatus: number | null;
 
-  @Column({ type: 'json' })
-  public responseBody: Record<string, unknown>;
+  @Column({ type: 'json', nullable: true })
+  public responseBody: Record<string, unknown> | null;
 
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   public createdAt: Date;

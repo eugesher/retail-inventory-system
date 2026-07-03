@@ -79,10 +79,24 @@ Semantics:
 - **Same key, different fingerprint** → `422` (`IDEMPOTENCY_KEY_REUSED`): the client reused
   a key for a different body, a client bug surfaced rather than silently honored.
 - **Missing key on an operation that requires one** → `400` (`IDEMPOTENCY_KEY_REQUIRED`).
-- **Concurrent double-submit**: the composite PK is the dedup anchor — a second insert
-  racing the first loses on the PK and is handled as a replay (load-existing-then-return),
-  the notification-delivery dedupe precedent
-  ([ADR-033](033-notification-templates-deliveries-and-render-dispatch.md)).
+- **Concurrent double-submit**: place / capture / ship run `find → work → save`. That is safe
+  under concurrency because each has a *second* serializing guard — the cart-conversion CAS
+  (place), the payment-state check + order OCC (capture), the ship `SELECT … FOR UPDATE` — so
+  a redundant concurrent run is at worst a benign idempotent gateway op, and the composite-PK
+  collision on `save` dedups the *stored response*. **Refund is the exception**: it has no
+  such second guard and the gateway refund is **not** naturally idempotent, so a plain
+  `find → refund → save` would let two truly concurrent same-key submits BOTH refund before
+  either records the key. Refund therefore uses **reserve-first**: an atomic INSERT of a
+  *pending* row (the `response_status` / `response_body` columns are **nullable** for this)
+  claims `(scope, key)` BEFORE the gateway call. A concurrent duplicate loses that INSERT and
+  is turned away with `409 ORDER_IDEMPOTENCY_KEY_IN_PROGRESS` before it can refund a second
+  time; the winner runs the refund, then `finalize`s the row with the response (a completed,
+  replayable record), or `release`s the pending row on failure so a legitimate retry can
+  re-run (the natural already-issued guard remains the backstop for the rare
+  gateway-succeeded-then-crashed window). This is the notification-delivery
+  persist-**before**-the-side-effect dedupe precedent
+  ([ADR-033](033-notification-templates-deliveries-and-render-dispatch.md)); the `find`/`save`
+  flow above is the retry-only variant the other three writes can afford.
 
 **TTL purge.** A record is purge-eligible once `created_at + IDEMPOTENCY_KEY_TTL_HOURS` has
 passed. A scheduled sweep (the notification retry-sweeper precedent, `@nestjs/schedule`)

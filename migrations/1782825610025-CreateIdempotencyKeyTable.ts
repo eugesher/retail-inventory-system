@@ -28,8 +28,14 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 //     past it, so it is indexed for that range scan.
 //   - `request_fingerprint` is the SHA-256 hex (CHAR(64)) of the canonicalized request
 //     body; a replay must match it or the write is a key-reuse error (`422`).
-//   - `response_body` is the cached response payload (JSON) returned verbatim on
-//     replay; `response_status` is its HTTP-equivalent status.
+//   - `response_body` / `response_status` are the cached response returned verbatim on
+//     replay. They are **NULLABLE**: the reserve-first refund flow (ADR-036 concurrency
+//     hardening) INSERTs a `pending` row — the `(scope, key)` claimed before the gateway
+//     call, its response NULL until a follow-up `finalize` fills it in — so a truly
+//     concurrent duplicate loses the PK and is turned away before it can refund twice. A
+//     NULL `response_body` marks a pending (in-flight) reservation; a non-NULL one a
+//     completed, replayable record. The `find`/`save` flow (place/capture/ship) only ever
+//     writes completed rows.
 //
 // `key` is backticked — it is a MySQL reserved word. `utf8mb4_unicode_ci` so the
 // implicit collation matches the rest of the schema. `synchronize` stays off, so this
@@ -41,8 +47,8 @@ export class CreateIdempotencyKeyTable1782825610025 implements MigrationInterfac
         scope               VARCHAR(64) NOT NULL,
         \`key\`               VARCHAR(64) NOT NULL,
         request_fingerprint CHAR(64)    NOT NULL,
-        response_status     INT         NOT NULL,
-        response_body       JSON        NOT NULL,
+        response_status     INT         NULL,
+        response_body       JSON        NULL,
         created_at          TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
         expires_at          TIMESTAMP   NOT NULL,
         PRIMARY KEY (scope, \`key\`)

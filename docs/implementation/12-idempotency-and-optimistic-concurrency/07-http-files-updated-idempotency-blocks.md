@@ -34,7 +34,7 @@ Each of the four idempotent operations now appears as a **trio** of requests:
    the header **`Idempotent-Replay: true`**.
 3. **The different-body reuse** (`…DifferentBody`) — the *same* key but a *changed* body. The
    stored fingerprint no longer matches, so the request is rejected **without executing**:
-   `422 { code: "IDEMPOTENCY_KEY_REUSED" }`.
+   `422 { code: "ORDER_IDEMPOTENCY_KEY_REUSED" }`.
 
 The trio lives in:
 
@@ -113,7 +113,7 @@ To observe each outcome end-to-end (after the file's `Prereqs:` login + setup bl
    response (same `id` / `orderNumber` / `gatewayReference`). Nothing moved — no second order
    row, no second gateway charge, and (for refund) no second audit row.
 2. **A key-reuse `422`.** Run the `…DifferentBody` sibling. It reuses the same captured key
-   with a changed field, so it returns `422` with `code: "IDEMPOTENCY_KEY_REUSED"` and never
+   with a changed field, so it returns `422` with `code: "ORDER_IDEMPOTENCY_KEY_REUSED"` and never
    executes — the safeguard against a client accidentally reusing one key for two distinct
    requests. For refund, the `422` fires *before* any gateway call, so the changed (larger)
    amount can never slip through as an over-refund.

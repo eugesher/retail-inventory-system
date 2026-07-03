@@ -85,6 +85,12 @@ export enum OrderErrorCodeEnum {
   // orders, surfaced loudly rather than silently honored with the wrong cached
   // response — 422.
   ORDER_IDEMPOTENCY_KEY_REUSED = 'ORDER_IDEMPOTENCY_KEY_REUSED',
+  // A concurrent request with the same `Idempotency-Key` is already in flight (the
+  // reserve-first refund flow — ADR-036 concurrency hardening): the first submit atomically
+  // reserved the key and is mid-execution, so this racing duplicate is turned away BEFORE
+  // it can run the (non-idempotent) gateway refund a second time. The client refetches or
+  // retries once the in-flight request completes (then it replays the stored result) — 409.
+  ORDER_IDEMPOTENCY_KEY_IN_PROGRESS = 'ORDER_IDEMPOTENCY_KEY_IN_PROGRESS',
 
   // A line's opaque `variantId` must be a positive integer — 400.
   ORDER_LINE_VARIANT_INVALID = 'ORDER_LINE_VARIANT_INVALID',
