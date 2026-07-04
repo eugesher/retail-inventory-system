@@ -129,6 +129,16 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     code: PermissionCodeEnum.NOTIFICATIONS_WRITE,
     description: 'Author notification templates and retry deliveries',
   },
+  {
+    id: '00000000-0000-4000-b000-000000000014',
+    code: PermissionCodeEnum.CUSTOMER_READ_CONSENT,
+    description: 'Read a customer consent record (staff override)',
+  },
+  {
+    id: '00000000-0000-4000-b000-000000000015',
+    code: PermissionCodeEnum.CUSTOMER_ERASE,
+    description: 'Erase (tombstone) a customer and their PII (staff override)',
+  },
 ];
 
 const ROLE_SEEDS: {

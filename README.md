@@ -258,7 +258,7 @@ apps/api-gateway/src/
         └── notifications.module.ts            # binds NOTIFICATIONS_GATEWAY_PORT -> NotificationsRabbitmqAdapter
 ```
 
-The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, and `PermissionAggregate` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
+The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, `PermissionAggregate`, and `ConsentRecord` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. **`ConsentRecord`** ([ADR-037](docs/adr/037-consent-record-and-tombstone-erasure.md)) is a 1:1-with-`Customer` channel-consent row keyed on the customer's `CHAR(36)` UUID (no `BaseEntity` — only `updated_at`; `transactional_email` defaults true, marketing flags false; an absent row means the defaults), bound as `CONSENT_RECORD_REPOSITORY`. The same change makes the identity schema **tombstone-ready** — `customer.email` and the five `address` PII columns are now nullable and a `customer.deleted_at` column exists, so a later erase can null a customer's PII in place while preserving the id the order tombstone references. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
 
 ### Per-module hexagonal layout
 
@@ -942,6 +942,10 @@ Every seeded permission code and the role bundles it appears in. Codes are kebab
 | `iam:role-edit` | `admin` |
 | `audit:read` | `admin` |
 | `pricing:write` | `admin`, `catalog-manager` |
+| `customer:read-consent` | `admin` |
+| `customer:erase` | `admin` |
+
+Both `customer:*` codes are **admin-only staff overrides** — there is deliberately no customer-facing consent permission code, because a customer JWT carries no `permissions` claim, so the customer's own consent write path is authorized by authentication + inherent ownership, not a code ([ADR-037](docs/adr/037-consent-record-and-tombstone-erasure.md) / [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md)).
 
 ### Required environment variables
 

@@ -6,6 +6,7 @@ import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
 import { MicroserviceClientRisEventsModule } from '@retail-inventory-system/messaging';
 
 import {
+  CONSENT_RECORD_REPOSITORY,
   CUSTOMER_REPOSITORY,
   PASSWORD_HASHER,
   PERMISSION_REPOSITORY,
@@ -28,6 +29,8 @@ import { Argon2PasswordAdapter } from './infrastructure/argon2';
 import { RmqAuditLogPublisher } from './infrastructure/audit';
 import { JwtTokenAdapter } from './infrastructure/jwt';
 import {
+  ConsentRecordEntity,
+  ConsentRecordTypeormRepository,
   CustomerEntity,
   CustomerTypeormRepository,
   PermissionEntity,
@@ -75,7 +78,13 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([StaffUserEntity, RoleEntity, PermissionEntity, CustomerEntity]),
+    TypeOrmModule.forFeature([
+      StaffUserEntity,
+      RoleEntity,
+      PermissionEntity,
+      CustomerEntity,
+      ConsentRecordEntity,
+    ]),
     authLibDynamicModule,
     // The producer-side client for the `ris.events` topic exchange — the real
     // `RmqAuditLogPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy`
@@ -102,6 +111,11 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     PermissionTypeormRepository,
     { provide: PERMISSION_REPOSITORY, useExisting: PermissionTypeormRepository },
 
+    // The customer channel-consent store. Bound here + exported so the consent
+    // Record/Read use cases and the erase writer (later consent work) resolve it.
+    ConsentRecordTypeormRepository,
+    { provide: CONSENT_RECORD_REPOSITORY, useExisting: ConsentRecordTypeormRepository },
+
     LoginUseCase,
     LogoutUseCase,
     RefreshTokenUseCase,
@@ -119,6 +133,7 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     RegisterCustomerUseCase,
     ROLE_REPOSITORY,
     PERMISSION_REPOSITORY,
+    CONSENT_RECORD_REPOSITORY,
     // Re-export the dynamic AuthLibModule so STAFF_USER_REPOSITORY (and the
     // other AuthLib-bound tokens) are visible to AuthModule's consumers.
     // See the comment above `authLibDynamicModule` for why this is needed.

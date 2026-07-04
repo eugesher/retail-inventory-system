@@ -62,6 +62,46 @@ describe('Customer', () => {
     });
   });
 
+  describe('tombstone rehydration (status="deleted")', () => {
+    it('rehydrates a deleted row with null email + null PII without throwing', () => {
+      const deletedAt = new Date('2026-07-04T09:30:00.000Z');
+      const customer = Customer.rehydrate(CUSTOMER_ID, {
+        email: null,
+        passwordHash: null,
+        status: 'deleted',
+        phone: null,
+        firstName: null,
+        lastName: null,
+        emailVerifiedAt: null,
+        refreshTokenHash: null,
+        deletedAt,
+      });
+
+      expect(customer.status).toBe('deleted');
+      expect(customer.email).toBeNull();
+      expect(customer.phone).toBeNull();
+      expect(customer.firstName).toBeNull();
+      expect(customer.lastName).toBeNull();
+      expect(customer.deletedAt).toEqual(deletedAt);
+      expect(customer.isActive).toBe(false);
+    });
+
+    it('still rejects a null email for a live (non-deleted) customer', () => {
+      expect(() =>
+        Customer.rehydrate(CUSTOMER_ID, {
+          email: null,
+          passwordHash: 'argon2-hash',
+          status: 'active',
+        }),
+      ).toThrow(/email must be a valid email/);
+    });
+
+    it('defaults deletedAt to null for a live customer', () => {
+      const customer = makeCustomer();
+      expect(customer.deletedAt).toBeNull();
+    });
+  });
+
   describe('status transitions', () => {
     it('suspend → reactivate flips status and isActive', () => {
       const customer = makeCustomer();

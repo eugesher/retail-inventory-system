@@ -14,6 +14,7 @@ export class CustomerMapper {
       lastName: entity.lastName,
       emailVerifiedAt: entity.emailVerifiedAt,
       refreshTokenHash: entity.refreshTokenHash,
+      deletedAt: entity.deletedAt,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
     });
@@ -30,6 +31,7 @@ export class CustomerMapper {
       lastName: customer.lastName,
       emailVerifiedAt: customer.emailVerifiedAt,
       refreshTokenHash: customer.refreshTokenHash,
+      deletedAt: customer.deletedAt,
     };
   }
 }
