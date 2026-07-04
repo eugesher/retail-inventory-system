@@ -1,3 +1,7 @@
+export * from './consent-record.entity';
+export * from './consent-record.mapper';
+export * from './consent-record-typeorm.repository';
+
 export * from './customer.entity';
 export * from './customer.mapper';
 export * from './customer-typeorm.repository';

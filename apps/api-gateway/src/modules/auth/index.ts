@@ -6,6 +6,8 @@ export * from './auth.module';
 // reads/writes auth aggregates) can `@Inject(ROLE_REPOSITORY)` without
 // reaching into auth's `application/ports/` deep path.
 export {
+  CONSENT_RECORD_REPOSITORY,
+  IConsentRecordRepositoryPort,
   IPermissionRepositoryPort,
   IRoleRepositoryPort,
   IStaffUserRepositoryPort,
@@ -16,6 +18,7 @@ export {
 
 // Aggregates — IAM consumes these to construct (`RoleAggregate.create`) and
 // rehydrate Role/Permission/StaffUser instances when calling cross-module
-// repositories injected via the tokens below.
-export { RoleAggregate, PermissionAggregate, StaffUser } from './domain';
+// repositories injected via the tokens below. `ConsentRecord` rides along for
+// the consent Record/Read use cases + the erase writer (later consent work).
+export { ConsentRecord, RoleAggregate, PermissionAggregate, StaffUser } from './domain';
 export { StaffUserRolesAssignedEvent, StaffUserRoleRevokedEvent } from './domain/events';

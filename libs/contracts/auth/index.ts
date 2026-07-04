@@ -1,5 +1,6 @@
 export * from './audit-log-publisher.port';
 export * from './audit-staff-action.event';
+export * from './consent-record.view';
 export * from './current-user.dto';
 export * from './jwt-payload.dto';
 export * from './permission.enum';

@@ -22,4 +22,12 @@ export enum PermissionCodeEnum {
   IAM_ROLE_EDIT = 'iam:role-edit',
   AUDIT_READ = 'audit:read',
   PRICING_WRITE = 'pricing:write',
+  // Customer-privacy staff overrides (admin-only). There is deliberately NO
+  // customer-facing consent permission code: a customer JWT carries no
+  // `permissions` claim (ADR-024/028), so a `@RequiresPermission('customer:…')`
+  // gate would be unreachable-by-construction dead code — the customer consent
+  // write path is authorized by authentication + inherent ownership, and these
+  // two codes gate only the staff read/erase overrides.
+  CUSTOMER_READ_CONSENT = 'customer:read-consent',
+  CUSTOMER_ERASE = 'customer:erase',
 }
