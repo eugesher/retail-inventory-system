@@ -35,6 +35,8 @@ The system handles order lifecycle management and product stock tracking across 
 │  POST  /api/auth/customer/login                           │
 │  POST  /api/auth/customer/guest-session                       │
 │  GET   /api/auth/customer/me                              │
+│  GET   /api/auth/customer/me/consent                      │
+│  PUT   /api/auth/customer/me/consent                      │
 │                                                           │
 │  IAM admin                                                │
 │  GET   /api/iam/roles                                     │
@@ -258,7 +260,7 @@ apps/api-gateway/src/
         └── notifications.module.ts            # binds NOTIFICATIONS_GATEWAY_PORT -> NotificationsRabbitmqAdapter
 ```
 
-The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, `PermissionAggregate`, and `ConsentRecord` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. **`ConsentRecord`** ([ADR-037](docs/adr/037-consent-record-and-tombstone-erasure.md)) is a 1:1-with-`Customer` channel-consent row keyed on the customer's `CHAR(36)` UUID (no `BaseEntity` — only `updated_at`; `transactional_email` defaults true, marketing flags false; an absent row means the defaults), bound as `CONSENT_RECORD_REPOSITORY`. The same change makes the identity schema **tombstone-ready** — `customer.email` and the five `address` PII columns are now nullable and a `customer.deleted_at` column exists, so a later erase can null a customer's PII in place while preserving the id the order tombstone references. `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
+The gateway also hosts a `modules/auth/` module (with the `StaffUser`, `Customer`, `RoleAggregate`, `PermissionAggregate`, and `ConsentRecord` aggregates) and a sibling `modules/iam/` module (the runtime-mutable admin shell over those aggregates). These are the only gateway modules with real `domain/` state and the only ones that own DB rows. **`ConsentRecord`** ([ADR-037](docs/adr/037-consent-record-and-tombstone-erasure.md)) is a 1:1-with-`Customer` channel-consent row keyed on the customer's `CHAR(36)` UUID (no `BaseEntity` — only `updated_at`; `transactional_email` defaults true, marketing flags false; an absent row means the defaults), bound as `CONSENT_RECORD_REPOSITORY`. A signed-in customer reads and updates their own record at `GET`/`PUT /api/auth/customer/me/consent` (bearer, **no permission code** — ownership is inherent in the token, so a customer can only ever touch their own consent); a `PUT` upserts-merges only the supplied fields and emits `customer.consent.updated` through the `CUSTOMER_EVENTS_PUBLISHER` adapter, which publishes onto `notification_events` **and** mirrors onto the `ris.events` firehose ([ADR-035](docs/adr/035-event-store-firehose-topic-exchange.md)), best-effort post-commit. The Read use case is written owner-or-staff so a later admin consent-read can reuse it. The same change makes the identity schema **tombstone-ready** — `customer.email` and the five `address` PII columns are now nullable and a `customer.deleted_at` column exists, so a later erase can null a customer's PII in place while preserving the id the order tombstone references; the paired `customer.erased` event carries **no PII** (only the ids + erase instant). `ClientProxy` is confined to `infrastructure/messaging/*-rabbitmq.adapter.ts`; everything else depends on the port symbol. See [ADR-010](docs/adr/010-jwt-rbac-at-the-gateway.md) and [ADR-024](docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md).
 
 ### Per-module hexagonal layout
 
@@ -799,6 +801,8 @@ POST /api/auth/customer/register        # public
 POST /api/auth/customer/login           # public
 POST /api/auth/customer/guest-session   # public — mints a guest-tier token + customerId
 GET  /api/auth/customer/me              # bearer
+GET  /api/auth/customer/me/consent      # bearer — read own consent (owner-inherent, no permission code)
+PUT  /api/auth/customer/me/consent      # bearer — update own consent (owner-inherent, no permission code)
 
 # Cart  (bearer + owner-check; no permission code — a customer touches only its own cart)
 POST   /api/cart                        # bearer — open a cart

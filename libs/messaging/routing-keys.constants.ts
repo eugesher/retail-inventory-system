@@ -310,6 +310,13 @@ export const ROUTING_KEYS = {
   // binds (ADR-033). The plural `notifications.*` prefix marks it as the cross-cutting
   // alerting stream, distinct from the singular `notification.delivery.*` RPC commands.
   NOTIFICATIONS_DELIVERY_FAILED: 'notifications.delivery.failed',
+  // Customer privacy events (api-gateway `auth` → `notification_events`, and
+  // mirrored onto `ris.events`). `customer.consent.updated` carries the full
+  // consent snapshot so the notification consent cache can refresh without an RPC;
+  // `customer.erased` carries NO PII — only the customer id, the erase instant, and
+  // the acting staff user — because the whole point of the erase is to destroy PII.
+  CUSTOMER_CONSENT_UPDATED: 'customer.consent.updated',
+  CUSTOMER_ERASED: 'customer.erased',
   // `audit.staff.action` — the cross-cutting staff-action audit stream (ADR-035).
   // Emitted onto the `ris.events` topic exchange by the real `AUDIT_LOG_PUBLISHER`
   // adapters (api-gateway `auth` + retail `orders`) whenever a privileged actor

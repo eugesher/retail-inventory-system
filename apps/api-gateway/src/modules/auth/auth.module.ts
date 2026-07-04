@@ -3,10 +3,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule as AuthLibModule, AUTH_USER_VALIDATOR } from '@retail-inventory-system/auth';
 import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
-import { MicroserviceClientRisEventsModule } from '@retail-inventory-system/messaging';
+import {
+  MicroserviceClientNotificationModule,
+  MicroserviceClientRisEventsModule,
+} from '@retail-inventory-system/messaging';
 
 import {
   CONSENT_RECORD_REPOSITORY,
+  CUSTOMER_EVENTS_PUBLISHER,
   CUSTOMER_REPOSITORY,
   PASSWORD_HASHER,
   PERMISSION_REPOSITORY,
@@ -20,6 +24,8 @@ import {
   LoginCustomerUseCase,
   LoginUseCase,
   LogoutUseCase,
+  ReadConsentUseCase,
+  RecordConsentUseCase,
   RefreshTokenUseCase,
   RegisterCustomerUseCase,
   RegisterStaffUserUseCase,
@@ -28,6 +34,7 @@ import {
 import { Argon2PasswordAdapter } from './infrastructure/argon2';
 import { RmqAuditLogPublisher } from './infrastructure/audit';
 import { JwtTokenAdapter } from './infrastructure/jwt';
+import { RmqCustomerEventsPublisher } from './infrastructure/messaging';
 import {
   ConsentRecordEntity,
   ConsentRecordTypeormRepository,
@@ -44,6 +51,7 @@ import {
   AuthAdminController,
   AuthController,
   CustomerAuthController,
+  CustomerConsentController,
   StaffLoginController,
 } from './presentation';
 
@@ -90,8 +98,18 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     // `RmqAuditLogPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy`
     // to emit `audit.staff.action` (ADR-035).
     MicroserviceClientRisEventsModule,
+    // The `notification_events` producer client — `RmqCustomerEventsPublisher`
+    // injects its `NOTIFICATION_MICROSERVICE` `ClientProxy` to emit the two
+    // `customer.*` privacy events onto the notification consumers' queue (ADR-037).
+    MicroserviceClientNotificationModule,
   ],
-  controllers: [AuthController, AuthAdminController, CustomerAuthController, StaffLoginController],
+  controllers: [
+    AuthController,
+    AuthAdminController,
+    CustomerAuthController,
+    CustomerConsentController,
+    StaffLoginController,
+  ],
   providers: [
     Argon2PasswordAdapter,
     { provide: PASSWORD_HASHER, useExisting: Argon2PasswordAdapter },
@@ -116,6 +134,11 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     ConsentRecordTypeormRepository,
     { provide: CONSENT_RECORD_REPOSITORY, useExisting: ConsentRecordTypeormRepository },
 
+    // The customer-privacy event publisher (ADR-037): emits `customer.consent.updated`
+    // / `customer.erased` onto `notification_events` and mirrors onto `ris.events`.
+    RmqCustomerEventsPublisher,
+    { provide: CUSTOMER_EVENTS_PUBLISHER, useExisting: RmqCustomerEventsPublisher },
+
     LoginUseCase,
     LogoutUseCase,
     RefreshTokenUseCase,
@@ -124,6 +147,8 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     LoginCustomerUseCase,
     CreateGuestSessionUseCase,
     GetCurrentCustomerUseCase,
+    RecordConsentUseCase,
+    ReadConsentUseCase,
   ],
   exports: [
     PASSWORD_HASHER,
@@ -134,6 +159,9 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     ROLE_REPOSITORY,
     PERMISSION_REPOSITORY,
     CONSENT_RECORD_REPOSITORY,
+    // Exported so the admin consent-read controller (a later change) can reuse the
+    // owner-or-staff Read Consent use case unchanged, passing `isStaff: true`.
+    ReadConsentUseCase,
     // Re-export the dynamic AuthLibModule so STAFF_USER_REPOSITORY (and the
     // other AuthLib-bound tokens) are visible to AuthModule's consumers.
     // See the comment above `authLibDynamicModule` for why this is needed.
