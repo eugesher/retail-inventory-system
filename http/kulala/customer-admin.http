@@ -1,0 +1,135 @@
+# Customer-admin endpoints
+# (apps/api-gateway/src/modules/customer-admin/presentation/customer-admin.controller.ts)
+#
+# The ADMIN surface over the `Customer` aggregate at /api/admin/customers/*. Both
+# routes are STAFF-ONLY with an explicit @RequiresPermission(...) gate (ADR-024/037):
+# they are admin overrides, never customer-reachable (a customer JWT carries no
+# `permissions` claim). The customer-facing self-service consent surface is the
+# separate http/kulala/consent.http.
+#   - GET  /admin/customers/:id/consent   (Bearer staff — customer:read-consent)
+#       Read ANY customer's ConsentRecordView. Reuses the owner-or-staff Read Consent
+#       use case with the staff override (isStaff:true); an absent row resolves to
+#       the defaults, never a 404.
+#   - POST /admin/customers/:id/erase     (Bearer staff — customer:erase)
+#       TOMBSTONE-ERASE a customer: null all PII (email/phone/name/password hash/
+#       refresh-token hash + the customer's addresses + abandon active carts),
+#       preserve the id, set status='deleted'. Body { confirmEmail } — a two-key
+#       safety guard: confirmEmail MUST equal the customer's CURRENT email or the
+#       call is a 400 with nothing written. Returns { status: 'deleted', erasedAt }.
+#       Re-erasing an already-erased customer is an idempotent 200 no-op.
+#
+#       !! IRREVERSIBLE !! The erase nulls PII permanently — there is no undo. The
+#       blocks below erase a THROWAWAY customer registered inline (not the seeded
+#       customer@example.com), so the flow is safe to run top-to-bottom and repeats
+#       cleanly (the erase frees the throwaway email, so re-registering it works).
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run `login` FIRST — it captures a seeded ADMIN bearer token into @accessToken.
+#      admin@example.com holds every permission code (including customer:read-consent
+#      AND customer:erase).
+#   3. adminGetConsent reads the SEEDED customer's consent (a safe, non-destructive
+#      read). Run `registerThrowaway` before the erase blocks — it mints the
+#      throwaway customer the erase targets and captures its id + email.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name login
+# POST /api/auth/staff/login
+# Seeded admin login (admin@example.com / admin1234). Response is
+# TokenResponseDto { accessToken, refreshToken, expiresIn }. The access JWT carries
+# `permissions: string[]` inflated at login — the admin holds every code, so this
+# one token authorizes both admin routes below.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+# The seeded acceptance customer's id (customer@example.com). adminGetConsent reads
+# this row (safe). The erase blocks deliberately target the throwaway registered
+# below instead, so running this file never destroys the seeded fixture.
+@seededCustomerId = 00000000-0000-4000-a000-000000000002
+
+###
+
+# @name adminGetConsent
+# GET /api/admin/customers/:id/consent   (Bearer staff — customer:read-consent)
+# Read the seeded customer's consent as an admin. Returns ConsentRecordView
+# { customerId, transactionalEmail, marketingEmail, marketingSms,
+# dataRetentionPolicy, updatedAt }. A staff token lacking customer:read-consent
+# gets a 403; a customer token gets a 403 (no `permissions` claim). An unknown or
+# row-less customer id still returns the defaults, never a 404.
+GET {{baseUrl}}/admin/customers/{{seededCustomerId}}/consent
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name registerThrowaway
+# POST /api/auth/customer/register
+# Mint a DISPOSABLE customer to erase below (public route — no bearer needed). The
+# response (201) is { id, email, status, ... }; its `id` is the CHAR(36) UUID the
+# erase blocks target. Re-running after the erase succeeds again because the erase
+# nulls the email, freeing it for re-registration.
+POST {{baseUrl}}/auth/customer/register
+Content-Type: application/json
+
+{
+  "email": "throwaway@example.com",
+  "password": "throwaway1234",
+  "firstName": "Throw",
+  "lastName": "Away"
+}
+
+###
+@throwawayCustomerId = {{registerThrowaway.response.body.$.id}}
+
+###
+
+# @name adminEraseCustomerConfirmMismatch
+# POST /api/admin/customers/:id/erase   (Bearer staff — customer:erase)
+# The confirm-email guard in action: a confirmEmail that does NOT match the
+# customer's current email is a 400 (BadRequest) and writes NOTHING — the customer
+# stays live. This block is safe to run before the real erase; it proves the guard
+# without mutating anything.
+POST {{baseUrl}}/admin/customers/{{throwawayCustomerId}}/erase
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "confirmEmail": "wrong@example.com"
+}
+
+###
+
+# @name adminEraseCustomer
+# POST /api/admin/customers/:id/erase   (Bearer staff — customer:erase)
+# IRREVERSIBLE. confirmEmail MATCHES the throwaway's current email, so the erase
+# proceeds: PII nulled (email/phone/name/password hash/refresh-token hash + the
+# customer's addresses), active carts abandoned, status='deleted', deleted_at set;
+# a subsequent /auth/refresh with that customer's old refresh token now 401s. Emits
+# customer.erased (NO PII — ids + erasedAt only). Returns
+# { status: 'deleted', erasedAt: '<iso>' }. Re-running this exact block is an
+# idempotent 200 no-op (the tombstone has no email to confirm against).
+POST {{baseUrl}}/admin/customers/{{throwawayCustomerId}}/erase
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "confirmEmail": "throwaway@example.com"
+}

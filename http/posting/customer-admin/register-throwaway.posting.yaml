@@ -1,0 +1,23 @@
+name: register-throwaway
+description: |-
+  POST /api/auth/customer/register
+  Mint a DISPOSABLE customer to erase below (public route — no bearer needed). The
+  response (201) is { id, email, status, ... }; its `id` is captured into
+  $throwawayCustomerId, the CHAR(36) UUID the erase blocks target. Re-running after
+  the erase succeeds again because the erase nulls the email, freeing it for
+  re-registration.
+method: POST
+url: $ENV_BASE_URL/auth/customer/register
+body:
+  content: |-
+    {
+      "email": "throwaway@example.com",
+      "password": "throwaway1234",
+      "firstName": "Throw",
+      "lastName": "Away"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: customer-admin/scripts.py:capture_register_throwaway

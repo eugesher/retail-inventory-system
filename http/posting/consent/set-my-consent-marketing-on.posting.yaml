@@ -1,0 +1,20 @@
+name: set-my-consent-marketing-on
+description: |-
+  PUT /api/auth/customer/me/consent   (Bearer customer)
+  Opt IN to marketing email. Upsert-merge — only `marketingEmail` changes; the
+  transactional and SMS flags and the retention policy keep their current values.
+  Emits customer.consent.updated, so a marketing send to this customer afterwards is
+  `sent` rather than `skipped-no-consent` (see notifications/send-marketing).
+  Response is the updated ConsentRecordView with an ISO `updatedAt`.
+method: PUT
+url: $ENV_BASE_URL/auth/customer/me/consent
+body:
+  content: |-
+    {
+      "marketingEmail": true
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -1,0 +1,19 @@
+name: admin-erase-customer-confirm-mismatch
+description: |-
+  POST /api/admin/customers/:id/erase   (Bearer staff — customer:erase)
+  The confirm-email guard in action: a confirmEmail that does NOT match the
+  customer's current email is a 400 (BadRequest) and writes NOTHING — the customer
+  stays live. This request is safe to run before the real erase; it proves the guard
+  without mutating anything.
+method: POST
+url: $ENV_BASE_URL/admin/customers/$throwawayCustomerId/erase
+body:
+  content: |-
+    {
+      "confirmEmail": "wrong@example.com"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

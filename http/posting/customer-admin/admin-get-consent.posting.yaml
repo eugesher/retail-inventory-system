@@ -1,0 +1,13 @@
+name: admin-get-consent
+description: |-
+  GET /api/admin/customers/:id/consent   (Bearer staff — customer:read-consent)
+  Read the seeded customer's consent as an admin (the seeded acceptance customer id
+  00000000-0000-4000-a000-000000000002 is inlined — a safe, non-destructive read).
+  Returns ConsentRecordView { customerId, transactionalEmail, marketingEmail,
+  marketingSms, dataRetentionPolicy, updatedAt }. A staff token lacking
+  customer:read-consent gets a 403; a customer token gets a 403 (no `permissions`
+  claim). An unknown or row-less customer id still returns the defaults, never a 404.
+url: $ENV_BASE_URL/admin/customers/00000000-0000-4000-a000-000000000002/consent
+headers:
+- name: Authorization
+  value: Bearer $accessToken
