@@ -1,0 +1,11 @@
+name: archive-product
+description: |-
+  POST /api/catalog/products/:productId/archive  (Bearer — catalog:write)
+  Transitions the product active -> archived (terminal soft-delete). Returns 200
+  with ProductView { ..., status: 'archived', archivedAt }. Archived products
+  are hidden from browse but stay resolvable by slug/id (see the follow-up list).
+method: POST
+url: $ENV_BASE_URL/catalog/products/$productId/archive
+headers:
+- name: Authorization
+  value: Bearer $accessToken

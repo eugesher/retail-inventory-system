@@ -1,0 +1,20 @@
+name: receive-stock
+description: |-
+  POST /api/inventory/variants/:variantId/stock/receive  (Bearer — inventory:adjust)
+  Receive stock — raises on-hand by a positive quantity. Omitting stockLocationId
+  targets default-warehouse. Response is the updated StockLevelView
+  { stockLocationId, quantityOnHand, quantityAllocated, quantityReserved,
+  available, version, updatedAt }. With the seed, variant 1 starts at 100 on hand,
+  so this leaves it at 150.
+method: POST
+url: $ENV_BASE_URL/inventory/variants/1/stock/receive
+body:
+  content: |-
+    {
+      "quantity": 50
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

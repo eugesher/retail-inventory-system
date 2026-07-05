@@ -1,0 +1,19 @@
+name: cancel-order-shipped
+description: |-
+  POST /api/orders/:orderId/cancel  (Bearer — staff order:cancel)
+  Attempts to cancel the whole order AFTER a fulfillment has shipped. EXPECT 409
+  ORDER_NOT_CANCELLABLE — the shipped-fulfillment-presence guard protects physically
+  shipped stock (the rejection is about order state, not authorization, hence a staff
+  token still gets 409). Body { statusCode:409, message, code:'ORDER_NOT_CANCELLABLE' }.
+method: POST
+url: $ENV_BASE_URL/orders/$orderIdB/cancel
+body:
+  content: |-
+    {
+      "reason": "Attempting to cancel a shipped order"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -1,0 +1,25 @@
+name: register-product
+description: |-
+  POST /api/catalog/products  (Bearer — catalog:write)
+  Registers a new product in status 'draft'. Body shape
+  (RegisterProductRequestDto):
+    name:         1..255
+    slug:         globally-unique kebab-case (^[a-z0-9]+(?:-[a-z0-9]+)*$$)
+    description?: <= 2000
+  Response is ProductView { id, name, slug, description, status: 'draft' }.
+method: POST
+url: $ENV_BASE_URL/catalog/products
+body:
+  content: |-
+    {
+      "name": "Aeron Chair",
+      "slug": "aeron-chair",
+      "description": "Ergonomic office chair"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: catalog/scripts.py:capture_register_product

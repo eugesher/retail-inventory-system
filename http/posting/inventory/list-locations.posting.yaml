@@ -1,0 +1,9 @@
+name: list-locations
+description: |-
+  GET /api/inventory/locations  (Bearer — inventory:read)
+  Lists the stock locations. The seeded `default-warehouse` appears here.
+  Response is StockLocationView[] { id, name, code, type, gln, active }.
+url: $ENV_BASE_URL/inventory/locations
+headers:
+- name: Authorization
+  value: Bearer $accessToken

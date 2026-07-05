@@ -1,0 +1,10 @@
+name: get-order
+description: |-
+  GET /api/orders/:orderId  (Bearer; owner OR order:read)
+  Reads the order back to observe all three advanced status axes after the flow:
+  status='delivered', paymentStatus='captured' (captured at ship time),
+  fulfillmentStatus='delivered'. Response (200) is OrderView.
+url: $ENV_BASE_URL/orders/$orderId
+headers:
+- name: Authorization
+  value: Bearer $accessToken

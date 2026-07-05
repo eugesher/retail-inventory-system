@@ -1,0 +1,29 @@
+name: issue-refund
+description: |-
+  POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
+  Issues a PARTIAL goodwill refund (1000 of the 4999 captured) — no return involved. The
+  retail service checks the captured precondition + the refundable ceiling, reverses the
+  amount via the (fake) gateway, accumulates payment.refunded_amount_minor, and (since this
+  is partial) leaves the payment `captured`. The `Idempotency-Key` is REQUIRED and
+  DEDUPLICATED (ADR-036) — the same key + body replays the stored refund (200 +
+  `Idempotent-Replay: true`, before the gateway AND before the audit); the refundable-amount
+  ceiling + the already-issued match remain the backstop against an over-refund on a new-key
+  replay. Response (201) is RefundView with status='issued' and a gatewayReference.
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/refunds
+body:
+  content: |-
+    {
+      "paymentId": $paymentId,
+      "amountMinor": 1000,
+      "reason": "Goodwill price adjustment"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $refundKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: refunds/scripts.py:setup_issue_refund

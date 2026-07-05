@@ -1,0 +1,8 @@
+name: list-prices-variant1
+description: |-
+  GET /api/catalog/variants/:variantId/prices?currency=USD  (public)
+  Lists EVERY price row in effect for (variant 1, USD) at `asOf` (omitted => now).
+  Query (PriceQueryDto): currency (default USD), asOf (default now, ISO-8601). The
+  immediate price just set is in effect, so it appears here. Response is
+  PriceView[].
+url: $ENV_BASE_URL/catalog/variants/1/prices?currency=USD

@@ -1,0 +1,27 @@
+name: create-tax-category
+description: |-
+  POST /api/catalog/tax-categories  (Bearer — pricing:write)
+  Creates a classification label (code + name + optional description); it carries
+  no rate — tax computation is a deferred capability. Body shape
+  (CreateTaxCategoryRequestDto):
+    code:         UPPER_SNAKE_CASE, unique (^[A-Z][A-Z0-9_]*$$)
+    name:         1..255
+    description?: <= 1000
+  LUXURY (the @taxCode set above) is deliberately NOT a seeded code, so this runs
+  on a fresh seed; a repeat → 409 TAX_CATEGORY_CODE_TAKEN. @taxCode feeds both
+  this create body and the attach body below. Response is TaxCategoryView
+  { id, code, name, description }.
+method: POST
+url: $ENV_BASE_URL/catalog/tax-categories
+body:
+  content: |-
+    {
+      "code": "LUXURY",
+      "name": "Luxury goods",
+      "description": "Higher-band classification"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

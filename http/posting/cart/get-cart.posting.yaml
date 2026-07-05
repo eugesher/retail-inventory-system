@@ -1,0 +1,9 @@
+name: get-cart
+description: |-
+  GET /api/cart/:cartId  (Bearer + owner-check)
+  Reads the cart by id. A non-owner gets 403; an unknown cart 404. Response is
+  CartView.
+url: $ENV_BASE_URL/cart/$cartId
+headers:
+- name: Authorization
+  value: Bearer $accessToken

@@ -1,0 +1,22 @@
+name: register-easel
+description: |-
+  POST /api/catalog/products  (Bearer — catalog:write)
+  Registers a fresh draft product (RegisterProductRequestDto: name, slug,
+  description?). The `workshop-easel` slug is globally unique. Response is
+  ProductView { id, ..., status: 'draft' }.
+method: POST
+url: $ENV_BASE_URL/catalog/products
+body:
+  content: |-
+    {
+      "name": "Workshop Easel",
+      "slug": "workshop-easel",
+      "description": "A sturdy oak studio easel"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: catalog-media/scripts.py:capture_register_easel

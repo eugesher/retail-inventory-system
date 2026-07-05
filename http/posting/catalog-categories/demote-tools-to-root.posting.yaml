@@ -1,0 +1,18 @@
+name: demote-tools-to-root
+description: |-
+  PATCH /api/catalog/categories/:slug/parent  (Bearer — catalog:write)
+  A null (or omitted) newParentSlug DEMOTES the category to a root: its path
+  collapses to `/workshop-tools` and parentId becomes null. The subtree rebases
+  with it (workshop-hand-planes → `/workshop-tools/workshop-hand-planes`).
+method: PATCH
+url: $ENV_BASE_URL/catalog/categories/workshop-tools/parent
+body:
+  content: |-
+    {
+      "newParentSlug": null
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

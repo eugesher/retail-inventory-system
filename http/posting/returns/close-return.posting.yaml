@@ -1,0 +1,11 @@
+name: close-return
+description: |-
+  POST /api/returns/:rmaId/close  (Bearer — staff order:return-authorize)
+  Settles the inspected RMA -> `closed` (terminal). Closing does not itself issue a refund —
+  Issue Refund (see refunds.http) is a distinct, explicit step. Response (200) is the
+  ReturnRequestView with status='closed' and closedAt stamped.
+method: POST
+url: $ENV_BASE_URL/returns/$rmaId/close
+headers:
+- name: Authorization
+  value: Bearer $accessToken

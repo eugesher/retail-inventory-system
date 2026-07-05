@@ -1,0 +1,11 @@
+name: list-refunds-b
+description: |-
+  GET /api/orders/:orderId/refunds  (Bearer — owner OR order:read)
+  Lists the order's refunds. Run a moment after `cancelOrderB` so the asynchronous
+  auto-refund consumer has processed retail.order.cancelled. Response (200) is RefundView[]
+  with the one auto-issued full refund (status='issued', reason='order-cancelled'). Re-running
+  the cancel event is idempotent — the refundable remainder is 0, so no second refund issues.
+url: $ENV_BASE_URL/orders/$orderIdB/refunds
+headers:
+- name: Authorization
+  value: Bearer $accessToken

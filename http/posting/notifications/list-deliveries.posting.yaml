@@ -1,0 +1,12 @@
+name: list-deliveries
+description: |-
+  GET /api/notifications/deliveries  (Bearer — notifications:read)
+  The paginated, NEWEST-FIRST audit read of the notification_delivery trail. Here
+  scoped to order-confirmation deliveries (eventReferenceType=order). Returns
+  IPage<NotificationDeliveryView> { items, total, page, size }. Empty until a
+  producing event has flowed against an active template (see "Where delivery rows
+  come from" above).
+url: $ENV_BASE_URL/notifications/deliveries?eventReferenceType=order&page=1&pageSize=20
+headers:
+- name: Authorization
+  value: Bearer $accessToken

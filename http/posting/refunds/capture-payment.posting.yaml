@@ -1,0 +1,20 @@
+name: capture-payment
+description: |-
+  POST /api/orders/:orderId/payments/capture  (Bearer — owner OR order:capture)
+  Captures the authorized payment (authorized -> captured) so it becomes refundable.
+  Response (200) is OrderView with paymentStatus='captured'; capture the payment id from
+  the embedded payment row.
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/payments/capture
+body:
+  content: '{}'
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $capture_payment_guid
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: refunds/scripts.py:setup_capture_payment
+  on_response: refunds/scripts.py:capture_capture_payment

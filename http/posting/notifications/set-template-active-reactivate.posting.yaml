@@ -1,0 +1,17 @@
+name: set-template-active-reactivate
+description: |-
+  PATCH /api/notifications/templates/:id/active  (Bearer — notifications:write)
+  Re-activate the same version. Body { active: true }. Response is the
+  NotificationTemplateView with active=true.
+method: PATCH
+url: $ENV_BASE_URL/notifications/templates/$templateId/active
+body:
+  content: |-
+    {
+      "active": true
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

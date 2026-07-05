@@ -1,0 +1,12 @@
+name: revoke-staff-role
+description: |-
+  DELETE /api/iam/staff/:id/roles/:roleName
+  204 on success. 404 if the role is not currently bound to the user. 409
+  "Cannot revoke the last remaining role" if it would leave the StaffUser
+  with no roles — the seeded admin holds the `admin` role independently of
+  `ops-readonly`, so this revoke succeeds.
+method: DELETE
+url: $ENV_BASE_URL/iam/staff/$adminMeId/roles/ops-readonly
+headers:
+- name: Authorization
+  value: Bearer $adminLoginAccessToken

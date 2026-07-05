@@ -1,0 +1,24 @@
+name: ship-fulfillment-different-body
+description: |-
+  POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+  The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @shipKey but a CHANGED body (a different
+  trackingNumber + carrier). The stored fingerprint no longer matches, so the request is
+  rejected WITHOUT executing:
+    422 { statusCode: 422, code: "ORDER_IDEMPOTENCY_KEY_REUSED" }
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/fulfillments/$fulfillmentId/ship
+body:
+  content: |-
+    {
+      "trackingNumber": "1Z999AA99999999999",
+      "carrier": "FedEx"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $shipKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: fulfillment/scripts.py:setup_ship_fulfillment_different_body

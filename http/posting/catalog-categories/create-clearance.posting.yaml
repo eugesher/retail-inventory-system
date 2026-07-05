@@ -1,0 +1,17 @@
+name: create-clearance
+description: |-
+  POST /api/catalog/categories  (Bearer — catalog:write)
+  A second ROOT category, the destination for the reparent demonstration below.
+method: POST
+url: $ENV_BASE_URL/catalog/categories
+body:
+  content: |-
+    {
+      "name": "Clearance",
+      "slug": "workshop-clearance"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

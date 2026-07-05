@@ -1,0 +1,9 @@
+name: list-my-orders
+description: |-
+  GET /api/orders?page=1&pageSize=10  (Bearer; own only)
+  Lists the authenticated caller's own orders, newest-first, paginated. Response (200)
+  is an IPage envelope { items: OrderView[], total, page, size }.
+url: $ENV_BASE_URL/orders?page=1&pageSize=10
+headers:
+- name: Authorization
+  value: Bearer $accessToken

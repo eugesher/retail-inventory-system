@@ -1,0 +1,20 @@
+name: customer-login
+description: |-
+  POST /api/auth/customer/login
+  Same JWT envelope as staff login, but the access token carries `roles: []`
+  and `permissions: []` — the customer is not an RBAC actor. Any
+  @RequiresPermission(...) endpoint returns 403 when called with a customer
+  JWT.
+method: POST
+url: $ENV_BASE_URL/auth/customer/login
+body:
+  content: |-
+    {
+      "email": "buyer@example.com",
+      "password": "buyer1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: auth/scripts.py:capture_customer_login

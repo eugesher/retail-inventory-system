@@ -1,0 +1,7 @@
+name: get-tree-after-reparent
+description: |-
+  GET /api/catalog/categories/:slug/tree  (public)
+  Reads the new owner's subtree. workshop-hand-planes now resolves at
+  `/workshop-clearance/workshop-tools/workshop-hand-planes` — proof the descendant
+  path was rewritten, not just the moved row.
+url: $ENV_BASE_URL/catalog/categories/workshop-clearance/tree

@@ -138,7 +138,7 @@ DTO validation (the `class-validator` decorators) is the only thing that produce
 ## 4. The `.http` files
 
 Two new Kulala files document the surface end-to-end against the seeded environment
-(`http/http-client.env.json` already defines `ENV_BASE_URL`; no new env value is needed).
+(`http/kulala/http-client.env.json` already defines `ENV_BASE_URL`; no new env value is needed).
 Both follow the existing conventions — `@baseUrl = {{ENV_BASE_URL}}`, `###` separators, a
 `# @name` per request, a header comment citing the controller path + body shape, and a
 `# Prereqs:` block that logs in the seeded users and captures the bearer tokens.
@@ -151,7 +151,7 @@ admin's superset papers over: **order-support** (`support@example.com`) holds
 (receive/inspect). Neither role holds the other's codes, which is exactly why the
 owner-or-staff vs staff-only split exists.
 
-### `http/returns.http` — the full RMA lifecycle + restock
+### `http/kulala/returns.http` — the full RMA lifecycle + restock
 
 The file builds a **delivered** order (place → fulfill → ship → deliver) so the return
 window is satisfied (a delivered order is always returnable — see
@@ -167,7 +167,7 @@ after the inspect commit, adding the unit back to `quantity_on_hand` and writing
 shape-only `rejectReturn` request documents the reject body without breaking the happy
 chain (the RMA is already closed by then).
 
-### `http/refunds.http` — the manual refund + the auto-refund trace
+### `http/kulala/refunds.http` — the manual refund + the auto-refund trace
 
 Two cases:
 

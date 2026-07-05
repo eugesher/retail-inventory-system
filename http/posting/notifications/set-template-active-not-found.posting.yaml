@@ -1,0 +1,17 @@
+name: set-template-active-not-found
+description: |-
+  PATCH /api/notifications/templates/:id/active  (Bearer — notifications:write)
+  An unknown template id is a 404 (NOTIFICATION_TEMPLATE_NOT_FOUND), surfaced from
+  the notification domain via its RPC exception filter → the gateway.
+method: PATCH
+url: $ENV_BASE_URL/notifications/templates/999999/active
+body:
+  content: |-
+    {
+      "active": false
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -1,0 +1,29 @@
+name: inspect-return
+description: |-
+  POST /api/returns/:rmaId/inspect  (Bearer — staff inventory:receive-return)
+  Records the per-line outcome and walks `received` -> `inspected`. ONE entry per RMA line
+  is required. A `restock` disposition re-enters the unit into sellable inventory: the
+  cross-service inventory.stock.restock-from-return RPC fires AFTER the inspect commit
+  (idempotent on the RMA id), adding the unit back to quantity_on_hand at default-warehouse
+  and writing a positive `return` StockMovement. `lineRefundAmountMinor` (4999) is recorded
+  for the later refund but issues NO refund here. Response (200) is the inspected
+  ReturnRequestView (the line now carries condition/disposition/lineRefundAmountMinor).
+method: POST
+url: $ENV_BASE_URL/returns/$rmaId/inspect
+body:
+  content: |-
+    {
+      "lines": [
+        {
+          "returnLineId": $returnLineId,
+          "condition": "new",
+          "disposition": "restock",
+          "lineRefundAmountMinor": 4999
+        }
+      ]
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

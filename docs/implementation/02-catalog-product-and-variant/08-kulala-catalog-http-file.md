@@ -1,21 +1,21 @@
-# 08 — Kulala `http/catalog.http` file
+# 08 — Kulala `http/kulala/catalog.http` file
 
 This document records the runnable HTTP client file that drives every catalog
 gateway endpoint end-to-end. The gateway exposes the catalog operations over
 HTTP at `/api/catalog` (see
 [07 — API-gateway catalog module](./07-api-gateway-catalog-module.md)); this
-change adds `http/catalog.http` so a developer can exercise the whole surface
+change adds `http/kulala/catalog.http` so a developer can exercise the whole surface
 locally — login, the four protected write commands, and the three public read
 queries — straight from an editor with the
 [Kulala](https://kulala.mwco.app/) / REST Client `.http` runner.
 
-It follows the conventions of the sibling files (`http/auth.http`,
-`http/iam.http`, `http/order.http`, `http/product.http`) and the shared
-environment file `http/http-client.env.json`.
+It follows the conventions of the sibling files (`http/kulala/auth.http`,
+`http/kulala/iam.http`, `http/kulala/order.http`, `http/product.http`) and the shared
+environment file `http/kulala/http-client.env.json`.
 
 ## 1. What the file covers
 
-`http/catalog.http` contains one `# @name`-labelled block per request. Reading
+`http/kulala/catalog.http` contains one `# @name`-labelled block per request. Reading
 top to bottom it tells the full lifecycle story of a product:
 
 | Block | Method + path | Auth | What it proves |
@@ -59,7 +59,7 @@ immediately after the request:
 
 The JSON path `{{login.response.body.$.accessToken}}` matches the login response
 shape `TokenResponseDto { accessToken, refreshToken, expiresIn }` — the same
-field `http/auth.http` and `http/iam.http` read. Every protected block below
+field `http/kulala/auth.http` and `http/kulala/iam.http` read. Every protected block below
 sends `Authorization: Bearer {{accessToken}}`. The seeded admin
 (`admin@example.com` / `admin1234`) holds every permission code, so the one
 token satisfies both `catalog:write` and `catalog:publish` with no role juggling.
@@ -67,7 +67,7 @@ token satisfies both `catalog:write` and `catalog:publish` with no role juggling
 ## 3. How to run it locally
 
 - **Environment file.** The top of the file declares `@baseUrl = {{ENV_BASE_URL}}`,
-  and `ENV_BASE_URL` resolves from `http/http-client.env.json`
+  and `ENV_BASE_URL` resolves from `http/kulala/http-client.env.json`
   (`dev.ENV_BASE_URL = http://localhost:3000/api`). No new environment value was
   needed — the existing `dev` profile suffices, so the env file was left
   unchanged.
@@ -104,7 +104,7 @@ staff-only by construction. The file uses the staff admin login throughout.
 ## 5. How the chaining threads `productId` / `variantId`
 
 The write blocks chain through file variables so the file runs end-to-end
-without manual edits — the same pattern `http/iam.http` uses to thread a
+without manual edits — the same pattern `http/kulala/iam.http` uses to thread a
 created role id into a later `PATCH`:
 
 - `registerProduct` returns `ProductView`; the file captures

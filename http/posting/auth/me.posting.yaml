@@ -1,0 +1,12 @@
+name: me
+description: |-
+  GET /api/auth/me
+  Returns the authenticated subject. AuthUserValidator routes by id — staff
+  or customer, the same endpoint works for both. Response shape
+  (CurrentUserResponseDto): { id, email, roles, permissions }. The
+  `permissions` field is the source of truth for PermissionsGuard checks
+  downstream (inflated at login; see ADR-024).
+url: $ENV_BASE_URL/auth/me
+headers:
+- name: Authorization
+  value: Bearer $staffLoginAccessToken

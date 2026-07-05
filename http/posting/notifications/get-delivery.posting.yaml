@@ -1,0 +1,10 @@
+name: get-delivery
+description: |-
+  GET /api/notifications/deliveries/:id  (Bearer — notifications:read)
+  One delivery row by id, including the materialized renderedBody (the exact content
+  sent). An unknown id is a 404 (NOTIFICATION_DELIVERY_NOT_FOUND). Response is
+  NotificationDeliveryView.
+url: $ENV_BASE_URL/notifications/deliveries/1
+headers:
+- name: Authorization
+  value: Bearer $accessToken

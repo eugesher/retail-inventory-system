@@ -1,0 +1,24 @@
+name: capture-payment
+description: |-
+  POST /api/orders/:orderId/payments/capture  (Bearer; owner OR staff order:capture)
+  Captures the order's authorized payment (authorized -> captured). The owning
+  customer captures its own; staff with order:capture may capture any. The optional
+  body { amountMinor } defaults to the order grand total (partial capture is a later
+  capability); the `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036) — the
+  same key + body replays the stored order (200 + `Idempotent-Replay: true`, no second
+  gateway call), a different body is 422, a missing key is 400. Re-capturing an
+  already-captured payment under a NEW key is also idempotent (the natural payment-state
+  backstop). Response (200) is OrderView with paymentStatus='captured' and payment.status='captured'.
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/payments/capture
+body:
+  content: '{}'
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $captureKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: order/scripts.py:setup_capture_payment

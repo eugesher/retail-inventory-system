@@ -1,0 +1,20 @@
+name: admin-login
+description: |-
+  POST /api/auth/staff/login
+  Mirror of http/kulala/auth.http's staffLogin block. Returns access + refresh
+  tokens. The login response (TokenResponseDto) intentionally omits user
+  info, so the next block (`adminMe`) is what supplies the staff-user id for
+  the assign/revoke blocks downstream.
+method: POST
+url: $ENV_BASE_URL/auth/staff/login
+body:
+  content: |-
+    {
+      "email": "admin@example.com",
+      "password": "admin1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: iam/scripts.py:capture_admin_login

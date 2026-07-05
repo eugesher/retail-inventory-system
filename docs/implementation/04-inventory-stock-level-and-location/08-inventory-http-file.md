@@ -1,14 +1,14 @@
-# The `http/inventory.http` walkthrough
+# The `http/kulala/inventory.http` walkthrough
 
-This document explains `http/inventory.http` — the Kulala/REST-client file that
+This document explains `http/kulala/inventory.http` — the Kulala/REST-client file that
 exercises every inventory gateway endpoint from an editor. It is the runnable
 companion to the two narrative docs that describe the use cases behind these
 routes: the [availability read path](07-availability-read-path.md) (the two GETs)
 and [Receive Stock and Adjust Stock](06-receive-and-adjust-use-cases.md) (the two
 POSTs). Read those for the *why*; read this for *how to drive it by hand*.
 
-Every gateway area has one such file (`http/auth.http`, `http/catalog.http`,
-`http/pricing.http`, …). `http/inventory.http` **replaced the deleted
+Every gateway area has one such file (`http/kulala/auth.http`, `http/kulala/catalog.http`,
+`http/kulala/pricing.http`, …). `http/kulala/inventory.http` **replaced the deleted
 `http/product.http`**: the old file drove `GET /api/product/:productId/stock`
 against the superseded `product_stock` model, which no longer exists — the route,
 the aggregate, and the file all went away together when the inventory context was
@@ -120,7 +120,7 @@ written yet (deferred to a later capability, see
 ## Self-containment
 
 Like every file under `http/`, this one carries `@baseUrl = {{ENV_BASE_URL}}` at
-the top (environment values live in `http/http-client.env.json`), uses `###`
+the top (environment values live in `http/kulala/http-client.env.json`), uses `###`
 request separators, and references only product/domain concepts — no
 orchestration breadcrumbs. The same gateway routes and payloads it documents are
 asserted automatically by `test/inventory-availability.e2e-spec.ts` (the reads)

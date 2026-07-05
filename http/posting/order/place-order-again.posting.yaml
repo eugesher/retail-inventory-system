@@ -1,0 +1,40 @@
+name: place-order-again
+description: |-
+  POST /api/cart/:cartId/place  (Bearer + owner-check)
+  Repeats the place on the now-converted cart with a NEW Idempotency-Key. The new key
+  MISSES the idempotency store, but the durable cart-state backstop still applies — the
+  cart is already `converted`, so the retail service returns the SAME order (same id +
+  orderNumber, the existing payment) instead of creating a second one. Because it is a
+  store miss (a fresh key), this is 201 with no `Idempotent-Replay` header (unlike
+  `placeOrderReplay`, which reuses the original key for a true 200 replay).
+method: POST
+url: $ENV_BASE_URL/cart/$cartId/place
+body:
+  content: |-
+    {
+      "shippingAddress": {
+        "recipientName": "Jane Buyer",
+        "line1": "1 Market St",
+        "city": "San Francisco",
+        "region": "CA",
+        "postalCode": "94105",
+        "country": "US"
+      },
+      "billingAddress": {
+        "recipientName": "Jane Buyer",
+        "line1": "1 Market St",
+        "city": "San Francisco",
+        "region": "CA",
+        "postalCode": "94105",
+        "country": "US"
+      }
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $place_order_again_guid
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: order/scripts.py:setup_place_order_again

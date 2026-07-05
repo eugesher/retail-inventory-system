@@ -140,7 +140,7 @@ surface, following the conventions of the sibling files (`@baseUrl = {{ENV_BASE_
 the captured response bodies, so each file runs top-to-bottom against a freshly seeded
 environment.
 
-### `http/fulfillment.http` — the happy create → ship → deliver flow
+### `http/kulala/fulfillment.http` — the happy create → ship → deliver flow
 
 1. `loginStaff` → `@accessToken` (admin@example.com — holds `order:fulfill` **and**
    `order:read`, so one operator token drives create/ship/deliver *and* the list/read
@@ -155,7 +155,7 @@ environment.
 7. `getOrder` — observe all three advanced axes: `status=delivered`,
    `paymentStatus=captured`, `fulfillmentStatus=delivered`.
 
-### `http/order-cancel.http` — the cancel cases
+### `http/kulala/order-cancel.http` — the cancel cases
 
 1. `loginStaff` → `@accessToken`; `loginCustomer` → `@customerToken`.
 2. **Case 1 (owner cancel, pre-fulfillment)**: place order A, then `cancelOrderOwner`

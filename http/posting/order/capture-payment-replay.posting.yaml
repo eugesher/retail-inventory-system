@@ -1,0 +1,20 @@
+name: capture-payment-replay
+description: |-
+  POST /api/orders/:orderId/payments/capture  (Bearer; owner OR staff order:capture)
+  The REPLAY: the SAME @captureKey + the SAME (empty) body. The store returns the stored
+  OrderView WITHOUT a second gateway capture and WITHOUT re-emitting `retail.payment.captured`
+  — 200 + the header `Idempotent-Replay: true`. (Because capture is already a 200 both fresh
+  and on replay, the header is the ONLY on-the-wire difference.)
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/payments/capture
+body:
+  content: '{}'
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $captureKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: order/scripts.py:setup_capture_payment_replay

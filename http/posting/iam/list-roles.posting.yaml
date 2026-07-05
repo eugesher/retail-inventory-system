@@ -1,0 +1,9 @@
+name: list-roles
+description: |-
+  GET /api/iam/roles
+  Returns Role[] sorted by name ASC; each entry includes its permission
+  codes. Requires `iam:role-edit`.
+url: $ENV_BASE_URL/iam/roles
+headers:
+- name: Authorization
+  value: Bearer $adminLoginAccessToken

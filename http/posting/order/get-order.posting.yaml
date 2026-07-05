@@ -1,0 +1,9 @@
+name: get-order
+description: |-
+  GET /api/orders/:orderId  (Bearer; owner OR staff order:read)
+  Reads the placed order with its lines + payment. The owning customer reads its own;
+  staff with order:read may read any. Response (200) is OrderView.
+url: $ENV_BASE_URL/orders/$orderId
+headers:
+- name: Authorization
+  value: Bearer $accessToken

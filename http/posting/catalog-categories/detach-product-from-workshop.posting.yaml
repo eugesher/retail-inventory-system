@@ -1,0 +1,14 @@
+name: detach-product-from-workshop
+description: |-
+  DELETE /api/catalog/products/:productId/categories/:categorySlug  (Bearer — catalog:write)
+  Detaches product 1 from `workshop` (idempotent — a detach of an absent
+  membership is still a 200). Returns ProductCategoriesView with the product's
+  membership after removal: it now lists only `workshop-tools`. Re-run
+  `browseWorkshopProducts` (no flag) afterwards and product 1 is gone; re-run
+  `browseWorkshopProductsWithDescendants` and it reappears (still under the
+  descendant `workshop-tools`).
+method: DELETE
+url: $ENV_BASE_URL/catalog/products/1/categories/workshop
+headers:
+- name: Authorization
+  value: Bearer $accessToken

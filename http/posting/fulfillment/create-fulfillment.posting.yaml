@@ -1,0 +1,25 @@
+name: create-fulfillment
+description: |-
+  POST /api/orders/:orderId/fulfillments  (Bearer — order:fulfill)
+  Plans ONE shipment covering both order lines in full, so a single ship + deliver
+  rolls the whole order to `delivered`. stockLocationId is optional (defaults to
+  default-warehouse). Response (201) is the pending FulfillmentView; capture
+  @fulfillmentId.
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/fulfillments
+body:
+  content: |-
+    {
+      "stockLocationId": "default-warehouse",
+      "lines": [
+        { "orderLineId": $lineOneId, "quantity": $lineOneQty },
+        { "orderLineId": $lineTwoId, "quantity": $lineTwoQty }
+      ]
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: fulfillment/scripts.py:capture_create_fulfillment

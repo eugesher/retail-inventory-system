@@ -1,0 +1,22 @@
+name: reorder-mismatch-rejected
+description: |-
+  PATCH /api/catalog/media/reorder  (Bearer — catalog:write)
+  A DELIBERATE failure: smuggling a foreign id (999999999) alongside the real trio
+  makes the set NOT an exact permutation of the active strip. The reorder is
+  all-or-nothing, so the catalog writes NOTHING and the gateway surfaces 409 with
+  body { statusCode: 409, message, code: 'CATALOG_MEDIA_REORDER_SET_MISMATCH' }.
+  The strip order from the previous block is unchanged.
+method: PATCH
+url: $ENV_BASE_URL/catalog/media/reorder
+body:
+  content: |-
+    {
+      "ownerType": "product",
+      "ownerId": 1,
+      "mediaIdsInOrder": [$documentId, $videoId, $imageId, 999999999]
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -1,0 +1,22 @@
+name: add-variant-graphite
+description: |-
+  POST /api/catalog/products/:productId/variants  (Bearer — catalog:write)
+  A second variant on the same product. Publish (below) requires the product to
+  carry at least one variant; appending two also shows the read views returning
+  a multi-entry variant collection.
+method: POST
+url: $ENV_BASE_URL/catalog/products/$productId/variants
+body:
+  content: |-
+    {
+      "sku": "AERON-CHAIR-GRPH-L",
+      "gtin": "0123456789029",
+      "optionValues": { "color": "graphite", "size": "L" },
+      "weightG": 15000,
+      "dimensionsMm": { "l": 680, "w": 680, "h": 1180 }
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

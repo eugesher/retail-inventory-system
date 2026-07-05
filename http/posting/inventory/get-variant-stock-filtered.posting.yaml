@@ -1,0 +1,7 @@
+name: get-variant-stock-filtered
+description: |-
+  GET /api/inventory/variants/:variantId/stock?locationIds=...  (public)
+  The same read scoped to a single location via the comma-separated ?locationIds
+  encoding. Scoped to default-warehouse it returns the same figures as the
+  all-locations read above (that is the only location holding stock for variant 1).
+url: $ENV_BASE_URL/inventory/variants/1/stock?locationIds=default-warehouse

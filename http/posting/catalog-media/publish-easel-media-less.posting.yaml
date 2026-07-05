@@ -1,0 +1,14 @@
+name: publish-easel-media-less
+description: |-
+  POST /api/catalog/products/:productId/publish  (Bearer — catalog:publish)
+  Publishes the product draft → active. It has a priced variant but NO media, so
+  the publish SUCCEEDS (200) and the response carries the SOFT warning:
+    ProductView { ..., status: 'active', publishedAt,
+      warnings: [{ code: 'CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA', message }] }
+  Contrast with the price gate: a missing price would have BLOCKED publish (409),
+  whereas a missing image only WARNS. Inspect `warnings[]` in the response body.
+method: POST
+url: $ENV_BASE_URL/catalog/products/$easelId/publish
+headers:
+- name: Authorization
+  value: Bearer $accessToken

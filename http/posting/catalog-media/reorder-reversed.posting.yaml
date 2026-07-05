@@ -1,0 +1,23 @@
+name: reorder-reversed
+description: |-
+  PATCH /api/catalog/media/reorder  (Bearer — catalog:write)
+  Re-sequences product 1's strip in a single shot. Body (ReorderMediaRequestDto):
+    ownerType, ownerId, mediaIdsInOrder: number[]
+  mediaIdsInOrder must be an EXACT permutation of the owner's ACTIVE media (same
+  ids, no duplicates/omissions/foreign ids); each asset's new sort_order is its
+  array index. Here the three ids are reversed (document, video, image). Returns
+  200 with the refreshed active strip in the new order (MediaAssetView[]).
+method: PATCH
+url: $ENV_BASE_URL/catalog/media/reorder
+body:
+  content: |-
+    {
+      "ownerType": "product",
+      "ownerId": 1,
+      "mediaIdsInOrder": [$documentId, $videoId, $imageId]
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
