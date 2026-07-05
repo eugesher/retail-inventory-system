@@ -1,0 +1,17 @@
+name: add-line-two
+description: |-
+  POST /api/cart/:cartId/lines  (Bearer + owner-check)
+  Adds seeded variant 3 (USD price 19999 minor units), quantity 1.
+method: POST
+url: $ENV_BASE_URL/cart/$cartId/lines
+body:
+  content: |-
+    {
+      "variantId": 3,
+      "quantity": 1
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

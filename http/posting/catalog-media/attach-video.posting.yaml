@@ -1,0 +1,21 @@
+name: attach-video
+description: |-
+  POST /api/catalog/media  (Bearer — catalog:write)
+  A second asset on product 1 — appends at the next slot (a higher sort_order).
+method: POST
+url: $ENV_BASE_URL/catalog/media
+body:
+  content: |-
+    {
+      "ownerType": "product",
+      "ownerId": 1,
+      "uri": "https://cdn.example.com/workshop/lamp-demo.mp4",
+      "type": "video"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: catalog-media/scripts.py:capture_attach_video

@@ -1,0 +1,20 @@
+name: create-cart
+description: |-
+  POST /api/cart  (Bearer — owner is the authenticated customer)
+  Opens a new active cart for the caller. Body (CreateCartRequestDto):
+    currency?: 3-letter code (defaults to USD)
+  Response is CartView { id, customerId, currency, status, lines: [], subtotalMinor }.
+method: POST
+url: $ENV_BASE_URL/cart
+body:
+  content: |-
+    {
+      "currency": "USD"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: cart/scripts.py:capture_create_cart

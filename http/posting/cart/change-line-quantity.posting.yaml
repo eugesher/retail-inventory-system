@@ -1,0 +1,26 @@
+name: change-line-quantity
+description: |-
+  PATCH /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
+  Sets a line's quantity to a new positive value (a 0 is rejected — removal is
+  the explicit DELETE). The retail use case RE-RESERVES the absolute new quantity
+  (inventory.reservation.reserve, idempotent-by-absolute-quantity) before saving —
+  raising it past available stock is a 409 INVENTORY_OUT_OF_STOCK. Body
+  (ChangeLineQuantityRequestDto):
+    quantity: positive int
+  The OPTIONAL `If-Match` header pins the cart version read from addLine
+  (@cartVersion). Matching → the write proceeds; stale → 409 VERSION_MISMATCH.
+  Response is the updated CartView (version bumped).
+method: PATCH
+url: $ENV_BASE_URL/cart/$cartId/lines/$lineId
+body:
+  content: |-
+    {
+      "quantity": 1
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+- name: If-Match
+  value: $cartVersion

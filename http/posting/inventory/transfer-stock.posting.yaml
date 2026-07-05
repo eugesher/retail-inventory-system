@@ -1,0 +1,29 @@
+name: transfer-stock
+description: |-
+  POST /api/inventory/variants/:variantId/stock/transfer  (Bearer — inventory:transfer)
+  Transfer stock — moves on-hand from one location to another atomically. Both
+  `fromLocationId` and `toLocationId` are required. The two ledger legs are a
+  PAIRED `adjustment` movement (the ledger has no `transfer` type): the source row
+  is a negative `adjustment` (reasonCode `transfer-out`) and the destination row a
+  positive `adjustment` (reasonCode `transfer-in`), sharing ONE referenceType
+  `transfer` + referenceId (the transfer's UUID) — querying that pair reconstructs
+  the transfer. Both StockLevel writes + both ledger appends commit in one
+  transaction, and the cached availability is invalidated for BOTH locations.
+  Reserved/allocated counters at the source are untouched (a transfer moves
+  on-hand only). Run after `receiveStock`: it debits 5 from default-warehouse and
+  credits 5 to backup-store. Response is { from, to } — both post-transfer
+  StockLevelViews.
+method: POST
+url: $ENV_BASE_URL/inventory/variants/1/stock/transfer
+body:
+  content: |-
+    {
+      "fromLocationId": "default-warehouse",
+      "toLocationId": "backup-store",
+      "quantity": 5
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

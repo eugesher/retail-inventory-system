@@ -1,0 +1,24 @@
+name: open-return
+description: |-
+  POST /api/orders/:orderId/returns  (Bearer — owner; the customer opens its OWN return)
+  The owning customer opens the return with @customerToken (no permission code — the
+  owner-or-staff route). Returns 1 of the 2 ordered units. The retail service enforces the
+  return-window + returnable-quantity invariants. Response (201) is ReturnRequestView with
+  status='requested' and an rmaNumber (RMA-<year>-<pad8(id)>). Capture @rmaId plus the RMA
+  line id (returnLineId) for the inspection step.
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/returns
+body:
+  content: |-
+    {
+      "reasonCategory": "defective",
+      "notes": "One unit arrived with a cracked screen",
+      "lines": [{ "orderLineId": $orderLineId, "quantity": 1 }]
+    }
+headers:
+- name: Authorization
+  value: Bearer $customerToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: returns/scripts.py:capture_open_return

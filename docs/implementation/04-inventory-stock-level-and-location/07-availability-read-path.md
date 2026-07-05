@@ -182,7 +182,7 @@ redis-cli --scan 'ris:inventory:stock:v2:*'
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/inventory/locations   # 401
 ```
 
-The `http/inventory.http` requests (`listLocations`, `getVariantStockAllLocations`,
+The `http/kulala/inventory.http` requests (`listLocations`, `getVariantStockAllLocations`,
 `getVariantStockFiltered`) drive the same calls from an editor, and
 `test/inventory-availability.e2e-spec.ts` asserts the public read, the
 miss-then-hit equality, the `401`/`200` on the location list, and the

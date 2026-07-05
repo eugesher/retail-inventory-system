@@ -1,0 +1,12 @@
+name: logout
+description: |-
+  POST /api/auth/logout
+  Clears the server-side refresh-token hash on the user row. The access JWT
+  remains technically valid until expiry — clients should drop it from local
+  storage themselves. After this call, `refresh` with the previously-issued
+  refresh token will fail with 401.
+method: POST
+url: $ENV_BASE_URL/auth/logout
+headers:
+- name: Authorization
+  value: Bearer $staffLoginAccessToken

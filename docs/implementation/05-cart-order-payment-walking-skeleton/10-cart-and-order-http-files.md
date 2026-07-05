@@ -5,10 +5,10 @@ file under [`http/`](../../../http/), so the whole checkout flow can be run
 request-by-request from an editor without a client app. The checkout surface is
 split across two files that mirror the two gateway modules:
 
-- [`http/cart.http`](../../../http/cart.http) — the mutable cart: create, read,
+- [`http/kulala/cart.http`](../../../http/kulala/cart.http) — the mutable cart: create, read,
   add / change / remove a line, the guest-session bootstrap, and the claim
   (guest-cart promotion).
-- [`http/order.http`](../../../http/order.http) — the immutable order: place
+- [`http/kulala/order.http`](../../../http/kulala/order.http) — the immutable order: place
   (a cart action that produces an order), get, list, capture, and the
   idempotent repeat-place.
 
@@ -113,7 +113,7 @@ See [08 — The `Idempotency-Key` header (Q10)](08-idempotency-key-header-q10.md
 for why state-driven idempotency was chosen over a persisted key store for the
 walking skeleton.
 
-## The cart flow (`http/cart.http`)
+## The cart flow (`http/kulala/cart.http`)
 
 | Request | Method + path | Notes |
 |---|---|---|
@@ -131,7 +131,7 @@ The price is **never sent** on `addLine` — it is snapshotted retail-side from
 `catalog.price.select` in the cart's currency, and an unknown / unpriced variant
 is rejected `409`.
 
-## The order flow (`http/order.http`)
+## The order flow (`http/kulala/order.http`)
 
 The order lifecycle spans both gateway controllers: **Place Order** is a cart
 action (`cart.controller.ts`, since it acts on the cart) but produces an `Order`;
@@ -171,7 +171,7 @@ variables; they never hard-code an id that a migration or seed might not produce
 
 ## Related documents
 
-- [01 — Retail rebuild, old tables dropped](01-retail-rebuild-and-old-tables-dropped.md) — where the legacy `http/order.http` was removed before this rebuild re-created it.
+- [01 — Retail rebuild, old tables dropped](01-retail-rebuild-and-old-tables-dropped.md) — where the legacy `http/kulala/order.http` was removed before this rebuild re-created it.
 - [02 — Cart aggregate and the Q1/Q3 decisions](02-cart-aggregate-and-q1-q3-decisions.md) — the cart operations + guest-promotion the cart file exercises.
 - [03 — Order three status axes (Q4)](03-order-three-status-and-q4-decision.md) — the `OrderView` axes the order file asserts.
 - [05 — Payment gateway port and the fake adapter](05-payment-gateway-port-and-fake-adapter.md) — the always-approve fake behind `placeOrder` / `capturePayment`.

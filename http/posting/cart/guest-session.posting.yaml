@@ -1,0 +1,12 @@
+name: guest-session
+description: |-
+  POST /api/auth/customer/guest-session  (@Public — no token)
+  Mints a guest-tier session: a real, logged-in-able guest Customer row
+  (status='guest', null password). The guest-tier token replaces a session
+  cookie — a guest builds a cart through the SAME bearer-protected cart routes.
+  Response is GuestSessionResponseDto { accessToken, refreshToken, expiresIn,
+  customerId }. Keep `customerId` — it is the fromCustomerId proof for claim.
+method: POST
+url: $ENV_BASE_URL/auth/customer/guest-session
+scripts:
+  on_response: cart/scripts.py:capture_guest_session

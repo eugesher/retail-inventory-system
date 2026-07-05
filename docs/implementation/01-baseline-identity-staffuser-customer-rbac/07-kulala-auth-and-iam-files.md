@@ -11,7 +11,7 @@ browsable inside the editor and reviewable in pull requests.
 
 ## File overview
 
-`http/auth.http` covers the auth controllers (staff + customer + admin-ping):
+`http/kulala/auth.http` covers the auth controllers (staff + customer + admin-ping):
 
 - `POST /api/auth/staff/login` (canonical) and `POST /api/auth/login` (the
   deprecated alias for one release).
@@ -20,7 +20,7 @@ browsable inside the editor and reviewable in pull requests.
 - `POST /api/auth/customer/register`, `POST /api/auth/customer/login`,
   `GET /api/auth/customer/me`.
 
-`http/iam.http` covers the IAM admin controller
+`http/kulala/iam.http` covers the IAM admin controller
 (`apps/api-gateway/src/modules/iam/presentation/iam.controller.ts`):
 
 - `GET /api/iam/roles`, `POST /api/iam/roles`, `PATCH /api/iam/roles/:id`,
@@ -32,11 +32,11 @@ file stands on its own when an operator opens it cold.
 
 ## Conventions
 
-Both files mirror the shape of `http/order.http`:
+Both files mirror the shape of `http/kulala/order.http`:
 
 - A top-of-file purpose comment naming every controller the file touches.
 - `@baseUrl = {{ENV_BASE_URL}}` — `ENV_BASE_URL` is defined per environment
-  in `http/http-client.env.json` (dev: `http://localhost:3000/api`). Kulala
+  in `http/kulala/http-client.env.json` (dev: `http://localhost:3000/api`). Kulala
   picks the active environment from a buffer-local selector.
 - One block per request, separated by `###`.
 - Each block leads with `# @name <handlerName>` so later blocks can
@@ -66,7 +66,7 @@ yarn start:dev:api-gateway
 
 Then in Neovim:
 
-1. Open `http/iam.http`.
+1. Open `http/kulala/iam.http`.
 2. Place the cursor on `# @name adminLogin` and run Kulala's "send request"
    keybind. The block returns 200 with `accessToken`/`refreshToken`.
 3. Send `# @name adminMe`. The response carries the admin's staff-user id.
@@ -81,13 +81,13 @@ references `{{staffLogin.response.body.$.accessToken}}` or
 
 Two follow-up cleanups are out of scope here but worth flagging:
 
-- `http/order.http` and `http/product.http` have no chained auth block.
+- `http/kulala/order.http` and `http/product.http` have no chained auth block.
   Operators currently send the request unauthenticated (the global guard
   rejects it) or hand-paste a token into the `Authorization` header. A
   follow-up could either add a leading login block to each file
   (matching the iam.http pattern) or factor a shared login fragment when
   Kulala supports request includes.
-- `http/http-client.env.json` could grow `adminEmail` / `adminPassword`
+- `http/kulala/http-client.env.json` could grow `adminEmail` / `adminPassword`
   entries to avoid hardcoding `admin@example.com` / `admin1234` in two
   places, but the convention in the existing files is to hardcode literal
   values in the `.http` body rather than expand the env JSON, so this stays

@@ -1,0 +1,21 @@
+name: claim-cart
+description: |-
+  POST /api/cart/:cartId/claim  (Bearer — the REGISTERED customer's token)
+  Promotes the guest cart to the registered customer. Body (ClaimCartRequestDto):
+    fromCustomerId: the guest id from the guest-session response (the ownership
+                    proof — knowing it proves the caller owned the guest session)
+  The new owner (newCustomerId) is taken from @CurrentUser().id, never sent. The
+  re-point succeeds only if the cart currently belongs to fromCustomerId, else
+  403. Response is the reassigned CartView (customerId is now the registered id).
+method: POST
+url: $ENV_BASE_URL/cart/$guestCartId/claim
+body:
+  content: |-
+    {
+      "fromCustomerId": "$guestCustomerId"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

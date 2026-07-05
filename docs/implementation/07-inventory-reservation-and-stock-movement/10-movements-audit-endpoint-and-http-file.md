@@ -186,7 +186,7 @@ sourcing explicitly.
 
 ## Try it
 
-The Kulala flows live in [`http/inventory.http`](../../../http/inventory.http):
+The Kulala flows live in [`http/kulala/inventory.http`](../../../http/kulala/inventory.http):
 
 - `listVariantMovements` — `GET .../variants/1/movements?page=1&pageSize=20`
   (bearer, `inventory:read`); run the receive/adjust/transfer requests above it

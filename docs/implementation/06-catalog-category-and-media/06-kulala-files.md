@@ -23,8 +23,8 @@ permission gating asserted from the seeded users
 | --- | --- |
 | `test/catalog-categories.e2e-spec.ts` | The category surface through the gateway: hierarchy + paths, reparent + subtree rebase, reclassify + both browse endpoints, the cycle 409, and the 401/403/404/409 gates. |
 | `test/catalog-media.e2e-spec.ts` | The polymorphic media surface: attach-appends-in-order, atomic reorder (200 + the mismatch 409), detach as an archive flip (+ the second-detach 409), variant-scoped media, and the 401/403/404/400 gates. |
-| `http/catalog-categories.http` | An interactive, top-to-bottom walk of the same category flows, ending in a deliberate cycle-reparent 409. |
-| `http/catalog-media.http` | An interactive walk of the media flows + a deliberate mismatch-reorder 409, plus the publish soft-warning demonstration. |
+| `http/kulala/catalog-categories.http` | An interactive, top-to-bottom walk of the same category flows, ending in a deliberate cycle-reparent 409. |
+| `http/kulala/catalog-media.http` | An interactive walk of the media flows + a deliberate mismatch-reorder 409, plus the publish soft-warning demonstration. |
 
 ## A prerequisite: the gateway now forwards the typed error code
 
@@ -123,9 +123,9 @@ after** that seed lands, and across repeated runs against living infrastructure:
 
 ## Kulala `.http` files
 
-The `.http` files follow the conventions of the existing `http/catalog.http` and
-`http/pricing.http`: `@baseUrl = {{ENV_BASE_URL}}` (resolved from
-`http/http-client.env.json`), `###` separators, a `# @name <id>` per request,
+The `.http` files follow the conventions of the existing `http/kulala/catalog.http` and
+`http/kulala/pricing.http`: `@baseUrl = {{ENV_BASE_URL}}` (resolved from
+`http/kulala/http-client.env.json`), `###` separators, a `# @name <id>` per request,
 header comments citing the **gateway controller path** plus the body/query shape,
 a `# Prereqs:` block (compose up → migrate → seed → start; run `login` first to
 capture `@accessToken`), and **chained captures** so the file runs top-to-bottom
@@ -157,7 +157,7 @@ media is its natural home, the **publish soft-warning demonstration**: register 
 fresh `workshop-easel` product, add a variant, set a price (the *hard* publish
 precondition), and publish it **media-less** — the `200` response carries
 `warnings: [{ code: 'CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA', message }]` — then
-attach an image as the recommended follow-up. (The pre-existing `http/catalog.http`
+attach an image as the recommended follow-up. (The pre-existing `http/kulala/catalog.http`
 is left untouched.)
 
 ### Why the two expected-409 blocks are included

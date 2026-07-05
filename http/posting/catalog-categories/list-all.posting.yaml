@@ -1,0 +1,6 @@
+name: list-all
+description: |-
+  GET /api/catalog/categories  (public)
+  The full flat list, ordered for navigation (sortOrder ASC, name ASC). All four
+  categories created above appear, each carrying its materialized `path`.
+url: $ENV_BASE_URL/catalog/categories

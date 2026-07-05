@@ -1,0 +1,22 @@
+name: ship-fulfillment-b
+description: |-
+  POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+  Ships the partial fulfillment (captures the payment inline). The order's
+  fulfillmentStatus becomes 'partially-shipped'.
+method: POST
+url: $ENV_BASE_URL/orders/$orderIdB/fulfillments/$fulfillmentIdB/ship
+body:
+  content: |-
+    {
+      "trackingNumber": "1Z999AA10123456785",
+      "carrier": "UPS"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $ship_fulfillment_b_guid
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: order-cancel/scripts.py:setup_ship_fulfillment_b

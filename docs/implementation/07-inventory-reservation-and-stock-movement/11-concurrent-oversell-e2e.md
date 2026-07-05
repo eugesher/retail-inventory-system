@@ -170,7 +170,7 @@ After the winner places, the suite asserts the state in two complementary terms:
 - **Manual release by reservation id over HTTP.** There is no reservation read API,
   so a suite has no deterministic in-process source for a reservation id. That
   endpoint (`POST /api/inventory/reservations/:reservationId/release`) is exercised
-  in the `http/inventory.http` flow and in the inventory unit specs; the audit suite
+  in the `http/kulala/inventory.http` flow and in the inventory unit specs; the audit suite
   produces the same `release` ledger row via the cart Remove route instead.
 
 ## Troubleshooting

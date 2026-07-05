@@ -1,0 +1,15 @@
+name: retry-delivery
+description: |-
+  POST /api/notifications/deliveries/:id/retry  (Bearer — notifications:write)
+  Operator manual retry of one FAILED delivery — re-dispatches the row's
+  already-rendered subject/body via the NOTIFIER (no template re-lookup), forcing
+  past the scheduled sweeper's exponential backoff. No request body. Only a `failed`
+  delivery is retryable: an unknown id is a 404, a non-`failed` source a 409
+  (NOTIFICATION_DELIVERY_INVALID_STATUS_TRANSITION). Response is the re-dispatched
+  NotificationDeliveryView (status `sent` on success, or `failed` again with a higher
+  attemptCount). Pick a `failed` row's id from listDeliveriesFailed above.
+method: POST
+url: $ENV_BASE_URL/notifications/deliveries/1/retry
+headers:
+- name: Authorization
+  value: Bearer $accessToken

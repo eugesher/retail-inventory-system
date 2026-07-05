@@ -1,0 +1,6 @@
+name: list-product-media-after-detach
+description: |-
+  GET /api/catalog/products/:productId/media  (public)
+  The active strip now returns only the two survivors (document, image) — the
+  archived video dropped out of the active read, the relative order preserved.
+url: $ENV_BASE_URL/catalog/products/1/media

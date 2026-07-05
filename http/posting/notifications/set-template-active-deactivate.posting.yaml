@@ -1,0 +1,18 @@
+name: set-template-active-deactivate
+description: |-
+  PATCH /api/notifications/templates/:id/active  (Bearer — notifications:write)
+  Deactivate the version authored above (the rollback lever): resolution then falls
+  through to the prior active version for this key. Body { active: false }. Response
+  is the NotificationTemplateView with active=false.
+method: PATCH
+url: $ENV_BASE_URL/notifications/templates/$templateId/active
+body:
+  content: |-
+    {
+      "active": false
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

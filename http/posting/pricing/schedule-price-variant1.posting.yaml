@@ -1,0 +1,36 @@
+name: schedule-price-variant1
+description: |-
+  POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+  Schedules a FUTURE price for variant 1 by passing a validFrom ahead of now — the
+  same route/body as the immediate Set; a future validFrom is what turns a Set
+  into a schedule. The use case appends this row and closes the open predecessor
+  (the `setPriceVariant1` price) at this validFrom, tiling the timeline; a second
+  OPEN row for the same (variant, currency) scope would otherwise hit the
+  open_scope_key conflict.
+
+  validFrom below is a fixed, comfortably-future instant so this file stays
+  runnable as-is. For a realistic "schedule, then watch it activate" demo, paste a
+  ~1h-ahead UTC ISO-8601 timestamp instead, e.g.
+    date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%S.000Z   (GNU/Linux)
+    date -u -v+1H        +%Y-%m-%dT%H:%M:%S.000Z   (macOS/BSD)
+
+  The CURRENT applicable answer (getApplicablePriceVariant1, asOf = now) is
+  UNCHANGED — the scheduled row is not yet in effect. Re-run that GET with ?asOf
+  at/after this validFrom to see the scheduled price win, e.g.
+    GET {{baseUrl}}/catalog/variants/1/price?currency=USD&asOf=2030-01-01T00:00:01.000Z
+  Response is the scheduled PriceView (the new open row, validTo: null).
+method: POST
+url: $ENV_BASE_URL/catalog/variants/1/prices
+body:
+  content: |-
+    {
+      "currency": "USD",
+      "amountMinor": 5999,
+      "validFrom": "2030-01-01T00:00:00.000Z",
+      "priority": 10
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

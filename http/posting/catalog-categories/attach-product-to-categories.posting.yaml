@@ -1,0 +1,20 @@
+name: attach-product-to-categories
+description: |-
+  POST /api/catalog/products/:productId/categories  (Bearer — catalog:write)
+  Attaches the seeded product 1 to BOTH `workshop` and `workshop-tools`. Body
+  (AttachProductCategoriesRequestDto): { categorySlugs: string[] } (non-empty,
+  kebab-case). Returns 200 (a membership UPDATE) with ProductCategoriesView
+  { product, categories } — `categories` is the product's FULL current membership.
+  Re-sending the same slugs is idempotent (still 200, membership unchanged).
+method: POST
+url: $ENV_BASE_URL/catalog/products/1/categories
+body:
+  content: |-
+    {
+      "categorySlugs": ["workshop", "workshop-tools"]
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

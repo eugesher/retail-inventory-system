@@ -1,0 +1,20 @@
+name: login
+description: |-
+  POST /api/auth/staff/login
+  Seeded admin login (admin@example.com / admin1234). The admin role holds every
+  permission code, including pricing:write, so this single token unlocks all
+  three write routes below. Response is TokenResponseDto
+  { accessToken, refreshToken, expiresIn }.
+method: POST
+url: $ENV_BASE_URL/auth/staff/login
+body:
+  content: |-
+    {
+      "email": "admin@example.com",
+      "password": "admin1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: pricing/scripts.py:capture_login

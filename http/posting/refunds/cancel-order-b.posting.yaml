@@ -1,0 +1,21 @@
+name: cancel-order-b
+description: |-
+  POST /api/orders/:orderId/cancel  (Bearer — owner OR order:cancel)
+  Cancels the captured-but-unshipped order. Cancel flags the captured payment for refund
+  (payment.flagged_for_refund = true), releases the stock allocation, and emits
+  retail.order.cancelled with paymentFlaggedForRefund=true. The retail OrderCancelledConsumer
+  consumes that event and issues the FULL refund INLINE (no HTTP call here) — the payment
+  goes `refunded`, the flag clears, and a refund row is written. Response (200) is the
+  cancelled OrderView.
+method: POST
+url: $ENV_BASE_URL/orders/$orderIdB/cancel
+body:
+  content: |-
+    {
+      "reason": "Customer cancelled after capture"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

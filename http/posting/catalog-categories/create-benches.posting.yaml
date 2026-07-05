@@ -1,0 +1,19 @@
+name: create-benches
+description: |-
+  POST /api/catalog/categories  (Bearer — catalog:write)
+  A second child under the root (path `/workshop/workshop-benches`). Two children
+  under one parent let the tree read below return a multi-entry `children` array.
+method: POST
+url: $ENV_BASE_URL/catalog/categories
+body:
+  content: |-
+    {
+      "name": "Benches",
+      "slug": "workshop-benches",
+      "parentSlug": "workshop"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

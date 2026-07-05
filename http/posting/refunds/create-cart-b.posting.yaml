@@ -1,0 +1,16 @@
+name: create-cart-b
+description: POST /api/cart  (Bearer + owner-check)
+method: POST
+url: $ENV_BASE_URL/cart
+body:
+  content: |-
+    {
+      "currency": "USD"
+    }
+headers:
+- name: Authorization
+  value: Bearer $customerToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: refunds/scripts.py:capture_create_cart_b

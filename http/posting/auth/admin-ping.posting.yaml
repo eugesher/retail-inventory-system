@@ -1,0 +1,12 @@
+name: admin-ping
+description: |-
+  GET /api/auth/admin/ping
+  Smoke endpoint for the global guard chain (JwtAuthGuard → RolesGuard →
+  PermissionsGuard). Gated behind `audit:read` (see ADR-024):
+    • Admin succeeds → 200 { "ok": true }
+    • StaffUser without `audit:read` → 403
+    • Anonymous → 401
+url: $ENV_BASE_URL/auth/admin/ping
+headers:
+- name: Authorization
+  value: Bearer $staffLoginAccessToken

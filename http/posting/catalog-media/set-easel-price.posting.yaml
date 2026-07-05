@@ -1,0 +1,21 @@
+name: set-easel-price
+description: |-
+  POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+  Sets an immediate USD price for the variant — the HARD publish precondition
+  (without an in-effect price in the default currency, publish 409s
+  PRODUCT_PUBLISH_REQUIRES_PRICE). Body (SetPriceRequestDto): currency,
+  amountMinor, validFrom? (omitted = immediate). Response is the persisted
+  PriceView.
+method: POST
+url: $ENV_BASE_URL/catalog/variants/$easelVariantId/prices
+body:
+  content: |-
+    {
+      "currency": "USD",
+      "amountMinor": 8900
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

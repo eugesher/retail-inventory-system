@@ -1,0 +1,9 @@
+name: browse-workshop-products
+description: |-
+  GET /api/catalog/categories/:slug/products  (public)
+  Browses the ACTIVE products directly in `workshop`, paginated. No Authorization
+  header. Query (CategoryProductsQueryDto): includeDescendants? (default false),
+  page? (default 1), pageSize? (default 20). Product 1 appears here because it was
+  attached directly to `workshop`. Response is the IPage envelope
+  { items, total, page, size }; each item is a ProductWithVariantsView.
+url: $ENV_BASE_URL/catalog/categories/workshop/products

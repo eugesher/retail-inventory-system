@@ -1,0 +1,30 @@
+name: add-variant-black
+description: |-
+  POST /api/catalog/products/:productId/variants  (Bearer — catalog:write)
+  Appends a variant to the just-registered product. The owning product comes
+  from the path param (captured @productId), not the body. Body shape
+  (CreateVariantRequestDto):
+    sku:           1..255 (unique)
+    gtin?:         <= 64
+    optionValues:  free-form option map { color, size, ... }
+    weightG?:      >= 0 int
+    dimensionsMm?: { l, w, h } non-negative ints
+  Response is ProductVariantView { id, productId, sku, ..., status: 'active' }.
+method: POST
+url: $ENV_BASE_URL/catalog/products/$productId/variants
+body:
+  content: |-
+    {
+      "sku": "AERON-CHAIR-BLK-M",
+      "gtin": "0123456789012",
+      "optionValues": { "color": "black", "size": "M" },
+      "weightG": 14500,
+      "dimensionsMm": { "l": 680, "w": 680, "h": 1145 }
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: catalog/scripts.py:capture_add_variant_black

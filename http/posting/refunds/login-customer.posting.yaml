@@ -1,0 +1,17 @@
+name: login-customer
+description: |-
+  POST /api/auth/customer/login
+  Seeded customer login — the order owner.
+method: POST
+url: $ENV_BASE_URL/auth/customer/login
+body:
+  content: |-
+    {
+      "email": "customer@example.com",
+      "password": "customer1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: refunds/scripts.py:capture_login_customer

@@ -1,0 +1,14 @@
+name: list-products
+description: |-
+  GET /api/catalog/products?status=active&page=1&pageSize=20  (public)
+  Browses the active catalogue, paginated. No Authorization header — the
+  @Public() route serves an unauthenticated shopper. Query
+  (ListProductsQueryDto):
+    status?:   active | draft | archived (defaults to active)
+    page?:     1-based, >= 1
+    pageSize?: >= 1 (capped at 100 downstream)
+    search?:   free-text name/slug filter
+  Response is the paginated envelope { items, total, page, size }; each item is a
+  ProductWithVariantsView carrying its ACTIVE variants only. The product
+  published above appears here.
+url: $ENV_BASE_URL/catalog/products?status=active&page=1&pageSize=20

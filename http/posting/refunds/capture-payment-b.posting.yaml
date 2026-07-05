@@ -1,0 +1,20 @@
+name: capture-payment-b
+description: |-
+  POST /api/orders/:orderId/payments/capture  (Bearer — owner OR order:capture)
+  Captures the payment WITHOUT shipping. A captured-but-unshipped order is the only state
+  where Cancel Order flags the payment for refund (cancel-after-ship is blocked; a
+  never-captured cancel just voids the authorization). Response (200) is OrderView with
+  paymentStatus='captured'.
+method: POST
+url: $ENV_BASE_URL/orders/$orderIdB/payments/capture
+body:
+  content: '{}'
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $capture_payment_b_guid
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: refunds/scripts.py:setup_capture_payment_b

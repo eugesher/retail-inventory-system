@@ -1,0 +1,8 @@
+name: get-variant-stock-all-locations
+description: |-
+  GET /api/inventory/variants/:variantId/stock  (public)
+  Variant 1's availability aggregated across all locations (no ?locationIds, no
+  Authorization header). Response is VariantStockView
+  { variantId, totalOnHand, totalAvailable, locations: StockLevelView[] }.
+  With the seed: totalOnHand 100, totalAvailable 100, one default-warehouse entry.
+url: $ENV_BASE_URL/inventory/variants/1/stock

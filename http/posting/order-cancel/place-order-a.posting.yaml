@@ -1,0 +1,36 @@
+name: place-order-a
+description: |-
+  POST /api/cart/:cartId/place  (Bearer + owner-check)
+  Places the order (authorize-only). Response (201) is OrderView; capture @orderIdA.
+method: POST
+url: $ENV_BASE_URL/cart/$cartIdA/place
+body:
+  content: |-
+    {
+      "shippingAddress": {
+        "recipientName": "Jane Buyer",
+        "line1": "1 Market St",
+        "city": "San Francisco",
+        "region": "CA",
+        "postalCode": "94105",
+        "country": "US"
+      },
+      "billingAddress": {
+        "recipientName": "Jane Buyer",
+        "line1": "1 Market St",
+        "city": "San Francisco",
+        "region": "CA",
+        "postalCode": "94105",
+        "country": "US"
+      }
+    }
+headers:
+- name: Authorization
+  value: Bearer $customerToken
+- name: Idempotency-Key
+  value: $place_order_a_guid
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: order-cancel/scripts.py:setup_place_order_a
+  on_response: order-cancel/scripts.py:capture_place_order_a

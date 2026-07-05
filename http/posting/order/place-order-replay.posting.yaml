@@ -1,0 +1,42 @@
+name: place-order-replay
+description: |-
+  POST /api/cart/:cartId/place  (Bearer + owner-check)
+  The REPLAY: the SAME @placeKey + the SAME body as `placeOrder`. The store recognizes the
+  key and its matching fingerprint and short-circuits BEFORE any side effect — no second
+  order, no re-allocation, no re-authorization, no re-emitted events. Response is the stored
+  OrderView with 200 (not 201) and the header `Idempotent-Replay: true`. Confirm the id +
+  orderNumber match `placeOrder`.
+method: POST
+url: $ENV_BASE_URL/cart/$cartId/place
+body:
+  content: |-
+    {
+      "shippingAddress": {
+        "recipientName": "Jane Buyer",
+        "line1": "1 Market St",
+        "line2": "Suite 400",
+        "city": "San Francisco",
+        "region": "CA",
+        "postalCode": "94105",
+        "country": "US",
+        "phone": "+1-415-555-0100"
+      },
+      "billingAddress": {
+        "recipientName": "Jane Buyer",
+        "line1": "1 Market St",
+        "city": "San Francisco",
+        "region": "CA",
+        "postalCode": "94105",
+        "country": "US"
+      },
+      "paymentMethod": "tok_visa"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $placeKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: order/scripts.py:setup_place_order_replay

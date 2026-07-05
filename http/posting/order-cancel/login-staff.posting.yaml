@@ -1,0 +1,17 @@
+name: login-staff
+description: |-
+  POST /api/auth/staff/login
+  Seeded admin login (order:fulfill + order:cancel).
+method: POST
+url: $ENV_BASE_URL/auth/staff/login
+body:
+  content: |-
+    {
+      "email": "admin@example.com",
+      "password": "admin1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: order-cancel/scripts.py:capture_login_staff

@@ -1,0 +1,19 @@
+name: adjust-stock-below-zero
+description: |-
+  POST /api/inventory/variants/:variantId/stock/adjust  (Bearer — inventory:adjust)
+  A signed delta that would drive on-hand below zero is rejected with a 409
+  Conflict (the domain below-zero invariant, surfaced via the inventory RPC
+  exception filter → the gateway). No state change.
+method: POST
+url: $ENV_BASE_URL/inventory/variants/1/stock/adjust
+body:
+  content: |-
+    {
+      "quantityDelta": -100000,
+      "reasonCode": "damaged"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

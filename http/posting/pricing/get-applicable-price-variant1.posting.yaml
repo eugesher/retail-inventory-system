@@ -1,0 +1,9 @@
+name: get-applicable-price-variant1
+description: |-
+  GET /api/catalog/variants/:variantId/price?currency=USD  (public)
+  Resolves the SINGLE applicable price for (variant 1, USD) at `asOf` (omitted =>
+  now) — highest priority, then latest validFrom. Returns 200 with one PriceView,
+  or 200 with a `null` body when none is in effect (the gateway does not promote
+  "no price" to a 404). Right now this returns the immediate price set in
+  `setPriceVariant1`.
+url: $ENV_BASE_URL/catalog/variants/1/price?currency=USD

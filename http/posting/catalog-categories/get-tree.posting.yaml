@@ -1,0 +1,8 @@
+name: get-tree
+description: |-
+  GET /api/catalog/categories/:slug/tree  (public)
+  Fetches the root with its nested ACTIVE subtree assembled into
+  CategoryTreeNodeView { ...category, children: [...] }. `workshop` nests
+  `workshop-tools` (→ `workshop-hand-planes`) and `workshop-benches`. A leaf
+  carries `children: []`.
+url: $ENV_BASE_URL/catalog/categories/workshop/tree

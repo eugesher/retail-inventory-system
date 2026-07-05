@@ -1,0 +1,8 @@
+name: get-variant
+description: |-
+  GET /api/catalog/variants/:variantId  (public)
+  Resolves one variant by id (captured @variantId) plus its parent product
+  header. An archived variant/product stays resolvable here so order/stock
+  references keyed on variantId never dangle. Response is VariantWithProductView
+  { ...variant, product }.
+url: $ENV_BASE_URL/catalog/variants/$variantId

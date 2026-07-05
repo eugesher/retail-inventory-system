@@ -1,0 +1,10 @@
+name: get-return
+description: |-
+  GET /api/returns/:rmaId  (Bearer — owner OR order:read)
+  Reads the RMA back to observe the final state. The admin token uses the order:read staff
+  override; the owning customer could read its own with @customerToken. Response (200) is
+  the closed ReturnRequestView.
+url: $ENV_BASE_URL/returns/$rmaId
+headers:
+- name: Authorization
+  value: Bearer $accessToken

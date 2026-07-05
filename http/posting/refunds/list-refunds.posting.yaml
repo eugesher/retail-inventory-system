@@ -1,0 +1,10 @@
+name: list-refunds
+description: |-
+  GET /api/orders/:orderId/refunds  (Bearer — owner OR order:read)
+  Lists the order's refunds newest-first. The owning customer could list its own with
+  @customerToken; staff use the order:read override. Response (200) is RefundView[] — the
+  one goodwill refund.
+url: $ENV_BASE_URL/orders/$orderId/refunds
+headers:
+- name: Authorization
+  value: Bearer $accessToken

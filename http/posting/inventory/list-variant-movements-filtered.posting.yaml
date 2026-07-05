@@ -1,0 +1,11 @@
+name: list-variant-movements-filtered
+description: |-
+  GET /api/inventory/variants/:variantId/movements?type=...&from=...&to=...  (Bearer — inventory:read)
+  The same audit read narrowed to one movement `type` and an INCLUSIVE occurredAt
+  window. Here: only `receipt` rows (the receiveStock request above) recorded in
+  June 2026. `from`/`to` are ISO-8601; an out-of-range or malformed bound is
+  ignored by the read path (the DTO's @IsISO8601() is the validation gate).
+url: $ENV_BASE_URL/inventory/variants/1/movements?type=receipt&from=2026-06-01T00:00:00.000Z&to=2026-06-30T23:59:59.999Z
+headers:
+- name: Authorization
+  value: Bearer $accessToken

@@ -1,0 +1,25 @@
+name: ship-fulfillment-replay
+description: |-
+  POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+  The REPLAY: the SAME @shipKey + the SAME body. The store returns the stored
+  FulfillmentView WITHOUT a second payment capture and WITHOUT a second inventory
+  commit-sale — 200 + the header `Idempotent-Replay: true`. Contrast with re-shipping under
+  a NEW key, which would hit the natural backstop and 409 (the fulfillment is no longer
+  pending).
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/fulfillments/$fulfillmentId/ship
+body:
+  content: |-
+    {
+      "trackingNumber": "1Z999AA10123456784",
+      "carrier": "UPS"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $shipKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: fulfillment/scripts.py:setup_ship_fulfillment_replay

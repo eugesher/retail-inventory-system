@@ -177,7 +177,7 @@ location, `backup-store` (a `store`-type location), via an idempotent
 `INSERT IGNORE` in `scripts/seeds/stock-location.sql`, registered before
 `stock-level.sql`. The seeded `warehouse@example.com` staff user (role
 `warehouse-staff`) already carries `inventory:transfer`, so the
-[`http/inventory.http`](../../../http/inventory.http) `transferStock` request runs
+[`http/kulala/inventory.http`](../../../http/kulala/inventory.http) `transferStock` request runs
 end-to-end against the seeded database: it debits 5 from `default-warehouse` and
 credits 5 to `backup-store`, and the companion `transferStockOverSource` request
 demonstrates the `409` over-transfer rejection.

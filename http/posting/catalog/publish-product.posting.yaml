@@ -1,0 +1,12 @@
+name: publish-product
+description: |-
+  POST /api/catalog/products/:productId/publish  (Bearer — catalog:publish)
+  Transitions the product draft -> active (the domain enforces >= 1 variant).
+  Returns 200 (a state transition, not a creation) with ProductView
+  { ..., status: 'active', publishedAt }. catalog:publish is a higher-trust code
+  than catalog:write — a role may hold write without publish.
+method: POST
+url: $ENV_BASE_URL/catalog/products/$productId/publish
+headers:
+- name: Authorization
+  value: Bearer $accessToken

@@ -1,0 +1,11 @@
+name: customer-me
+description: |-
+  GET /api/auth/customer/me
+  Returns the Customer's profile (CurrentCustomerResponseDto). The same JWT
+  that succeeds here is rejected by /auth/admin/ping because the customer
+  lacks the `audit:read` permission code — and any other code, since their
+  permission set is empty.
+url: $ENV_BASE_URL/auth/customer/me
+headers:
+- name: Authorization
+  value: Bearer $customerLoginAccessToken
