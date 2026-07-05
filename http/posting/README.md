@@ -66,18 +66,20 @@ The Kulala `{{$guid}}` maps to a `setup` script. Two shapes exist:
 
 ## Subcollections
 
-All 14 Kulala files are ported (174 requests). Each folder mirrors the
+All 16 Kulala files are ported (185 requests). Each folder mirrors the
 same-named `../kulala/<name>.http` and carries its own `scripts.py`.
 
 | Folder | Requests | Folder | Requests |
 | --- | ---: | --- | ---: |
 | `auth/` | 9 | `inventory/` | 13 |
-| `cart/` | 10 | `notifications/` | 12 |
+| `cart/` | 10 | `notifications/` | 13 |
 | `catalog/` | 10 | `order/` | 12 |
 | `catalog-categories/` | 18 | `order-cancel/` | 13 |
 | `catalog-media/` | 17 | `pricing/` | 8 |
-| `fulfillment/` | 13 | `refunds/` | 16 |
-| `iam/` | 7 | `returns/` | 16 |
+| `consent/` | 5 | `refunds/` | 16 |
+| `customer-admin/` | 5 | `returns/` | 16 |
+| `fulfillment/` | 13 | | |
+| `iam/` | 7 | | |
 
 > Note: `notifications/author-template` authors a Handlebars notification
 > template whose body contains `{{orderId}}` / `{{grandTotalMinor}}`. Those are

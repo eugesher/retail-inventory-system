@@ -192,3 +192,15 @@ arrive in follow-up consent work:
 - [ADR-028](../../adr/028-cart-order-payment-and-address-chain.md) — the nullable
   `order.customer_id` tombstone FK and the immutable order-address snapshots the
   erase preserves.
+
+## Related documents
+
+- [02 — Erasing a customer: the tombstone, not a hard delete](02-erase-customer-q6.md) —
+  the `erase()` mutator, the one-transaction erasure writer, and the tombstone
+  semantics this schema makes representable.
+- [03 — The notification consent-gate](03-consent-event-and-cache.md) — how the
+  `ConsentRecord` defined here gates marketing dispatch, read cache-aside.
+- [04 — The customer privacy events and the no-PII erase contract](04-customer-erased-event-and-pii.md) —
+  the `customer.consent.updated` / `customer.erased` wire events.
+- [06 — The consent, erasure, and marketing HTTP surface](06-consent-and-erase-api-and-http-files.md) —
+  the operator's-eye view of the endpoints and the request libraries.
