@@ -68,6 +68,11 @@ export const configModuleConfig = {
     MAX_DELIVERY_ATTEMPTS: Joi.number().integer().positive().default(3),
     // Retention window (days) for delivery rows; the purge worker is a future capability.
     RETENTION_DELIVERY_DAYS: Joi.number().integer().positive().default(90),
+    // TTL (seconds) for a cached notification consent snapshot (ADR-037). The consent
+    // cache is kept fresh by the customer.consent.updated / customer.erased consumer, so
+    // this TTL is only a staleness safety net if an event is missed. Defaulted, so a
+    // missing var never fails boot (the `RETENTION_DELIVERY_DAYS` precedent).
+    NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS: Joi.number().integer().positive().default(300),
     // TEST-ONLY: when true, the notification microservice binds a deterministically-flaky
     // NOTIFIER that fails a delivery carrying the test marker once (to exercise the retry
     // path). Defaults false; production must never enable it.

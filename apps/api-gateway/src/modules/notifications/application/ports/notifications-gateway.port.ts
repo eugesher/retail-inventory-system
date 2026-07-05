@@ -6,6 +6,10 @@ import {
   NotificationTemplateView,
 } from '@retail-inventory-system/contracts';
 
+// The gateway maps a null downstream response (no active marketing template) onto
+// `null`, surfacing it as a `200` with an empty body to the operator.
+export type MarketingSendResult = NotificationDeliveryView | null;
+
 export const NOTIFICATIONS_GATEWAY_PORT = Symbol('NOTIFICATIONS_GATEWAY_PORT');
 
 // Business-shaped command / query inputs for the gateway notifications port. They
@@ -63,6 +67,20 @@ export interface IRetryDeliveryCommand {
   deliveryId: number;
 }
 
+// Staff-triggered marketing dispatch (ADR-037). Fully resolved at the HTTP edge: the
+// controller defaults `eventType` (→ `marketing.email.promo`) and mints a per-request
+// `campaignId` before it reaches the use case, so the notification service's
+// consent-gate can decide send vs `skipped-no-consent`. `customerEmail` is an
+// operator-supplied input (the boundary-clean alternative to a cross-module lookup of
+// the gateway `auth` module's `customer` table).
+export interface ISendMarketingCommand {
+  customerId: string;
+  customerEmail: string;
+  eventType: string;
+  campaignId: string;
+  context: Record<string, unknown>;
+}
+
 // The gateway-side seam onto the notification microservice's template + delivery
 // RPCs (`notification.template.author` / `.set-active` / `.list`,
 // `notification.delivery.list` / `.get` / `.retry`). The concrete implementation
@@ -105,4 +123,11 @@ export interface INotificationsGatewayPort {
     command: IRetryDeliveryCommand,
     correlationId: string,
   ): Promise<NotificationDeliveryView>;
+  // Staff-triggered marketing dispatch → the resulting delivery row (sent, or a
+  // `skipped-no-consent` row when the customer has not opted in), or `null` when no
+  // active marketing template resolves.
+  sendMarketing(
+    command: ISendMarketingCommand,
+    correlationId: string,
+  ): Promise<MarketingSendResult>;
 }

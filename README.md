@@ -96,6 +96,7 @@ The system handles order lifecycle management and product stock tracking across 
 │  GET   /api/notifications/deliveries                      │
 │  GET   /api/notifications/deliveries/:id                  │
 │  POST  /api/notifications/deliveries/:id/retry            │
+│  POST  /api/notifications/marketing/send                  │
 └──────────────┬──────────────────────────────┬─────────────┘
                │           RabbitMQ           │
       RPC      │                              │     RPC
@@ -849,6 +850,7 @@ PATCH  /api/notifications/templates/:id/active   # bearer + notifications:write 
 GET    /api/notifications/deliveries             # bearer + notifications:read  — delivery audit page (?customerId, ?eventReferenceType, ?eventReferenceId, ?status, ?page, ?pageSize)
 GET    /api/notifications/deliveries/:id         # bearer + notifications:read  — one delivery row (incl. renderedBody)
 POST   /api/notifications/deliveries/:id/retry   # bearer + notifications:write — manually retry a failed delivery (forces past backoff)
+POST   /api/notifications/marketing/send         # bearer + notifications:write — send a marketing notification ({ customerId, customerEmail, eventType?, campaignId?, context? }); the consent-gate decides send vs skipped-no-consent
 
 # IAM admin
 GET   /api/iam/roles                    # bearer + iam:role-edit
@@ -978,6 +980,7 @@ The notification microservice reads four further defaulted variables (all Joi-va
 | `OPS_NOTIFICATIONS_EMAIL` | `ops@example.com` | Ops mailbox for system-only notifications with no customer recipient (e.g. the inventory low-stock alert). |
 | `MAX_DELIVERY_ATTEMPTS` | `3` | Max attempts before a notification delivery is abandoned and `notifications.delivery.failed` is emitted. |
 | `RETENTION_DELIVERY_DAYS` | `90` | Retention window (days) for delivery rows; the purge worker is a future capability. |
+| `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300` | TTL (seconds) for a cached notification consent snapshot; a staleness safety net (the cache is kept fresh by the `customer.consent.updated` / `customer.erased` events). |
 | `NOTIFIER_TEST_FLAKY` | `false` | **Test-only.** When `true`, the `NOTIFIER` binding swaps to a flaky log adapter that fails the first dispatch of any rendered body carrying the `__FAIL_ONCE__` marker, then succeeds on retry — the seam the retry e2e suite drives. Never set in production or shared dev env files; the suite toggles it per-run and reads it straight off `process.env`. |
 
 ### Local development
@@ -1165,6 +1168,7 @@ The notification microservice does more than log a fan-out line — it keeps a *
 - **Template** (`notification_template`) — a versioned, per-`(eventType, channel, locale)` registry of the Handlebars `subject`/`body`. Authoring an edit appends a new business `version` and the newest `active` one wins (`findLatestActive`); old versions are retained for audit and one-call rollback (deactivate the newest via `PATCH /api/notifications/templates/:id/active`).
 - **Delivery** (`notification_delivery`) — one row per outgoing notification, the answer to "did we send this?". On each consumed event the pipeline resolves the active template, renders it, and **persists the row in `queued` _before_ calling the `NOTIFIER`**, then flips it `→ sent` (success) or `→ failed` (the failure reason is recorded on the row, never rethrown). The row carries the rendered `subject`/`body`, the recipient, the `(eventReferenceType, eventReferenceId)` it answers to, a monotonic `attemptCount`, and the `correlationId` — so a delivery row is filterable by the same `correlationId` that ties the log lines together.
 - **Retry** — a `@nestjs/schedule` sweeper re-attempts `failed` deliveries on exponential backoff up to `MAX_DELIVERY_ATTEMPTS`, and an operator can force one now via `POST /api/notifications/deliveries/:id/retry` (ignores the backoff gate, re-dispatches the row's already-rendered body). At the cap the service emits `notifications.delivery.failed` once onto its own `notification_events` queue (a reserved alerting seam).
+- **Consent-gate** ([ADR-037](docs/adr/037-consent-record-and-tombstone-erasure.md)) — before the transport call, a **customer-facing** dispatch is weighed against the recipient's channel-consent. The gate reads consent **cache-aside** (`ris:notifications:consent:v1:<customerId>`, a raw-SQL `CONSENT_READER` over the shared `consent_record` behind a `singleFlight` cache — no RPC per delivery), kept fresh by a `consent-events` consumer that write-throughs `customer.consent.updated` and evicts on `customer.erased`. A transactional email (`eventType` in the transactional set) is gated on `transactionalEmail` (the bypass — order confirmations flow even with marketing off); a marketing email on `marketingEmail`, a marketing sms on `marketingSms`. An unconsented channel persists a terminal `skipped-no-consent` delivery row (an auditable record of a message deliberately **not** sent) and skips the transport; ops/system rows (null recipient) are ungated. Cache/reader errors fail safe to defaults (transactional allowed, marketing suppressed), never blocking a dispatch. A staff operator can drive a marketing send via `POST /api/notifications/marketing/send` to exercise the path.
 
 **Inspecting a delivery.** The audit trail is fronted by two staff-only (`notifications:read`) gateway reads — list and drill-down:
 

@@ -9,6 +9,7 @@ import {
   ListDeliveriesUseCase,
   ListTemplatesUseCase,
   RetryDeliveryUseCase,
+  SendMarketingUseCase,
   SetTemplateActiveUseCase,
 } from './application/use-cases';
 import { NotificationsRabbitmqAdapter } from './infrastructure/messaging';
@@ -29,6 +30,7 @@ import { NotificationsController } from './presentation';
     ListDeliveriesUseCase,
     GetDeliveryUseCase,
     RetryDeliveryUseCase,
+    SendMarketingUseCase,
     { provide: NOTIFICATIONS_GATEWAY_PORT, useClass: NotificationsRabbitmqAdapter },
   ],
 })

@@ -84,6 +84,15 @@ const CATALOG_CATEGORY_KEY_VERSION = 'v1';
 // They exist so a future cached read path adopts the v1 key shape without
 // re-keying; a bump of this constant re-keys every entry on the next deploy.
 const NOTIFICATIONS_TEMPLATE_KEY_VERSION = 'v1';
+// The notification consent cache (ADR-037) — the FIRST consumed notification cache
+// key. On every customer-facing dispatch the Render & Dispatch consent-gate resolves
+// the recipient's channel-consent (`transactional_email`/`marketing_email`/
+// `marketing_sms`) to decide send vs `skipped-no-consent`; reading the shared
+// `consent_record` table per delivery would put an RPC/DB hit on the notification hot
+// path, so the flags are cached per customer, kept fresh by the `customer.consent.updated`
+// write-through / `customer.erased` eviction consumer. Keyed on the customer's CHAR(36)
+// UUID (the `<id>` axis). A bump re-keys every entry on the next deploy.
+const NOTIFICATIONS_CONSENT_KEY_VERSION = 'v1';
 
 // Sentinel for the "every facet for this id" key. Non-glob so the literal
 // cannot be confused with a Redis MATCH pattern (CACHE-011 fix from ADR-016).
@@ -195,6 +204,19 @@ export const CACHE_KEYS = {
     locale: string,
     opts?: ITenantOptions,
   ): string => `${CACHE_KEYS.notificationsTemplatePrefix(eventType, channel, opts)}${locale}`,
+
+  // Notification consent read-path builders (ADR-037 / ADR-016 / ADR-022) — the first
+  // CONSUMED notification cache key. The `<id>` axis is the customer's CHAR(36) UUID;
+  // the cached value is a small `{ transactionalEmail, marketingEmail, marketingSms,
+  // dataRetentionPolicy }` snapshot resolved from the shared `consent_record` table.
+  // Key shape: `ris:[t:<tenantId>:]notifications:consent:v1:<customerId>`. The prefix
+  // terminates one segment short of the id so a `delByPrefix` wipes the entry (the
+  // consent snapshot is a singleton per customer — no facet).
+  notificationsConsentPrefix: (opts?: ITenantOptions): string =>
+    `${rootPrefix(opts)}notifications:consent:${NOTIFICATIONS_CONSENT_KEY_VERSION}:`,
+
+  notificationsConsent: (customerId: string, opts?: ITenantOptions): string =>
+    `${CACHE_KEYS.notificationsConsentPrefix(opts)}${customerId}`,
 
   // -- Pre-v3 (v2) shape — invalidate-only ----------------------------------
   // Returns the retired v2 stock prefix `ris:inventory:stock:v2:<id>:`. Exposed

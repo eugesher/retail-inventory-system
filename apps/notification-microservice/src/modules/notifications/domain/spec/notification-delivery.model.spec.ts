@@ -73,6 +73,52 @@ describe('NotificationDelivery', () => {
     });
   });
 
+  describe('skipped factory (consent-gate short-circuit)', () => {
+    it('creates a row directly in the terminal skipped-no-consent status with attemptCount 0', () => {
+      const delivery = NotificationDelivery.skipped(openInput());
+
+      expect(delivery.id).toBeNull();
+      expect(delivery.status).toBe(NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
+      expect(delivery.attemptCount).toBe(0);
+      expect(delivery.lastAttemptAt).toBeNull();
+      expect(delivery.failureReason).toBeNull();
+    });
+
+    it('still records the rendered subject/body that would have been sent (audit trail)', () => {
+      const delivery = NotificationDelivery.skipped(
+        openInput({ renderedSubject: 'Promo', renderedBody: 'Buy now' }),
+      );
+
+      expect(delivery.renderedSubject).toBe('Promo');
+      expect(delivery.renderedBody).toBe('Buy now');
+    });
+
+    it('shares the open invariants — rejects an empty recipientAddress with the typed code', () => {
+      try {
+        NotificationDelivery.skipped(openInput({ recipientAddress: '' }));
+        fail('expected skipped to throw');
+      } catch (err) {
+        expect((err as NotificationDomainException).code).toBe(
+          NotificationErrorCodeEnum.DELIVERY_RECIPIENT_REQUIRED,
+        );
+      }
+    });
+
+    it('is terminal — markSent / markFailed / markDelivered are illegal from it', () => {
+      const delivery = NotificationDelivery.skipped(openInput());
+
+      expect(() => delivery.markSent(at('2026-07-05T10:00:00Z'))).toThrow(
+        NotificationDomainException,
+      );
+      expect(() => delivery.markFailed(at('2026-07-05T10:00:00Z'), 'x')).toThrow(
+        NotificationDomainException,
+      );
+      expect(() => delivery.markDelivered()).toThrow(NotificationDomainException);
+      // The rejected transitions leave the row in its terminal status untouched.
+      expect(delivery.status).toBe(NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
+    });
+  });
+
   describe('legal status transitions', () => {
     it('markSent: queued → sent, increments attemptCount, stamps lastAttemptAt', () => {
       const delivery = NotificationDelivery.open(openInput());
