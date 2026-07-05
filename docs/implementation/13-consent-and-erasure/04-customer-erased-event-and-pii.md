@@ -137,16 +137,36 @@ keys off `customerId` alone.
 ## The erase audit row
 
 Every erase is also recorded to the staff-action audit log, and — like the event —
-that record captures **no PII**. The audit `before`/`after` is a state-only
-projection: `{ id, status }` before the erase and `{ status: 'deleted' }` after,
-with the customer id as the audited entity and no email, name, or address anywhere
-in the payload. This keeps the audit trail answering "who erased which customer and
-when" without itself becoming a surviving copy of the data the erase destroyed. The
-audit row is written by the erase flow, documented in full alongside that flow (the
-tombstone-erase change that adds the `Customer.erase()` mutator and the
-cross-context PII-nulling writer); this section marks the contract the erase must
-honor — a state-only, PII-free audit record — so the two descriptions stay
-consistent.
+that record captures **no PII**. `EraseCustomerUseCase` publishes it through the
+real `AUDIT_LOG_PUBLISHER` (the `RmqAuditLogPublisher` that maps the in-process
+`IAuditLogEvent` onto the `audit.staff.action` wire event and mirrors it onto
+`ris.events`, where the event store persists it into `audit_log_entry` — ADR-035).
+The published event is:
+
+| Field | Value |
+| --- | --- |
+| `name` | `'CustomerErased'` |
+| `actorId` | the erasing staff user's id |
+| `actorKind` | `'staff'` |
+| `targetKind` / `targetId` | `'customer'` / the erased customer id |
+| `payload.before` | `{ id, status }` — the pre-erase state |
+| `payload.after` | `{ status: 'deleted' }` |
+
+The `before`/`after` is a **state-only** projection: `{ id, status }` before the
+erase and `{ status: 'deleted' }` after, with the customer id as the audited entity
+and no email, name, or address anywhere in the payload. This keeps the audit trail
+answering "who erased which customer and when" without itself becoming a surviving
+copy of the data the erase destroyed — capturing the PII here would defeat the erase
+at the exact moment it was performed, exactly as it would in the event payload.
+
+The audit is published **after** the erase transaction commits and **before** the
+`customer.erased` fan-out event (the audit is the compliance record and is ordered
+first); both are best-effort, so a broker outage can never roll back a completed
+erase. The full tombstone mechanics — the `Customer.erase()` mutator, the
+one-transaction cross-context PII-nulling writer, the confirm-email guard, and the
+admin endpoint — are documented in
+[02-erase-customer-q6.md](02-erase-customer-q6.md) and
+[05-confirm-email-guard.md](05-confirm-email-guard.md).
 
 ## Related decisions
 

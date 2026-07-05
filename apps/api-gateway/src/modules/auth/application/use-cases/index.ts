@@ -1,4 +1,5 @@
 export * from './create-guest-session.use-case';
+export * from './erase-customer.use-case';
 export * from './get-current-customer.use-case';
 export * from './login-customer.use-case';
 export * from './login.use-case';

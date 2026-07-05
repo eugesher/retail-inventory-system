@@ -5,6 +5,7 @@ export * from './consent-record-typeorm.repository';
 export * from './customer.entity';
 export * from './customer.mapper';
 export * from './customer-typeorm.repository';
+export * from './customer-erasure-writer.adapter';
 
 export * from './permission.entity';
 export * from './permission.mapper';

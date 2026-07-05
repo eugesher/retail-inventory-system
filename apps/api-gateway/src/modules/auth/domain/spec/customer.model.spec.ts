@@ -122,6 +122,79 @@ describe('Customer', () => {
     });
   });
 
+  describe('erase (tombstone)', () => {
+    const eraseAt = new Date('2026-07-05T12:00:00.000Z');
+
+    const makeLive = (): Customer =>
+      makeCustomer({
+        email: 'buyer@example.com',
+        phone: '+1-555-0100',
+        firstName: 'Buy',
+        lastName: 'Er',
+        emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
+        refreshTokenHash: 'live-token-hash',
+      });
+
+    it('nulls PII, flips status to "deleted", stamps deletedAt, clears refreshTokenHash', () => {
+      const customer = makeLive();
+
+      customer.erase(eraseAt);
+
+      expect(customer.status).toBe('deleted');
+      expect(customer.deletedAt).toEqual(eraseAt);
+      expect(customer.email).toBeNull();
+      expect(customer.phone).toBeNull();
+      expect(customer.firstName).toBeNull();
+      expect(customer.lastName).toBeNull();
+      expect(customer.passwordHash).toBeNull();
+      expect(customer.emailVerifiedAt).toBeNull();
+      expect(customer.refreshTokenHash).toBeNull();
+      expect(customer.isActive).toBe(false);
+    });
+
+    it('defaults the erase instant to now when omitted', () => {
+      const customer = makeLive();
+      const before = Date.now();
+
+      customer.erase();
+
+      expect(customer.deletedAt).not.toBeNull();
+      expect(customer.deletedAt!.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it('records no domain event (the aggregate stays event-light)', () => {
+      const customer = makeLive();
+      // Drain the CustomerRegisteredEvent from construction first.
+      customer.pullDomainEvents();
+
+      customer.erase(eraseAt);
+
+      expect(customer.pullDomainEvents()).toHaveLength(0);
+    });
+
+    it('is idempotent — a second erase re-nulls the same fields without throwing', () => {
+      const customer = makeLive();
+      customer.erase(eraseAt);
+
+      const secondAt = new Date('2026-08-01T00:00:00.000Z');
+      expect(() => customer.erase(secondAt)).not.toThrow();
+
+      expect(customer.status).toBe('deleted');
+      expect(customer.email).toBeNull();
+      expect(customer.deletedAt).toEqual(secondAt);
+    });
+
+    it('still omits PII hashes from JSON after erase', () => {
+      const customer = makeLive();
+      customer.erase(eraseAt);
+
+      const serialized = JSON.stringify(customer);
+      expect(serialized).not.toContain('passwordHash');
+      expect(serialized).not.toContain('refreshTokenHash');
+      expect(JSON.parse(serialized)).toMatchObject({ status: 'deleted', email: null });
+    });
+  });
+
   describe('markEmailVerified', () => {
     it('sets emailVerifiedAt', () => {
       const customer = makeCustomer();

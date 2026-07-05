@@ -19,6 +19,16 @@ export {
 // Aggregates — IAM consumes these to construct (`RoleAggregate.create`) and
 // rehydrate Role/Permission/StaffUser instances when calling cross-module
 // repositories injected via the tokens below. `ConsentRecord` rides along for
-// the consent Record/Read use cases + the erase writer (later consent work).
+// the consent Record/Read use cases + the erase writer.
 export { ConsentRecord, RoleAggregate, PermissionAggregate, StaffUser } from './domain';
 export { StaffUserRolesAssignedEvent, StaffUserRoleRevokedEvent } from './domain/events';
+
+// Use cases the admin shells inject. The `customer-admin` module fronts the
+// admin consent-read (`ReadConsentUseCase`, owner-or-staff, `isStaff: true`) and
+// the tombstone erase (`EraseCustomerUseCase`); both are provided + exported by
+// `auth.module.ts`. Exposing them through the module-root barrel is the sanctioned
+// cross-module seam — the `iam` module reaches auth's aggregates the same way (the
+// deep `application/use-cases` path is blocked by the boundaries lint). The result
+// type rides along so the admin controller can annotate its response.
+export { ReadConsentUseCase, EraseCustomerUseCase } from './application/use-cases';
+export type { IEraseCustomerResult } from './application/use-cases';

@@ -1,3 +1,4 @@
+export * from './erase-customer.command';
 export * from './login-customer.command';
 export * from './login.command';
 export * from './record-consent.command';
