@@ -1,0 +1,39 @@
+name: send-marketing
+description: |-
+  POST /api/notifications/marketing/send  (Bearer — notifications:write)
+  The staff-triggered marketing dispatch (ADR-037). The gateway maps the body onto a
+  marketing notification (eventType defaults to marketing.email.promo, a
+  NON-transactional key; a fresh campaignId is minted per request unless supplied)
+  and dispatches the RPC; the notification service's CONSENT-GATE then decides the
+  outcome — the endpoint itself never inspects consent. Body { customerId,
+  customerEmail, eventType?, campaignId?, context? }; `context` is the Handlebars
+  render context for the seeded marketing template ({{customerName}} / {{promoCode}}).
+
+  CONSENT-GATED: the send resolves against the customer's `marketingEmail` flag. The
+  seeded customer starts with marketingEmail=false, so this send yields a
+  `skipped-no-consent` delivery row (the gate suppresses the NOTIFIER call but records
+  what would have been sent). Opt the customer in first (the consent subcollection's
+  set-my-consent-marketing-on) and re-send with a fresh campaignId to get a `sent`
+  row instead. The response IS the resulting NotificationDeliveryView (the RPC is
+  request-response); an empty body means no marketing template resolved. Observe the
+  row afterwards via list-deliveries filtered by
+  eventReferenceType=marketing&eventReferenceId=<campaignId>.
+method: POST
+url: $ENV_BASE_URL/notifications/marketing/send
+body:
+  content: |-
+    {
+      "customerId": "00000000-0000-4000-a000-000000000002",
+      "customerEmail": "customer@example.com",
+      "eventType": "marketing.email.promo",
+      "campaignId": "promo-demo-001",
+      "context": {
+        "customerName": "Casey",
+        "promoCode": "SAVE20"
+      }
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -1,0 +1,20 @@
+name: login
+description: |-
+  POST /api/auth/customer/login
+  Seeded customer login (customer@example.com / customer1234). Response is
+  TokenResponseDto { accessToken, refreshToken, expiresIn }. The access JWT carries
+  `roles: []` and `permissions: []` — a customer is not an RBAC actor, so ownership,
+  not a permission code, is what authorizes the consent routes below.
+method: POST
+url: $ENV_BASE_URL/auth/customer/login
+body:
+  content: |-
+    {
+      "email": "customer@example.com",
+      "password": "customer1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: consent/scripts.py:capture_login
