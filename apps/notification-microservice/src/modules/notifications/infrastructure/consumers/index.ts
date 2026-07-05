@@ -1,3 +1,4 @@
+export * from './consent-events.consumer';
 export * from './fulfillment-events.consumer';
 export * from './inventory-events.consumer';
 export * from './order-cancelled-events.consumer';

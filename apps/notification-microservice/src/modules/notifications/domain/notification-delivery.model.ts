@@ -54,8 +54,11 @@ export interface IOpenNotificationDeliveryInput {
 // source of truth for "did we already send this, and how did it go?" (ADR-033). Its
 // `status` walks `QUEUED → SENT → DELIVERED | BOUNCED`, with `QUEUED|FAILED → FAILED`
 // (and `FAILED → SENT` once a retry succeeds) — the retry sweeper re-attempts `failed`
-// rows. The row is **live-ephemeral**: it is never deleted (a `RETENTION_DELIVERY_DAYS`
-// purge is a deferred future capability), so `deletedAt` stays inert.
+// rows. A row created via the `skipped` factory is born in the terminal
+// `SKIPPED_NO_CONSENT` status (the consent-gate short-circuit, ADR-037) and never
+// enters that walk. The row is **live-ephemeral**: it is never deleted (a
+// `RETENTION_DELIVERY_DAYS` purge is a deferred future capability), so `deletedAt`
+// stays inert.
 //
 // `attemptCount` is **monotonic** — only `markSent` / `markFailed` (the two
 // attempt-consuming transitions) increment it; `markDelivered` / `markBounced` record a
@@ -108,23 +111,7 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
   // an empty one is an internal-caller bug, so it throws a plain `Error` (the
   // `Reservation.create` non-future-expiry precedent), never a wire-mappable code.
   public static open(input: IOpenNotificationDeliveryInput): NotificationDelivery {
-    if (!input.recipientAddress || input.recipientAddress.trim().length === 0) {
-      throw new NotificationDomainException(
-        NotificationErrorCodeEnum.DELIVERY_RECIPIENT_REQUIRED,
-        'NotificationDelivery.recipientAddress must be non-empty',
-      );
-    }
-    if (!Number.isInteger(input.templateId) || input.templateId <= 0) {
-      throw new Error(
-        `NotificationDelivery.templateId must be a positive integer, got ${input.templateId}`,
-      );
-    }
-    if (!input.renderedBody || input.renderedBody.trim().length === 0) {
-      throw new Error('NotificationDelivery.renderedBody must be non-empty');
-    }
-    if (!input.correlationId || input.correlationId.trim().length === 0) {
-      throw new Error('NotificationDelivery.correlationId must be non-empty');
-    }
+    NotificationDelivery.assertCreatable(input);
 
     return new NotificationDelivery({
       id: null,
@@ -142,6 +129,60 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
       renderedBody: input.renderedBody,
       correlationId: input.correlationId,
     });
+  }
+
+  // Creates a delivery **directly in the terminal `SKIPPED_NO_CONSENT` status** — the
+  // consent-gate short-circuit (ADR-037). It takes the SAME input as `open` (the row
+  // still records the rendered subject/body that WOULD have been sent, for the audit
+  // trail), but the row is born terminal: `attemptCount = 0`, `lastAttemptAt = null`,
+  // and no `markSent`/`markFailed` transition is ever run (the `NOTIFIER` is skipped).
+  // The four attempt/receipt mutators can never touch it — `assertAttemptable` accepts
+  // only `QUEUED`/`FAILED`, and the receipt transitions require `SENT` — so the status
+  // is terminal by construction. It shares `open`'s invariants: a customer-facing
+  // suppressed send still has a real recipient + rendered body.
+  public static skipped(input: IOpenNotificationDeliveryInput): NotificationDelivery {
+    NotificationDelivery.assertCreatable(input);
+
+    return new NotificationDelivery({
+      id: null,
+      templateId: input.templateId,
+      recipientCustomerId: input.recipientCustomerId,
+      recipientAddress: input.recipientAddress,
+      channel: input.channel,
+      eventReferenceType: input.eventReferenceType,
+      eventReferenceId: input.eventReferenceId,
+      status: NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT,
+      attemptCount: 0,
+      lastAttemptAt: null,
+      failureReason: null,
+      renderedSubject: input.renderedSubject,
+      renderedBody: input.renderedBody,
+      correlationId: input.correlationId,
+    });
+  }
+
+  // Shared creation-time invariants for `open` / `skipped`. The recipient address is
+  // the one externally-meaningful invariant → a typed `DELIVERY_RECIPIENT_REQUIRED`;
+  // the rest are plumbing the dispatch use case always supplies, so an empty one is an
+  // internal-caller bug → a plain `Error` (never a wire-mappable code).
+  private static assertCreatable(input: IOpenNotificationDeliveryInput): void {
+    if (!input.recipientAddress || input.recipientAddress.trim().length === 0) {
+      throw new NotificationDomainException(
+        NotificationErrorCodeEnum.DELIVERY_RECIPIENT_REQUIRED,
+        'NotificationDelivery.recipientAddress must be non-empty',
+      );
+    }
+    if (!Number.isInteger(input.templateId) || input.templateId <= 0) {
+      throw new Error(
+        `NotificationDelivery.templateId must be a positive integer, got ${input.templateId}`,
+      );
+    }
+    if (!input.renderedBody || input.renderedBody.trim().length === 0) {
+      throw new Error('NotificationDelivery.renderedBody must be non-empty');
+    }
+    if (!input.correlationId || input.correlationId.trim().length === 0) {
+      throw new Error('NotificationDelivery.correlationId must be non-empty');
+    }
   }
 
   // Rebuilds a persisted delivery from storage (any status). Records no events.

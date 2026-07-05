@@ -6,6 +6,7 @@ import {
   INotificationDeliveryGetPayload,
   INotificationDeliveryListPayload,
   INotificationDeliveryRetryPayload,
+  INotificationMarketingSendPayload,
   INotificationTemplateAuthorPayload,
   INotificationTemplateListPayload,
   INotificationTemplateSetActivePayload,
@@ -22,7 +23,9 @@ import {
   IListTemplatesQuery,
   INotificationsGatewayPort,
   IRetryDeliveryCommand,
+  ISendMarketingCommand,
   ISetTemplateActiveCommand,
+  MarketingSendResult,
 } from '../../application/ports';
 
 // The single `ClientProxy` holder for the notifications gateway module (ADR-009 /
@@ -105,6 +108,18 @@ export class NotificationsRabbitmqAdapter implements INotificationsGatewayPort {
     return firstValueFrom(
       this.client.send<NotificationDeliveryView, INotificationDeliveryRetryPayload>(
         ROUTING_KEYS.NOTIFICATION_DELIVERY_RETRY,
+        { ...command, correlationId },
+      ),
+    );
+  }
+
+  public async sendMarketing(
+    command: ISendMarketingCommand,
+    correlationId: string,
+  ): Promise<MarketingSendResult> {
+    return firstValueFrom(
+      this.client.send<MarketingSendResult, INotificationMarketingSendPayload>(
+        ROUTING_KEYS.NOTIFICATION_MARKETING_SEND,
         { ...command, correlationId },
       ),
     );

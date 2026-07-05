@@ -10,6 +10,9 @@ import {
 } from '@retail-inventory-system/messaging';
 
 import {
+  CONSENT_CACHE,
+  CONSENT_CACHE_TTL_SECONDS,
+  CONSENT_READER,
   INotifierPort,
   MAX_DELIVERY_ATTEMPTS,
   NOTIFICATION_DELIVERY_REPOSITORY,
@@ -28,12 +31,15 @@ import {
   RenderAndDispatchUseCase,
   RetryDeliveryUseCase,
   RetryFailedDeliveriesUseCase,
+  SendMarketingUseCase,
   SetTemplateActiveUseCase,
 } from '../application/use-cases';
 import { HealthController } from '../presentation/health.controller';
 import { NotificationRpcExceptionFilter } from '../presentation/notification-rpc-exception.filter';
 import { NotificationsController } from '../presentation/notifications.controller';
+import { ConsentCache } from './cache';
 import {
+  ConsentEventsConsumer,
   FulfillmentEventsConsumer,
   InventoryEventsConsumer,
   OrderCancelledNotificationConsumer,
@@ -44,6 +50,7 @@ import {
 import { FlakyLogNotifierAdapter, LogNotifierAdapter } from './delivery';
 import { NotificationRabbitmqPublisher } from './messaging';
 import {
+  ConsentReaderTypeormAdapter,
   NotificationDeliveryEntity,
   NotificationDeliveryTypeormRepository,
   NotificationTemplateEntity,
@@ -127,6 +134,7 @@ import { DeliveryRetryScheduler } from './scheduling';
   controllers: [
     HealthController,
     NotificationsController,
+    ConsentEventsConsumer,
     InventoryEventsConsumer,
     OrderEventsConsumer,
     OrderCancelledNotificationConsumer,
@@ -146,6 +154,7 @@ import { DeliveryRetryScheduler } from './scheduling';
     RetryFailedDeliveriesUseCase,
     DeliveryRetryScheduler,
     RenderAndDispatchUseCase,
+    SendMarketingUseCase,
     LogNotifierAdapter,
     FlakyLogNotifierAdapter,
     // `NOTIFIER` is `LogNotifierAdapter` by default. When `NOTIFIER_TEST_FLAKY` is set
@@ -178,6 +187,15 @@ import { DeliveryRetryScheduler } from './scheduling';
       provide: NOTIFICATION_DELIVERY_REPOSITORY,
       useExisting: NotificationDeliveryTypeormRepository,
     },
+    // The consent-gate seams (ADR-037). `CONSENT_READER` reads the shared
+    // `consent_record` table with parameterized SQL (no gateway-entity import);
+    // `CONSENT_CACHE` is the cache-aside layer over the global `CACHE_PORT` (the app
+    // registers `CacheModule` for the first time in this service) that fronts it,
+    // resolving a customer's channel-consent per dispatch without a per-delivery DB hit.
+    ConsentReaderTypeormAdapter,
+    { provide: CONSENT_READER, useExisting: ConsentReaderTypeormAdapter },
+    ConsentCache,
+    { provide: CONSENT_CACHE, useExisting: ConsentCache },
     NotificationRabbitmqPublisher,
     { provide: NOTIFICATION_EVENTS_PUBLISHER, useExisting: NotificationRabbitmqPublisher },
     // The per-delivery retry cap, resolved from `MAX_DELIVERY_ATTEMPTS` (Joi default 3) so
@@ -197,6 +215,16 @@ import { DeliveryRetryScheduler } from './scheduling';
       provide: OPS_NOTIFICATIONS_EMAIL,
       useFactory: (config: ConfigService): string =>
         config.get<string>('OPS_NOTIFICATIONS_EMAIL') ?? 'ops@example.com',
+      inject: [ConfigService],
+    },
+    // The consent-cache TTL (seconds), resolved from `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS`
+    // (Joi default 300) so the cache adapter injects a plain number rather than reading env
+    // (the `MAX_DELIVERY_ATTEMPTS` value-provider precedent, ADR-037). The TTL is a
+    // staleness safety net — the cache is kept fresh by the consent-events consumer.
+    {
+      provide: CONSENT_CACHE_TTL_SECONDS,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS') ?? 300,
       inject: [ConfigService],
     },
   ],

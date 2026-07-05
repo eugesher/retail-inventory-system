@@ -235,6 +235,37 @@ describe('CACHE_KEYS', () => {
     });
   });
 
+  describe('notificationsConsent (consumed consent read-path builders — ADR-037)', () => {
+    // The first CONSUMED notification cache key: the consent-gate resolves a
+    // customer's channel-consent per dispatch under this key, kept fresh by the
+    // customer.consent.updated / customer.erased consumer. Keyed on the customer's
+    // CHAR(36) UUID (the `<id>` axis); the snapshot is a singleton per customer (no facet).
+    it('embeds the v1 schema-version segment and keys on the customer UUID', () => {
+      expect(CACHE_KEYS.notificationsConsentPrefix()).toBe('ris:notifications:consent:v1:');
+      expect(CACHE_KEYS.notificationsConsent('11111111-1111-4111-8111-111111111111')).toBe(
+        'ris:notifications:consent:v1:11111111-1111-4111-8111-111111111111',
+      );
+    });
+
+    it('keeps the prefix a prefix of the full key so delByPrefix wipes the entry', () => {
+      const prefix = CACHE_KEYS.notificationsConsentPrefix();
+      expect(CACHE_KEYS.notificationsConsent('cust-1').startsWith(prefix)).toBe(true);
+    });
+
+    it('prepends `t:<tenantId>:` immediately after the `ris:` root when tenantId is supplied', () => {
+      expect(CACHE_KEYS.notificationsConsentPrefix({ tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:notifications:consent:v1:',
+      );
+      expect(CACHE_KEYS.notificationsConsent('cust-1', { tenantId: 'store-7' })).toBe(
+        'ris:t:store-7:notifications:consent:v1:cust-1',
+      );
+    });
+
+    it('omits the tenant segment entirely when no tenantId is supplied', () => {
+      expect(CACHE_KEYS.notificationsConsent('cust-1')).not.toMatch(/(^|:)t:/);
+    });
+  });
+
   describe('productStock (pre-ADR-016 legacy — kept for original transition window)', () => {
     it('uses the bare stock prefix', () => {
       expect(CACHE_KEYS.productStockPrefix(42)).toBe('stock:42:');

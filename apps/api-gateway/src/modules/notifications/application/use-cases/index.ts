@@ -3,4 +3,5 @@ export * from './get-delivery.use-case';
 export * from './list-deliveries.use-case';
 export * from './list-templates.use-case';
 export * from './retry-delivery.use-case';
+export * from './send-marketing.use-case';
 export * from './set-template-active.use-case';
