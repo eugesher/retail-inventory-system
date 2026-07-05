@@ -37,11 +37,14 @@ export class Customer extends AggregateRoot<string> {
   private _emailVerifiedAt: Date | null;
   private _refreshTokenHash: string | null;
   private _deletedAt: Date | null;
-  private readonly _email: string | null;
-  private readonly _passwordHash: string | null;
-  private readonly _phone: string | null;
-  private readonly _firstName: string | null;
-  private readonly _lastName: string | null;
+  // The PII fields are mutable (not `readonly`) solely so `erase()` can null them
+  // in place. Nothing else reassigns them — a live customer's PII is set once in
+  // the constructor and only the tombstone-erase clears it (ADR-037 §2).
+  private _email: string | null;
+  private _passwordHash: string | null;
+  private _phone: string | null;
+  private _firstName: string | null;
+  private _lastName: string | null;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
 
@@ -129,8 +132,7 @@ export class Customer extends AggregateRoot<string> {
   }
 
   // The tombstone marker: null for a live customer, set to the erase instant for
-  // a `status='deleted'` row. Loaded on rehydrate; only task-owned erase logic
-  // sets it (this model carries no `erase()` mutator yet).
+  // a `status='deleted'` row. Loaded on rehydrate and set by `erase()`.
   public get deletedAt(): Date | null {
     return this._deletedAt;
   }
@@ -153,6 +155,29 @@ export class Customer extends AggregateRoot<string> {
 
   public rotateRefreshTokenHash(hash: string | null): void {
     this._refreshTokenHash = hash;
+  }
+
+  // Tombstone-erase this customer (ADR-037 §2). Nulls every PII field, flips the
+  // status to `deleted`, stamps `deletedAt` with the erase instant, and clears the
+  // refresh-token hash — a **session revocation**: a live refresh token can no
+  // longer roll forward, and `existsAuthenticatableById` (`status IN
+  // ('active','guest')`) already bars a `deleted` row from authenticating. The id
+  // is deliberately preserved so every `order.customer_id` FK stays valid and the
+  // sales history survives — the whole reason the FK was made nullable (ADR-028
+  // §1). Records **no** domain event: the erase use case emits the `customer.erased`
+  // wire event, keeping this aggregate event-light (the ConsentRecord/Category
+  // precedent). Idempotent — re-erasing an already-`deleted` customer re-nulls the
+  // same (already-null) fields and re-stamps `deletedAt`, a no-op in effect.
+  public erase(at: Date = new Date()): void {
+    this._status = 'deleted';
+    this._deletedAt = at;
+    this._email = null;
+    this._phone = null;
+    this._firstName = null;
+    this._lastName = null;
+    this._passwordHash = null;
+    this._emailVerifiedAt = null;
+    this._refreshTokenHash = null;
   }
 
   public async validatePassword(candidate: string, hasher: IPasswordHasher): Promise<boolean> {

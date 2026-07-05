@@ -10,6 +10,7 @@ import {
 
 import {
   CONSENT_RECORD_REPOSITORY,
+  CUSTOMER_ERASURE_WRITER,
   CUSTOMER_EVENTS_PUBLISHER,
   CUSTOMER_REPOSITORY,
   PASSWORD_HASHER,
@@ -20,6 +21,7 @@ import {
 } from './application/ports';
 import {
   CreateGuestSessionUseCase,
+  EraseCustomerUseCase,
   GetCurrentCustomerUseCase,
   LoginCustomerUseCase,
   LoginUseCase,
@@ -39,6 +41,7 @@ import {
   ConsentRecordEntity,
   ConsentRecordTypeormRepository,
   CustomerEntity,
+  CustomerErasureWriterAdapter,
   CustomerTypeormRepository,
   PermissionEntity,
   PermissionTypeormRepository,
@@ -130,7 +133,7 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     { provide: PERMISSION_REPOSITORY, useExisting: PermissionTypeormRepository },
 
     // The customer channel-consent store. Bound here + exported so the consent
-    // Record/Read use cases and the erase writer (later consent work) resolve it.
+    // Record/Read use cases resolve it.
     ConsentRecordTypeormRepository,
     { provide: CONSENT_RECORD_REPOSITORY, useExisting: ConsentRecordTypeormRepository },
 
@@ -138,6 +141,13 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     // / `customer.erased` onto `notification_events` and mirrors onto `ris.events`.
     RmqCustomerEventsPublisher,
     { provide: CUSTOMER_EVENTS_PUBLISHER, useExisting: RmqCustomerEventsPublisher },
+
+    // The cross-context erasure writer (ADR-037 §3): nulls the customer + address
+    // + cart PII in one transaction over the shared `retail_db` via raw SQL. It
+    // injects the default `EntityManager` (no `forFeature` — the root connection is
+    // global), so no extra TypeORM registration is needed.
+    CustomerErasureWriterAdapter,
+    { provide: CUSTOMER_ERASURE_WRITER, useExisting: CustomerErasureWriterAdapter },
 
     LoginUseCase,
     LogoutUseCase,
@@ -149,6 +159,7 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     GetCurrentCustomerUseCase,
     RecordConsentUseCase,
     ReadConsentUseCase,
+    EraseCustomerUseCase,
   ],
   exports: [
     PASSWORD_HASHER,
@@ -159,9 +170,12 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     ROLE_REPOSITORY,
     PERMISSION_REPOSITORY,
     CONSENT_RECORD_REPOSITORY,
-    // Exported so the admin consent-read controller (a later change) can reuse the
-    // owner-or-staff Read Consent use case unchanged, passing `isStaff: true`.
+    // Exported so the `customer-admin` controller can reuse the owner-or-staff Read
+    // Consent use case unchanged (passing `isStaff: true`) and drive the tombstone
+    // erase. The domain mutation stays in the module that owns the `Customer`
+    // aggregate (ADR-004); `customer-admin` is a thin admin shell (ADR-024).
     ReadConsentUseCase,
+    EraseCustomerUseCase,
     // Re-export the dynamic AuthLibModule so STAFF_USER_REPOSITORY (and the
     // other AuthLib-bound tokens) are visible to AuthModule's consumers.
     // See the comment above `authLibDynamicModule` for why this is needed.

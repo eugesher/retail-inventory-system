@@ -9,6 +9,7 @@ import { ConsentRecord, Customer, StaffUser } from '../../../domain';
 import {
   IConsentRecordRepositoryPort,
   IConsentUpdatedPublishInput,
+  ICustomerErasureWriterPort,
   ICustomerEventsPublisherPort,
   ICustomerErasedPublishInput,
   ICustomerRepositoryPort,
@@ -125,6 +126,18 @@ export class FakeCustomerEventsPublisher implements ICustomerEventsPublisherPort
 
   public publishErased(input: ICustomerErasedPublishInput): Promise<void> {
     this.erased.push(input);
+    return Promise.resolve();
+  }
+}
+
+// Recording fake for ICustomerErasureWriterPort — captures the `Customer` handed to
+// `persistErasure` (post-`erase()`), so the erase use-case spec can assert the
+// aggregate's PII is nulled and count writes (for the idempotency short-circuit).
+export class RecordingCustomerErasureWriter implements ICustomerErasureWriterPort {
+  public readonly persisted: Customer[] = [];
+
+  public persistErasure(customer: Customer): Promise<void> {
+    this.persisted.push(customer);
     return Promise.resolve();
   }
 }

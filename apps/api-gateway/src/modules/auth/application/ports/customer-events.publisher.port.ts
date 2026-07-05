@@ -13,7 +13,7 @@ export interface IConsentUpdatedPublishInput {
 
 // The domain-typed input for a `customer.erased` emit. NO PII — only the ids and
 // the erase instant (the adapter builds the no-PII `ICustomerErasedEvent` wire
-// shape). The erase flow (a later change) is the only caller.
+// shape). `EraseCustomerUseCase` is the only caller.
 export interface ICustomerErasedPublishInput {
   customerId: string;
   erasedAt: Date;
