@@ -67,4 +67,18 @@ VALUES
   ('inventory.stock.low', 'email', 'en-US',
    'Low stock alert',
    'Low stock for variant {{variantId}} at {{stockLocationId}}: {{quantity}} on hand (threshold {{threshold}}).',
+   1, 1),
+  -- The marketing template (ADR-037). Unlike the ten rows above, its `event_type`
+  -- is NOT a transactional routing key: it is `marketing.email.promo`
+  -- (`ROUTING_KEYS.MARKETING_EMAIL_PROMO`), the default key the marketing-send
+  -- endpoint dispatches on. The consent-gate therefore weighs a send of this
+  -- template against `marketing_email` (not the transactional bypass), so a
+  -- customer who has NOT opted into marketing yields a `skipped-no-consent` row
+  -- and one who HAS yields a `sent` row. Its placeholders render against the
+  -- operator-supplied `context` on the send request (there is no wire event) —
+  -- `{{customerName}}` / `{{promoCode}}` give a `sent` delivery a rendered body to
+  -- assert on.
+  ('marketing.email.promo', 'email', 'en-US',
+   'A special offer just for you, {{customerName}}',
+   'Hi {{customerName}}! Enjoy our latest promotion. Use code {{promoCode}} at checkout for a limited-time discount.',
    1, 1);

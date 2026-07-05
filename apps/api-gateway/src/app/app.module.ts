@@ -10,6 +10,7 @@ import { DatabaseModule } from '@retail-inventory-system/database';
 import { CorrelationMiddleware, LoggerModuleConfig } from '@retail-inventory-system/observability';
 
 import {
+  ConsentRecordEntity,
   CustomerEntity,
   PermissionEntity,
   RoleEntity,
@@ -31,7 +32,13 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.API_GATEWAY)),
-    DatabaseModule.forRoot([StaffUserEntity, RoleEntity, PermissionEntity, CustomerEntity]),
+    DatabaseModule.forRoot([
+      StaffUserEntity,
+      RoleEntity,
+      PermissionEntity,
+      CustomerEntity,
+      ConsentRecordEntity,
+    ]),
     AuthModule,
     IamModule,
     CustomerAdminModule,
