@@ -1,0 +1,21 @@
+name: reparent-cycle-rejected
+description: |-
+  PATCH /api/catalog/categories/:slug/parent  (Bearer — catalog:write)
+  A DELIBERATE failure: reparenting `workshop` under `workshop-hand-planes` (its
+  own descendant) would form a cycle. The catalog domain rejects it and the
+  gateway surfaces 409 with body { statusCode: 409, message,
+  code: 'CATALOG_CATEGORY_CYCLE' }. This block is last so it never interrupts the
+  chain above. (Reparenting a category under ITSELF — newParentSlug === the slug —
+  is rejected the same way.)
+method: PATCH
+url: $ENV_BASE_URL/catalog/categories/workshop/parent
+body:
+  content: |-
+    {
+      "newParentSlug": "workshop-hand-planes"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

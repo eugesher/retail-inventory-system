@@ -1,0 +1,23 @@
+name: author-template-missing-subject
+description: |-
+  POST /api/notifications/templates  (Bearer — notifications:write)
+  An email template with no subject is rejected 400
+  (NOTIFICATION_TEMPLATE_SUBJECT_REQUIRED) — the channel-specific subject rule,
+  surfaced from the notification domain via its RPC exception filter → the gateway.
+  No row is written. (For an sms/push channel the subject is optional and this body
+  would succeed.)
+method: POST
+url: $ENV_BASE_URL/notifications/templates
+body:
+  content: |-
+    {
+      "eventType": "retail.order.placed",
+      "channel": "email",
+      "locale": "en-US",
+      "body": "Subject-less email body — rejected before persist."
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

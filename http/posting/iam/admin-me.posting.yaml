@@ -1,0 +1,13 @@
+name: admin-me
+description: |-
+  GET /api/auth/me
+  Resolves "who is the caller" → { id, email, roles, permissions }. We chain
+  this block specifically to capture the admin's id so the staff-role
+  blocks below can target it via {{adminMe.response.body.$$.id}}. Side
+  benefit: verifies the access token from adminLogin actually authenticates.
+url: $ENV_BASE_URL/auth/me
+headers:
+- name: Authorization
+  value: Bearer $adminLoginAccessToken
+scripts:
+  on_response: iam/scripts.py:capture_admin_me

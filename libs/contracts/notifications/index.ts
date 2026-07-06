@@ -9,3 +9,4 @@ export * from './notification-delivery-list.payload';
 export * from './notification-delivery-get.payload';
 export * from './notification-delivery-record-outcome.payload';
 export * from './notification-delivery-retry.payload';
+export * from './notification-marketing-send.payload';

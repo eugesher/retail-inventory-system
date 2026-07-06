@@ -1,0 +1,26 @@
+name: create-role
+description: |-
+  POST /api/iam/roles
+  Body shape (CreateRoleRequestDto):
+    name: ^[a-z][a-z0-9-]*$$, 1..64 — unique in role.name (409 on duplicate)
+    description?: string, ≤255
+    permissionCodes: PermissionCodeEnum[] — every code must exist in the
+                     registry (400 lists the unknown codes)
+  Returns 201 with the persisted Role projection. `id` is captured for the
+  patchRole block below.
+method: POST
+url: $ENV_BASE_URL/iam/roles
+body:
+  content: |-
+    {
+      "name": "ops-readonly",
+      "description": "Operations team read-only access",
+      "permissionCodes": ["catalog:read", "inventory:read", "order:read"]
+    }
+headers:
+- name: Authorization
+  value: Bearer $adminLoginAccessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: iam/scripts.py:capture_create_role

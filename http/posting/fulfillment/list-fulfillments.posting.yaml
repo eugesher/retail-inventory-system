@@ -1,0 +1,10 @@
+name: list-fulfillments
+description: |-
+  GET /api/orders/:orderId/fulfillments  (Bearer — owner OR order:read)
+  Lists the order's fulfillments newest-first. The admin token uses the order:read
+  staff override; the owning customer could list its own with @customerToken. Response
+  (200) is FulfillmentView[] — the just-created pending fulfillment.
+url: $ENV_BASE_URL/orders/$orderId/fulfillments
+headers:
+- name: Authorization
+  value: Bearer $accessToken

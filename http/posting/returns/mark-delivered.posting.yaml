@@ -1,0 +1,10 @@
+name: mark-delivered
+description: |-
+  POST /api/orders/:orderId/fulfillments/:fulfillmentId/deliver  (Bearer — order:fulfill)
+  Marks the fulfillment delivered, rolling the order up to `delivered` — so the return
+  window is satisfied (a delivered order is always returnable).
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/fulfillments/$fulfillmentId/deliver
+headers:
+- name: Authorization
+  value: Bearer $accessToken

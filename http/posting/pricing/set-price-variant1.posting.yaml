@@ -1,0 +1,28 @@
+name: set-price-variant1
+description: |-
+  POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+  Sets an IMMEDIATE price for seeded variant 1 (AURORA-WARM): validFrom is
+  omitted, so the domain stamps it to now and opens the row (validTo = null).
+  Body shape (SetPriceRequestDto):
+    currency:    ISO-4217 3-letter (^[A-Z]{3}$$)
+    amountMinor: integer minor units / cents (>= 0)
+    validFrom?:  ISO-8601; omitted/<= now is immediate, a future instant schedules
+    validTo?:    ISO-8601 close instant; omitted means open-ended
+    priority?:   resolution tiebreak (default 0)
+  This is the "Set before Get" that makes the read blocks below self-contained.
+  Response is the persisted PriceView
+  { id, variantId, currency, amountMinor, validFrom, validTo: null, priority }.
+method: POST
+url: $ENV_BASE_URL/catalog/variants/1/prices
+body:
+  content: |-
+    {
+      "currency": "USD",
+      "amountMinor": 4999,
+      "priority": 0
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -6,6 +6,7 @@ import {
   INotificationDeliveryListPayload,
   INotificationDeliveryRecordOutcomePayload,
   INotificationDeliveryRetryPayload,
+  INotificationMarketingSendPayload,
   INotificationTemplateAuthorPayload,
   INotificationTemplateListPayload,
   INotificationTemplateSetActivePayload,
@@ -22,6 +23,7 @@ import {
   ListTemplatesUseCase,
   RecordDeliveryOutcomeUseCase,
   RetryDeliveryUseCase,
+  SendMarketingUseCase,
   SetTemplateActiveUseCase,
 } from '../application/use-cases';
 
@@ -51,6 +53,7 @@ export class NotificationsController {
     private readonly getDeliveryUseCase: GetDeliveryUseCase,
     private readonly recordDeliveryOutcomeUseCase: RecordDeliveryOutcomeUseCase,
     private readonly retryDeliveryUseCase: RetryDeliveryUseCase,
+    private readonly sendMarketingUseCase: SendMarketingUseCase,
   ) {}
 
   @MessagePattern(ROUTING_KEYS.NOTIFICATION_TEMPLATE_AUTHOR)
@@ -103,5 +106,16 @@ export class NotificationsController {
     @Payload() payload: INotificationDeliveryRetryPayload,
   ): Promise<NotificationDeliveryView> {
     return this.retryDeliveryUseCase.execute(payload);
+  }
+
+  // The staff-triggered marketing dispatch (ADR-037). It routes through the shared
+  // Render & Dispatch pipeline, where the consent-gate decides send vs
+  // `skipped-no-consent`. Resolves the resulting `NotificationDeliveryView`, or `null`
+  // when no active marketing template resolves (the seeded template is a later capability).
+  @MessagePattern(ROUTING_KEYS.NOTIFICATION_MARKETING_SEND)
+  public async sendMarketing(
+    @Payload() payload: INotificationMarketingSendPayload,
+  ): Promise<NotificationDeliveryView | null> {
+    return this.sendMarketingUseCase.execute(payload);
   }
 }

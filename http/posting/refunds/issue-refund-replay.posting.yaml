@@ -1,0 +1,26 @@
+name: issue-refund-replay
+description: |-
+  POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
+  The REPLAY: the SAME @refundKey + the SAME body. The store short-circuits BEFORE the
+  gateway call AND BEFORE the audit emit, so there is NO second gateway reversal and — the
+  refund-specific guarantee — NO second `audit_log_entry` row (one logical refund = exactly
+  one audit record). Response is the stored RefundView with 200 (not 201) + the header
+  `Idempotent-Replay: true`; confirm the refund id + gatewayReference match `issueRefund`.
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/refunds
+body:
+  content: |-
+    {
+      "paymentId": $paymentId,
+      "amountMinor": 1000,
+      "reason": "Goodwill price adjustment"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $refundKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: refunds/scripts.py:setup_issue_refund_replay

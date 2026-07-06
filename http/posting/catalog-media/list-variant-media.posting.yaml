@@ -1,0 +1,7 @@
+name: list-variant-media
+description: |-
+  GET /api/catalog/variants/:variantId/media  (public)
+  Lists variant 1's active media — the single swatch just attached. The product's
+  strip (listProductMediaAfterDetach) is unaffected. An unknown owner here returns
+  200 with [] (the zero-answer convention), never a 404.
+url: $ENV_BASE_URL/catalog/variants/1/media

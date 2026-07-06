@@ -1,0 +1,8 @@
+name: list-roots
+description: |-
+  GET /api/catalog/categories?root=true  (public)
+  Lists the top-level (root) categories only — the `?root` flag narrows the flat
+  list to parentId IS NULL. No Authorization header (the @Public() read route).
+  `workshop` appears; `workshop-tools` (a child) does not. Response is
+  CategoryView[].
+url: $ENV_BASE_URL/catalog/categories?root=true

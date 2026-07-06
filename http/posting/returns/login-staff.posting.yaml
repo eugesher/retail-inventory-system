@@ -1,0 +1,18 @@
+name: login-staff
+description: |-
+  POST /api/auth/staff/login
+  Seeded admin login — holds order:fulfill + order:read + order:return-authorize +
+  inventory:receive-return (the full returns operator set).
+method: POST
+url: $ENV_BASE_URL/auth/staff/login
+body:
+  content: |-
+    {
+      "email": "admin@example.com",
+      "password": "admin1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: returns/scripts.py:capture_login_staff

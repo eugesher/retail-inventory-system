@@ -6,7 +6,7 @@ The notification microservice has no HTTP surface of its own — it is RMQ-only
 [delivery audit](02-notification-delivery-as-audit-trail.md) RPCs become reachable
 to an operator only when the API gateway fronts them over HTTP. This document
 describes that gateway surface: a new `modules/notifications/` proxy that fronts six
-of the notification RPCs at `/api/notifications`, and the `http/notifications.http`
+of the notification RPCs at `/api/notifications`, and the `http/kulala/notifications.http`
 file that exercises them.
 
 The module honors [ADR-009](../../adr/009-port-adapter-at-the-gateway.md) (the
@@ -145,9 +145,9 @@ apps/api-gateway/src/modules/notifications/
 The module is registered in `apps/api-gateway/src/app/app.module.ts` alongside the
 other gateway modules.
 
-## 5. The `http/notifications.http` flow
+## 5. The `http/kulala/notifications.http` flow
 
-[`http/notifications.http`](../../../http/notifications.http) documents all six routes
+[`http/kulala/notifications.http`](../../../http/kulala/notifications.http) documents all six routes
 as runnable [Kulala](https://github.com/mistweaverco/kulala.nvim) requests, following
 the conventions of the sibling `.http` files. The happy-path flow it captures:
 
@@ -176,4 +176,4 @@ endpoint that mints a delivery. So the delivery reads return an empty page until
 order is placed (or another producing event fires); the file explains how to source a
 real delivery id (from the list read, or the `notification_delivery` table) for the
 `get`/`retry` calls. No new environment variable was needed — the requests reuse the
-existing `ENV_BASE_URL` from `http/http-client.env.json`.
+existing `ENV_BASE_URL` from `http/kulala/http-client.env.json`.

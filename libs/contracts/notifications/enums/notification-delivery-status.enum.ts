@@ -16,10 +16,20 @@
 //   SENT    → BOUNCED    (a downstream bounce notice — terminal)
 // `DELIVERED` and `BOUNCED` are terminal. A delivery row is never deleted; it is
 // the source of truth for "did we already send this?" (`deleted_at` inert).
+//
+// `SKIPPED_NO_CONSENT` is a **terminal status set at row creation** — never reached
+// via `QUEUED → …`. The Render & Dispatch consent-gate (ADR-037) writes a delivery
+// directly in this status when a customer-facing dispatch's channel is unconsented
+// (a marketing email to a customer who opted out, a marketing sms with no sms
+// consent, or a transactional email a customer suppressed): the row records what
+// WOULD have been sent for the audit trail, but the transport (`NOTIFIER`) is never
+// called and `attemptCount` stays 0. It participates in the customer-facing dedupe
+// key so a redelivery collapses to the same skipped row instead of a second one.
 export enum NotificationDeliveryStatusEnum {
   QUEUED = 'queued',
   SENT = 'sent',
   DELIVERED = 'delivered',
   FAILED = 'failed',
   BOUNCED = 'bounced',
+  SKIPPED_NO_CONSENT = 'skipped-no-consent',
 }

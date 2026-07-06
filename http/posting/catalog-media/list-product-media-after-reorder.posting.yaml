@@ -1,0 +1,6 @@
+name: list-product-media-after-reorder
+description: |-
+  GET /api/catalog/products/:productId/media  (public)
+  The strip now returns in the reversed order (document, video, image) — proof the
+  reorder persisted the new slots.
+url: $ENV_BASE_URL/catalog/products/1/media

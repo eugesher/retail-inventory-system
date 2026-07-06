@@ -249,3 +249,44 @@ Authorization: Bearer {{accessToken}}
 # surfaced from the notification domain via its RPC exception filter → the gateway.
 POST {{baseUrl}}/notifications/deliveries/999999/retry
 Authorization: Bearer {{accessToken}}
+
+###
+
+# Marketing send
+#
+# @name sendMarketing
+# POST /api/notifications/marketing/send  (Bearer — notifications:write)
+# The staff-triggered marketing dispatch (ADR-037). The gateway maps the body onto a
+# marketing notification (eventType defaults to marketing.email.promo, a
+# NON-transactional key; a fresh campaignId is minted per request unless supplied)
+# and dispatches the RPC; the notification service's CONSENT-GATE then decides the
+# outcome — the endpoint itself never inspects consent. Body { customerId,
+# customerEmail, eventType?, campaignId?, context? }; `context` is the Handlebars
+# render context for the seeded marketing template ({{customerName}} / {{promoCode}}).
+#
+# CONSENT-GATED: the send resolves against the customer's `marketingEmail` flag. The
+# seeded customer starts with marketingEmail=false, so this send yields a
+# `skipped-no-consent` delivery row (the gate suppresses the NOTIFIER call but records
+# what would have been sent). Opt the customer in first (PUT /auth/customer/me/consent
+# { "marketingEmail": true } — see http/kulala/consent.http) and re-send with a fresh
+# campaignId to get a `sent` row instead. Either way the response IS the resulting
+# NotificationDeliveryView (the RPC is request-response); an empty body means no
+# marketing template resolved. Observe the row afterwards via
+# GET /notifications/deliveries?eventReferenceType=marketing&eventReferenceId=<campaignId>.
+#
+# (This route lives on the gateway notifications controller, hence its placement here
+# rather than in http/kulala/customer-admin.http — but it is an admin/ops tool.)
+POST {{baseUrl}}/notifications/marketing/send
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "customerId": "00000000-0000-4000-a000-000000000002",
+  "customerEmail": "customer@example.com",
+  "eventType": "marketing.email.promo",
+  "campaignId": "promo-demo-001",
+  "context": {
+    "customerName": "Casey",
+    "promoCode": "SAVE20"
+  }
+}

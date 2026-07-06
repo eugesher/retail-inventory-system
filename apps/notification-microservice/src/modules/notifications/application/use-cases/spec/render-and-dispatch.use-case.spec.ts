@@ -7,6 +7,8 @@ import {
 
 import { Notification, NotificationDelivery, NotificationTemplate } from '../../../domain';
 import {
+  IConsentCachePort,
+  IConsentSnapshot,
   INotificationDeliveryPage,
   INotificationDeliveryRepositoryPort,
   INotificationTemplateRepositoryPort,
@@ -15,6 +17,31 @@ import {
 } from '../../ports';
 import { IRenderAndDispatchInput, RenderAndDispatchUseCase } from '../render-and-dispatch.use-case';
 import { FakeLogger } from './test-doubles';
+
+// A consent cache double. `snapshot` is what `get` returns; it defaults to a
+// FULLY-consenting customer so the non-consent specs (which exercise the dispatch path)
+// are never gated. The consent specs below flip individual flags. `getCalls` records the
+// customer ids `get` was called with, so a spec can prove the gate was (or was not) run.
+class FakeConsentCache implements IConsentCachePort {
+  public snapshot: IConsentSnapshot = {
+    transactionalEmail: true,
+    marketingEmail: true,
+    marketingSms: true,
+    dataRetentionPolicy: 'default-7-years',
+  };
+  public readonly getCalls: string[] = [];
+
+  public get(customerId: string): Promise<IConsentSnapshot> {
+    this.getCalls.push(customerId);
+    return Promise.resolve(this.snapshot);
+  }
+  public set(): Promise<void> {
+    return Promise.resolve();
+  }
+  public del(): Promise<void> {
+    return Promise.resolve();
+  }
+}
 
 // A template repo whose only live method is `findLatestActive` — the render hot path. The
 // other port methods are unreachable in this pipeline and throw if touched (a regression
@@ -150,6 +177,7 @@ describe('RenderAndDispatchUseCase', () => {
   let deliveryRepo: RecordingDeliveryRepo;
   let renderer: FakeRenderer;
   let notifier: RecordingNotifier;
+  let consentCache: FakeConsentCache;
   let logger: FakeLogger;
   let useCase: RenderAndDispatchUseCase;
 
@@ -186,12 +214,14 @@ describe('RenderAndDispatchUseCase', () => {
     deliveryRepo = new RecordingDeliveryRepo(events);
     renderer = new FakeRenderer();
     notifier = new RecordingNotifier(events);
+    consentCache = new FakeConsentCache();
     logger = new FakeLogger();
     useCase = new RenderAndDispatchUseCase(
       templateRepo,
       deliveryRepo,
       renderer,
       notifier,
+      consentCache,
       logger as unknown as PinoLogger,
     );
   });
@@ -383,5 +413,132 @@ describe('RenderAndDispatchUseCase', () => {
     // ...but the transport (which requires a non-empty subject) gets the eventType fallback.
     expect(notifier.sent[0].subject).toBe('retail.order.placed');
     expect(notifier.sent[0].body).toBe('Order 99 confirmed');
+  });
+
+  describe('consent-gate (ADR-037)', () => {
+    // `marketing.email.promo` is NOT in TRANSACTIONAL_EVENT_TYPES → a marketing email.
+    const MARKETING_EVENT = 'marketing.email.promo';
+
+    it('records ONE skipped-no-consent row and never dispatches a marketing email when marketingEmail is false', async () => {
+      templateRepo.latest = emailTemplate();
+      consentCache.snapshot = {
+        transactionalEmail: true,
+        marketingEmail: false,
+        marketingSms: false,
+        dataRetentionPolicy: 'default-7-years',
+      };
+
+      const result = await useCase.execute(buildInput({ eventType: MARKETING_EVENT }));
+
+      expect(result?.status).toBe(NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
+      expect(result?.attemptCount).toBe(0);
+      // Exactly one row persisted (the skipped row), and the transport was never touched.
+      expect(deliveryRepo.saved).toHaveLength(1);
+      expect(deliveryRepo.savedStatuses).toEqual([
+        NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT,
+      ]);
+      expect(notifier.sent).toHaveLength(0);
+      expect(events).not.toContain('notifier.send');
+      expect(consentCache.getCalls).toEqual(['cust-uuid-1']);
+      expect(
+        logger.logs.some(
+          (l) =>
+            l.message ===
+            'Recipient has not consented to this channel; recorded skipped-no-consent, no dispatch',
+        ),
+      ).toBe(true);
+    });
+
+    it('dispatches a marketing email when marketingEmail is true', async () => {
+      templateRepo.latest = emailTemplate();
+      consentCache.snapshot = {
+        transactionalEmail: false,
+        marketingEmail: true,
+        marketingSms: false,
+        dataRetentionPolicy: 'default-7-years',
+      };
+
+      const result = await useCase.execute(buildInput({ eventType: MARKETING_EVENT }));
+
+      expect(result?.status).toBe(NotificationDeliveryStatusEnum.SENT);
+      expect(notifier.sent).toHaveLength(1);
+    });
+
+    it('dispatches a transactional email even when marketingEmail is false (the bypass)', async () => {
+      templateRepo.latest = emailTemplate();
+      consentCache.snapshot = {
+        transactionalEmail: true,
+        marketingEmail: false,
+        marketingSms: false,
+        dataRetentionPolicy: 'default-7-years',
+      };
+
+      // `retail.order.placed` (buildInput's default eventType) IS in the transactional set.
+      const result = await useCase.execute(buildInput());
+
+      expect(result?.status).toBe(NotificationDeliveryStatusEnum.SENT);
+      expect(notifier.sent).toHaveLength(1);
+    });
+
+    it('records skipped-no-consent for a transactional email when transactionalEmail is false', async () => {
+      templateRepo.latest = emailTemplate();
+      consentCache.snapshot = {
+        transactionalEmail: false,
+        marketingEmail: true,
+        marketingSms: true,
+        dataRetentionPolicy: 'default-7-years',
+      };
+
+      const result = await useCase.execute(buildInput());
+
+      expect(result?.status).toBe(NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
+      expect(notifier.sent).toHaveLength(0);
+    });
+
+    it('skips the gate entirely for a system/ops (null-recipient) dispatch and sends as today', async () => {
+      templateRepo.latest = emailTemplate();
+      // Even a fully-denied snapshot is irrelevant: the gate never runs for a null recipient.
+      consentCache.snapshot = {
+        transactionalEmail: false,
+        marketingEmail: false,
+        marketingSms: false,
+        dataRetentionPolicy: 'default-7-years',
+      };
+
+      const result = await useCase.execute(
+        buildInput({
+          eventType: 'inventory.stock.low',
+          recipientCustomerId: null,
+          recipientAddress: 'ops@example.com',
+        }),
+      );
+
+      expect(result?.status).toBe(NotificationDeliveryStatusEnum.SENT);
+      expect(notifier.sent).toHaveLength(1);
+      // The consent cache was never consulted for a null-recipient dispatch.
+      expect(consentCache.getCalls).toHaveLength(0);
+    });
+
+    it('with the absent-row defaults (transactional true, marketing false): transactional sends, marketing skips', async () => {
+      // The cache-aside layer resolves an absent consent_record row to DEFAULT_CONSENT;
+      // here the fake returns those defaults directly.
+      consentCache.snapshot = {
+        transactionalEmail: true,
+        marketingEmail: false,
+        marketingSms: false,
+        dataRetentionPolicy: 'default-7-years',
+      };
+
+      templateRepo.latest = emailTemplate();
+      const transactional = await useCase.execute(buildInput());
+      expect(transactional?.status).toBe(NotificationDeliveryStatusEnum.SENT);
+
+      // Fresh state for the marketing leg.
+      events.length = 0;
+      const marketing = await useCase.execute(
+        buildInput({ eventType: MARKETING_EVENT, eventReferenceId: '100' }),
+      );
+      expect(marketing?.status).toBe(NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
+    });
   });
 });

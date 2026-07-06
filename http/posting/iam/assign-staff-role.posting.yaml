@@ -1,0 +1,19 @@
+name: assign-staff-role
+description: |-
+  POST /api/iam/staff/:id/roles
+  Idempotent — reassigning a role the user already holds is a no-op (200
+  either way). Unknown role name → 400; missing or suspended staff user →
+  404. Returns 200 with the updated StaffUser projection
+  { id, email, roleNames }.
+method: POST
+url: $ENV_BASE_URL/iam/staff/$adminMeId/roles
+body:
+  content: |-
+    {
+      "roleNames": ["ops-readonly"]
+    }
+headers:
+- name: Authorization
+  value: Bearer $adminLoginAccessToken
+- name: Content-Type
+  value: application/json

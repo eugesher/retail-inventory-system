@@ -1,0 +1,10 @@
+name: authorize-return
+description: |-
+  POST /api/returns/:rmaId/authorize  (Bearer — staff order:return-authorize)
+  Order support authorizes the requested return -> `authorized`. Response (200) is the
+  ReturnRequestView with status='authorized' and authorizedAt stamped.
+method: POST
+url: $ENV_BASE_URL/returns/$rmaId/authorize
+headers:
+- name: Authorization
+  value: Bearer $accessToken

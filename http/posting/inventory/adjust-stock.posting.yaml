@@ -1,0 +1,20 @@
+name: adjust-stock
+description: |-
+  POST /api/inventory/variants/:variantId/stock/adjust  (Bearer — inventory:adjust)
+  Adjust stock — applies a signed delta with a mandatory reasonCode (carried on
+  the inventory.stock.adjusted event + logs, and on a signed `adjustment` row
+  appended to the stock_movement ledger inside the counter transaction). Run after
+  `receiveStock`: 150 − 3 = 147 on hand. Response is the updated StockLevelView.
+method: POST
+url: $ENV_BASE_URL/inventory/variants/1/stock/adjust
+body:
+  content: |-
+    {
+      "quantityDelta": -3,
+      "reasonCode": "damaged"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

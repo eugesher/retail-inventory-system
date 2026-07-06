@@ -1,0 +1,21 @@
+name: transfer-stock-over-source
+description: |-
+  POST /api/inventory/variants/:variantId/stock/transfer  (Bearer — inventory:transfer)
+  Transferring more than the source's on-hand is rejected with a 409 Conflict (the
+  same below-zero invariant Adjust surfaces — `INVENTORY_STOCK_RESULT_NEGATIVE`)
+  the moment the move would drive the source below zero, before any write. No state
+  change at either location.
+method: POST
+url: $ENV_BASE_URL/inventory/variants/1/stock/transfer
+body:
+  content: |-
+    {
+      "fromLocationId": "default-warehouse",
+      "toLocationId": "backup-store",
+      "quantity": 100000
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -1,0 +1,11 @@
+name: list-templates
+description: |-
+  GET /api/notifications/templates  (Bearer — notifications:write)
+  The registry browse — every version, active or not. Here scoped to the
+  retail.order.placed event so the row authored above appears (plus any earlier
+  versions). Drop the query string to list the whole registry. Response is
+  NotificationTemplateView[].
+url: $ENV_BASE_URL/notifications/templates?eventType=retail.order.placed&channel=email&locale=en-US
+headers:
+- name: Authorization
+  value: Bearer $accessToken

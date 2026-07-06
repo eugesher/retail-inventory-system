@@ -1,0 +1,18 @@
+name: restore-tools-under-workshop
+description: |-
+  PATCH /api/catalog/categories/:slug/parent  (Bearer — catalog:write)
+  Reparents `workshop-tools` back under `workshop`, restoring the original
+  hierarchy (path `/workshop/workshop-tools`) so the browse blocks below read a
+  meaningful tree. rewrittenDescendantCount === 1 again.
+method: PATCH
+url: $ENV_BASE_URL/catalog/categories/workshop-tools/parent
+body:
+  content: |-
+    {
+      "newParentSlug": "workshop"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -1,0 +1,17 @@
+name: login
+description: |-
+  POST /api/auth/customer/login
+  Seeded customer login. Response is TokenResponseDto { accessToken, ... }.
+method: POST
+url: $ENV_BASE_URL/auth/customer/login
+body:
+  content: |-
+    {
+      "email": "customer@example.com",
+      "password": "customer1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: order/scripts.py:capture_login

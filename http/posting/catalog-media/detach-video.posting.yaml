@@ -1,0 +1,13 @@
+name: detach-video
+description: |-
+  DELETE /api/catalog/media/:id  (Bearer — catalog:write)
+  Detaches the middle asset (the video). Detach is a STATUS FLIP active → archived
+  — the row survives so historical references still resolve; there is no sibling
+  compaction. Returns 200 with the archived MediaAssetView { ..., status:
+  'archived' }. A SECOND detach of the same id → 409
+  CATALOG_MEDIA_INVALID_STATE_TRANSITION (the flip is state-guarded, not idempotent).
+method: DELETE
+url: $ENV_BASE_URL/catalog/media/$videoId
+headers:
+- name: Authorization
+  value: Bearer $accessToken

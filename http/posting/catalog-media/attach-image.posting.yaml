@@ -1,0 +1,30 @@
+name: attach-image
+description: |-
+  POST /api/catalog/media  (Bearer — catalog:write)
+  Attaches the first asset to product 1. Body shape (AttachMediaRequestDto):
+    ownerType: 'product' | 'product-variant'
+    ownerId:   BIGINT id of the owning product/variant
+    uri:       opaque, already-uploaded reference (no scheme allow-list), 1..1024
+    type:      'image' | 'video' | 'document'
+    altText?:  <= 255
+  There is NO sortOrder field — attach always APPENDS (slot = max(sort_order) + 1
+  across all rows, archived included). Response is MediaAssetView
+  { id, ownerType, ownerId, uri, type, altText, sortOrder, status: 'active' }.
+method: POST
+url: $ENV_BASE_URL/catalog/media
+body:
+  content: |-
+    {
+      "ownerType": "product",
+      "ownerId": 1,
+      "uri": "https://cdn.example.com/workshop/lamp-front.jpg",
+      "type": "image",
+      "altText": "Aurora desk lamp, front view"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: catalog-media/scripts.py:capture_attach_image

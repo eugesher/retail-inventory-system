@@ -30,6 +30,10 @@ export class TestDbSeedUtil {
     // which runs before these SQL files), product_variant (catalog-product-variant.sql),
     // and snapshots the variant's price (price.sql) — so it must come last.
     'cart.sql',
+    // The seeded customer's consent record. FKs the seeded customer only (seeded
+    // by the JS identity pass ahead of every SQL file), so it can follow the
+    // identity pass anywhere; placed after cart.sql for tidiness.
+    'consent-record.sql',
     // One active v1 template per notification event type. No FK dependency
     // (notification_template references nothing; notification_delivery is not seeded),
     // so its position is free — placed last after the catalog/retail fixtures.

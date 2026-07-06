@@ -3,6 +3,7 @@ export * from './current-user.response.dto';
 export * from './guest-session.response.dto';
 export * from './login-customer.request.dto';
 export * from './login.request.dto';
+export * from './record-consent.request.dto';
 export * from './refresh.request.dto';
 export * from './register-customer.request.dto';
 export * from './token.response.dto';

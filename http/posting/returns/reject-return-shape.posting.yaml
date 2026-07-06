@@ -1,0 +1,19 @@
+name: reject-return-shape
+description: |-
+  POST /api/returns/:rmaId/reject  (Bearer — staff order:return-authorize)
+  Shape-only reference (NOT part of the happy chain above — the RMA is already closed). A
+  reject walks a `requested` RMA -> `rejected` (terminal) with the supplied reason appended
+  to the RMA notes. To exercise it, open a SECOND return and send this against its rmaId
+  before authorizing.
+method: POST
+url: $ENV_BASE_URL/returns/$rmaId/reject
+body:
+  content: |-
+    {
+      "reason": "Outside the return window"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

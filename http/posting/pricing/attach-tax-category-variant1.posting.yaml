@@ -1,0 +1,22 @@
+name: attach-tax-category-variant1
+description: |-
+  PATCH /api/catalog/variants/:variantId/tax-category  (Bearer — pricing:write)
+  Attaches the LUXURY category (created above, referenced by @taxCode) to variant
+  1 — it writes the variant's tax_category_id FK and returns the updated header.
+  Body shape (AttachTaxCategoryRequestDto):
+    taxCategoryCode: UPPER_SNAKE_CASE code of an existing category
+  An unknown code => 404 TAX_CATEGORY_NOT_FOUND; an unknown variant => 404
+  VARIANT_NOT_FOUND. Returns 200 with VariantTaxHeaderView
+  { variantId, sku, taxCategoryId, taxCategoryCode } carrying the attached code.
+method: PATCH
+url: $ENV_BASE_URL/catalog/variants/1/tax-category
+body:
+  content: |-
+    {
+      "taxCategoryCode": "LUXURY"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

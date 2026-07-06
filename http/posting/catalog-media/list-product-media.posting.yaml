@@ -1,0 +1,7 @@
+name: list-product-media
+description: |-
+  GET /api/catalog/products/:productId/media  (public)
+  Lists product 1's ACTIVE media, sorted by sort_order ASC. No Authorization
+  header (the @Public() storefront read). Returns the three just-attached assets
+  in creation order (image, video, document). Response is MediaAssetView[].
+url: $ENV_BASE_URL/catalog/products/1/media

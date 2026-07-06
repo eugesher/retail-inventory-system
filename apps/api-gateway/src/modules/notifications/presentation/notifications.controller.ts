@@ -22,6 +22,8 @@ import {
   getSchemaPath,
 } from '@nestjs/swagger';
 
+import { randomUUID } from 'node:crypto';
+
 import { RequiresPermission } from '@retail-inventory-system/auth';
 import {
   IPage,
@@ -29,19 +31,23 @@ import {
   NotificationTemplateView,
   PermissionCodeEnum,
 } from '@retail-inventory-system/contracts';
+import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
+import { MarketingSendResult } from '../application/ports';
 import {
   AuthorTemplateUseCase,
   GetDeliveryUseCase,
   ListDeliveriesUseCase,
   ListTemplatesUseCase,
   RetryDeliveryUseCase,
+  SendMarketingUseCase,
   SetTemplateActiveUseCase,
 } from '../application/use-cases';
 import {
   AuthorTemplateRequestDto,
   DeliveriesQueryDto,
+  SendMarketingRequestDto,
   SetTemplateActiveRequestDto,
   TemplatesQueryDto,
 } from './dto';
@@ -70,6 +76,7 @@ export class NotificationsController {
     private readonly listDeliveriesUseCase: ListDeliveriesUseCase,
     private readonly getDeliveryUseCase: GetDeliveryUseCase,
     private readonly retryDeliveryUseCase: RetryDeliveryUseCase,
+    private readonly sendMarketingUseCase: SendMarketingUseCase,
   ) {}
 
   @Get('templates')
@@ -232,5 +239,44 @@ export class NotificationsController {
     @CorrelationId() correlationId: string,
   ): Promise<NotificationDeliveryView> {
     return this.retryDeliveryUseCase.execute({ deliveryId: id }, correlationId);
+  }
+
+  @Post('marketing/send')
+  @RequiresPermission(PermissionCodeEnum.NOTIFICATIONS_WRITE)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Send a marketing notification to a customer (staff, notifications:write)',
+  })
+  // Staff-triggered marketing dispatch (ADR-037). The consent-gate in the notification
+  // service decides send vs skipped-no-consent — a customer who opted out yields a
+  // `skipped-no-consent` delivery row (still a 200). `eventType` defaults to the
+  // marketing template key; a fresh `campaignId` is minted per request (so repeated
+  // sends to the same customer are distinct delivery rows, not deduped against one
+  // another). An operator-supplied `campaignId` is honored (an at-least-once redelivery
+  // of the SAME request then dedups). A missing marketing template yields a 200 with an
+  // empty body.
+  @ApiOkResponse({
+    description:
+      'The resulting delivery row (sent or skipped-no-consent); empty when no marketing template resolves',
+    type: NotificationDeliveryView,
+  })
+  @ApiProduces('application/json')
+  public async sendMarketing(
+    @Body() dto: SendMarketingRequestDto,
+    @CorrelationId() correlationId: string,
+  ): Promise<MarketingSendResult> {
+    return this.sendMarketingUseCase.execute(
+      {
+        customerId: dto.customerId,
+        customerEmail: dto.customerEmail,
+        // Presentation may import ROUTING_KEYS (the application layer may not) — resolve
+        // the marketing default here and mint the per-request campaign id.
+        eventType: dto.eventType ?? ROUTING_KEYS.MARKETING_EMAIL_PROMO,
+        campaignId: dto.campaignId ?? randomUUID(),
+        context: dto.context ?? {},
+      },
+      correlationId,
+    );
   }
 }

@@ -1,0 +1,21 @@
+name: reparent-tools-under-clearance
+description: |-
+  PATCH /api/catalog/categories/:slug/parent  (Bearer — catalog:write)
+  Moves `workshop-tools` (and its whole subtree) under `workshop-clearance`. Body
+  (ReparentCategoryRequestDto): { newParentSlug?: string | null }. The response is
+  CategoryReparentView { category, rewrittenDescendantCount }:
+    category.path === '/workshop-clearance/workshop-tools'
+    rewrittenDescendantCount === 1   (the grandchild workshop-hand-planes, rebased
+                                       in the SAME transaction as the moved row)
+method: PATCH
+url: $ENV_BASE_URL/catalog/categories/workshop-tools/parent
+body:
+  content: |-
+    {
+      "newParentSlug": "workshop-clearance"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

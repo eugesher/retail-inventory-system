@@ -8,6 +8,9 @@ import {
 
 import { Notification, NotificationDelivery } from '../../domain';
 import {
+  CONSENT_CACHE,
+  IConsentCachePort,
+  IConsentSnapshot,
   INotificationDeliveryRepositoryPort,
   INotificationTemplateRepositoryPort,
   INotifierPort,
@@ -17,6 +20,7 @@ import {
   NOTIFIER,
   TEMPLATE_RENDERER,
 } from '../ports';
+import { TRANSACTIONAL_EVENT_TYPES } from './transactional-event-types';
 import { resolveTransportSubject } from './transport-subject';
 
 // The default locale when a consumer does not supply one. Every seeded template is keyed
@@ -81,6 +85,12 @@ export interface IRenderAndDispatchInput {
 // through the existing `Notification` value object; the template/delivery machinery sits
 // *in front of* the transport, which stays `LogNotifierAdapter` by default.
 //
+// **The consent-gate (ADR-037)** sits between the render and the queued-row persist. For
+// a customer-facing dispatch it resolves the recipient's channel-consent (cache-aside,
+// no per-delivery RPC) and, if the applicable channel is unconsented, persists a
+// terminal `skipped-no-consent` row and returns WITHOUT dispatching. Transactional email
+// bypasses the marketing check; ops/system rows (null recipient) skip the gate entirely.
+//
 // `correlationId` is logged **inline** in every branch (never via `PinoLogger.assign`,
 // which throws outside request scope — ADR-011 §7).
 @Injectable()
@@ -94,6 +104,8 @@ export class RenderAndDispatchUseCase {
     private readonly renderer: ITemplateRendererPort,
     @Inject(NOTIFIER)
     private readonly notifier: INotifierPort,
+    @Inject(CONSENT_CACHE)
+    private readonly consentCache: IConsentCachePort,
     @InjectPinoLogger(RenderAndDispatchUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -168,9 +180,15 @@ export class RenderAndDispatchUseCase {
       return null;
     }
 
-    // 3. Idempotency pre-check — customer-facing rows only. A redelivered event whose
-    //    delivery already exists short-circuits to that row with NO second NOTIFIER call.
+    // 3. Customer-facing gating — the idempotency pre-check + the consent-gate. Both
+    //    apply ONLY to a customer-facing row: a system/ops dispatch (null recipient,
+    //    e.g. the low-stock alert to the ops mailbox) is never deduped (ADR-033) and no
+    //    consent applies to it, so it skips this whole block and goes straight to
+    //    persist-and-dispatch below.
     if (input.recipientCustomerId !== null) {
+      // 3a. Idempotency pre-check. A redelivered event whose delivery already exists
+      //     (sent OR a prior `skipped-no-consent`) short-circuits to that row with NO
+      //     second NOTIFIER call and NO second row.
       const existing = await this.deliveryRepo.findByDedupeKey(
         template.id!,
         input.eventReferenceType,
@@ -190,6 +208,40 @@ export class RenderAndDispatchUseCase {
           'Duplicate delivery, skipping dispatch',
         );
         return existing;
+      }
+
+      // 3b. Consent-gate (ADR-037). Resolve the recipient's channel-consent (cache-aside,
+      //     no per-delivery RPC — kept fresh by the customer.consent.updated /
+      //     customer.erased consumer). If the applicable channel is unconsented, persist
+      //     a TERMINAL `skipped-no-consent` row (recording what WOULD have been sent, for
+      //     the audit trail) and return WITHOUT calling the NOTIFIER. The skipped row
+      //     carries the same dedupe key, so a redelivery collapses onto it at 3a rather
+      //     than writing a second row.
+      const consent = await this.consentCache.get(input.recipientCustomerId);
+      if (!this.isChannelConsented(input.channel, input.eventType, consent)) {
+        const skipped = NotificationDelivery.skipped({
+          templateId: template.id!,
+          recipientCustomerId: input.recipientCustomerId,
+          recipientAddress: input.recipientAddress,
+          channel: input.channel,
+          eventReferenceType: input.eventReferenceType,
+          eventReferenceId: input.eventReferenceId,
+          renderedSubject,
+          renderedBody,
+          correlationId: input.correlationId,
+        });
+        const persisted = await this.deliveryRepo.save(skipped);
+        this.logger.info(
+          {
+            correlationId: input.correlationId,
+            deliveryId: persisted.id,
+            eventType: input.eventType,
+            channel: input.channel,
+            recipientCustomerId: input.recipientCustomerId,
+          },
+          'Recipient has not consented to this channel; recorded skipped-no-consent, no dispatch',
+        );
+        return persisted;
       }
     }
 
@@ -273,5 +325,31 @@ export class RenderAndDispatchUseCase {
     }
 
     return this.deliveryRepo.save(delivery);
+  }
+
+  // Classifies a customer-facing dispatch and returns whether the recipient has
+  // consented to the applicable channel (ADR-037):
+  //   - EMAIL + `eventType ∈ TRANSACTIONAL_EVENT_TYPES` → transactional email, gated on
+  //     `transactionalEmail` (the bypass — a customer gets order confirmations even with
+  //     marketing off);
+  //   - EMAIL + `eventType ∉` the set → marketing email, gated on `marketingEmail`;
+  //   - SMS → marketing sms, gated on `marketingSms`;
+  //   - PUSH / WEBHOOK → out of scope for this capability; treated as ungated (send) to
+  //     preserve today's behavior rather than silently dropping them (ADR-037).
+  private isChannelConsented(
+    channel: NotificationChannelEnum,
+    eventType: string,
+    consent: IConsentSnapshot,
+  ): boolean {
+    if (channel === NotificationChannelEnum.EMAIL) {
+      return TRANSACTIONAL_EVENT_TYPES.has(eventType)
+        ? consent.transactionalEmail
+        : consent.marketingEmail;
+    }
+    if (channel === NotificationChannelEnum.SMS) {
+      return consent.marketingSms;
+    }
+    // push / webhook — ungated for now (documented default, never a silent drop).
+    return true;
   }
 }

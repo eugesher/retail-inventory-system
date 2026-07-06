@@ -1,0 +1,20 @@
+name: add-easel-variant
+description: |-
+  POST /api/catalog/products/:productId/variants  (Bearer — catalog:write)
+  Appends a variant (publish requires ≥ 1 variant). Response is ProductVariantView
+  { id, productId, sku, ..., status: 'active' }.
+method: POST
+url: $ENV_BASE_URL/catalog/products/$easelId/variants
+body:
+  content: |-
+    {
+      "sku": "WORKSHOP-EASEL-OAK",
+      "optionValues": { "material": "oak" }
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: catalog-media/scripts.py:capture_add_easel_variant

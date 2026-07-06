@@ -1,0 +1,9 @@
+name: list-order-returns
+description: |-
+  GET /api/orders/:orderId/returns  (Bearer — owner OR order:read)
+  Lists the order's RMAs newest-first. Response (200) is ReturnRequestView[] — the one RMA
+  just walked through its lifecycle.
+url: $ENV_BASE_URL/orders/$orderId/returns
+headers:
+- name: Authorization
+  value: Bearer $accessToken

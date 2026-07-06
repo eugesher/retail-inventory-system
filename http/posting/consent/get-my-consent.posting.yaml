@@ -1,0 +1,11 @@
+name: get-my-consent
+description: |-
+  GET /api/auth/customer/me/consent   (Bearer customer)
+  Read the authenticated customer's consent record. On a fresh seed this returns
+  the seeded row { transactionalEmail: true, marketingEmail: false, marketingSms:
+  false, dataRetentionPolicy: 'default-7-years', updatedAt: <iso|null> }. A customer
+  whose row is absent gets the same defaults (absent-means-defaults) — never a 404.
+url: $ENV_BASE_URL/auth/customer/me/consent
+headers:
+- name: Authorization
+  value: Bearer $accessToken

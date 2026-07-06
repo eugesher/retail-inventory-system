@@ -5,8 +5,13 @@ import {
   IJwtRefreshPayload,
 } from '@retail-inventory-system/contracts';
 
-import { Customer, StaffUser } from '../../../domain';
+import { ConsentRecord, Customer, StaffUser } from '../../../domain';
 import {
+  IConsentRecordRepositoryPort,
+  IConsentUpdatedPublishInput,
+  ICustomerErasureWriterPort,
+  ICustomerEventsPublisherPort,
+  ICustomerErasedPublishInput,
   ICustomerRepositoryPort,
   IIssuedTokens,
   IPasswordPort,
@@ -77,6 +82,63 @@ export class InMemoryCustomerRepository implements ICustomerRepositoryPort {
   public save(customer: Customer): Promise<Customer> {
     this.byId.set(customer.id, customer);
     return Promise.resolve(customer);
+  }
+}
+
+export class InMemoryConsentRecordRepository implements IConsentRecordRepositoryPort {
+  private byId = new Map<string, ConsentRecord>();
+  public saveCount = 0;
+
+  public seed(record: ConsentRecord): void {
+    this.byId.set(record.customerId, record);
+  }
+
+  public findByCustomerId(customerId: string): Promise<ConsentRecord | null> {
+    return Promise.resolve(this.byId.get(customerId) ?? null);
+  }
+
+  public save(record: ConsentRecord): Promise<ConsentRecord> {
+    this.saveCount += 1;
+    // Simulate the real repository's DB `@UpdateDateColumn` stamp + re-read: a
+    // saved row always comes back with a fresh, non-null `updatedAt`.
+    const stamped = ConsentRecord.rehydrate(record.customerId, {
+      transactionalEmail: record.transactionalEmail,
+      marketingEmail: record.marketingEmail,
+      marketingSms: record.marketingSms,
+      dataRetentionPolicy: record.dataRetentionPolicy,
+      updatedAt: new Date(),
+    });
+    this.byId.set(record.customerId, stamped);
+    return Promise.resolve(stamped);
+  }
+}
+
+// Recording fake for ICustomerEventsPublisherPort — collects the emitted inputs so
+// specs can assert the `customer.consent.updated` / `customer.erased` fan-out.
+export class FakeCustomerEventsPublisher implements ICustomerEventsPublisherPort {
+  public readonly consentUpdated: IConsentUpdatedPublishInput[] = [];
+  public readonly erased: ICustomerErasedPublishInput[] = [];
+
+  public publishConsentUpdated(input: IConsentUpdatedPublishInput): Promise<void> {
+    this.consentUpdated.push(input);
+    return Promise.resolve();
+  }
+
+  public publishErased(input: ICustomerErasedPublishInput): Promise<void> {
+    this.erased.push(input);
+    return Promise.resolve();
+  }
+}
+
+// Recording fake for ICustomerErasureWriterPort — captures the `Customer` handed to
+// `persistErasure` (post-`erase()`), so the erase use-case spec can assert the
+// aggregate's PII is nulled and count writes (for the idempotency short-circuit).
+export class RecordingCustomerErasureWriter implements ICustomerErasureWriterPort {
+  public readonly persisted: Customer[] = [];
+
+  public persistErasure(customer: Customer): Promise<void> {
+    this.persisted.push(customer);
+    return Promise.resolve();
   }
 }
 

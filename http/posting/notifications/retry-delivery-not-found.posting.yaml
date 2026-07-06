@@ -1,0 +1,10 @@
+name: retry-delivery-not-found
+description: |-
+  POST /api/notifications/deliveries/:id/retry  (Bearer — notifications:write)
+  A retry targeting an unknown id is a 404 (NOTIFICATION_DELIVERY_NOT_FOUND),
+  surfaced from the notification domain via its RPC exception filter → the gateway.
+method: POST
+url: $ENV_BASE_URL/notifications/deliveries/999999/retry
+headers:
+- name: Authorization
+  value: Bearer $accessToken

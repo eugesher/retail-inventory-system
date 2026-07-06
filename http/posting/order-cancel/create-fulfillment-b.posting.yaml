@@ -1,0 +1,21 @@
+name: create-fulfillment-b
+description: |-
+  POST /api/orders/:orderId/fulfillments  (Bearer — order:fulfill)
+  Plans a PARTIAL shipment — 1 of the line's 2 ordered units — so 1 unit stays
+  unshipped for the cancel-line case. Capture @fulfillmentIdB.
+method: POST
+url: $ENV_BASE_URL/orders/$orderIdB/fulfillments
+body:
+  content: |-
+    {
+      "lines": [
+        { "orderLineId": $lineBId, "quantity": 1 }
+      ]
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: order-cancel/scripts.py:capture_create_fulfillment_b

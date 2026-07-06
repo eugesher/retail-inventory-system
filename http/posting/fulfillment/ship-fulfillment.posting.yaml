@@ -1,0 +1,28 @@
+name: ship-fulfillment
+description: |-
+  POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
+  Ships the pending fulfillment. trackingNumber is required to mark it shipped; carrier
+  is free-text metadata. This CAPTURES the order's authorized payment inline (so the
+  inventory + retail services must be running), advances the order's fulfillment axis to
+  `shipped` and each line's status, then commits the sale to inventory. The
+  `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036): re-sending this exact
+  request with the SAME @shipKey + body replays the stored ship (200 + `Idempotent-Replay: true`,
+  no re-capture / no re-committed sale); a missing key is 400. Response (200) is the shipped
+  FulfillmentView (status='shipped', trackingNumber + shippedAt stamped).
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/fulfillments/$fulfillmentId/ship
+body:
+  content: |-
+    {
+      "trackingNumber": "1Z999AA10123456784",
+      "carrier": "UPS"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $shipKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: fulfillment/scripts.py:setup_ship_fulfillment

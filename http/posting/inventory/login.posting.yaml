@@ -1,0 +1,18 @@
+name: login
+description: |-
+  POST /api/auth/staff/login
+  Seeded admin login (admin@example.com / admin1234). Response is
+  TokenResponseDto { accessToken, refreshToken, expiresIn }.
+method: POST
+url: $ENV_BASE_URL/auth/staff/login
+body:
+  content: |-
+    {
+      "email": "admin@example.com",
+      "password": "admin1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: inventory/scripts.py:capture_login

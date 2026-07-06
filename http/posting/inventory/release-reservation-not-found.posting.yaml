@@ -1,0 +1,12 @@
+name: release-reservation-not-found
+description: |-
+  POST /api/inventory/reservations/:reservationId/release  (Bearer — inventory:adjust)
+  A release targeting an unknown id is a 404 (`INVENTORY_RESERVATION_NOT_FOUND`),
+  surfaced from the inventory domain via its RPC exception filter → the gateway. A
+  random UUID that matches no row demonstrates it. (Re-releasing an already-released
+  or committed hold is instead a 409 `INVENTORY_RESERVATION_INVALID_STATE`.)
+method: POST
+url: $ENV_BASE_URL/inventory/reservations/3f1c9b6e-4d2a-4f8e-9c1b-2a7d6e5f0a11/release
+headers:
+- name: Authorization
+  value: Bearer $accessToken

@@ -13,7 +13,11 @@ const ALLOWED_STATUSES: ReadonlySet<CustomerStatus> = new Set([
 ]);
 
 interface ICustomerProps {
-  email: string;
+  // `email` is nullable so the model can *represent* a tombstone: an erased
+  // (`status='deleted'`) customer has its PII nulled while its id survives
+  // (ADR-028 §1, the nullable-FK-leaves-an-order-tombstone reasoning). The
+  // constructor invariant below is status-conditional accordingly.
+  email: string | null;
   passwordHash: string | null;
   status?: CustomerStatus;
   phone?: string | null;
@@ -21,6 +25,7 @@ interface ICustomerProps {
   lastName?: string | null;
   emailVerifiedAt?: Date | null;
   refreshTokenHash?: string | null;
+  deletedAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -31,23 +36,32 @@ export class Customer extends AggregateRoot<string> {
   private _status: CustomerStatus;
   private _emailVerifiedAt: Date | null;
   private _refreshTokenHash: string | null;
-  private readonly _email: string;
-  private readonly _passwordHash: string | null;
-  private readonly _phone: string | null;
-  private readonly _firstName: string | null;
-  private readonly _lastName: string | null;
+  private _deletedAt: Date | null;
+  // The PII fields are mutable (not `readonly`) solely so `erase()` can null them
+  // in place. Nothing else reassigns them — a live customer's PII is set once in
+  // the constructor and only the tombstone-erase clears it (ADR-037 §2).
+  private _email: string | null;
+  private _passwordHash: string | null;
+  private _phone: string | null;
+  private _firstName: string | null;
+  private _lastName: string | null;
   public readonly createdAt: Date | null;
   public readonly updatedAt: Date | null;
 
   private constructor(id: string, props: ICustomerProps) {
     super(id);
 
-    if (!props.email || !EMAIL_REGEX.test(props.email)) {
-      throw new Error('Customer: email must be a valid email address');
-    }
     const status: CustomerStatus = props.status ?? 'active';
     if (!ALLOWED_STATUSES.has(status)) {
       throw new Error(`Customer: unknown status "${status}"`);
+    }
+
+    // Status-conditional email invariant: a live customer (any status other than
+    // `deleted`) MUST carry a syntactically valid email; a tombstoned
+    // (`status='deleted'`) customer may have a null email — its PII was nulled by
+    // the erase, and the model must be able to rehydrate that row without throwing.
+    if (status !== 'deleted' && (!props.email || !EMAIL_REGEX.test(props.email))) {
+      throw new Error('Customer: email must be a valid email address');
     }
 
     const passwordHash = props.passwordHash ?? null;
@@ -57,7 +71,7 @@ export class Customer extends AggregateRoot<string> {
       );
     }
 
-    this._email = props.email.toLowerCase();
+    this._email = props.email ? props.email.toLowerCase() : null;
     this._passwordHash = passwordHash;
     this._status = status;
     this._phone = props.phone ?? null;
@@ -65,13 +79,17 @@ export class Customer extends AggregateRoot<string> {
     this._lastName = props.lastName ?? null;
     this._emailVerifiedAt = props.emailVerifiedAt ?? null;
     this._refreshTokenHash = props.refreshTokenHash ?? null;
+    this._deletedAt = props.deletedAt ?? null;
     this.createdAt = props.createdAt ?? null;
     this.updatedAt = props.updatedAt ?? null;
   }
 
   public static register(id: string, props: ICustomerProps): Customer {
     const customer = new Customer(id, props);
-    customer.addDomainEvent(new CustomerRegisteredEvent(id, customer._email));
+    // `register` is the live-customer create path; the constructor guarantees a
+    // non-null email for any non-`deleted` status, so `_email` is a real string
+    // here (the `authorizedAt!` post-transition idiom).
+    customer.addDomainEvent(new CustomerRegisteredEvent(id, customer._email!));
     return customer;
   }
 
@@ -79,7 +97,9 @@ export class Customer extends AggregateRoot<string> {
     return new Customer(id, props);
   }
 
-  public get email(): string {
+  // Null only for a tombstoned (`status='deleted'`) customer whose PII was
+  // nulled on erase; a live customer always has an email.
+  public get email(): string | null {
     return this._email;
   }
 
@@ -111,6 +131,12 @@ export class Customer extends AggregateRoot<string> {
     return this._refreshTokenHash;
   }
 
+  // The tombstone marker: null for a live customer, set to the erase instant for
+  // a `status='deleted'` row. Loaded on rehydrate and set by `erase()`.
+  public get deletedAt(): Date | null {
+    return this._deletedAt;
+  }
+
   public get isActive(): boolean {
     return this._status === 'active';
   }
@@ -131,6 +157,29 @@ export class Customer extends AggregateRoot<string> {
     this._refreshTokenHash = hash;
   }
 
+  // Tombstone-erase this customer (ADR-037 §2). Nulls every PII field, flips the
+  // status to `deleted`, stamps `deletedAt` with the erase instant, and clears the
+  // refresh-token hash — a **session revocation**: a live refresh token can no
+  // longer roll forward, and `existsAuthenticatableById` (`status IN
+  // ('active','guest')`) already bars a `deleted` row from authenticating. The id
+  // is deliberately preserved so every `order.customer_id` FK stays valid and the
+  // sales history survives — the whole reason the FK was made nullable (ADR-028
+  // §1). Records **no** domain event: the erase use case emits the `customer.erased`
+  // wire event, keeping this aggregate event-light (the ConsentRecord/Category
+  // precedent). Idempotent — re-erasing an already-`deleted` customer re-nulls the
+  // same (already-null) fields and re-stamps `deletedAt`, a no-op in effect.
+  public erase(at: Date = new Date()): void {
+    this._status = 'deleted';
+    this._deletedAt = at;
+    this._email = null;
+    this._phone = null;
+    this._firstName = null;
+    this._lastName = null;
+    this._passwordHash = null;
+    this._emailVerifiedAt = null;
+    this._refreshTokenHash = null;
+  }
+
   public async validatePassword(candidate: string, hasher: IPasswordHasher): Promise<boolean> {
     if (this._passwordHash === null) {
       return false;
@@ -139,7 +188,9 @@ export class Customer extends AggregateRoot<string> {
   }
 
   public recordLoggedIn(): void {
-    this.addDomainEvent(new CustomerLoggedInEvent(this.id, this._email));
+    // Only an authenticatable (active/guest) customer reaches a login, and those
+    // always carry a non-null email; a tombstoned customer cannot authenticate.
+    this.addDomainEvent(new CustomerLoggedInEvent(this.id, this._email!));
   }
 
   // `passwordHash` and `refreshTokenHash` must never leak through structured

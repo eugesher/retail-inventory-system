@@ -1,0 +1,12 @@
+name: mark-delivered
+description: |-
+  POST /api/orders/:orderId/fulfillments/:fulfillmentId/deliver  (Bearer — order:fulfill)
+  Marks the shipped fulfillment delivered. Because it is the order's only fulfillment
+  and it covers every line, the order rolls up to lifecycle='delivered' +
+  fulfillmentStatus='delivered'. Response (200) is the delivered FulfillmentView
+  (status='delivered', deliveredAt stamped).
+method: POST
+url: $ENV_BASE_URL/orders/$orderId/fulfillments/$fulfillmentId/deliver
+headers:
+- name: Authorization
+  value: Bearer $accessToken

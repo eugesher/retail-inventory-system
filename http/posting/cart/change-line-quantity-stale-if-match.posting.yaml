@@ -1,0 +1,22 @@
+name: change-line-quantity-stale-if-match
+description: |-
+  PATCH /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
+  Demonstrates the optimistic-concurrency precondition (ADR-036). `If-Match: 0`
+  is a deliberately stale version (the cart has moved past 0 after the add), so
+  the write is rejected WITHOUT retrying:
+    409 { statusCode: 409, code: "VERSION_MISMATCH", details: { currentVersion } }
+  The client should refetch the cart (GET), read the new `version`, and retry.
+method: PATCH
+url: $ENV_BASE_URL/cart/$cartId/lines/$lineId
+body:
+  content: |-
+    {
+      "quantity": 3
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+- name: If-Match
+  value: '0'

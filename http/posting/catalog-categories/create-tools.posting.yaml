@@ -1,0 +1,20 @@
+name: create-tools
+description: |-
+  POST /api/catalog/categories  (Bearer — catalog:write)
+  Creates a CHILD category by naming its parentSlug. The child's path is derived
+  from the parent's: `/workshop/workshop-tools`. parentId points at the root just
+  created. Response is CategoryView.
+method: POST
+url: $ENV_BASE_URL/catalog/categories
+body:
+  content: |-
+    {
+      "name": "Hand Tools",
+      "slug": "workshop-tools",
+      "parentSlug": "workshop"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

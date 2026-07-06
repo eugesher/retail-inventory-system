@@ -1,0 +1,19 @@
+name: guest-create-cart
+description: |-
+  POST /api/cart  (Bearer — the guest token)
+  The guest opens its own cart through the normal route; the cart's customerId
+  is the guest id.
+method: POST
+url: $ENV_BASE_URL/cart
+body:
+  content: |-
+    {
+      "currency": "USD"
+    }
+headers:
+- name: Authorization
+  value: Bearer $guestAccessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: cart/scripts.py:capture_guest_create_cart

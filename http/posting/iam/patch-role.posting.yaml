@@ -1,0 +1,20 @@
+name: patch-role
+description: |-
+  PATCH /api/iam/roles/:id
+  Body shape (UpdateRoleRequestDto): description? | permissionCodes? (at
+  least one — both omitted → 400 "No-op patch"). permissionCodes is a
+  REPLACE, not a merge — supply the full desired set. The adapter does the
+  swap in a single transaction.
+method: PATCH
+url: $ENV_BASE_URL/iam/roles/$createRoleId
+body:
+  content: |-
+    {
+      "description": "Ops team (read + audit)",
+      "permissionCodes": ["catalog:read", "inventory:read", "order:read", "audit:read"]
+    }
+headers:
+- name: Authorization
+  value: Bearer $adminLoginAccessToken
+- name: Content-Type
+  value: application/json

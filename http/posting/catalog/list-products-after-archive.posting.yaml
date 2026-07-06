@@ -1,0 +1,7 @@
+name: list-products-after-archive
+description: |-
+  GET /api/catalog/products?status=active&search=aeron  (public)
+  Re-browses with a name/slug filter narrowed to the product just archived. It
+  is absent from the active listing now — browse hides non-active products —
+  even though getProductBySlug / getVariant above still resolve it.
+url: $ENV_BASE_URL/catalog/products?status=active&page=1&pageSize=20&search=aeron

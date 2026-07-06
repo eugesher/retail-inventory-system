@@ -1,0 +1,18 @@
+name: refresh
+description: |-
+  POST /api/auth/refresh
+  Rotates BOTH the access and refresh tokens and emits RefreshTokenRotated.
+  Reusing an already-rotated refresh token triggers
+    `RefreshFailed: rotation reuse detected`
+  and clears the live hash on the user row (ADR-010 — every successful
+  refresh persists a new hash, so a stale token can never replay).
+method: POST
+url: $ENV_BASE_URL/auth/refresh
+body:
+  content: |-
+    {
+      "refreshToken": "$staffLoginRefreshToken"
+    }
+headers:
+- name: Content-Type
+  value: application/json

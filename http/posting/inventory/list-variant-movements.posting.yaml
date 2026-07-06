@@ -1,0 +1,15 @@
+name: list-variant-movements
+description: |-
+  GET /api/inventory/variants/:variantId/movements  (Bearer — inventory:read)
+  The variant's stock-movement audit trail: a paginated, NEWEST-FIRST timeline of
+  the append-only `stock_movement` ledger. Every counter-changing operation leaves
+  a row here — receive (`receipt`), adjust (`adjustment`), reserve/release/cancel
+  (`release`), allocate (`allocation`), transfer (a paired `adjustment` per leg).
+  Response is IPage<StockMovementView> { items, total, page, size }; each item is
+  { id, variantId, stockLocationId, type, quantity (signed), reasonCode,
+  referenceType, referenceId, actorId, occurredAt (ISO) }. Run the receive/adjust/
+  transfer requests above first to populate variant 1's ledger, then read it here.
+url: $ENV_BASE_URL/inventory/variants/1/movements?page=1&pageSize=20
+headers:
+- name: Authorization
+  value: Bearer $accessToken

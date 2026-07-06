@@ -175,12 +175,12 @@ round *up* and momentarily sit one second ahead of `UTC_TIMESTAMP()`. The e2e wa
 just over a second between the last price Set and the publish (the realistic "price
 first, publish later" gap) so the precondition is deterministically met.
 
-## 7. Kulala HTTP exercises (`http/pricing.http`)
+## 7. Kulala HTTP exercises (`http/kulala/pricing.http`)
 
-[`http/pricing.http`](../../../http/pricing.http) is a runnable, top-to-bottom
+[`http/kulala/pricing.http`](../../../http/kulala/pricing.http) is a runnable, top-to-bottom
 Kulala collection for the six routes. It mirrors the conventions of
-[`http/catalog.http`](../../../http/catalog.http): `@baseUrl = {{ENV_BASE_URL}}`
-(resolved from [`http/http-client.env.json`](../../../http/http-client.env.json)),
+[`http/kulala/catalog.http`](../../../http/kulala/catalog.http): `@baseUrl = {{ENV_BASE_URL}}`
+(resolved from [`http/kulala/http-client.env.json`](../../../http/kulala/http-client.env.json)),
 `###`-separated blocks, a `# @name <id>` per request, and header comments citing
 the controller path, the body/query shape, and the auth posture.
 
@@ -238,5 +238,5 @@ domain with `PRICE_VALID_FROM_IN_PAST`, so the scheduled instant must be in the
 future.)
 
 `test/pricing.e2e-spec.ts` remains the automated reference for the same
-request/response shapes and the full auth posture; `http/pricing.http` is the
+request/response shapes and the full auth posture; `http/kulala/pricing.http` is the
 hand-runnable companion.

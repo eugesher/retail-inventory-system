@@ -1,0 +1,53 @@
+name: place-order
+description: |-
+  POST /api/cart/:cartId/place  (Bearer + owner-check)
+  Converts the cart one-shot into an Order, snapshots the addresses, ALLOCATES the
+  cart's stock holds into the order inside the conversion transaction (after the
+  cart-conversion CAS, via inventory.reservation.allocate — so the inventory
+  microservice must be running; an unallocatable line rolls the whole place back
+  with 409 INVENTORY_OUT_OF_STOCK, no order row, cart stays active), authorizes
+  payment inline, and returns the OrderView. The `Idempotency-Key` header is REQUIRED
+  (a missing header is 400 IDEMPOTENCY_KEY_REQUIRED). Replaying the SAME key + body
+  returns the stored order with 200 + `Idempotent-Replay: true` (no second order, no
+  re-emitted events); the SAME key + a DIFFERENT body is 422 (ORDER_IDEMPOTENCY_KEY_REUSED).
+  Body (PlaceOrderRequestDto):
+    shippingAddress, billingAddress: { recipientName, line1, line2?, city, region,
+                                       postalCode, country (2-char), phone? }
+    paymentMethod?: opaque method token forwarded to the gateway
+  Response (201) is OrderView { orderNumber, status='pending', paymentStatus='authorized',
+    fulfillmentStatus='unfulfilled', lines[...], grandTotalMinor, payment{ status='authorized' } }.
+method: POST
+url: $ENV_BASE_URL/cart/$cartId/place
+body:
+  content: |-
+    {
+      "shippingAddress": {
+        "recipientName": "Jane Buyer",
+        "line1": "1 Market St",
+        "line2": "Suite 400",
+        "city": "San Francisco",
+        "region": "CA",
+        "postalCode": "94105",
+        "country": "US",
+        "phone": "+1-415-555-0100"
+      },
+      "billingAddress": {
+        "recipientName": "Jane Buyer",
+        "line1": "1 Market St",
+        "city": "San Francisco",
+        "region": "CA",
+        "postalCode": "94105",
+        "country": "US"
+      },
+      "paymentMethod": "tok_visa"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Idempotency-Key
+  value: $placeKey
+- name: Content-Type
+  value: application/json
+scripts:
+  setup: order/scripts.py:setup_place_order
+  on_response: order/scripts.py:capture_place_order

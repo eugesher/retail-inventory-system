@@ -1,0 +1,28 @@
+name: author-template
+description: |-
+  POST /api/notifications/templates  (Bearer — notifications:write)
+  Author a retail.order.placed / email / en-US template. The body is a Handlebars
+  source rendered against the event context (so {{orderId}} resolves to the placed
+  order's id). Because `channel` is email, `subject` is REQUIRED (a subject-less
+  email author is a 400). Re-running this appends a HIGHER version (create-or-edit),
+  leaving prior versions retained — newest-active-wins resolution keeps the latest
+  live. Response is the new NotificationTemplateView { id, eventType, channel,
+  locale, subject, body, version, active, createdAt, updatedAt } (201).
+method: POST
+url: $ENV_BASE_URL/notifications/templates
+body:
+  content: |-
+    {
+      "eventType": "retail.order.placed",
+      "channel": "email",
+      "locale": "en-US",
+      "subject": "Your order {{orderId}} is confirmed",
+      "body": "Hi! Your order {{orderId}} totalling {{grandTotalMinor}} minor units was placed. Thank you!"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: notifications/scripts.py:capture_author_template

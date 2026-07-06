@@ -1,0 +1,11 @@
+name: receive-return
+description: |-
+  POST /api/returns/:rmaId/receive  (Bearer — staff inventory:receive-return)
+  The warehouse logs the returned goods in -> `received`. (In production a
+  warehouse-staff token, not order-support — admin holds both here.) Response (200) is the
+  ReturnRequestView with status='received'.
+method: POST
+url: $ENV_BASE_URL/returns/$rmaId/receive
+headers:
+- name: Authorization
+  value: Bearer $accessToken

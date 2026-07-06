@@ -31,7 +31,7 @@ import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto
 // release + the place-driven allocation are system rows (`actorId: null`).
 //
 // Note on the by-reservation-id manual release: that endpoint is exercised in the
-// `http/inventory.http` flow and the inventory unit specs. There is no HTTP source
+// `http/kulala/inventory.http` flow and the inventory unit specs. There is no HTTP source
 // for a reservation id in-suite (no reservation read API), so the same `release`
 // ledger row is produced here via the cart Remove route, which travels the
 // identical release codepath (reason `cart-removed`).

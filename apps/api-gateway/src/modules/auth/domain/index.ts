@@ -1,3 +1,4 @@
+export * from './consent-record.model';
 export * from './customer.model';
 export * from './permission.aggregate';
 export * from './role.aggregate';

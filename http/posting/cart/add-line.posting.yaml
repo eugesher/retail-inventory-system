@@ -1,0 +1,29 @@
+name: add-line
+description: |-
+  POST /api/cart/:cartId/lines  (Bearer + owner-check)
+  Adds a variant line. The price is NEVER sent — it is snapshotted retail-side
+  from catalog.price.select in the cart's currency. An unknown/unpriced variant
+  is rejected 409. The retail use case then RESERVES the line's absolute target
+  quantity against inventory (inventory.reservation.reserve) BEFORE saving — an
+  out-of-stock target is rejected 409 with the body
+  { statusCode: 409, code: "INVENTORY_OUT_OF_STOCK", details: { available } }
+  and the cart is left untouched (so the inventory microservice must be running;
+  `yarn start:dev` starts it). Body (AddLineRequestDto):
+    variantId: positive int (the catalog variant id; seeded variant 1 has a USD price + 100 on hand)
+    quantity:  positive int
+  Response is the updated CartView; the new line carries unitPriceSnapshotMinor.
+method: POST
+url: $ENV_BASE_URL/cart/$cartId/lines
+body:
+  content: |-
+    {
+      "variantId": 1,
+      "quantity": 2
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: cart/scripts.py:capture_add_line

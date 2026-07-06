@@ -310,6 +310,28 @@ export const ROUTING_KEYS = {
   // binds (ADR-033). The plural `notifications.*` prefix marks it as the cross-cutting
   // alerting stream, distinct from the singular `notification.delivery.*` RPC commands.
   NOTIFICATIONS_DELIVERY_FAILED: 'notifications.delivery.failed',
+  // `notification.marketing.send` → `SendMarketingUseCase` (RPC, Gateway →
+  // Notification, on `notification_events`): the staff-triggered marketing dispatch
+  // (ADR-037). It maps the operator's `{ customerId, customerEmail, eventType,
+  // campaignId, context }` onto an `IRenderAndDispatchInput` (channel `email`,
+  // recipient = the customer) with a marketing `eventType`, so the Render & Dispatch
+  // consent-gate decides send vs `skipped-no-consent`. It exists so the marketing path
+  // is demonstrable end to end (the seeded marketing template is a later capability).
+  NOTIFICATION_MARKETING_SEND: 'notification.marketing.send',
+  // `marketing.email.promo` — the default marketing template `eventType` the marketing
+  // seam uses when the operator supplies none. It is a **template registry key** (the
+  // `(eventType, channel, locale)` natural key the seeded marketing template is authored
+  // under), NOT a queue-bound subject — deliberately NOT in `TRANSACTIONAL_EVENT_TYPES`,
+  // so the consent-gate treats it as marketing. Kept here as the single shared source of
+  // truth so the gateway default and the seeded template agree (ADR-037).
+  MARKETING_EMAIL_PROMO: 'marketing.email.promo',
+  // Customer privacy events (api-gateway `auth` → `notification_events`, and
+  // mirrored onto `ris.events`). `customer.consent.updated` carries the full
+  // consent snapshot so the notification consent cache can refresh without an RPC;
+  // `customer.erased` carries NO PII — only the customer id, the erase instant, and
+  // the acting staff user — because the whole point of the erase is to destroy PII.
+  CUSTOMER_CONSENT_UPDATED: 'customer.consent.updated',
+  CUSTOMER_ERASED: 'customer.erased',
   // `audit.staff.action` — the cross-cutting staff-action audit stream (ADR-035).
   // Emitted onto the `ris.events` topic exchange by the real `AUDIT_LOG_PUBLISHER`
   // adapters (api-gateway `auth` + retail `orders`) whenever a privileged actor

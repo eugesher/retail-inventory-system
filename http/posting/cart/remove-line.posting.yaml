@@ -1,0 +1,13 @@
+name: remove-line
+description: |-
+  DELETE /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
+  Drops the line from the cart. An unknown line id is 404. After the cart write
+  the retail use case RELEASES the line's stock hold (inventory.reservation.release)
+  best-effort — a release failure is logged and swallowed, never fails the remove.
+  `If-Match` is also honored here (optional). Response is the updated CartView
+  (now with an empty lines array).
+method: DELETE
+url: $ENV_BASE_URL/cart/$cartId/lines/$lineId
+headers:
+- name: Authorization
+  value: Bearer $accessToken

@@ -1,0 +1,8 @@
+name: browse-workshop-products-with-descendants
+description: |-
+  GET /api/catalog/categories/:slug/products?includeDescendants=true  (public)
+  Same browse, but the scope widens from `workshop` to `workshop` PLUS its active
+  subtree (a path-prefix expansion). Product 1 still appears — and it would still
+  appear here even after it is detached from `workshop` directly (next block),
+  because it stays attached to `workshop-tools`, a descendant.
+url: $ENV_BASE_URL/catalog/categories/workshop/products?includeDescendants=true

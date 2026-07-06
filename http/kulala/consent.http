@@ -1,0 +1,118 @@
+# Customer self-service consent endpoints
+# (apps/api-gateway/src/modules/auth/presentation/customer-consent.controller.ts)
+#
+# The channel-consent surface a CUSTOMER manages for themselves at
+# /api/auth/customer/me/consent. Both routes are BEARER-PROTECTED WITH NO
+# PERMISSION CODE (ADR-024/028): the controller folds @CurrentUser().id into the
+# query/command, so a customer can only ever read/write their OWN consent —
+# ownership is inherent in the token, never a @RequiresPermission gate (a customer
+# JWT carries no `permissions` claim, so a permission code would be unreachable dead
+# code). The parallel ADMIN read/erase surface lives in http/kulala/customer-admin.http.
+#   - GET /auth/customer/me/consent   (Bearer customer)
+#       Return the caller's ConsentRecordView { customerId, transactionalEmail,
+#       marketingEmail, marketingSms, dataRetentionPolicy, updatedAt }. An ABSENT
+#       row resolves to the defaults (transactionalEmail=true, both marketing
+#       channels false, dataRetentionPolicy='default-7-years', updatedAt=null) —
+#       never a 404.
+#   - PUT /auth/customer/me/consent   (Bearer customer)
+#       Upsert-merge the caller's preferences. Body
+#       { transactionalEmail?, marketingEmail?, marketingSms?, dataRetentionPolicy? }
+#       — every field optional; only the supplied keys change, the rest keep their
+#       current value. `updatedAt` becomes an ISO string. A successful write emits
+#       customer.consent.updated (consumed by the notification service to refresh
+#       its consent cache), so a subsequent marketing send is gated on the new state.
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures the seeded customer's bearer token
+#      into @accessToken, which the protected requests substitute into their
+#      Authorization header. The seeded customer (customer@example.com) starts with
+#      transactional email ON and both marketing channels OFF.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name login
+# POST /api/auth/customer/login
+# Seeded customer login (customer@example.com / customer1234). Response is
+# TokenResponseDto { accessToken, refreshToken, expiresIn }. The access JWT carries
+# `roles: []` and `permissions: []` — a customer is not an RBAC actor, so ownership,
+# not a permission code, is what authorizes the consent routes below.
+POST {{baseUrl}}/auth/customer/login
+Content-Type: application/json
+
+{
+  "email": "customer@example.com",
+  "password": "customer1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name getMyConsent
+# GET /api/auth/customer/me/consent   (Bearer customer)
+# Read the authenticated customer's consent record. On a fresh seed this returns
+# the seeded row { transactionalEmail: true, marketingEmail: false, marketingSms:
+# false, dataRetentionPolicy: 'default-7-years', updatedAt: <iso|null> }. A customer
+# whose row is absent gets the same defaults (absent-means-defaults) — never a 404.
+GET {{baseUrl}}/auth/customer/me/consent
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name setMyConsentMarketingOn
+# PUT /api/auth/customer/me/consent   (Bearer customer)
+# Opt IN to marketing email. Upsert-merge — only `marketingEmail` changes; the
+# transactional and SMS flags and the retention policy keep their current values.
+# Emits customer.consent.updated, so a marketing send to this customer afterwards is
+# `sent` rather than `skipped-no-consent` (see http/kulala/notifications.http →
+# sendMarketing). Response is the updated ConsentRecordView with an ISO `updatedAt`.
+PUT {{baseUrl}}/auth/customer/me/consent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "marketingEmail": true
+}
+
+###
+
+# @name setMyConsentMarketingOff
+# PUT /api/auth/customer/me/consent   (Bearer customer)
+# Opt OUT of marketing email again (the reversal of the block above). After this
+# write a marketing send yields a `skipped-no-consent` delivery — the consent-gate
+# suppresses the send but still records what would have been sent. Only
+# `marketingEmail` changes.
+PUT {{baseUrl}}/auth/customer/me/consent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "marketingEmail": false
+}
+
+###
+
+# @name setRetentionPolicy
+# PUT /api/auth/customer/me/consent   (Bearer customer)
+# Set the free-form data-retention policy label (≤64 chars). Independent of the
+# channel flags — this write leaves transactionalEmail / marketingEmail /
+# marketingSms untouched and only overwrites `dataRetentionPolicy`.
+PUT {{baseUrl}}/auth/customer/me/consent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "dataRetentionPolicy": "default-7-years"
+}

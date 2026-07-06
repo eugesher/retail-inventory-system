@@ -1,0 +1,19 @@
+name: set-my-consent-marketing-off
+description: |-
+  PUT /api/auth/customer/me/consent   (Bearer customer)
+  Opt OUT of marketing email again (the reversal of set-my-consent-marketing-on).
+  After this write a marketing send yields a `skipped-no-consent` delivery — the
+  consent-gate suppresses the send but still records what would have been sent. Only
+  `marketingEmail` changes.
+method: PUT
+url: $ENV_BASE_URL/auth/customer/me/consent
+body:
+  content: |-
+    {
+      "marketingEmail": false
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

@@ -1,0 +1,20 @@
+name: create-hand-planes
+description: |-
+  POST /api/catalog/categories  (Bearer — catalog:write)
+  A GRANDCHILD under `tools` (path `/workshop/workshop-tools/workshop-hand-planes`).
+  It is the descendant whose path the reparent below rebases in the same
+  transaction.
+method: POST
+url: $ENV_BASE_URL/catalog/categories
+body:
+  content: |-
+    {
+      "name": "Hand Planes",
+      "slug": "workshop-hand-planes",
+      "parentSlug": "workshop-tools"
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

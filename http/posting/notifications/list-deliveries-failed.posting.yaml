@@ -1,0 +1,9 @@
+name: list-deliveries-failed
+description: |-
+  GET /api/notifications/deliveries?status=failed  (Bearer — notifications:read)
+  The same audit read narrowed to one lifecycle state — here `failed` deliveries
+  (the candidates for a manual retry). Use a returned row's id below.
+url: $ENV_BASE_URL/notifications/deliveries?status=failed&page=1&pageSize=20
+headers:
+- name: Authorization
+  value: Bearer $accessToken

@@ -1,3 +1,6 @@
+export * from './consent-record.repository.port';
+export * from './customer-erasure-writer.port';
+export * from './customer-events.publisher.port';
 export * from './customer.repository.port';
 export * from './password.port';
 export * from './permission.repository.port';

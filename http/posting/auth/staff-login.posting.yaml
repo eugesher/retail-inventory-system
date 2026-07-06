@@ -1,0 +1,20 @@
+name: staff-login
+description: |-
+  POST /api/auth/staff/login
+  Canonical staff login. Returns access + refresh tokens. The access JWT
+  carries `permissions: string[]`, inflated at login: the seeded admin user
+  holds every code in the registry, so this token unlocks the whole IAM
+  surface in http/kulala/iam.http.
+method: POST
+url: $ENV_BASE_URL/auth/staff/login
+body:
+  content: |-
+    {
+      "email": "admin@example.com",
+      "password": "admin1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: auth/scripts.py:capture_staff_login

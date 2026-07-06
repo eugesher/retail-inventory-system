@@ -95,7 +95,9 @@ export class RefreshTokenUseCase {
 
     const accessToken = await this.tokens.issueAccessToken({
       sub: subject.id,
-      email: subject.email,
+      // The `!subject.isActive` guard above rejected any tombstoned customer, so
+      // the subject's email is a real string here (never a session for a tombstone).
+      email: subject.email!,
       roles: resolved.roles,
       permissions: resolved.permissions,
       jti: accessJti,

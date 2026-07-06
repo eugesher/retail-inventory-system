@@ -53,7 +53,7 @@ describe('LoginCustomerUseCase', () => {
   it('issues tokens with empty roles + permissions on valid credentials', async () => {
     const customer = await seedCustomer();
 
-    const result = await useCase.execute({ email: customer.email, password: 'password123' });
+    const result = await useCase.execute({ email: customer.email!, password: 'password123' });
 
     expect(result.accessToken).toMatch(/^access:cust-1:/);
     expect(result.refreshToken).toMatch(/^refresh:cust-1:/);
@@ -90,7 +90,7 @@ describe('LoginCustomerUseCase', () => {
     const customer = await seedCustomer();
     customer.suspend();
     await expect(
-      useCase.execute({ email: customer.email, password: 'password123' }),
+      useCase.execute({ email: customer.email!, password: 'password123' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
@@ -99,7 +99,7 @@ describe('LoginCustomerUseCase', () => {
       const customer = await seedCustomer();
 
       await useCase.execute({
-        email: customer.email,
+        email: customer.email!,
         password: 'password123',
         correlationId: 'cid-c-ok',
       });
@@ -142,7 +142,8 @@ describe('LoginCustomerUseCase', () => {
 
       await expect(
         useCase.execute({
-          email: customer.email,
+          // A seeded live customer always has a non-null email.
+          email: customer.email!,
           password: 'WRONG',
           correlationId: 'cid-c-bad',
         }),

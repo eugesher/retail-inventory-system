@@ -1,0 +1,20 @@
+name: customer-register
+description: |-
+  POST /api/auth/customer/register
+  Creates a Customer in `status='active'`, `email_verified_at: null`. Email is
+  case-folded and uniqueness-checked at the repository layer — duplicates →
+  409. Password is hashed with argon2id (OWASP 2024 defaults — see
+  AUTH_ARGON2_* env in CLAUDE.md).
+method: POST
+url: $ENV_BASE_URL/auth/customer/register
+body:
+  content: |-
+    {
+      "email": "buyer@example.com",
+      "password": "buyer1234",
+      "firstName": "Buy",
+      "lastName": "Er"
+    }
+headers:
+- name: Content-Type
+  value: application/json
