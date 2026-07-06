@@ -43,14 +43,23 @@ export class ConsentCache implements IConsentCachePort {
     const key = CACHE_KEYS.notificationsConsent(customerId);
 
     try {
-      // Single-flight the whole get-or-load so a stampede of concurrent dispatches to
-      // the same customer collapses to ONE DB read (the StockCache `getOrLoad`
-      // precedent, ADR-021). The re-check inside the leader handles a hit landing
-      // between the miss and the leader starting.
+      // Fast path: a cache HIT returns before touching the single-flight machinery
+      // (the StockCache `getOrLoad` precedent, ADR-021 — outer `get` first, single-
+      // flight only on a miss, so a hit pays no span/map/closure overhead). This is
+      // the hottest read in the capability: the consent-gate calls it per customer-
+      // facing dispatch.
+      const cached = await this.cache.get<IConsentSnapshot>(key);
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      // Miss: single-flight the get-or-load so a stampede of concurrent dispatches to
+      // the same customer collapses to ONE DB read. The re-check inside the leader
+      // handles a hit landing between the outer `get` and the leader starting.
       return await this.cache.singleFlight(key, async () => {
-        const cached = await this.cache.get<IConsentSnapshot>(key);
-        if (cached !== undefined) {
-          return cached;
+        const hit = await this.cache.get<IConsentSnapshot>(key);
+        if (hit !== undefined) {
+          return hit;
         }
         const snapshot = await this.load(customerId);
         await this.trySet(key, snapshot);

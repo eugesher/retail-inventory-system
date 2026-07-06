@@ -1,28 +1,23 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { firstValueFrom, timeout } from 'rxjs';
 
 import {
   ICustomerConsentUpdatedEvent,
   ICustomerErasedEvent,
   MicroserviceClientTokenEnum,
 } from '@retail-inventory-system/contracts';
-import { RisEventsMirrorPublisher, ROUTING_KEYS } from '@retail-inventory-system/messaging';
+import {
+  emitBestEffort,
+  RisEventsMirrorPublisher,
+  ROUTING_KEYS,
+} from '@retail-inventory-system/messaging';
 
 import {
   IConsentUpdatedPublishInput,
   ICustomerEventsPublisherPort,
   ICustomerErasedPublishInput,
 } from '../../application/ports';
-
-// A down broker does NOT reject `emit()` — amqp-connection-manager buffers the
-// publish and the returned Observable stays *pending*, which a `try/catch` can't
-// catch. So the primary emit is bounded by an rxjs `timeout`: past this window it
-// rejects (and is swallowed) instead of hanging the committed consent write. The
-// bound is generous — a healthy broker acks in milliseconds, so it only bites
-// during an outage (the `RisEventsMirrorPublisher` rationale).
-const CUSTOMER_EVENT_EMIT_TIMEOUT_MS = 5_000;
 
 // The `auth` module's `CUSTOMER_EVENTS_PUBLISHER` binding and its sole
 // `ClientProxy` holder (ADR-009). It publishes the two `customer.*` privacy events
@@ -36,10 +31,10 @@ const CUSTOMER_EVENT_EMIT_TIMEOUT_MS = 5_000;
 //      stream without any consumer being re-bound.
 //
 // Both are **best-effort post-commit** (ADR-020): the consent record / tombstone has
-// already committed, so a broker hiccup must never surface to the caller. The primary
-// emit is wrapped here (warn-log + swallow + timeout); the mirror already owns that
-// posture internally. The mirror is ordered **after** the primary emit so a mirror
-// hiccup can never shadow the publish that feeds the real consumers.
+// already committed, so a broker hiccup must never surface to the caller. Both legs
+// route through the shared `emitBestEffort` helper (warn-log + swallow + timeout). The
+// mirror is ordered **after** the primary emit so a mirror hiccup can never shadow the
+// publish that feeds the real consumers.
 @Injectable()
 export class RmqCustomerEventsPublisher implements ICustomerEventsPublisherPort {
   constructor(
@@ -87,26 +82,20 @@ export class RmqCustomerEventsPublisher implements ICustomerEventsPublisherPort 
     await this.risEvents.mirror(ROUTING_KEYS.CUSTOMER_ERASED, event);
   }
 
-  // The best-effort primary emit onto `notification_events`. `ClientProxy.emit()` is
-  // a cold Observable; `firstValueFrom` materializes it and waits for the broker ack,
-  // bounded by the timeout. A rejected/timed-out emit is warn-logged (with the full
-  // payload, so a dropped event stays recoverable) and swallowed — the committed
-  // consent write is never blocked by the fan-out.
+  // The best-effort primary emit onto `notification_events`, via the shared
+  // `emitBestEffort` helper (the same bounded-emit + warn-and-swallow the `ris.events`
+  // mirror uses) — the committed consent write / tombstone is never blocked by the
+  // fan-out, and a dropped event stays recoverable from the warn line's payload.
   private async emitPrimary(
     routingKey: string,
     event: ICustomerConsentUpdatedEvent | ICustomerErasedEvent,
   ): Promise<void> {
-    try {
-      await firstValueFrom(
-        this.notificationClient
-          .emit<void, ICustomerConsentUpdatedEvent | ICustomerErasedEvent>(routingKey, event)
-          .pipe(timeout({ each: CUSTOMER_EVENT_EMIT_TIMEOUT_MS })),
-      );
-    } catch (error) {
-      this.logger.warn(
-        { routingKey, correlationId: event.correlationId, payload: event, err: error as Error },
-        'Failed to emit customer event onto notification_events',
-      );
-    }
+    await emitBestEffort(
+      this.notificationClient,
+      routingKey,
+      event,
+      this.logger,
+      'Failed to emit customer event onto notification_events',
+    );
   }
 }
