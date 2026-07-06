@@ -111,24 +111,7 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
   // an empty one is an internal-caller bug, so it throws a plain `Error` (the
   // `Reservation.create` non-future-expiry precedent), never a wire-mappable code.
   public static open(input: IOpenNotificationDeliveryInput): NotificationDelivery {
-    NotificationDelivery.assertCreatable(input);
-
-    return new NotificationDelivery({
-      id: null,
-      templateId: input.templateId,
-      recipientCustomerId: input.recipientCustomerId,
-      recipientAddress: input.recipientAddress,
-      channel: input.channel,
-      eventReferenceType: input.eventReferenceType,
-      eventReferenceId: input.eventReferenceId,
-      status: NotificationDeliveryStatusEnum.QUEUED,
-      attemptCount: 0,
-      lastAttemptAt: null,
-      failureReason: null,
-      renderedSubject: input.renderedSubject,
-      renderedBody: input.renderedBody,
-      correlationId: input.correlationId,
-    });
+    return NotificationDelivery.create(input, NotificationDeliveryStatusEnum.QUEUED);
   }
 
   // Creates a delivery **directly in the terminal `SKIPPED_NO_CONSENT` status** — the
@@ -141,6 +124,18 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
   // is terminal by construction. It shares `open`'s invariants: a customer-facing
   // suppressed send still has a real recipient + rendered body.
   public static skipped(input: IOpenNotificationDeliveryInput): NotificationDelivery {
+    return NotificationDelivery.create(input, NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
+  }
+
+  // Shared construction for `open` / `skipped` — same creation-time invariants and the
+  // same 13-field props, differing only in the born status (`open` → QUEUED, `skipped`
+  // → the terminal SKIPPED_NO_CONSENT). Both are born with `id: null` / `attemptCount:
+  // 0` / no prior attempt or failure; the two public factories stay as the readable,
+  // intention-revealing entry points.
+  private static create(
+    input: IOpenNotificationDeliveryInput,
+    status: NotificationDeliveryStatusEnum,
+  ): NotificationDelivery {
     NotificationDelivery.assertCreatable(input);
 
     return new NotificationDelivery({
@@ -151,7 +146,7 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
       channel: input.channel,
       eventReferenceType: input.eventReferenceType,
       eventReferenceId: input.eventReferenceId,
-      status: NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT,
+      status,
       attemptCount: 0,
       lastAttemptAt: null,
       failureReason: null,

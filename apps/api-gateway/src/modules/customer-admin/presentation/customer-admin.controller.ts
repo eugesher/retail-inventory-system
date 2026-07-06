@@ -63,12 +63,14 @@ export class CustomerAdminController {
   ): Promise<EraseCustomerResponseDto> {
     // Fold the acting staff principal's id into the command — it is recorded on the
     // audit row + the `customer.erased` event, never inferred downstream.
-    const result = await this.eraseCustomer.execute({
+    // `IEraseCustomerResult` and `EraseCustomerResponseDto` are the same shape
+    // (`{ status: 'deleted'; erasedAt: string | null }`), so the use-case result is
+    // the response as-is — the method's return type still drives the Swagger schema.
+    return this.eraseCustomer.execute({
       customerId: id,
       confirmEmail: dto.confirmEmail,
       actorStaffUserId: actor.id,
       correlationId,
     });
-    return { status: result.status, erasedAt: result.erasedAt };
   }
 }

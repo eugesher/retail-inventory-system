@@ -351,10 +351,15 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
-  // The gateway auth + iam modules follow the same per-layer rules as
-  // the inventory/stock module; these fixtures repeat the bumper there
-  // so a future regression on the gateway side is caught.
-  describe('boundaries/dependencies — gateway auth + iam modules', () => {
+  // The gateway auth + iam + customer-admin modules follow the same
+  // per-layer rules as the inventory/stock module; these fixtures repeat
+  // the bumper there so a future regression on the gateway side is caught.
+  // `iam` and `customer-admin` are the two admin shells with no `domain/`
+  // or `infrastructure/` of their own — they mutate/read the auth aggregates
+  // through the use cases AuthModule re-exports, so the generic
+  // `apps/*/src/modules/*/...` element patterns classify them with no new
+  // boundaries entry (ADR-017).
+  describe('boundaries/dependencies — gateway auth + iam + customer-admin modules', () => {
     it('auth domain (RoleAggregate, PermissionAggregate, StaffUser, Customer) may not import @retail-inventory-system/messaging', () => {
       // Domain must stay framework- and transport-free. With default-disallow
       // + checkAllOrigins, lib-messaging is not in the domain allow list, so
@@ -416,6 +421,21 @@ describe('boundaries rules (ADR-017)', () => {
       // 4 levels up: presentation → iam → modules → src → modules/auth/...
       const code = `import { StaffUserEntity } from '../../auth/infrastructure/persistence/staff-user.entity';\nexport type Y = StaffUserEntity;\n`;
       const messages = lint(code, 'apps/api-gateway/src/modules/iam/presentation/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('customer-admin presentation may not import auth infrastructure (cross-element + cross-module)', () => {
+      // `customer-admin` is the second admin shell with no `infrastructure/`
+      // of its own — it reads/erases the `Customer` aggregate through the
+      // ReadConsent / EraseCustomer use cases AuthModule re-exports. A direct
+      // file-level import into auth's persistence tree from
+      // customer-admin/presentation is the regression this fixture catches.
+      // 4 levels up: presentation → customer-admin → modules → src → modules/auth/...
+      const code = `import { CustomerEntity } from '../../auth/infrastructure/persistence/customer.entity';\nexport type Y = CustomerEntity;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/customer-admin/presentation/__fixture__.ts',
+      );
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
   });
