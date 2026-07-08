@@ -96,50 +96,56 @@ state (the identity tables).
 ### System diagram
 
 ```
-                        ┌──────────────────────┐
-                        │    Client (HTTP)     │
-                        └──────────┬───────────┘
-                                   │
-                    ┌──────────────▼───────────────┐
-                    │   API Gateway  :3000 /api    │
-                    │  JwtAuthGuard → RolesGuard   │
-                    │        → PermissionsGuard    │
-                    └──────────────┬───────────────┘
-                                   │  RabbitMQ (RPC + events)
-        ┌──────────────┬───────────┼───────────┬──────────────┐
-        │              │           │           │              │
-┌───────▼──────┐ ┌─────▼──────┐ ┌──▼───────┐ ┌─▼───────────┐ │
-│    retail    │ │ inventory  │ │ catalog  │ │notification │ │
-│ retail_queue │ │inventory_q.│ │catalog_q.│ │notification_│ │
-│              │ │            │ │+ pricing │ │   events    │ │
-│ cart · orders│ │stock levels│ │products  │ │templates    │ │
-│ fulfillment  │ │reservations│ │variants  │ │deliveries   │ │
-│ returns      │ │movements   │ │categories│ │consent gate │ │
-│ refunds      │ │            │ │media     │ │             │ │
-└───────┬──────┘ └─────┬──────┘ └──┬───────┘ └─┬───────────┘ │
-        │              │           │           │             │
-        │        ┌─────▼─────┐     │           │             │
-        │        │   Redis   │     │           │             │
-        │        │ stock keys│     │           │             │
-        │        │consent key│◄────┼───────────┘             │
-        │        └───────────┘     │                         │
-        └──────────────┬───────────┘                         │
-                       │                                     │
-              ┌────────▼─────────┐                           │
-              │ MySQL: retail_db │                           │
-              │  (shared schema) │                           │
-              └──────────────────┘                           │
-                                                             │
-   every producer ALSO mirrors its event onto the topic      │
-   exchange `ris.events` (dual-publish, best-effort) ────────┘
-                       │
-                       │  event_store_firehose_queue, bound `#`
-              ┌────────▼──────────────────────┐
-              │    event-store microservice   │
-              │  MySQL: ris_eventstore        │
-              │  domain_event · audit_log_entry│
-              └───────────────────────────────┘
+                   ┌───────────────────────┐
+                   │     Client (HTTP)     │
+                   └───────────┬───────────┘
+                               │
+              ┌────────────────▼────────────────┐
+              │    API Gateway   :3000 /api     │
+              │    JwtAuthGuard → RolesGuard    │
+              │       → PermissionsGuard        │
+              └────────────────┬────────────────┘
+                               │  RabbitMQ (RPC + events)
+       ┌───────────────┬───────┴───────┬───────────────┬───────────┐
+       │               │               │               │           │
+┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐    │
+│   retail    │ │   catalog   │ │  inventory  │ │notification │    │
+│retail_queue │ │catalog_q.   │ │inventory_q. │ │notification_│    │
+│             │ │  + pricing  │ │             │ │   events    │    │
+│cart · orders│ │products     │ │stock levels │ │templates    │    │
+│fulfillment  │ │variants     │ │reservations │ │deliveries   │    │
+│returns      │ │categories   │ │movements    │ │consent gate │    │
+│refunds      │ │media        │ │             │ │             │    │
+└──────┬──────┘ └──────┬──────┘ └──┬───────┬──┘ └──┬───────┬──┘    │
+       │               │           │       │       │       │       │
+       │               │           │    ┌──▼───────▼──┐    │       │
+       │               │           │    │    Redis    │    │       │
+       │               │           │    │stock keys   │    │       │
+       │               │           │    │consent keys │    │       │
+       │               │           │    └─────────────┘    │       │
+       └───────────────┴───────┬───┴───────────────────────┘       │
+                               │                                   │
+                   ┌───────────▼───────────┐                       │
+                   │   MySQL: retail_db    │                       │
+                   │    (shared schema)    │                       │
+                   └───────────────────────┘                       │
+                                                                   │
+   every producer ALSO mirrors its event onto the                  │
+   topic exchange `ris.events` (dual-publish,                      │
+   best-effort) — the event store binds `#`                        │
+                                                                   │
+                               ┌───────────────────────────────────┘
+                               │  event_store_firehose_queue
+             ┌─────────────────▼─────────────────┐
+             │    event-store microservice       │
+             │  MySQL: ris_eventstore            │
+             │  domain_event · audit_log_entry   │
+             └───────────────────────────────────┘
 ```
+
+The gateway's own `auth` tables live in `retail_db` too — that edge is omitted above for
+legibility. Redis is used by **inventory** (stock availability) and **notification**
+(consent) only, both cache-aside.
 
 ### Deployables
 
@@ -527,9 +533,11 @@ substantial state machine with warehouse-facing operations.
 
 ```
 requested ──► authorized ──► received ──► inspected ──► closed
-     │
-     └──► rejected                       (rejected and closed are terminal)
+    │
+    └──► rejected
 ```
+
+`rejected` and `closed` are terminal.
 
 `ReturnRequest` (`BIGINT`) owns `ReturnLine`. `rmaNumber` is `RMA-<year>-<pad8(id)>`.
 `customerId` is the gateway's **`CHAR(36)` UUID** (the buyer), mirroring `order.customer_id`
