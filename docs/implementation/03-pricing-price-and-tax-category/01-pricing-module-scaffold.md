@@ -224,8 +224,7 @@ the real thing — and the marker would rot. So the removal is total:
   emit, no-variant rejection, not-found rejection, best-effort publish failure)
   stay green;
 - the references the removal left dangling are fixed in the same change: the
-  message-pattern note in `CLAUDE.md` and the publish passages in the sibling
-  catalog docs
+  publish passages in the sibling catalog docs
   ([05 — Catalog use cases](../02-catalog-product-and-variant/05-catalog-use-cases.md)
   and
   [03 — The `Product` and `ProductVariant` domain](../02-catalog-product-and-variant/03-product-and-variant-domain.md))

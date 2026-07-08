@@ -14,7 +14,7 @@ already produces:
 
 - the **event firehose** — every business event published anywhere in the system (the
   `catalog.*`, `inventory.*`, `retail.*`, and `notification.*` events). A later
-  capability binds a `ris.events` topic exchange with `#.#` wildcards so the service's
+  capability binds a `ris.events` topic exchange with the catch-all `#` so the service's
   queue receives all of them; and
 - the **staff audit log** — the "who did what, when" trail the `AUDIT_LOG_PUBLISHER`
   seam already emits from the money-touching flows (refunds) and the auth/IAM
@@ -58,7 +58,7 @@ HTTP surface of its own:
 the same bootstrap shape the notification microservice uses. It registers **no**
 `@MessagePattern` / `@EventPattern` handlers yet, so the service connects to RabbitMQ
 and its database and then idles, logging that it is listening. (A later capability
-re-points this connection at the `ris.events` topic exchange with `#.#` wildcards so the
+re-points this connection at the `ris.events` topic exchange with the catch-all `#` so the
 queue receives the whole firehose.)
 
 The service identity:

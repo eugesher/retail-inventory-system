@@ -206,6 +206,8 @@ and the libs we already have (`common`, `config`, `inventory`,
 - [ADR-013](013-order-aggregate-and-cross-service-confirm.md) —
   `IOrderRepositoryPort`, `IOrderEventsPublisherPort`, and
   `IInventoryConfirmGatewayPort` all live under `application/ports/`.
-- `CLAUDE.md` §"Service Structure" — the live authority on the
-  per-module layout; treats `application/ports/` as the binding
-  location for every active module.
+- `eslint.config.mjs` — the `boundaries/*` element types
+  ([ADR-017](017-architecture-lint-via-eslint-boundaries.md)) are the live,
+  machine-checked authority on the per-module layout; they recognise
+  `application/ports/` as the binding location for every active module, and a
+  `domain/ports/**` file has no element type at all.

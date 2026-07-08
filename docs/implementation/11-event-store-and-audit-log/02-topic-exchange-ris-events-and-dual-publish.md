@@ -53,7 +53,7 @@ existing consumer, are untouched.
                        ┌────────────────────────► notification_events (unchanged)
   producer ──emit──────┤   (existing default-exchange destination)
                        │
-                       └──mirror──► ris.events (topic) ──#.#──► event_store_firehose_queue
+                       └──mirror──► ris.events (topic) ────#────► event_store_firehose_queue
 ```
 
 **Why dual-publish and not consumer re-binding?** Re-binding every existing consumer
@@ -73,14 +73,14 @@ idempotent consumer (a later capability) absorbs duplicate delivery.
 ## 3. One firehose queue with in-consumer dispatch
 
 The event store will bind **one** queue, `event_store_firehose_queue`, to `ris.events`
-with routing key `#.#` (every event), and dispatch by the concrete routing key **inside
+with routing key `#` (every event), and dispatch by the concrete routing key **inside
 the consumer**: `audit.staff.action` to the audit-log ingest, everything else to the
 domain-event ingest.
 
 This refines the earlier "two queues" sketch (a dedicated audit queue beside a
 domain-event queue). A single Nest application binds every `@EventPattern` to **every**
 connected RMQ transport, so two queues with disjoint pattern sets in one app is not
-cleanly supported. One `#.#` queue plus an in-consumer routing-key switch keeps all
+cleanly supported. One `#` queue plus an in-consumer routing-key switch keeps all
 ingestion in one place and sidesteps that limitation. (The consumer that realizes this is
 a later capability; the topology it binds to is fixed here.)
 
@@ -139,7 +139,7 @@ They now bind a real `RmqAuditLogPublisher` that maps the in-process audit event
 
 A live check confirms the path: a real staff login (`POST /api/auth/staff/login`)
 publishes one message to `ris.events` with routing key `audit.staff.action`, which a
-temporary `#.#`-bound probe queue receives — proving api-gateway → topic exchange →
+temporary `#`-bound probe queue receives — proving api-gateway → topic exchange →
 firehose-shaped binding works before any consumer exists. The mapping, the no-op
 deletions, and why only these two services are swapped are detailed in
 [04-auditlog-ingestion-and-publisher-swap.md](04-auditlog-ingestion-and-publisher-swap.md).

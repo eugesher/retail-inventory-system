@@ -59,7 +59,7 @@ AMQP topic routing key. No queue is asserted on the producer side.
 ### One firehose queue with in-consumer dispatch (not two queues)
 
 The event store binds **one** queue, `event_store_firehose_queue`, to `ris.events` with
-routing key `#.#` (every event). A separate `audit.staff.action` queue is **not** used:
+routing key `#` (every event). A separate `audit.staff.action` queue is **not** used:
 a single Nest application binds every `@EventPattern` to every connected RMQ transport,
 so two queues with disjoint pattern sets is not cleanly supported. Instead the firehose
 consumer reads the concrete routing key off the RMQ message and dispatches
@@ -109,7 +109,7 @@ code.
 - **Two event-store queues (a dedicated `audit.staff.action` queue + a domain-event
   queue).** Rejected. A single Nest app binds every `@EventPattern` to every connected
   transport, so cleanly splitting disjoint pattern sets across two queues in one app is
-  not supported. One `#.#` queue + an in-consumer routing-key switch is simpler and
+  not supported. One `#` queue + an in-consumer routing-key switch is simpler and
   keeps all ingestion in one place.
 - **A transactional outbox for guaranteed delivery.** Rejected for this scope (ADR-020).
   Producers publish best-effort post-commit; at-least-once on the broker side plus an
@@ -125,7 +125,7 @@ code.
 - The audit log now flows over the wire. A privileged staff action (login, role
   assignment, refund, …) publishes one `audit.staff.action` message onto `ris.events`;
   with the event-store consumer absent it is currently unrouted-and-dropped by the broker
-  (best-effort, by design) until the `#.#` firehose binding lands.
+  (best-effort, by design) until the `#` firehose binding lands.
 - **`ipAddress` is always null.** No call site threads the request IP into the
   `IAuditLogEvent` today; the wire field is present and reserved so the ingest schema is
   stable when IP capture is added.
@@ -133,7 +133,7 @@ code.
   leaves exactly one audit adapter per audited service. The `auth.module.ts`
   `AUDIT_LOG_PUBLISHER` **export** is preserved so the `iam` use cases keep resolving it.
 - **Out of scope here** (later capabilities): the dual-publish mirror across the seven
-  domain-event publishers; the event-store firehose consumer, its `#.#` binding, the
+  domain-event publishers; the event-store firehose consumer, its `#` binding, the
   ingest use cases, and the duplicate-absorbing idempotency key; the `domain_event` /
   `audit_log_entry` tables. This ADR records only the topology decision and its first
   producer.
@@ -153,3 +153,17 @@ code.
 - [ADR-032](032-returns-and-refunds-rma-lifecycle-and-restock.md) — the always-audit
   refund money movements that the retail `orders` `RmqAuditLogPublisher` now carries onto
   `ris.events`.
+
+## Editorial Correction (2026-07-08)
+
+This ADR originally spelled the catch-all binding key as `#.#`. The **decision is
+unchanged** — one `event_store_firehose_queue` bound to `ris.events` with a catch-all
+routing key, dispatched by concrete routing key inside the consumer. Only the wildcard
+token was wrong: the shipped binding is a **lone `#`**.
+
+RabbitMQ's topic matcher routes both, but Nest's `matchRmqPattern` requires a trailing
+`#` to be the *last* token; with `#.#` it rejects every multi-word routing key and the
+message is nacked. Every `#.#` in the body above has been corrected to `#`; nothing else
+was rewritten. See
+[`docs/implementation/11-event-store-and-audit-log/03-domainevent-ingestion-and-idempotency.md`](../implementation/11-event-store-and-audit-log/03-domainevent-ingestion-and-idempotency.md)
+§ "Why the pattern is `#`, not `#.#`".
