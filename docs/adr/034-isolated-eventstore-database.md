@@ -13,7 +13,7 @@ streams:
 
 - the **event firehose** — every business event published anywhere in the system
   (the `catalog.*`, `inventory.*`, `retail.*`, `notification.*` events), captured by a
-  `#.#` topic-exchange binding; and
+  `#` topic-exchange binding; and
 - the **staff audit log** — the "who did what, when" trail that the
   `AUDIT_LOG_PUBLISHER` seam already emits from the money-touching flows (refunds) and
   the auth/IAM mutations.
@@ -128,7 +128,7 @@ The cost is **one extra connection + one extra migration run**, accepted deliber
   run.
 - The event store boots as a plain RMQ listener on `event_store_firehose_queue` (the
   default exchange) and **idles** — no `@EventPattern` handlers are bound yet. The
-  `ris.events` topic-exchange binding with `#.#` wildcards, the `domain_event` /
+  `ris.events` topic-exchange binding with the catch-all `#`, the `domain_event` /
   `audit_log_entry` tables, the firehose consumer, and the audit-publisher swap are
   later capabilities; this ADR records only the isolated-database decision and the shell
   that realizes it.
@@ -146,3 +146,11 @@ The cost is **one extra connection + one extra migration run**, accepted deliber
   service upholds.
 - [ADR-017](017-architecture-lint-via-eslint-boundaries.md) — the `apps/*/src/...`
   boundary globs that already cover a canonically-laid-out new service.
+
+## Editorial Correction (2026-07-08)
+
+Two forward-references in the body above spelled the firehose binding key as `#.#`. The
+shipped binding is a **lone `#`** — Nest's `matchRmqPattern` nacks a multi-word routing
+key under `#.#`. Corrected in place; the isolated-database decision this ADR records is
+untouched. See [ADR-035](035-event-store-firehose-topic-exchange.md) § Editorial
+Correction.
