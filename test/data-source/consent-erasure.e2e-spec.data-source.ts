@@ -43,6 +43,19 @@ export interface ICartRowProjection {
   status: string;
 }
 
+// One `consent_record` row, projected to the flags the erase suite asserts on. The
+// tombstone suite opts the customer into marketing (creating the row), then proves the
+// erase DELETES it — so a later consent read falls through to the absent-row defaults
+// (marketing denied) and the consent-gate can never send marketing to an erased
+// customer. mysql2 surfaces the `TINYINT(1)` flags as `0`/`1` numbers, coerced here.
+export interface IConsentRowProjection {
+  customerId: string;
+  transactionalEmail: boolean;
+  marketingEmail: boolean;
+  marketingSms: boolean;
+  dataRetentionPolicy: string;
+}
+
 // E2E helper for the consent/erasure suites. Inherits `getStockLevelRows` (the
 // tombstone suite polls it for the async catalog-variant-created auto-init before
 // receiving stock, exactly as the order/fulfillment suites do) and adds read-only
@@ -122,5 +135,35 @@ export class ConsentErasureE2ESpecDataSource extends InventoryAutoInitE2ESpecDat
       id: String(row.id),
       status: String(row.status),
     }));
+  }
+
+  // Reads the customer's `consent_record` row (the erase must DELETE it). Returns
+  // `undefined` when the row is absent — which, post-erase, is exactly the oracle: the
+  // row is gone, so a consent read resolves to the absent-row defaults (marketing denied).
+  public async getConsentByCustomerId(
+    customerId: string,
+  ): Promise<IConsentRowProjection | undefined> {
+    const rows: Record<string, unknown>[] = await this.query(
+      `
+        SELECT customer_id, transactional_email, marketing_email, marketing_sms,
+               data_retention_policy
+        FROM consent_record
+        WHERE customer_id = ?
+        LIMIT 1;
+      `,
+      [customerId],
+    );
+    const row = rows[0];
+    if (!row) {
+      return undefined;
+    }
+    return {
+      customerId: String(row.customer_id),
+      // mysql2 surfaces a TINYINT(1) as a 0/1 number on a raw query.
+      transactionalEmail: Number(row.transactional_email) === 1,
+      marketingEmail: Number(row.marketing_email) === 1,
+      marketingSms: Number(row.marketing_sms) === 1,
+      dataRetentionPolicy: String(row.data_retention_policy),
+    };
   }
 }
