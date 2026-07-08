@@ -199,7 +199,10 @@ follows when the historical prose disagrees with the source of truth.
   [ADR-016](016-cache-aside-generalized.md) — the adapter now delegates to
   `CACHE_PORT` from `@retail-inventory-system/cache`. Direct imports of
   `@nestjs/cache-manager`, `@keyv/redis`, or `cacheable` from any
-  `apps/*/src` file are forbidden per CLAUDE.md §"Cache-key convention"
+  `apps/*/src` file are forbidden per the cache-key convention of
+  [ADR-016](016-cache-aside-generalized.md) and
+  [ADR-022](022-cache-keys-tenant-and-schema-version.md), machine-enforced by the
+  `boundaries/*` denylists in `eslint.config.mjs`
   (verification gate: `grep -rE 'redis|cache-manager|keyv' apps/*/src` must
   return zero matches).
 - **§3 "preserves the ADR-002 SCAN+UNLINK contract verbatim + named-key
@@ -217,7 +220,8 @@ follows when the historical prose disagrees with the source of truth.
   `stock.repository.port.ts`, `stock-cache.port.ts`,
   `stock-events.publisher.port.ts`, and `transaction.port.ts`. The fourth
   was introduced to ring-fence the `ARCH-LINT-EX-01` `EntityManager`-leak
-  exception documented in CLAUDE.md §"Operational notes"; `IStockRepositoryPort`
+  exception recorded in [ADR-017](017-architecture-lint-via-eslint-boundaries.md)
+  §6 "Documented exceptions"; `IStockRepositoryPort`
   method signatures now take an optional `scope?: ITransactionScope`
   instead of a raw `EntityManager`. The exception is partially closed —
   `ITransactionPort` is in place, but removing the inline `@InjectEntityManager`
@@ -233,7 +237,8 @@ follows when the historical prose disagrees with the source of truth.
   (post-commit ordering type-enforced — no public `invalidate`, no
   fire-and-forget); CACHE-005 by the `available` flag on
   `IStockCachePort.get`'s return shape (a Redis-down read collapses the
-  per-request warn count from three to one). The closure register is in
-  CLAUDE.md §"Operational notes"; the only `AUDIT-2026-05-08` annotation
+  per-request warn count from three to one). The closure register is
+  [`docs/audits/audit-2026-05-20-followup.md`](../audits/audit-2026-05-20-followup.md);
+  the only `AUDIT-2026-05-08` annotation
   surviving in the stock module today is `[CODE-001]` inside
   `reserve-stock-for-order.use-case.ts`.

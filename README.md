@@ -1501,7 +1501,6 @@ Deliberate gaps, each with the seam already in place:
 | [`docs/audits/`](docs/audits/) | Point-in-time review findings. |
 | `eslint.config.mjs` | The authoritative answer to "where does this file belong". |
 | The `*RpcExceptionFilter` of each module | The authoritative error-code → HTTP-status tables. |
-| [`CLAUDE.md`](CLAUDE.md) | A terse map for AI coding agents — what exists and where, not how it operates. |
 
 When you make an architectural decision, **write an ADR** — next free 3-digit number,
 allocated at first commit. If a decision is later reversed, write a new ADR that
