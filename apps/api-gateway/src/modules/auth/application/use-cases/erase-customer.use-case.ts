@@ -37,7 +37,8 @@ export interface IEraseCustomerResult {
 //   4. Capture a PII-free before-snapshot `{ id, status }` for the audit.
 //   5. `customer.erase(now)` nulls the PII in the aggregate.
 //   6. The erasure writer persists it + nulls the `owner_type='customer'` address
-//      PII + abandons the customer's carts, all in one transaction.
+//      PII + abandons the customer's carts + deletes the consent record, all in one
+//      transaction.
 //   7. Audit (`AUDIT_LOG_PUBLISHER`) — before/after is the state transition only,
 //      NO PII (capturing it would re-seed the durable audit log with the data the
 //      erase removes, defeating itself — ADR-037 §4).

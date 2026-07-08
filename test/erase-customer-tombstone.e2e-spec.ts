@@ -26,6 +26,10 @@ import { ConsentErasureE2ESpecDataSource } from './data-source/consent-erasure.e
 //     only `owner_type='customer'` PII, and an order snapshot is immutable (ADR-028);
 //   - every active cart the customer held is `abandoned` (and the `converted` order-cart is
 //     left alone);
+//   - the customer's `consent_record` row is DELETED — the customer opts into marketing
+//     first, so the erase has a real opt-in to clear; afterwards the row is gone and an
+//     admin consent read falls through to the absent-row defaults (marketing denied), so an
+//     erased customer can never be marketed to (ADR-037);
 //   - the customer's captured refresh token is rejected (`POST /api/auth/refresh` → `401`).
 //
 // (No `owner_type='customer'` address is creatable via the API today, so this suite asserts
@@ -69,6 +73,12 @@ interface IOrderBody {
 interface IEraseResponse {
   status: string;
   erasedAt: string | null;
+}
+
+interface IConsentView {
+  transactionalEmail: boolean;
+  marketingEmail: boolean;
+  marketingSms: boolean;
 }
 
 describe('Erase customer — tombstone: PII nulled, order snapshot intact, session revoked (e2e)', () => {
@@ -269,6 +279,22 @@ describe('Erase customer — tombstone: PII nulled, order snapshot intact, sessi
     expect(secondCart.status).toBe(HttpStatus.CREATED);
   });
 
+  it('opts the customer into marketing — a consent row the erase must remove', async () => {
+    const res = await server()
+      .put('/api/auth/customer/me/consent')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({ marketingEmail: true, marketingSms: true });
+    expect(res.status).toBe(HttpStatus.OK);
+
+    // Pre-state: the row exists with marketing ON. This is the dangerous state an erase
+    // must clear — otherwise it could later be re-loaded and used to send marketing to an
+    // erased customer. Asserting it here makes the post-erase oracle non-vacuous.
+    const consent = await dataSource.getConsentByCustomerId(customerId);
+    expect(consent).toBeDefined();
+    expect(consent!.marketingEmail).toBe(true);
+    expect(consent!.marketingSms).toBe(true);
+  });
+
   it('erases the customer via the admin endpoint', async () => {
     const res = await server()
       .post(`/api/admin/customers/${customerId}/erase`)
@@ -294,6 +320,26 @@ describe('Erase customer — tombstone: PII nulled, order snapshot intact, sessi
     expect(row!.passwordHash).toBeNull();
     expect(row!.refreshTokenHash).toBeNull();
     expect(row!.deletedAt).not.toBeNull();
+  });
+
+  it('deletes the consent record so an erased customer can no longer be marketed to', async () => {
+    // Row-level: the `consent_record` row is GONE. The erase deletes it in the same
+    // transaction — the tombstone never hard-deletes the customer, so the FK CASCADE never
+    // fires; the row must be removed explicitly (ADR-037).
+    const consent = await dataSource.getConsentByCustomerId(customerId);
+    expect(consent).toBeUndefined();
+
+    // Behavior: an admin consent read now resolves to the absent-row DEFAULTS
+    // (transactional on, marketing OFF) — even though the customer had opted INTO marketing
+    // before the erase — so the notification consent-gate suppresses any marketing dispatch.
+    const readRes = await server()
+      .get(`/api/admin/customers/${customerId}/consent`)
+      .set('Authorization', adminAuth);
+    expect(readRes.status).toBe(HttpStatus.OK);
+    const view = readRes.body as IConsentView;
+    expect(view.transactionalEmail).toBe(true);
+    expect(view.marketingEmail).toBe(false);
+    expect(view.marketingSms).toBe(false);
   });
 
   it('leaves the placed order resolvable with its order-snapshot address intact', async () => {

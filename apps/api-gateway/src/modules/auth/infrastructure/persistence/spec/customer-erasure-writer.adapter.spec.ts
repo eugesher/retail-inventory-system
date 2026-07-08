@@ -1,6 +1,7 @@
 import { EntityManager } from 'typeorm';
 
 import { Customer } from '../../../domain';
+import { ConsentRecordEntity } from '../consent-record.entity';
 import { CustomerEntity } from '../customer.entity';
 import { CustomerErasureWriterAdapter } from '../customer-erasure-writer.adapter';
 
@@ -11,26 +12,43 @@ interface ICapturedQuery {
   params?: unknown[];
 }
 
+interface ICapturedDelete {
+  target: unknown;
+  criteria: unknown;
+}
+
+interface IRepositoryDouble {
+  save: (entity: unknown) => Promise<unknown>;
+  delete: (criteria: unknown) => Promise<unknown>;
+}
+
 // A hand-rolled EntityManager double: `transaction(cb)` runs the callback with a
-// transactional manager that records `getRepository().save()` calls and `query()`
-// calls, so the spec can assert the exact SQL + bound params the adapter issues —
-// in particular that the address UPDATE targets `owner_type='customer'` only.
+// transactional manager that records `getRepository().save()` / `.delete()` calls
+// and `query()` calls, so the spec can assert the exact SQL + bound params the
+// adapter issues — in particular that the address UPDATE targets
+// `owner_type='customer'` only, and that the consent record is deleted.
 const buildManagerDouble = (): {
   entityManager: EntityManager;
   saved: unknown[];
+  deletes: ICapturedDelete[];
   queries: ICapturedQuery[];
 } => {
   const saved: unknown[] = [];
+  const deletes: ICapturedDelete[] = [];
   const queries: ICapturedQuery[] = [];
 
-  const repositoryDouble = {
+  const makeRepositoryDouble = (target: unknown): IRepositoryDouble => ({
     save: (entity: unknown): Promise<unknown> => {
       saved.push(entity);
       return Promise.resolve(entity);
     },
-  };
+    delete: (criteria: unknown): Promise<unknown> => {
+      deletes.push({ target, criteria });
+      return Promise.resolve({ affected: 1 });
+    },
+  });
   const txManager = {
-    getRepository: (): typeof repositoryDouble => repositoryDouble,
+    getRepository: (target: unknown): IRepositoryDouble => makeRepositoryDouble(target),
     query: (sql: string, params?: unknown[]): Promise<unknown[]> => {
       queries.push({ sql, params });
       return Promise.resolve([]);
@@ -41,7 +59,7 @@ const buildManagerDouble = (): {
     transaction: (cb: (m: unknown) => Promise<unknown>): Promise<unknown> => cb(txManager),
   } as unknown as EntityManager;
 
-  return { entityManager, saved, queries };
+  return { entityManager, saved, deletes, queries };
 };
 
 const makeErasedCustomer = (): Customer => {
@@ -105,5 +123,20 @@ describe('CustomerErasureWriterAdapter', () => {
     expect(cartUpdate!.params).toEqual([CUSTOMER_ID]);
     expect(cartUpdate!.sql).toMatch(/status\s*=\s*'abandoned'/i);
     expect(cartUpdate!.sql).toMatch(/status\s*=\s*'active'/i);
+  });
+
+  it('deletes the customer’s consent record (GDPR erasure of consent PII)', async () => {
+    const { entityManager, deletes } = buildManagerDouble();
+    const adapter = new CustomerErasureWriterAdapter(entityManager);
+
+    await adapter.persistErasure(makeErasedCustomer());
+
+    // The consent record is deleted in the same transaction, so it does not survive
+    // the tombstone (its FK CASCADE never fires on a non-hard-delete). A later consent
+    // read then falls through to the absent-row defaults (marketing denied), which is
+    // what the `customer.erased` cache-eviction consumer relies on.
+    const consentDelete = deletes.find((d) => d.target === ConsentRecordEntity);
+    expect(consentDelete).toBeDefined();
+    expect(consentDelete!.criteria).toEqual({ customerId: CUSTOMER_ID });
   });
 });
