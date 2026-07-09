@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
-import { Repository } from 'typeorm';
+import { Between, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 
-import { IDomainEventAppendResult, IDomainEventRepositoryPort } from '../../application/ports';
+import { IDomainEventQueryFilters, IPage } from '@retail-inventory-system/contracts';
+
+import {
+  IDomainEventAppendResult,
+  IDomainEventPageRequest,
+  IDomainEventRepositoryPort,
+} from '../../application/ports';
 import { DomainEvent } from '../../domain';
 import { DomainEventEntity } from './domain-event.entity';
 import { DomainEventMapper } from './domain-event.mapper';
@@ -27,6 +33,20 @@ function isDuplicateEntryError(error: unknown): boolean {
   };
   const driver = candidate.driverError ?? candidate;
   return driver.errno === MYSQL_ER_DUP_ENTRY_ERRNO || driver.code === MYSQL_ER_DUP_ENTRY_CODE;
+}
+
+// The wire filter carries ISO-8601 bounds; the column is a `TIMESTAMP(3)`. An absent OR
+// unparseable bound means "no bound" — the gateway DTO (`@IsISO8601()`) is the validation
+// gate, so a malformed value can only reach here through a direct RPC, where widening the
+// scan is the safe answer (the `ListStockMovementsUseCase.parseInstant` precedent). Kept
+// module-local: the sibling `audit-log/` repository carries its own copy rather than
+// importing across the cross-module isolation line (ADR-017).
+function parseInstant(value: string | undefined): Date | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
 // The single `@InjectRepository(DomainEventEntity)` site. It implements
@@ -66,5 +86,59 @@ export class DomainEventTypeormRepository implements IDomainEventRepositoryPort 
       }
       throw error;
     }
+  }
+
+  // The paginated audit read (ADR-039). A READ — the append-only invariant is untouched;
+  // `findAndCount` issues the page SELECT plus the full-match `COUNT(*)` the envelope's
+  // `total` needs.
+  //
+  // Ordering is owned here, not by the caller: `occurred_at DESC, id DESC`. The `id`
+  // tiebreaker totalises the order when two events share a millisecond, so a page boundary
+  // never drops or repeats a row.
+  public async query(
+    filters: IDomainEventQueryFilters,
+    page: IDomainEventPageRequest,
+  ): Promise<IPage<DomainEvent>> {
+    const where: FindOptionsWhere<DomainEventEntity> = {};
+    if (filters.eventType !== undefined) {
+      where.eventType = filters.eventType;
+    }
+    if (filters.aggregateType !== undefined) {
+      where.aggregateType = filters.aggregateType;
+    }
+    if (filters.aggregateId !== undefined) {
+      where.aggregateId = filters.aggregateId;
+    }
+    if (filters.correlationId !== undefined) {
+      where.correlationId = filters.correlationId;
+    }
+
+    // Inclusive `occurred_at` window: both bounds → BETWEEN, one bound → a single
+    // half-open comparison. An INVERTED range (`from > to`) yields `BETWEEN hi AND lo`,
+    // which MySQL evaluates to the empty set — the deliberate "empty page, not a rejection"
+    // answer (ADR-039), so the event store needs no domain-exception type.
+    const from = parseInstant(filters.from);
+    const to = parseInstant(filters.to);
+    if (from !== undefined && to !== undefined) {
+      where.occurredAt = Between(from, to);
+    } else if (from !== undefined) {
+      where.occurredAt = MoreThanOrEqual(from);
+    } else if (to !== undefined) {
+      where.occurredAt = LessThanOrEqual(to);
+    }
+
+    const [entities, total] = await this.domainEventRepository.findAndCount({
+      where,
+      order: { occurredAt: 'DESC', id: 'DESC' },
+      skip: (page.page - 1) * page.size,
+      take: page.size,
+    });
+
+    return {
+      items: entities.map((entity) => DomainEventMapper.toDomain(entity)),
+      total,
+      page: page.page,
+      size: page.size,
+    };
   }
 }

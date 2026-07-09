@@ -650,10 +650,18 @@ module's `infrastructure/` inject its own.
 aggregateId ← first present of a documented payload-key precedence). A missing or `NaN`
 `occurredAt` is warn-and-dropped.
 
-**No query surface.** The logs are written, idempotent, and proven by the
-`test/event-store-*.e2e-spec.ts` suites, but nothing reads them back — the two repository
-ports expose `append` and nothing else, and the service has no HTTP surface at all. Today
-you inspect `ris_eventstore` with SQL, exactly as those e2e suites do.
+**Reads exist; nothing calls them yet.** The logs are written, idempotent, and proven by the
+`test/event-store-*.e2e-spec.ts` suites. Three application use cases can now interrogate them
+([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)):
+`QueryDomainEventsUseCase` and `QueryAuditLogEntriesUseCase` — filtered, paginated,
+newest-first, over **indexed columns only** (the JSON `payload` / `before` / `after` are
+returned but never searched) — and `TraceByCorrelationUseCase`, an unpaginated ascending
+timeline of everything one correlation id touched, across both logs. Page size is capped at
+100 in the use case, so every caller inherits the cap. An unknown id or an inverted `from`/`to`
+range yields an empty result, never an error: the event store has no domain-exception type.
+
+No routing key, no controller, and no HTTP route reaches them, and the service still has no
+HTTP surface. To inspect `ris_eventstore` today, use SQL, exactly as those e2e suites do.
 
 ---
 
@@ -1501,7 +1509,7 @@ Deliberate gaps, each with the seam already in place:
 
 | Gap | Seam that exists |
 | --- | --- |
-| Event-store read/query endpoints | both append-only tables are populated and already indexed for the reads (`IDX_DOMAIN_EVENT_CORRELATION`, `IDX_AUDIT_LOG_ENTRY_ACTOR`, `IDX_AUDIT_LOG_ENTRY_ACTION`); no repository read, no controller |
+| Event-store read/query endpoints | the three read use cases, the widened repository ports, and the `libs/contracts/audit/` wire shapes all exist and are unit-covered; `audit:read` is already seeded onto `admin`. Nothing invokes them — no routing key, no controller, no gateway route ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
 | Event retention / purge / event-sourced replay | — |
 | Delivery-row purge worker | `RETENTION_DELIVERY_DAYS` is Joi-validated; nothing reads it yet |
 | Real payment processor, partial captures, a gateway `fail` outcome | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter` |

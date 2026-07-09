@@ -65,17 +65,21 @@ caller bug (the ingest use case shapes and validates the wire payload first), so
 throws a plain `Error`, not a typed domain exception. Field-level malformed-input
 rejection (drop + warn) is the ingest use case's responsibility, a later capability.
 
-### 2.2 The repositories expose only `append`
+### 2.2 The repositories expose exactly one mutating verb: `append`
 
 `DomainEventTypeormRepository` and `AuditLogEntryTypeormRepository` implement their
 ports **directly**. They deliberately do **not** extend `BaseTypeormRepository`, whose
-public `save` / `softDelete` surface would contradict append-only. The repository
-interface (`IDomainEventRepositoryPort` / `IAuditLogRepositoryPort`) declares
-`append(...)` and nothing else — there is **no** `save` / `update` / `delete` /
-`softDelete` method anywhere on the seam, so an UPDATE or DELETE is *not expressible*
-against these repositories. The single mutating verb, `append`, uses TypeORM's `insert`
-(never `save`-with-id semantics), so there is not even a preload-by-id round trip that
-could turn into an update. This is the `stock_movement` ledger precedent
+public `save` / `softDelete` surface would contradict append-only. There is **no** `save` /
+`update` / `delete` / `softDelete` method anywhere on either seam, so an UPDATE or DELETE is
+*not expressible* against these repositories. The single mutating verb, `append`, uses
+TypeORM's `insert` (never `save`-with-id semantics), so there is not even a preload-by-id
+round trip that could turn into an update.
+
+The ports later grew read methods — a filtered, paginated `query` on each, plus a
+correlation-scoped `listByCorrelationId` on the audit port
+([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)). A read cannot mutate, so
+the invariant this section states is untouched: what the type surface forbids is *writing* a
+row that already exists. This is the `stock_movement` ledger precedent
 ([ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md) §2,
 [ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md)): the repositories
 are the only `@InjectRepository` sites for their entity, and they return domain types
@@ -152,6 +156,7 @@ context module, the entity list registered on the eventstore connection in
 
 **Defers (later capabilities):** the firehose consumer + the in-consumer dispatch by
 routing key, the ingest use cases (including the `correlation_id = ''` coalescing in §3)
-and their idempotency proof, any read/query path over the two logs (the ports carry no
-read at all — a query surface designs its own), and the producer dual-publish fan-out
-across the domain-event publishers.
+and their idempotency proof, any read/query path over the two logs — the ports shipped with
+no read, and the query surface designed its own from scratch
+([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)) — and the producer
+dual-publish fan-out across the domain-event publishers.
