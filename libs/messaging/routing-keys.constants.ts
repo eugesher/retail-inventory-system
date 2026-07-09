@@ -350,6 +350,16 @@ export const ROUTING_KEYS = {
   // service queue, because the audit log is a destination of its own, decoupled
   // from the operational request/response paths.
   AUDIT_STAFF_ACTION: 'audit.staff.action',
+  // Audit + event-store query RPCs (Gateway → Event Store on `event_store_query_queue`),
+  // served by `AuditQueryController`. Commands, not events — they never travel over
+  // `ris.events`, whose `audit.staff.action` key is the one `audit.` EVENT (ADR-035/039).
+  // `audit.event.query` → `QueryDomainEventsUseCase` → `IPage<DomainEventView>`,
+  // `audit.entry.query` → `QueryAuditLogEntriesUseCase` → `IPage<AuditLogEntryView>`,
+  // `audit.trace.by-correlation` → `TraceByCorrelationUseCase` → `ICorrelationTraceResult`
+  // (unpaginated, ascending, both logs).
+  AUDIT_EVENT_QUERY: 'audit.event.query',
+  AUDIT_ENTRY_QUERY: 'audit.entry.query',
+  AUDIT_TRACE_BY_CORRELATION: 'audit.trace.by-correlation',
 } as const;
 
 export type RoutingKey = (typeof ROUTING_KEYS)[keyof typeof ROUTING_KEYS];

@@ -135,10 +135,10 @@ state (the identity tables).
    best-effort) — the event store binds `#`                        │
                                                                    │
                                ┌───────────────────────────────────┘
-                               │  event_store_firehose_queue
+                               │  event_store_firehose_queue  (ingest, topic exchange)
              ┌─────────────────▼─────────────────┐
-             │    event-store microservice       │
-             │  MySQL: ris_eventstore            │
+             │    event-store microservice       │◀── event_store_query_queue
+             │  MySQL: ris_eventstore            │    (audit.* RPCs, default exchange)
              │  domain_event · audit_log_entry   │
              └───────────────────────────────────┘
 ```
@@ -156,7 +156,7 @@ legibility. Redis is used by **inventory** (stock availability) and **notificati
 | `inventory-microservice` | RMQ `inventory_queue` | `StockLevel` running totals, `StockLocation`, TTL `Reservation` holds, append-only `StockMovement` ledger |
 | `retail-microservice` | RMQ `retail_queue` | Checkout — mutable `Cart`; immutable `Order` + `OrderLine` + `Address` + `Payment` + `Fulfillment` + `Refund`; the `ReturnRequest` RMA context |
 | `notification-microservice` | RMQ `notification_events` | Versioned templates, delivery audit trail, render-and-dispatch pipeline, consent gate, retry sweeper |
-| `event-store-microservice` | RMQ `event_store_firehose_queue` | Append-only sink: `domain_event` (event firehose) + `audit_log_entry` (staff audit log), in its **own** database |
+| `event-store-microservice` | RMQ `event_store_firehose_queue` + `event_store_query_queue` | Append-only sink: `domain_event` (event firehose) + `audit_log_entry` (staff audit log), in its **own** database; answers the three `audit.*` query RPCs |
 
 ### Two logical databases
 
@@ -182,8 +182,10 @@ on the producer's own queue as reserved surfaces.
 Beside the primary `emit`, each publisher mirrors the same routing key + payload onto the
 durable topic exchange `ris.events` via the shared `RisEventsMirrorPublisher`. The mirror is
 **non-throwing best-effort** and ordered *after* the primary emit, so a `ris.events` outage can
-never shadow the publish that feeds a real consumer. The event store binds one queue with the
-catch-all `#` and dispatches inside the consumer — no existing consumer was re-bound.
+never shadow the publish that feeds a real consumer. The event store binds a single queue to
+`ris.events` with the catch-all `#` and dispatches inside the consumer — no existing consumer
+was re-bound. Its second queue, `event_store_query_queue`, carries RPCs on the default
+exchange and is not bound to this exchange at all.
 
 > The binding pattern is a lone `#`, **not** `#.#`. RabbitMQ routes both, but Nest's
 > `matchRmqPattern` rejects `#.#` for any multi-word routing key and nacks the message.
@@ -650,18 +652,32 @@ module's `infrastructure/` inject its own.
 aggregateId ← first present of a documented payload-key precedence). A missing or `NaN`
 `occurredAt` is warn-and-dropped.
 
-**Reads exist; nothing calls them yet.** The logs are written, idempotent, and proven by the
-`test/event-store-*.e2e-spec.ts` suites. Three application use cases can now interrogate them
-([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)):
-`QueryDomainEventsUseCase` and `QueryAuditLogEntriesUseCase` — filtered, paginated,
+**The logs can be read back over RPC** ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)).
+`QueryDomainEventsUseCase` and `QueryAuditLogEntriesUseCase` are filtered, paginated and
 newest-first, over **indexed columns only** (the JSON `payload` / `before` / `after` are
-returned but never searched) — and `TraceByCorrelationUseCase`, an unpaginated ascending
-timeline of everything one correlation id touched, across both logs. Page size is capped at
-100 in the use case, so every caller inherits the cap. An unknown id or an inverted `from`/`to`
-range yields an empty result, never an error: the event store has no domain-exception type.
+returned but never searched); `TraceByCorrelationUseCase` is an unpaginated ascending timeline
+of everything one correlation id touched, across both logs. Page size is capped at 100 in the
+use case, so every caller inherits the cap. An unknown id or an inverted `from`/`to` range
+yields an empty result, never an error: the event store has no domain-exception type, and
+therefore no RPC exception filter.
 
-No routing key, no controller, and no HTTP route reaches them, and the service still has no
-HTTP surface. To inspect `ris_eventstore` today, use SQL, exactly as those e2e suites do.
+They are served by the context-root `AuditQueryController` on a **second queue**,
+`event_store_query_queue`, bound to the default exchange — command traffic never rides the
+`ris.events` topic exchange:
+
+| Routing key | Use case |
+| --- | --- |
+| `audit.event.query` | `QueryDomainEventsUseCase` |
+| `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
+| `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
+
+`main.ts` is therefore a **hybrid app**: `NestFactory.create` + two `connectMicroservice`
+calls + `init()` + `startAllMicroservices()`. It never calls `listen()`, so the service still
+opens no TCP port. `audit.staff.action` remains the one `audit.` *event* — it rides
+`ris.events` into the firehose queue and is never routed here.
+
+No gateway HTTP route reaches these RPCs yet. To inspect `ris_eventstore` from outside, use
+SQL, exactly as the `test/event-store-*.e2e-spec.ts` suites do.
 
 ---
 
@@ -1509,7 +1525,7 @@ Deliberate gaps, each with the seam already in place:
 
 | Gap | Seam that exists |
 | --- | --- |
-| Event-store read/query endpoints | the three read use cases, the widened repository ports, and the `libs/contracts/audit/` wire shapes all exist and are unit-covered; `audit:read` is already seeded onto `admin`. Nothing invokes them — no routing key, no controller, no gateway route ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
+| Event-store read/query **HTTP endpoints** | the three `audit.*` RPCs answer on `event_store_query_queue` and `audit:read` is already seeded onto `admin`. No gateway module fronts them, so there is no `/api/audit/*` route yet ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
 | Event retention / purge / event-sourced replay | — |
 | Delivery-row purge worker | `RETENTION_DELIVERY_DAYS` is Joi-validated; nothing reads it yet |
 | Real payment processor, partial captures, a gateway `fail` outcome | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter` |
