@@ -16,6 +16,7 @@ import {
   RoleEntity,
   StaffUserEntity,
 } from '../modules/auth/infrastructure/persistence';
+import { AuditModule } from '../modules/audit';
 import { AuthModule } from '../modules/auth';
 import { CartModule } from '../modules/cart';
 import { CatalogModule } from '../modules/catalog';
@@ -48,6 +49,7 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
     OrdersModule,
     ReturnsModule,
     NotificationsModule,
+    AuditModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: DuplicateKeyExceptionFilter },

@@ -256,9 +256,10 @@ Category and media operations emit **no** events.
 | `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
 
 All three on the context-root `audit-query.controller.ts` (3 `@MessagePattern`), reached
-through `MicroserviceClientEventStoreModule` (`EVENT_STORE_MICROSERVICE`). RPC-only today — no
-gateway HTTP route. `audit.staff.action` is the one `audit.` **event**: it rides `ris.events`
-into the firehose queue and never reaches this controller (ADR-039).
+through `MicroserviceClientEventStoreModule` (`EVENT_STORE_MICROSERVICE`) — from the gateway's
+`modules/audit/` behind `GET /api/audit/{events,entries,trace/:correlationId}`.
+`audit.staff.action` is the one `audit.` **event**: it rides `ris.events` into the firehose
+queue and never reaches this controller (ADR-039).
 
 ### Event consumers
 
@@ -320,6 +321,7 @@ Each RPC-fronting module has `application/ports` (`*_GATEWAY_PORT`),
 | `modules/orders/` | `/api/orders` | `orders.controller.ts` + sibling `refunds.controller.ts` |
 | `modules/returns/` | `/api/returns/*`, `/api/orders/:orderId/returns` | `returns.controller.ts` (empty-prefix `@Controller()`) |
 | `modules/notifications/` | `/api/notifications` | `notifications.controller.ts`; all staff-only |
+| `modules/audit/` | `/api/audit/*` | `audit.controller.ts`; three `GET`s, all `audit:read`; DTOs carry **no** `pageSize` cap (the event store's `clampPageWindow` owns it) and a local `IsOnOrAfter` cross-property validator |
 | `modules/auth/` | `/api/auth/*` | the only gateway module with real `domain/` + DB rows |
 | `modules/iam/` | `/api/iam/*` | admin shell over the auth aggregates; **no `domain/`** |
 | `modules/customer-admin/` | `/api/admin/customers/*` | admin shell over `Customer`; **no `domain/`** |
@@ -509,7 +511,7 @@ each declares its own `{ page, size }` request shape.
 Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEventsUseCase`,
 `QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts`
 (heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
-The three read use cases are served over RPC; **no gateway HTTP route reaches them.**
+The three read use cases are served over RPC, fronted by the gateway's `modules/audit/`.
 Context-root controllers (`modules/*.ts`, matching no `boundaries` element pattern — each
 injects use cases from both siblings): `firehose.consumer.ts` (`@EventPattern('#')`) and
 `audit-query.controller.ts` (`audit.event.query` / `audit.entry.query` /

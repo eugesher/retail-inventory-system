@@ -1,0 +1,17 @@
+name: trace-unknown-correlation
+description: |-
+  GET /api/audit/trace/:correlationId  (Bearer — audit:read)
+  A correlation id that matches nothing is a 200 with two EMPTY ARRAYS —
+  { "events": [], "auditEntries": [] } — never a 404. The absence of a trace is not the
+  absence of a resource: nothing was deleted, nothing is missing, that request simply
+  never ran. A 404 here would invite a caller to treat "no history" as "bad id".
+
+  The one id you cannot ask for is the empty string. domain_event.correlation_id is
+  NOT NULL DEFAULT '' (MySQL treats NULLs as distinct inside a UNIQUE, which would have
+  defeated the ingest dedupe key), so '' is the sentinel for "ingested without a
+  correlation id" and would match every such row rather than none. The controller
+  rejects a blank path segment with a 400.
+url: $ENV_BASE_URL/audit/trace/00000000-0000-4000-9999-ffffffffffff
+headers:
+- name: Authorization
+  value: Bearer $accessToken

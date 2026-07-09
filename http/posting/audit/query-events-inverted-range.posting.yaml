@@ -1,0 +1,11 @@
+name: query-events-inverted-range
+description: |-
+  GET /api/audit/events  (Bearer — audit:read)
+  A transposed window (from > to) is a 400 from the gateway DTO. The event store would
+  have answered it with an empty page — `BETWEEN hi AND lo` selects nothing in MySQL —
+  and an operator who swapped two dates would then read that empty page as "nothing
+  happened". The rejection lives at the HTTP edge, where every other shape error lives.
+url: $ENV_BASE_URL/audit/events?from=2030-01-01T00:00:00.000Z&to=2020-01-01T00:00:00.000Z
+headers:
+- name: Authorization
+  value: Bearer $accessToken

@@ -1,0 +1,25 @@
+name: query-events-by-aggregate
+description: |-
+  GET /api/audit/events  (Bearer — audit:read)
+  Every captured event for ONE aggregate instance, newest first. `aggregateType` is the
+  routing key's second token (`retail.order.placed` -> `order`), `aggregateId` the
+  aggregate's own id — both derived at ingest by the firehose extractors, not declared by
+  the producer. pageSize=50 is under the event store's 100 ceiling; ask for 500 and you
+  get 100. An order id with no events is a 200 empty page, not a 404.
+
+  This filter is NARROWER than it looks. `aggregateType=order` matches
+  retail.order.placed and retail.order.cancelled, and nothing else: the payment,
+  fulfillment, refund and stock events that same order produced were extracted under
+  their OWN aggregate types (`payment`, `fulfillment`, `refund`, `stock`), each keyed by
+  its own id. To follow one order across all of them, filter by correlation id or trace
+  it — the next request and `trace-by-correlation` do exactly that.
+
+  Run this before `query-events-by-correlation` and `trace-by-correlation`: its
+  on_response hook publishes the first row's correlationId as $tracedCorrelationId,
+  which both of them read.
+url: $ENV_BASE_URL/audit/events?aggregateType=order&aggregateId=1&pageSize=50
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+scripts:
+  on_response: audit/scripts.py:capture_query_events_by_aggregate
