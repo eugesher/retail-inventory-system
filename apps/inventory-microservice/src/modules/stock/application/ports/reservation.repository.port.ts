@@ -30,6 +30,12 @@ export interface IReservationRepositoryPort {
     variantId: number,
     scope?: ITransactionScope,
   ): Promise<Reservation[]>;
+  // The sweep's candidate scan: `active` holds whose TTL has already elapsed, oldest
+  // first, capped at `limit`. Served by `IDX_RESERVATION_STATUS_EXPIRES_AT`. The rows
+  // are candidates only — the sweep re-reads each by id inside its transaction, so a
+  // hold released or refreshed between the scan and the write is observed there, not
+  // here.
+  listExpiredActive(now: Date, limit: number, scope?: ITransactionScope): Promise<Reservation[]>;
   // Insert-or-update by id; re-reads the saved row so the committed `version` and
   // the DB timestamps come back concrete. A lost INSERT race on the UNIQUE triple
   // is translated to `StockWriteConflictError` so the shared bounded-retry write

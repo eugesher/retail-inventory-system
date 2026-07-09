@@ -108,6 +108,9 @@ services:
       CACHE_TTL_MS_PRODUCT_STOCK: 60000
       # Bounded optimistic-concurrency retry budget for the stock write protocol (ADR-036).
       OCC_RETRY_ATTEMPTS: 5
+      # Expired-reservation sweep bounds (ADR-038): rows per invocation, rows per transaction.
+      RESERVATION_SWEEP_BATCH_SIZE: 200
+      RESERVATION_SWEEP_TRANSACTION_SIZE: 25
       OTEL_SERVICE_NAME: inventory-microservice
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     volumes:

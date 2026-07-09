@@ -15,4 +15,5 @@ export * from './reserve-stock.use-case';
 export * from './restock-from-return.use-case';
 export * from './stock-mutation';
 export * from './stock-write-conflict.error';
+export * from './sweep-expired-reservations.use-case';
 export * from './transfer-stock.use-case';

@@ -12,6 +12,8 @@ import {
 import {
   OCC_RETRY_ATTEMPTS,
   RESERVATION_REPOSITORY,
+  RESERVATION_SWEEP_BATCH_SIZE,
+  RESERVATION_SWEEP_TRANSACTION_SIZE,
   RESERVATION_TTL_MINUTES,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
@@ -32,6 +34,7 @@ import {
   ReleaseReservationUseCase,
   ReserveStockUseCase,
   RestockFromReturnUseCase,
+  SweepExpiredReservationsUseCase,
   TransferStockUseCase,
 } from '../application/use-cases';
 import { InventoryRpcExceptionFilter, StockController } from '../presentation';
@@ -113,6 +116,25 @@ import {
       inject: [ConfigService],
     },
 
+    // The two bounds the expired-reservation sweep runs under (ADR-038), resolved from
+    // `RESERVATION_SWEEP_BATCH_SIZE` (Joi default 200) and
+    // `RESERVATION_SWEEP_TRANSACTION_SIZE` (Joi default 25) — the batch size caps the rows
+    // one invocation scans and expires, the transaction size the rows one transaction
+    // locks. Value providers, so the use case never reads env (the `OCC_RETRY_ATTEMPTS`
+    // precedent above; ADR-017).
+    {
+      provide: RESERVATION_SWEEP_BATCH_SIZE,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('RESERVATION_SWEEP_BATCH_SIZE') ?? 200,
+      inject: [ConfigService],
+    },
+    {
+      provide: RESERVATION_SWEEP_TRANSACTION_SIZE,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('RESERVATION_SWEEP_TRANSACTION_SIZE') ?? 25,
+      inject: [ConfigService],
+    },
+
     StockCache,
     { provide: STOCK_CACHE, useExisting: StockCache },
 
@@ -130,6 +152,7 @@ import {
     AdjustStockUseCase,
     ReserveStockUseCase,
     ReleaseReservationUseCase,
+    SweepExpiredReservationsUseCase,
     AllocateStockUseCase,
     CancelAllocationUseCase,
     CommitSaleUseCase,
