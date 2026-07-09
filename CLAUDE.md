@@ -74,8 +74,12 @@ section is the reason to read it.
   queue of whoever consumes it, not the producer's own.
 - `RisEventsMirrorPublisher.mirror` is non-throwing best-effort and is ordered **after**
   the primary `emit`, so a `ris.events` failure can never shadow the real publish.
-- A single Nest app binds every `@EventPattern` to every connected transport — two queues
-  with disjoint pattern sets in one app is not supported.
+- A single Nest app binds every handler pattern to every connected transport. Two queues with
+  disjoint **`@EventPattern`** sets in one app is therefore not supported. An **event** queue
+  plus an **RPC** queue is (ADR-039): `ServerRMQ.getHandlerByPattern` does an exact map lookup
+  when `wildcards: false`, so a wildcard pattern is inert there — but a `wildcards: true`
+  transport binds *every* registered pattern as a routing key on its exchange, so the other
+  queue's patterns show up as inert bindings in the RabbitMQ UI.
 
 **Persistence**
 
@@ -157,8 +161,8 @@ libs/
   cache/          # ICachePort + RedisCacheAdapter + @Cacheable + CACHE_KEYS registry
   common/         # framework-free: Result, DomainException, pagination, bodyFingerprint
   config/         # configModuleConfig (Joi env schema)
-  contracts/      # cross-service message + DTO contracts (auth, microservices, retail,
-                  #   inventory, catalog, notifications)
+  contracts/      # cross-service message + DTO contracts (audit, auth, microservices,
+                  #   retail, inventory, catalog, notifications)
   database/       # BaseEntity, BaseTypeormRepository, SnakeNamingStrategy, DatabaseModule
   ddd/            # Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort
   messaging/      # MessagingModule, MicroserviceClient*Module, RabbitmqClientFactory,
@@ -464,7 +468,7 @@ Presentation: `health.controller.ts`, `notifications.controller.ts`,
 Seeds: `scripts/seeds/notification-template.sql` (eleven active `v1` `email`/`en-US` rows),
 `scripts/seeds/consent-record.sql`.
 
-**event-store** `modules/audit-and-events.module.ts` (ADR-034/035) — RMQ-only, no HTTP,
+**event-store** `modules/audit-and-events.module.ts` (ADR-034/035/039) — RMQ-only, no HTTP,
 **its own** DB `ris_eventstore` via
 `DatabaseModule.forRootWithUrl([DomainEventEntity, AuditLogEntryEntity], 'EVENTSTORE_DATABASE_URL')`.
 One bounded context (`audit-and-events`) split into two sibling modules: `domain-events/`
@@ -473,16 +477,23 @@ Domain: `DomainEvent` and `AuditLogEntry` are **frozen value objects** (every fi
 `public readonly`, `Object.freeze`d, `create` / `reconstitute` factories, no mutators, no
 domain events, **not** `AggregateRoot`s). Invariants throw a plain `Error`.
 `AuditActorType` is domain-local, not a `libs/contracts` enum.
-Ports: `DOMAIN_EVENT_REPOSITORY` (`append` → `{ inserted }`; swallows the composite-UNIQUE
-`ER_DUP_ENTRY` via an **inlined** `isDuplicateEntryError`) and `AUDIT_LOG_REPOSITORY`
-(`append`). **Both ports are `append`-only** — no read, no `save`/`update`/`delete`. Both
-implement the port directly, `insert`-only, and are the sole `@InjectRepository` sites.
-Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, plus
-`firehose-extractors.ts` (heuristic `producer` / `aggregateType` / `aggregateId`).
-Consumer: `modules/firehose.consumer.ts`. **No `presentation/` layer** — nothing reads the
-two logs back; inspect `ris_eventstore` with SQL.
+Ports: `DOMAIN_EVENT_REPOSITORY` (`append` → `{ inserted }`, swallowing the composite-UNIQUE
+`ER_DUP_ENTRY` via an **inlined** `isDuplicateEntryError`; + `query`), `AUDIT_LOG_REPOSITORY`
+(`append` + `query` + `listByCorrelationId`), and `TRACE_DOMAIN_EVENT_READER` (audit-log-owned
+raw-SQL reader over the sibling module's `domain_event` — the trace may not inject the
+sibling's repository). **`append` is the only mutating verb on either log** — no
+`save`/`update`/`delete`. Both repositories implement their port directly, `insert`-only, and
+are the sole `@InjectRepository` sites. `application/ports` may not import `lib-common`, so
+each declares its own `{ page, size }` request shape.
+Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEventsUseCase`,
+`QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts`
+(heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
+The three read use cases have **no caller** — no controller, no routing key, no HTTP route.
+Consumer: `modules/firehose.consumer.ts`. **No `presentation/` layer.** The event store has no
+`*DomainException` / `*RpcExceptionFilter` pair, on purpose (ADR-039): an inverted `from`/`to`
+range yields an empty page, and shape errors belong to the gateway DTO.
 Migrations: `1782521938896-CreateDomainEventTable`, `1782521942829-CreateAuditLogEntryTable`
-(eventstore pipeline).
+(eventstore pipeline). All seven indexes the query filters need already exist.
 
 ## Shared Libraries
 
@@ -490,7 +501,7 @@ Imported via the path aliases in `tsconfig.json` as `@retail-inventory-system/<n
 
 | Library | Contents |
 | --- | --- |
-| `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception. |
+| `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `audit/` (the event-store read surface: `DomainEventView` / `AuditLogEntryView` + the two query payloads + the correlation-trace payload/result — ADR-039), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception — every `*View` is a **class** with `@ApiResponseProperty`, since `naming-convention` reserves the bare `interface` form for `I`-prefixed names. |
 | `auth` | `AuthModule.forRootAsync({ imports, providers, exports })` (Passport + JwtModule + `JwtStrategy` + the three guards, all global), `AUTH_USER_VALIDATOR`, `@Public` / `@Roles` / `@RequiresPermission` / `@CurrentUser`, runtime `RoleEnum` re-export. |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(entities)` / `.forRootWithUrl(entities, urlEnvVar)`. Apps call `forRoot` at `AppModule` level; per-module registration prefers `forFeature` (auth uses inline `TypeOrmModule.forFeature` — ADR-019). |
 | `messaging` | `MessagingModule`, `MicroserviceClient{Retail,Inventory,Notification,Catalog}Module` + `MicroserviceClientRisEventsModule` (`RIS_EVENTS_PUBLISHER`), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION`), `EXCHANGES`. |
@@ -586,7 +597,7 @@ Run `docker-compose up` for MySQL, RabbitMQ, and Redis locally; add
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). ADRs are the durable record (3-digit padding,
-`001-…`; **next free number is `039`**). When making an architectural decision, write an
+`001-…`; **next free number is `040`**). When making an architectural decision, write an
 ADR — Nygard hybrid (Status, Context, Decision, Alternatives, Consequences), one decision
 per file, slug describes the decision not the area (ADR-003). Do not edit an accepted ADR
 beyond flipping its `Status` and adding a pointer; if a decision is reversed, write a new

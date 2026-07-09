@@ -167,3 +167,14 @@ message is nacked. Every `#.#` in the body above has been corrected to `#`; noth
 was rewritten. See
 [`docs/implementation/11-event-store-and-audit-log/03-domainevent-ingestion-and-idempotency.md`](../implementation/11-event-store-and-audit-log/03-domainevent-ingestion-and-idempotency.md)
 § "Why the pattern is `#`, not `#.#`".
+
+## Editorial Correction (2026-07-10)
+
+Two sentences above — one in *Decision*, one in *Alternatives Considered* — conclude that
+"two queues with disjoint pattern sets is not cleanly supported." Their premise (a single
+Nest app binds every `@EventPattern` to every connected transport) is correct and the
+**decision is unchanged**: the firehose still binds one queue to `ris.events` with a lone
+`#`. But the phrasing is blanket where the argument is not, and it does not hold for an
+**RPC** transport with `wildcards: false`, where `ServerRMQ` resolves handlers by exact map
+lookup. [ADR-039](039-audit-and-event-store-query-surface.md) §3 records the distinction and
+adds a second, RPC-only queue on the default exchange. No argument here has been rewritten.

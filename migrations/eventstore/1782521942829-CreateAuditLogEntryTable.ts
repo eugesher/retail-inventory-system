@@ -22,9 +22,11 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // reserved word (the `return_line.condition` precedent). Audit has no natural dedupe
 // key, so there is NO UNIQUE constraint — the BIGINT PK autoincrements per entry.
 //
-// The four indexes back the future audit query paths: by actor, by mutated entity, by
-// action classifier, and by correlation. No FK on any column (the isolated schema
-// references nothing).
+// The four indexes serve the audit read surface: by actor, by mutated entity, by action
+// classifier, and by correlation (docs/adr/039-audit-and-event-store-query-surface.md). Note
+// `correlation_id` is NULLABLE here — unlike its `domain_event` sibling, whose dedupe UNIQUE
+// forced it non-null — so a `WHERE correlation_id = ?` never matches a null-correlation row.
+// No FK on any column (the isolated schema references nothing).
 export class CreateAuditLogEntryTable1782521942829 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
@@ -56,7 +58,7 @@ export class CreateAuditLogEntryTable1782521942829 implements MigrationInterface
     await queryRunner.query(
       'CREATE INDEX IDX_AUDIT_LOG_ENTRY_ACTION ON audit_log_entry (action, occurred_at DESC);',
     );
-    // The cross-service-trace join.
+    // The cross-service trace, and the `correlationId` filter of the paginated query.
     await queryRunner.query(
       'CREATE INDEX IDX_AUDIT_LOG_ENTRY_CORRELATION ON audit_log_entry (correlation_id);',
     );
