@@ -51,6 +51,12 @@ export const configModuleConfig = {
     // (ADR-038). Defaulted, so a missing var never fails boot.
     RESERVATION_SWEEP_TRANSACTION_SIZE: Joi.number().integer().min(1).default(25),
 
+    // Seconds between expired-reservation sweep invocations (ADR-038). It decides only how
+    // promptly an ALREADY-expired hold is reclaimed — `RESERVATION_TTL_MINUTES` is what
+    // bounds a hold's life — so it should tick well inside the TTL. Defaulted, so a missing
+    // var never fails boot (the `RESERVATION_TTL_MINUTES` precedent).
+    RESERVATION_SWEEP_INTERVAL_SECONDS: Joi.number().integer().min(1).default(60),
+
     // Return-eligibility window (days) — a `shipped` order is returnable only within
     // `RETURN_WINDOW_DAYS` of its ship date; a `delivered` order is always returnable
     // (ADR-032). The Open return use case reads it. Defaulted, so a missing var never
