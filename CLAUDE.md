@@ -94,7 +94,8 @@ section is the reason to read it.
 **Config / DI**
 
 - **A use case never reads `process.env`.** Config arrives through a value-provider token:
-  `OCC_RETRY_ATTEMPTS`, `RESERVATION_TTL_MINUTES`, `RETURN_WINDOW_DAYS`,
+  `OCC_RETRY_ATTEMPTS`, `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
+  `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RETURN_WINDOW_DAYS`,
   `IDEMPOTENCY_KEY_TTL_HOURS`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
   `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only, read off `process.env` inside a `useFactory`).
@@ -346,7 +347,7 @@ Infra: `pricing-rabbitmq.publisher.ts`. No `CacheModule`.
 Both catalog modules share one connection:
 `DatabaseModule.forRoot([...catalogEntities, ...pricingEntities])`.
 
-**inventory** `modules/stock/` (ADR-027/030/031/032) — keyed on the opaque catalog `variantId`.
+**inventory** `modules/stock/` (ADR-027/030/031/032/038) — keyed on the opaque catalog `variantId`.
 Aggregates: `StockLevel` (per-location running totals; `available` a pure getter; `version`),
 `StockLocation` (caller-assigned string PK), `Reservation` (TTL hold; app-generated
 `CHAR(36)` UUID; all-statuses UNIQUE `(cartId, variantId, stockLocationId)`), plus the
@@ -354,10 +355,14 @@ immutable `StockMovement` ledger record (frozen, fixed sign per type, no mutator
 `InventoryDomainException` (carries optional `details`) + `InventoryErrorCodeEnum`.
 Events: `Stock{Received,Adjusted,Low}Event`, `StockLevelInitializedEvent`,
 `Stock{Reserved,Released,Allocated,Committed,Returned}Event`.
-Ports: `STOCK_REPOSITORY`, `RESERVATION_REPOSITORY`, `STOCK_MOVEMENT_REPOSITORY`
+Ports: `STOCK_REPOSITORY`, `RESERVATION_REPOSITORY` (its `listExpiredActive` is the sweep's
+advisory candidate scan), `STOCK_MOVEMENT_REPOSITORY`
 (`append` / `listByVariant` / `existsByReference` — no `save`/`update`/`delete`),
 `STOCK_CACHE`, `STOCK_EVENTS_PUBLISHER`, `TRANSACTION_PORT` (opaque `ITransactionScope`),
-`RESERVATION_TTL_MINUTES`, `OCC_RETRY_ATTEMPTS`.
+`RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
+`RESERVATION_SWEEP_TRANSACTION_SIZE`, `OCC_RETRY_ATTEMPTS`.
+`SweepExpiredReservationsUseCase` (ADR-038) is a registered provider with **no caller** — no
+schedule, no RPC.
 Shared application helpers: `use-cases/stock-mutation.ts` (`runWithStockWriteRetry`,
 `applyOnHandChange`), `reservation-mutation.ts`, `low-stock.emitter.ts`,
 `movement-recorded.emitter.ts`, `stock-write-conflict.error.ts`, `stock-location.guard.ts`,
@@ -567,7 +572,7 @@ Run `docker-compose up` for MySQL, RabbitMQ, and Redis locally; add
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). ADRs are the durable record (3-digit padding,
-`001-…`; **next free number is `038`**). When making an architectural decision, write an
+`001-…`; **next free number is `039`**). When making an architectural decision, write an
 ADR — Nygard hybrid (Status, Context, Decision, Alternatives, Consequences), one decision
 per file, slug describes the decision not the area (ADR-003). Do not edit an accepted ADR
 beyond flipping its `Status` and adding a pointer; if a decision is reversed, write a new

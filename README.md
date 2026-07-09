@@ -733,9 +733,12 @@ racing for the last unit deterministic: exactly one reserve wins, the loser sees
 **Reservation TTL.** Every Reserve (re)sets `expiresAt = now + RESERVATION_TTL_MINUTES`, so
 an active line refreshes its lease as the shopper edits the cart. A hold returns to
 `available` three ways: cart Remove **releases** it, Place **allocates** it (after which only
-a cancel-allocation frees it), or an operator **manually releases** it by id. There is **no
-expiry sweeper yet** (`Reservation.expire()` has no caller), so a stranded hold over-holds
-stock — but is never lost: the next Reserve on the same triple reuses the row.
+a cancel-allocation frees it), or an operator **manually releases** it by id.
+`SweepExpiredReservationsUseCase` reclaims a stranded hold — expiring it in bounded batches,
+returning the units, appending a negative `release` movement with `reason_code = 'expired'`,
+and emitting `inventory.stock.released` — but **nothing drives it yet**: no schedule, no
+endpoint. A stranded hold is never lost either way: the next Reserve on the same triple
+reuses the row. See [ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md).
 
 **Audit, not balance.** `stock_movement` is an append-only audit trail; the running totals on
 `stock_level` are the source of truth, and **summing ledger rows never reconstructs on-hand**.
@@ -1097,6 +1100,8 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 | `CACHE_TTL_MS_DEFAULT` | `60000` | global default for an unscoped `set()` |
 | `CACHE_TTL_MS_PRODUCT_STOCK` | `60000` | TTL for a cached availability read (the name predates the running-totals rewrite) |
 | `RESERVATION_TTL_MINUTES` | `15` | hold lifetime — `expiresAt = now + this` on every Reserve |
+| `RESERVATION_SWEEP_BATCH_SIZE` | `200` | rows one expired-reservation sweep scans and expires; a ceiling a caller cannot raise |
+| `RESERVATION_SWEEP_TRANSACTION_SIZE` | `25` | rows one sweep transaction expires — bounds how long it holds row locks |
 | `RETURN_WINDOW_DAYS` | `30` | a `shipped` order is returnable only within this window; a `delivered` one always is |
 | `OCC_RETRY_ATTEMPTS` | `5` | bounded retry budget for version-checked writes |
 | `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows |
@@ -1483,7 +1488,7 @@ Deliberate gaps, each with the seam already in place:
 
 | Gap | Seam that exists |
 | --- | --- |
-| Reservation TTL sweeper | `Reservation.expire()` has no caller; manual release is the only reclaim tool |
+| A running reservation TTL sweeper | `SweepExpiredReservationsUseCase` is wired and unit-covered, but nothing invokes it — no schedule, no endpoint; manual release is still the only reachable reclaim tool |
 | Event-store read/query endpoints | both append-only tables are populated and already indexed for the reads (`IDX_DOMAIN_EVENT_CORRELATION`, `IDX_AUDIT_LOG_ENTRY_ACTOR`, `IDX_AUDIT_LOG_ENTRY_ACTION`); no repository read, no controller |
 | Event retention / purge / event-sourced replay | — |
 | Delivery-row purge worker | `RETENTION_DELIVERY_DAYS` is Joi-validated; nothing reads it yet |
