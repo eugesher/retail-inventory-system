@@ -1,12 +1,10 @@
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { PinoLogger } from 'nestjs-pino';
 
+import { IReservationSweepResult } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
-import {
-  ISweepExpiredReservationsResult,
-  SweepExpiredReservationsUseCase,
-} from '../../../application/use-cases';
+import { SweepExpiredReservationsUseCase } from '../../../application/use-cases';
 import {
   RESERVATION_SWEEP_INTERVAL_NAME,
   ReservationSweepScheduler,
@@ -15,7 +13,7 @@ import {
 const INTERVAL_SECONDS = 2;
 const INTERVAL_MS = INTERVAL_SECONDS * 1000;
 
-const EMPTY_SWEEP: ISweepExpiredReservationsResult = {
+const EMPTY_SWEEP: IReservationSweepResult = {
   scanned: 0,
   expired: 0,
   skipped: 0,
@@ -26,7 +24,7 @@ const EMPTY_SWEEP: ISweepExpiredReservationsResult = {
 // so the double needs nothing else. The real `SchedulerRegistry` is used as-is — it is a
 // plain class with a no-arg constructor and a `Map` behind it.
 class FakeSweepUseCase {
-  public readonly execute = jest.fn<Promise<ISweepExpiredReservationsResult>, []>(() =>
+  public readonly execute = jest.fn<Promise<IReservationSweepResult>, []>(() =>
     Promise.resolve(EMPTY_SWEEP),
   );
 }

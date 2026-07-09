@@ -386,14 +386,15 @@ routes through `stockCache.withInvalidation(...)` (post-commit invalidation,
 | `inventory.stock-level.transfer` | `TransferStockUseCase` | atomic two-location on-hand move — two `StockLevel` writes + a paired `transfer-out`/`transfer-in` `adjustment` movement |
 | `inventory.reservation.reserve` | `ReserveStockUseCase` | no-oversell guard; idempotent by *absolute* quantity on the triple; `expiresAt = now + RESERVATION_TTL_MINUTES` |
 | `inventory.reservation.release` | `ReleaseReservationUseCase` | selector is `reservationId` **or** `cartId` (+ optional facets); both/neither → `400` |
+| `inventory.reservation.sweep` | `SweepExpiredReservationsUseCase` | the on-demand twin of the sweep timer — same use case, plus a staff `actorId` on every ledger row; `batchSize` clamped to `RESERVATION_SWEEP_BATCH_SIZE` |
 | `inventory.reservation.allocate` | `AllocateStockUseCase` | cart holds → order allocation at place-time; per line refresh-then-commit, drift-rebalance, or `allocateDirect` fallback; all-lines-atomic |
 | `inventory.allocation.cancel` | `CancelAllocationUseCase` | reverses an order's allocation; touches no reservation rows |
 | `inventory.stock.commit-sale` | `CommitSaleUseCase` | ship-from-allocated; **idempotency-first on `fulfillmentId`**; decrements on-hand **and** allocated |
 | `inventory.stock.restock-from-return` | `RestockFromReturnUseCase` | **idempotency-first on `returnRequestId`**; raises on-hand only, so no low-stock re-fire |
 
-The reservation/allocate/commit-sale/restock RPCs have **no gateway HTTP route** — they are
-driven retail → inventory. `CatalogEventsConsumer` handles `catalog.variant.created` →
-`AutoInitStockLevelUseCase`.
+The reserve / allocate / cancel-allocation / commit-sale / restock RPCs have **no gateway HTTP
+route** — they are driven retail → inventory. `CatalogEventsConsumer` handles
+`catalog.variant.created` → `AutoInitStockLevelUseCase`.
 
 ADRs: [027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md),
 [030](docs/adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md),
@@ -740,7 +741,10 @@ batches, returns the units, appends a negative `release` movement with `reason_c
 'expired'`, and emits one `inventory.stock.released` **per hold**. Between a hold's `expiresAt`
 and the tick that observes it, `available` understates reality — the system under-sells, never
 over-sells — so the sweep should tick well inside the TTL. A stranded hold is never lost
-either way: the next Reserve on the same triple reuses the row. See
+either way: the next Reserve on the same triple reuses the row. An operator who cannot wait
+for the next tick runs the same sweep on demand via
+`POST /api/inventory/reservations/sweep` — one implementation, two callers, and the manual one
+attributes each ledger row to the staff principal. See
 [ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md).
 
 **Audit, not balance.** `stock_movement` is an append-only audit trail; the running totals on
@@ -865,12 +869,17 @@ An unknown media owner is a `200 []`, not a `404`.
 | `POST` | `/inventory/variants/:variantId/stock/receive` | `inventory:adjust` — `{ stockLocationId?, quantity }` |
 | `POST` | `/inventory/variants/:variantId/stock/adjust` | `inventory:adjust` — `{ stockLocationId?, quantityDelta, reasonCode }` |
 | `POST` | `/inventory/variants/:variantId/stock/transfer` | `inventory:transfer` — `{ fromLocationId, toLocationId, quantity }` |
+| `POST` | `/inventory/reservations/sweep` | `inventory:adjust` — `{ batchSize? }`, expires elapsed holds on demand |
 | `POST` | `/inventory/reservations/:reservationId/release` | `inventory:adjust` — the operator manual release |
 
 A variant with no stock rows is a `200` zero-availability answer (`locations: []`), not a
-`404`. The manual release is the **only operator-reachable hold-freeing tool** until a TTL
-sweeper lands; source the `reservationId` from the reserve-path logs, the
-`inventory.stock.reserved` event, or the DB — there is no reservation read endpoint by design.
+`404`. The two reservation routes share `inventory:adjust` because they do the same thing to
+the books — return held units to `available` and append a `release` ledger row. The sweep runs
+the same use case the inventory service's timer ticks and answers
+`{ scanned, expired, skipped, durationMs }` where `scanned = expired + skipped`; it needs no
+`Idempotency-Key`, since a second call finds the holds already `expired` and skips them. The
+by-id release needs a `reservationId` — source it from the reserve-path logs, the
+`inventory.stock.reserved` event, or the DB; there is no reservation read endpoint by design.
 
 ### Cart
 
@@ -1492,7 +1501,6 @@ Deliberate gaps, each with the seam already in place:
 
 | Gap | Seam that exists |
 | --- | --- |
-| An operator-triggered reservation sweep | the timer drives `SweepExpiredReservationsUseCase` every `RESERVATION_SWEEP_INTERVAL_SECONDS`, but a human cannot force one — no RPC routing key, no gateway route; manual release by id is the only on-demand reclaim tool |
 | Event-store read/query endpoints | both append-only tables are populated and already indexed for the reads (`IDX_DOMAIN_EVENT_CORRELATION`, `IDX_AUDIT_LOG_ENTRY_ACTOR`, `IDX_AUDIT_LOG_ENTRY_ACTION`); no repository read, no controller |
 | Event retention / purge / event-sourced replay | — |
 | Delivery-row purge worker | `RETENTION_DELIVERY_DAYS` is Joi-validated; nothing reads it yet |

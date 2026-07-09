@@ -208,12 +208,12 @@ tables.** Behaviour lives in the use case — read it, don't look for it here.
 | `inventory.stock-level.get` / `.receive` / `.adjust` / `.transfer` | `QueryAvailability` / `ReceiveStock` / `AdjustStock` / `TransferStock` |
 | `inventory.location.list` | `ListLocations` |
 | `inventory.stock-movement.list` | `ListStockMovements` |
-| `inventory.reservation.reserve` / `.release` / `.allocate` | `ReserveStock` / `ReleaseReservation` / `AllocateStock` |
+| `inventory.reservation.reserve` / `.release` / `.sweep` / `.allocate` | `ReserveStock` / `ReleaseReservation` / `SweepExpiredReservations` / `AllocateStock` |
 | `inventory.allocation.cancel` | `CancelAllocation` |
 | `inventory.stock.commit-sale` | `CommitSale` |
 | `inventory.stock.restock-from-return` | `RestockFromReturn` |
 
-Served by `stock.controller.ts` (12 `@MessagePattern`). The reserve / allocate /
+Served by `stock.controller.ts` (13 `@MessagePattern`). The reserve / allocate /
 cancel-allocation / commit-sale / restock RPCs have **no gateway HTTP route** — retail
 drives them.
 
@@ -369,8 +369,11 @@ advisory candidate scan), `STOCK_MOVEMENT_REPOSITORY`
 `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
 `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS` (the scheduler's,
 not the use case's), `OCC_RETRY_ATTEMPTS`.
-`SweepExpiredReservationsUseCase` (ADR-038) has exactly one caller — `ReservationSweepScheduler`
-(`infrastructure/scheduling/`). No RPC, no HTTP route.
+`SweepExpiredReservationsUseCase` (ADR-038) has two callers and one implementation:
+`ReservationSweepScheduler` (`infrastructure/scheduling/`) and the `inventory.reservation.sweep`
+`@MessagePattern`, behind `POST /api/inventory/reservations/sweep` (`inventory:adjust`). The
+only difference is `actorId` — `null` for a tick. Its result type is the wire contract
+`IReservationSweepResult`, not a local interface.
 Shared application helpers: `use-cases/stock-mutation.ts` (`runWithStockWriteRetry`,
 `applyOnHandChange`), `reservation-mutation.ts`, `low-stock.emitter.ts`,
 `movement-recorded.emitter.ts`, `stock-write-conflict.error.ts`, `stock-location.guard.ts`,

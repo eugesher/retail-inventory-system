@@ -25,6 +25,11 @@ export const ROUTING_KEYS = {
   // `IReservationReleaseResult` (ADR-030 §5).
   INVENTORY_RESERVATION_RESERVE: 'inventory.reservation.reserve',
   INVENTORY_RESERVATION_RELEASE: 'inventory.reservation.release',
+  // `inventory.reservation.sweep` → `SweepExpiredReservationsUseCase` (RPC, Gateway →
+  // Inventory): expires `active` holds whose TTL has elapsed, returns their quantity to
+  // `available`, writes one negative `release` movement each, and emits
+  // `inventory.stock.released` per hold. Runs the same code the scheduled sweep runs.
+  INVENTORY_RESERVATION_SWEEP: 'inventory.reservation.sweep',
   // `inventory.reservation.allocate` → `AllocateStockUseCase` → `IAllocationResult`
   // (converts a cart's holds into an order's allocations at place-time, with a
   // direct-allocation fallback) and `inventory.allocation.cancel` →

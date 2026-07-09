@@ -6,6 +6,8 @@ import {
   IPage,
   IReservationReleasePayload,
   IReservationReleaseResult,
+  IReservationSweepPayload,
+  IReservationSweepResult,
   IStockAdjustPayload,
   IStockLocationsListPayload,
   IStockMovementListPayload,
@@ -100,7 +102,7 @@ export class InventoryRabbitmqAdapter implements IInventoryGatewayPort {
     );
   }
 
-  // The audit-list and manual-release RPCs take the FULL wire payload (the
+  // The audit-list, manual-release and sweep RPCs take the FULL wire payload (the
   // controller already folded the REQUIRED `correlationId` + the release's
   // `reason` / `actorId`), so unlike the methods above there is no separate
   // `correlationId` argument to stitch — the payload is sent verbatim.
@@ -121,6 +123,17 @@ export class InventoryRabbitmqAdapter implements IInventoryGatewayPort {
     return firstValueFrom(
       this.client.send<IReservationReleaseResult, IReservationReleasePayload>(
         ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE,
+        payload,
+      ),
+    );
+  }
+
+  public async sweepReservations(
+    payload: IReservationSweepPayload,
+  ): Promise<IReservationSweepResult> {
+    return firstValueFrom(
+      this.client.send<IReservationSweepResult, IReservationSweepPayload>(
+        ROUTING_KEYS.INVENTORY_RESERVATION_SWEEP,
         payload,
       ),
     );

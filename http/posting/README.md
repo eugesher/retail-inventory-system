@@ -66,12 +66,12 @@ The Kulala `{{$guid}}` maps to a `setup` script. Two shapes exist:
 
 ## Subcollections
 
-All 16 Kulala files are ported (185 requests). Each folder mirrors the
+All 16 Kulala files are ported (187 requests). Each folder mirrors the
 same-named `../kulala/<name>.http` and carries its own `scripts.py`.
 
 | Folder | Requests | Folder | Requests |
 | --- | ---: | --- | ---: |
-| `auth/` | 9 | `inventory/` | 13 |
+| `auth/` | 9 | `inventory/` | 15 |
 | `cart/` | 10 | `notifications/` | 13 |
 | `catalog/` | 10 | `order/` | 12 |
 | `catalog-categories/` | 18 | `order-cancel/` | 13 |

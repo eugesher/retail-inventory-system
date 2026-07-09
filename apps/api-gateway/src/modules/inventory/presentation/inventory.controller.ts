@@ -27,6 +27,7 @@ import {
   ICurrentUser,
   IPage,
   IReservationReleaseResult,
+  IReservationSweepResult,
   IStockTransferResult,
   PermissionCodeEnum,
   ReservationView,
@@ -44,12 +45,14 @@ import {
   ListVariantMovementsUseCase,
   ReceiveStockUseCase,
   ReleaseReservationUseCase,
+  SweepReservationsUseCase,
   TransferStockUseCase,
 } from '../application/use-cases';
 import {
   AdjustStockRequestDto,
   MovementsQueryDto,
   ReceiveStockRequestDto,
+  SweepReservationsRequestDto,
   TransferStockRequestDto,
   VariantStockQueryDto,
 } from './dto';
@@ -63,12 +66,13 @@ import {
 // in stock before checking out; the stock-location list and the per-variant
 // movements audit read are operational data, so they require `inventory:read`; the
 // receive/adjust/transfer writes require `inventory:adjust` / `inventory:transfer`;
-// the manual reservation release is an operator action over the holds, so it reuses
+// the manual reservation release and the on-demand reservation sweep are operator
+// actions over the holds — both return held units to `available` — so both reuse
 // `inventory:adjust` (no new permission code was minted — the existing
 // read/adjust codes cover the audit + ops surface, ADR-024). Every permission code
 // is staff-only — customer tokens carry no `permissions` claim — so the location
-// list, the audit read, the writes, and the manual release are staff-only by
-// construction.
+// list, the audit read, the writes, the manual release, and the sweep are staff-only
+// by construction.
 @ApiTags('Inventory')
 @Controller('inventory')
 export class InventoryController {
@@ -80,6 +84,7 @@ export class InventoryController {
     private readonly transferStockUseCase: TransferStockUseCase,
     private readonly listVariantMovementsUseCase: ListVariantMovementsUseCase,
     private readonly releaseReservationUseCase: ReleaseReservationUseCase,
+    private readonly sweepReservationsUseCase: SweepReservationsUseCase,
   ) {}
 
   @Get('locations')
@@ -243,6 +248,53 @@ export class InventoryController {
       { ...dto, variantId, actorId: actor.id },
       correlationId,
     );
+  }
+
+  // Declared BEFORE the by-id release below. The two cannot collide today —
+  // `reservations/sweep` is two segments and the release route is three — but a
+  // literal segment ahead of its `:param` sibling is the ordering a future reader
+  // should never have to re-derive.
+  @Post('reservations/sweep')
+  @RequiresPermission(PermissionCodeEnum.INVENTORY_ADJUST)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Sweep expired reservation holds on demand (staff, inventory:adjust)',
+  })
+  // Runs the SAME sweep the inventory service ticks on a timer — one implementation,
+  // two callers. Use it after a broker outage, after a bulk cart abandonment, or to
+  // watch the reclaim happen instead of waiting for the next tick. Optional body
+  // `{ batchSize? }`; the service clamps the value to its configured ceiling.
+  //
+  // No `Idempotency-Key` (ADR-036): the sweep is idempotent by construction — a second
+  // invocation finds the holds already `expired` and skips them, so a replay moves no
+  // counter. Do not add one.
+  @ApiOkResponse({
+    description:
+      'Sweep counters. `scanned = expired + skipped` always holds: a skipped candidate is one a concurrent writer had already settled or refreshed.',
+    schema: {
+      type: 'object',
+      properties: {
+        scanned: { type: 'number' },
+        expired: { type: 'number' },
+        skipped: { type: 'number' },
+        durationMs: { type: 'number' },
+      },
+    },
+  })
+  @ApiProduces('application/json')
+  public async sweepReservations(
+    @Body() dto: SweepReservationsRequestDto,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<IReservationSweepResult> {
+    // The staff principal is the ONLY difference between this and a scheduled tick:
+    // it lands on every `release` ledger row the invocation writes (ADR-028).
+    return this.sweepReservationsUseCase.execute({
+      batchSize: dto.batchSize,
+      actorId: actor.id,
+      correlationId,
+    });
   }
 
   @Post('reservations/:reservationId/release')

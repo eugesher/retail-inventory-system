@@ -268,8 +268,11 @@ none: a background tick has no request scope. It is logged as an **inline field*
   it — belongs in `infrastructure/`, never in `application/`, the notification
   `DeliveryRetryScheduler` and retail `IdempotencyPurgeScheduler` precedent. See
   [`02-sweeper-cron-and-emit-granularity.md`](02-sweeper-cron-and-emit-granularity.md).
-- **No operator endpoint.** No RPC routing key, no gateway route: the timer is the only
-  caller.
+- **No operator endpoint *in this file*.** The RPC routing key, the 13th `@MessagePattern`,
+  and the `POST /api/inventory/reservations/sweep` route that let a human force a sweep are
+  described in
+  [`03-manual-sweep-admin-endpoint.md`](03-manual-sweep-admin-endpoint.md). They call this
+  use case unchanged — there is no second sweep implementation.
 - **No lock.** Stated as a design commitment, not an omission: see §4.
 - **No migration.** The index the scan needs already exists.
 

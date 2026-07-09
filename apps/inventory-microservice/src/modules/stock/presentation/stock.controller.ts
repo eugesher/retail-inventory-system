@@ -11,6 +11,8 @@ import {
   IReservationReleasePayload,
   IReservationReleaseResult,
   IReservationReservePayload,
+  IReservationSweepPayload,
+  IReservationSweepResult,
   IRestockFromReturnPayload,
   IRestockFromReturnResult,
   IStockAdjustPayload,
@@ -40,6 +42,7 @@ import {
   ReleaseReservationUseCase,
   ReserveStockUseCase,
   RestockFromReturnUseCase,
+  SweepExpiredReservationsUseCase,
   TransferStockUseCase,
 } from '../application/use-cases';
 
@@ -52,6 +55,7 @@ export class StockController {
     private readonly adjustStock: AdjustStockUseCase,
     private readonly reserveStock: ReserveStockUseCase,
     private readonly releaseReservation: ReleaseReservationUseCase,
+    private readonly sweepExpiredReservations: SweepExpiredReservationsUseCase,
     private readonly allocateStock: AllocateStockUseCase,
     private readonly cancelAllocation: CancelAllocationUseCase,
     private readonly commitSale: CommitSaleUseCase,
@@ -133,6 +137,21 @@ export class StockController {
     @Payload() payload: IReservationReleasePayload,
   ): Promise<IReservationReleaseResult> {
     return this.releaseReservation.execute(payload);
+  }
+
+  // Sweep Expired Reservations (ADR-038): the on-demand twin of the timer. It runs
+  // the SAME use case `ReservationSweepScheduler` ticks — there is no second sweep
+  // implementation — so the only difference is `actorId`, which the gateway folds in
+  // from the staff principal and which lands on every `release` ledger row this
+  // invocation writes. `batchSize` is an override the use case clamps into
+  // `[1, RESERVATION_SWEEP_BATCH_SIZE]`. A sweep that exhausts its retry budget
+  // surfaces `STOCK_WRITE_CONFLICT` → `409` through the `InventoryRpcExceptionFilter`,
+  // which is the honest answer: the system is under write contention, try again.
+  @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_SWEEP)
+  public handleReservationSweep(
+    @Payload() payload: IReservationSweepPayload,
+  ): Promise<IReservationSweepResult> {
+    return this.sweepExpiredReservations.execute(payload);
   }
 
   // Allocate Stock (ADR-030): converts a cart's holds into an order's allocations
