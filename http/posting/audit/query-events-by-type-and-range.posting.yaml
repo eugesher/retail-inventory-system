@@ -1,0 +1,12 @@
+name: query-events-by-type-and-range
+description: |-
+  GET /api/audit/events  (Bearer — audit:read)
+  One event type inside one inclusive time window — the "how many orders were placed
+  last quarter, and by whom" read. `eventType` is the FULL dotted routing key, not the
+  aggregate token. `from`/`to` are ISO-8601 instants bounding occurredAt inclusively.
+  Widen the window if this returns nothing; the seed writes no domain events, only a
+  running system does.
+url: $ENV_BASE_URL/audit/events?eventType=retail.order.placed&from=2026-01-01T00:00:00.000Z&to=2027-01-01T00:00:00.000Z
+headers:
+- name: Authorization
+  value: Bearer $accessToken

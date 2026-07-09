@@ -676,8 +676,9 @@ calls + `init()` + `startAllMicroservices()`. It never calls `listen()`, so the 
 opens no TCP port. `audit.staff.action` remains the one `audit.` *event* — it rides
 `ris.events` into the firehose queue and is never routed here.
 
-No gateway HTTP route reaches these RPCs yet. To inspect `ris_eventstore` from outside, use
-SQL, exactly as the `test/event-store-*.e2e-spec.ts` suites do.
+The gateway's `modules/audit/` fronts all three at `GET /api/audit/events`,
+`GET /api/audit/entries` and `GET /api/audit/trace/:correlationId`, behind `audit:read`
+([§6](#6-http-api)).
 
 ---
 
@@ -969,6 +970,28 @@ directly. A permission code is a *staff override over an owner-check*, never a c
 The gateway resolves the `marketing.email.promo` default and **mints a fresh `campaignId`
 per request**, so repeated sends are distinct rows. `customerEmail` is a documented operator
 input, not a cross-module lookup.
+
+### Audit and event store (staff-only)
+
+| Method | Route | Auth |
+| --- | --- | --- |
+| `GET` | `/audit/events` | `audit:read` — `?eventType`, `?aggregateType`, `?aggregateId`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize` |
+| `GET` | `/audit/entries` | `audit:read` — `?actorId`, `?entityType`, `?entityId`, `?action`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize` |
+| `GET` | `/audit/trace/:correlationId` | `audit:read` — both logs for one request, each oldest-first |
+
+Three questions: *what did the system do* (`domain_event`), *what did a person do*
+(`audit_log_entry`), *what did this one request cause* (both, joined by correlation id). Every
+filter is optional and names an **indexed** column — the JSON bodies (`payload`, `before`,
+`after`) are returned but never searched.
+
+`pageSize` defaults to 20 and is **capped at 100 by the event store's use case**, not by the
+gateway DTO, so a direct RPC caller inherits the same ceiling. The DTO owns shape instead: an
+inverted `from`/`to` window is a `400` here, because the event store would answer it with a
+silently empty page. Nothing in this area ever returns a `404` — an unknown correlation id is a
+`200` with two empty arrays, and an unmatched filter set a `200` empty page.
+
+`?action=` takes the stable **event-name** string (`StaffUserRolesAssigned`, `RefundIssued`),
+never a permission code — the ingest maps `action ← IAuditLogEvent.name`.
 
 ### Admin
 
@@ -1525,7 +1548,8 @@ Deliberate gaps, each with the seam already in place:
 
 | Gap | Seam that exists |
 | --- | --- |
-| Event-store read/query **HTTP endpoints** | the three `audit.*` RPCs answer on `event_store_query_queue` and `audit:read` is already seeded onto `admin`. No gateway module fronts them, so there is no `/api/audit/*` route yet ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
+| Free-text / JSON-path search over an event `payload` or an audit `before` / `after` | the columns are returned by `GET /api/audit/*` but no index can serve a predicate over them, so none is offered ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
+| Keyset (cursor) pagination for deep offsets over `domain_event` | `clampPageWindow` bounds the page, not the offset; `skip((page - 1) * size)` still walks the skipped rows ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
 | Event retention / purge / event-sourced replay | — |
 | Delivery-row purge worker | `RETENTION_DELIVERY_DAYS` is Joi-validated; nothing reads it yet |
 | Real payment processor, partial captures, a gateway `fail` outcome | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter` |

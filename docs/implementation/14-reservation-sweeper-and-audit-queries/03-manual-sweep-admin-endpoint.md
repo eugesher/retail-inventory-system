@@ -203,6 +203,8 @@ TTL sweep.
   advisory scan, the two bounds, and the race it settles without a lock.
 - [`02-sweeper-cron-and-emit-granularity.md`](02-sweeper-cron-and-emit-granularity.md) — the
   timer that is the sweep's other caller, and why it emits one event per hold.
+- [`07-request-libraries-audit-and-sweep.md`](07-request-libraries-audit-and-sweep.md) — how to
+  run these two requests in either library, and why a second sweep reports `expired: 0`.
 - [ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md) — the decision record for
   the whole capability, including the batch-size ceiling this route may lower but not raise.
 - [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) — the four writes that do

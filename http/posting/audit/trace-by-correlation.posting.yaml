@@ -1,0 +1,25 @@
+name: trace-by-correlation
+description: |-
+  GET /api/audit/trace/:correlationId  (Bearer — audit:read)
+  The whole causal chain of one request, reassembled from the two logs by the single id
+  that threads them. Returns { events, auditEntries } — two arrays, each ordered FORWARD
+  in time (occurredAt ascending, id ascending as the tiebreaker for rows sharing a
+  millisecond), never merged into one interleaved stream: they answer different questions
+  and their ids live in different spaces. Unpaginated, because a correlation id scopes
+  exactly one request's chain, which is bounded and small.
+
+  Read the `events` array top to bottom and it tells the story: an order cancellation, for
+  instance, reads inventory.stock-movement.recorded -> inventory.stock.released ->
+  retail.order.cancelled -> retail.refund.issued, with the matching RefundIssued row
+  sitting in `auditEntries`. That is one HTTP call fanning out across two services and an
+  in-service consumer, recovered from two tables by one id.
+
+  `auditEntries` may hold more than one copy of the same action. audit_log_entry has no
+  dedupe key, so an at-least-once redelivery of an audit.staff.action message appends a
+  second row; domain_event carries a composite UNIQUE and swallows the duplicate.
+
+  $tracedCorrelationId is published by `query-events-by-aggregate`; run that first.
+url: $ENV_BASE_URL/audit/trace/$tracedCorrelationId
+headers:
+- name: Authorization
+  value: Bearer $accessToken

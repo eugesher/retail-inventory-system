@@ -286,3 +286,6 @@ like every other queue in this system.
 - [`04-audit-query-read-seams-and-indexes.md`](04-audit-query-read-seams-and-indexes.md) — the
   three use cases this transport exposes, their filters, their indexes, and why an inverted
   range is an empty page.
+- [`06-audit-proxy-endpoints-and-pagination.md`](06-audit-proxy-endpoints-and-pagination.md) —
+  the API gateway module that consumes this transport, and why a missing consumer on
+  `event_store_query_queue` reaches an HTTP caller as a hung request rather than an error.

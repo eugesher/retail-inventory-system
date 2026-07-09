@@ -1,0 +1,13 @@
+name: query-entries-by-actor
+description: |-
+  GET /api/audit/entries  (Bearer — audit:read)
+  Everything ONE staff principal did, newest first — the seeded admin, whose id is a
+  fixed UUID (scripts/test-db-seed.ts). Rows written with a NULL actor (a pre-auth
+  LoginFailed, an unattributed background mutation such as the auto-refund-from-cancel
+  path) are matched by no actorId a caller can pass: `WHERE actor_id = ?` never matches
+  a NULL. Their actorType is `system` rather than `staff-user`; list them by dropping
+  this filter.
+url: $ENV_BASE_URL/audit/entries?actorId=00000000-0000-4000-a000-000000000001&pageSize=10
+headers:
+- name: Authorization
+  value: Bearer $accessToken

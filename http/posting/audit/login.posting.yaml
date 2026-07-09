@@ -1,0 +1,20 @@
+name: login
+description: |-
+  POST /api/auth/staff/login
+  Seeded admin login (admin@example.com / admin1234). Response is
+  TokenResponseDto { accessToken, refreshToken, expiresIn }. This call is itself
+  audited: it emits an audit.staff.action event whose `action` is `UserLoggedIn`,
+  so it seeds a row the entries reads below can find.
+method: POST
+url: $ENV_BASE_URL/auth/staff/login
+body:
+  content: |-
+    {
+      "email": "admin@example.com",
+      "password": "admin1234"
+    }
+headers:
+- name: Content-Type
+  value: application/json
+scripts:
+  on_response: audit/scripts.py:capture_login
