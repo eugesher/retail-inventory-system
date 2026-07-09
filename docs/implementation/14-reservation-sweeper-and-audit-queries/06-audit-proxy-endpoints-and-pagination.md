@@ -210,6 +210,9 @@ one.
 - [`07-request-libraries-audit-and-sweep.md`](07-request-libraries-audit-and-sweep.md) — the
   Kulala and Posting request files that exercise these routes, and the chaining that carries a
   correlation id from an events query into the trace.
+- [`08-sweep-vs-release-race-and-e2e-coverage.md`](08-sweep-vs-release-race-and-e2e-coverage.md)
+  — the end-to-end suites behind these three routes, why a suite that calls them must boot the
+  event store's hybrid shape, and why the ingest suites still read raw SQL.
 - [ADR-039](../../adr/039-audit-and-event-store-query-surface.md) — the decision record: the two
   queries, the trace, the dedicated RPC queue, this gateway proxy, and the alternatives each
   lost to.

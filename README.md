@@ -1234,16 +1234,23 @@ public stock read, the uncached movements ledger, the delivery audit reads, and 
 | Capability | Suites |
 | --- | --- |
 | Reservations + movements | `cart-reserve-release`, `place-order-allocates`, `inventory-movements-audit`, **`concurrent-oversell`** |
+| Reservation TTL sweep | `reservation-sweeper`, `reservation-sweeper-cron`, **`concurrent-sweep-release`** |
 | Fulfillment + ship + cancel | `fulfillment-happy-path`, `fulfillment-partial-ship`, `cancel-order-pre-fulfillment`, `cancel-order-blocked-after-ship`, `ship-triggers-capture`, **`concurrent-ship-cancel`** |
 | Returns + refunds | `return-restock-refund`, `return-rejected`, `auto-refund-from-cancel`, `manual-refund` |
 | Notifications | `notifications-place-order`, `notifications-ship-fulfillment`, `notifications-low-stock`, `notifications-template-edit`, `notifications-retry`, `notification` |
 | Event store | `event-store-firehose`, `event-store-audit-log`, `event-store-idempotency` |
+| Audit + event-store reads | `audit-event-query`, `audit-entry-query`, `audit-trace-correlation` |
 | Idempotency + OCC | `idempotency-{place-order,different-body,capture,ship,refund,purge}`, `occ-cart`, `concurrent-place-order`, `inventory-concurrency` |
 | Consent + erasure | `consent-roundtrip`, `notification-consent-gating`, `erase-customer-tombstone`, `erase-customer-confirm-guard` |
 
-The two concurrency proofs (`concurrent-oversell`, `concurrent-ship-cancel`) are
-**winner-agnostic** and must stay green across five consecutive runs. See
-[the concurrent-oversell walkthrough](docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md).
+The three concurrency proofs (`concurrent-oversell`, `concurrent-ship-cancel`,
+`concurrent-sweep-release`) are **winner-agnostic** and must stay green across five consecutive
+runs. See [the concurrent-oversell walkthrough](docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md)
+and [the sweep-vs-release walkthrough](docs/implementation/14-reservation-sweeper-and-audit-queries/08-sweep-vs-release-race-and-e2e-coverage.md).
+
+The ingest suites (`event-store-*`, `idempotency-place-order`, `idempotency-refund`) assert by
+direct SQL even though `GET /api/audit/*` could answer the same questions: a suite proving the
+**write** path must not depend on the read path to do it.
 
 ### Request collections
 

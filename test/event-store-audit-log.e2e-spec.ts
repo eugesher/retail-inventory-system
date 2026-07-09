@@ -18,7 +18,9 @@ import {
 // gateway emits `audit.staff.action` onto the `ris.events` topic exchange, the event
 // store's `FirehoseConsumer` routes it (alone among the firehose) to the audit-log
 // ingest, and a row lands in the isolated `ris_eventstore.audit_log_entry`. The suite
-// reads the row directly by SQL — there is no query endpoint (a deferred capability).
+// reads the row directly by SQL: it is proving INGESTION, and reading through
+// `GET /api/audit/entries` would make that assertion depend on the read path.
+// `audit-entry-query.e2e-spec.ts` proves the read path over the same row.
 //
 // The actual emitted `action` is the in-process `IAuditLogEvent.name` string,
 // `'StaffUserRolesAssigned'` — NOT a permission code. The mapping records the whole

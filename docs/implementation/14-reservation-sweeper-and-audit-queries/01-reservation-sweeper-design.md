@@ -283,6 +283,9 @@ the loop — the scheduler does exactly that.
 
 ## Cross-links
 
+- [`08-sweep-vs-release-race-and-e2e-coverage.md`](08-sweep-vs-release-race-and-e2e-coverage.md)
+  — the lock-free race drawn out interleaving by interleaving, and the end-to-end suite that
+  proves `quantity_reserved` is decremented exactly once per hold.
 - [ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md) — this capability's
   decision record.
 - [ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md) — the
