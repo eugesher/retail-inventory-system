@@ -1,0 +1,84 @@
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+
+import { RESERVATION_SWEEP_INTERVAL_SECONDS } from '../../application/ports';
+import { SweepExpiredReservationsUseCase } from '../../application/use-cases';
+
+// The registry key for the timer this class installs. Exported because
+// `onModuleDestroy` must delete the interval under the same name it added, and because a
+// test that needs to reach the live timer resolves `SchedulerRegistry` and asks for it.
+export const RESERVATION_SWEEP_INTERVAL_NAME = 'reservation-ttl-sweep';
+
+// The `@nestjs/schedule` driver for the expired-reservation sweep (ADR-038). It is a
+// provider (not a controller) — `ScheduleModule.forRoot()` (wired in `stock.module.ts`)
+// brings in the `SchedulerRegistry` this class registers its timer with. All sweep logic
+// lives in `SweepExpiredReservationsUseCase`; this class only drives it on a timer and
+// guards the tick so a thrown sweep never crashes the scheduler loop (the notification
+// `DeliveryRetryScheduler` / retail `IdempotencyPurgeScheduler` precedent — the schedule
+// stays in `infrastructure/`, never in the use case).
+//
+// Unlike those two, the cadence is CONFIGURED (`RESERVATION_SWEEP_INTERVAL_SECONDS`, Joi
+// default 60), which is why the interval is registered imperatively rather than declared
+// with a schedule decorator: a decorator's `ms` argument is evaluated when the class is
+// defined, long before the DI container can resolve the injected value. `SchedulerRegistry`
+// is the seam Nest provides for a cadence that is only known at instantiation.
+//
+// The interval decides only how promptly an already-expired hold is reclaimed;
+// `RESERVATION_TTL_MINUTES` is what bounds a hold's life. A cadence longer than the TTL
+// stays oversell-safe — `available` merely understates reality for up to one interval past
+// the TTL (ADR-038 Consequences).
+@Injectable()
+export class ReservationSweepScheduler implements OnModuleInit, OnModuleDestroy {
+  constructor(
+    private readonly sweeper: SweepExpiredReservationsUseCase,
+    private readonly schedulerRegistry: SchedulerRegistry,
+    @Inject(RESERVATION_SWEEP_INTERVAL_SECONDS)
+    private readonly intervalSeconds: number,
+    @InjectPinoLogger(ReservationSweepScheduler.name)
+    private readonly logger: PinoLogger,
+  ) {}
+
+  public onModuleInit(): void {
+    const intervalMs = this.intervalSeconds * 1000;
+    const handle = setInterval(() => void this.sweep(), intervalMs);
+    this.schedulerRegistry.addInterval(RESERVATION_SWEEP_INTERVAL_NAME, handle);
+    // Inline `intervalSeconds` — a scheduler has no request scope, so the request-scoped
+    // `assign()` helper on the logger would throw here (ADR-011 §7). One line per boot, at
+    // `info`: it is the only proof from outside the process that the sweep is armed, and at
+    // what cadence.
+    this.logger.info({ intervalSeconds: this.intervalSeconds }, 'Reservation sweep scheduled');
+  }
+
+  // An imperative `setInterval` outlives the Nest container that created it. Left running,
+  // the timer keeps firing against torn-down repositories and keeps the Node event loop
+  // alive, which in a Jest run means the worker never exits. `deleteInterval` clears the
+  // handle and drops it from the registry.
+  //
+  // `SchedulerOrchestrator.beforeApplicationShutdown` currently clears the WHOLE registry,
+  // so this would mostly happen anyway — but that is a library internal, not a contract,
+  // and it needs `app.close()` to fire. Deleting what we added keeps the handle's lifetime
+  // ours. The `doesExist` guard is load-bearing: `deleteInterval` resolves through
+  // `getInterval`, which throws on an unknown name, so an unguarded call on a container
+  // that never reached `onModuleInit` would mask the real failure.
+  public onModuleDestroy(): void {
+    if (this.schedulerRegistry.doesExist('interval', RESERVATION_SWEEP_INTERVAL_NAME)) {
+      this.schedulerRegistry.deleteInterval(RESERVATION_SWEEP_INTERVAL_NAME);
+    }
+  }
+
+  // The use case mints its own `correlationId` per invocation and reads its own bounds, so
+  // the tick passes nothing.
+  private async sweep(): Promise<void> {
+    try {
+      await this.sweeper.execute();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      // A sweep fault must not stop the scheduler — log and let the next tick try again.
+      // The use case deliberately does not guard its own throws: an exhausted
+      // `OCC_RETRY_ATTEMPTS` budget surfaces `STOCK_WRITE_CONFLICT` here, and under
+      // contention that is a transient condition the next tick resolves.
+      this.logger.warn({ reason }, 'Reservation sweep failed');
+    }
+  }
+}

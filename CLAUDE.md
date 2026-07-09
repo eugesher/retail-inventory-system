@@ -95,10 +95,16 @@ section is the reason to read it.
 
 - **A use case never reads `process.env`.** Config arrives through a value-provider token:
   `OCC_RETRY_ATTEMPTS`, `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
-  `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RETURN_WINDOW_DAYS`,
+  `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS`,
+  `RETURN_WINDOW_DAYS`,
   `IDEMPOTENCY_KEY_TTL_HOURS`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
   `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only, read off `process.env` inside a `useFactory`).
+  `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects: a
+  configured cadence cannot go in an `@Interval`/`@Cron` decorator (its argument is evaluated
+  at class definition), so `ReservationSweepScheduler` registers the timer through
+  `SchedulerRegistry.addInterval` in `onModuleInit` — and **must** `deleteInterval` in
+  `onModuleDestroy`, or a leaked timer hangs the Jest e2e worker.
 - A new `PermissionCodeEnum` member auto-seeds to the `admin` role **only if** it is also
   added to `PERMISSION_SEEDS` in `scripts/test-db-seed.ts`.
 - `EVENTSTORE_DATABASE_URL` is a **required** Joi key in the shared schema, so it must be
@@ -106,8 +112,9 @@ section is the reason to read it.
 
 **Repo**
 
-- `.env.local` **is git-tracked** (CI reads it). `CLAUDE.md` is **untracked**, excluded via
-  `.git/info/exclude` — edits to it never show up in `git status`.
+- `.env.local` **is git-tracked** (CI reads it), but `.env.example` is **not** — `.gitignore`'s
+  `.env.*` glob swallows it and only `.env.local` is force-tracked. An edit to `.env.example`
+  never shows up in `git status`; do not conclude it was missed.
 - Bare `npx jest` fails with a Babel TypeScript parse error (not a code bug). Always pass
   `--config jest.unit.config.js`.
 - `yarn lint` is the **source of truth for where a file belongs**. Never weaken a
@@ -360,9 +367,10 @@ advisory candidate scan), `STOCK_MOVEMENT_REPOSITORY`
 (`append` / `listByVariant` / `existsByReference` — no `save`/`update`/`delete`),
 `STOCK_CACHE`, `STOCK_EVENTS_PUBLISHER`, `TRANSACTION_PORT` (opaque `ITransactionScope`),
 `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
-`RESERVATION_SWEEP_TRANSACTION_SIZE`, `OCC_RETRY_ATTEMPTS`.
-`SweepExpiredReservationsUseCase` (ADR-038) is a registered provider with **no caller** — no
-schedule, no RPC.
+`RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS` (the scheduler's,
+not the use case's), `OCC_RETRY_ATTEMPTS`.
+`SweepExpiredReservationsUseCase` (ADR-038) has exactly one caller — `ReservationSweepScheduler`
+(`infrastructure/scheduling/`). No RPC, no HTTP route.
 Shared application helpers: `use-cases/stock-mutation.ts` (`runWithStockWriteRetry`,
 `applyOnHandChange`), `reservation-mutation.ts`, `low-stock.emitter.ts`,
 `movement-recorded.emitter.ts`, `stock-write-conflict.error.ts`, `stock-location.guard.ts`,
@@ -370,7 +378,10 @@ the view factories.
 Infra: `persistence/` (4 entities/mappers; `StockMovementTypeormRepository` implements the
 port **directly**; `TypeormTransactionAdapter`), `cache/stock.cache.ts` (`getOrLoad` +
 `withInvalidation`), `consumers/catalog-events.consumer.ts`,
-`messaging/stock-rabbitmq.publisher.ts` (two clients).
+`messaging/stock-rabbitmq.publisher.ts` (two clients),
+`scheduling/reservation-sweep.scheduler.ts` (imperative `SchedulerRegistry.addInterval` —
+the cadence is injected, so no `@Interval`; `ScheduleModule.forRoot()` is wired in
+`stock.module.ts`).
 Presentation: `stock.controller.ts` + `inventory-rpc-exception.filter.ts`.
 
 **retail** `modules/cart/` (ADR-028) — the mutable checkout side.

@@ -8,7 +8,8 @@ settles without taking a lock. The whole design is recorded in
 
 The use case is
 `apps/inventory-microservice/src/modules/stock/application/use-cases/sweep-expired-reservations.use-case.ts`.
-It has no schedule and no RPC handler: nothing calls it yet.
+A timer drives it; how that timer is registered, and at what cadence, is the sibling note
+[`02-sweeper-cron-and-emit-granularity.md`](02-sweeper-cron-and-emit-granularity.md).
 
 ## 1. The problem: a hold nobody reclaims
 
@@ -263,18 +264,19 @@ none: a background tick has no request scope. It is logged as an **inline field*
   means a shopper who re-adds the line `reactivate`s the same row rather than duplicating it.
   Rows accumulate with abandoned carts and nothing prunes them. This is an accepted open gap,
   recorded rather than papered over with an env var nothing reads.
-- **No schedule.** The use case is a provider with no caller. The cadence — and the
-  `@nestjs/schedule` import that carries it — belongs in `infrastructure/`, never in
-  `application/`, the notification `DeliveryRetryScheduler` and retail
-  `IdempotencyPurgeScheduler` precedent.
-- **No operator endpoint.** No RPC routing key, no gateway route.
+- **No schedule in this file.** The cadence — and the `@nestjs/schedule` import that carries
+  it — belongs in `infrastructure/`, never in `application/`, the notification
+  `DeliveryRetryScheduler` and retail `IdempotencyPurgeScheduler` precedent. See
+  [`02-sweeper-cron-and-emit-granularity.md`](02-sweeper-cron-and-emit-granularity.md).
+- **No operator endpoint.** No RPC routing key, no gateway route: the timer is the only
+  caller.
 - **No lock.** Stated as a design commitment, not an omission: see §4.
 - **No migration.** The index the scan needs already exists.
 
-Because there is no schedule, **the sweep also does not guard its own throws.** An exhausted
-`OCC_RETRY_ATTEMPTS` budget surfaces `STOCK_WRITE_CONFLICT` and aborts the invocation; chunks
-committed before the failing one stay committed. Whoever drives the sweep owns the `try/catch`
-that keeps a thrown tick from killing the loop.
+**The sweep does not guard its own throws.** An exhausted `OCC_RETRY_ATTEMPTS` budget surfaces
+`STOCK_WRITE_CONFLICT` and aborts the invocation; chunks committed before the failing one stay
+committed. Whoever drives the sweep owns the `try/catch` that keeps a thrown tick from killing
+the loop — the scheduler does exactly that.
 
 ## Cross-links
 
