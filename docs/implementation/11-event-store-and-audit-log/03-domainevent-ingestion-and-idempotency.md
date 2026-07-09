@@ -187,6 +187,7 @@ nothing escapes the handler.
   onto the firehose yet, so the `domain_event` path is exercised by unit tests and a
   manual republish here; its end-to-end proof arrives with the producer dual-publish
   fan-out and the event-store e2e suite.
-- **Read / query paths.** `listByCorrelationId` is implemented on the repository so the
-  seam is complete, but no HTTP/RPC endpoint is built against it — a cross-service-trace
-  query is a later capability.
+- **Read / query paths.** `IDomainEventRepositoryPort` declares `append` and nothing
+  else, so nothing reads the firehose back — today you inspect `ris_eventstore` with
+  SQL. A cross-service-trace query is a later capability that designs its own read
+  surface.

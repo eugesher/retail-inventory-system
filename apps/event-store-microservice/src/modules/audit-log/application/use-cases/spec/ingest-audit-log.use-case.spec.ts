@@ -23,10 +23,6 @@ class FakeAuditLogRepository implements IAuditLogRepositoryPort {
     this.appended.push(entry);
     return Promise.resolve();
   }
-
-  public listByActor(): Promise<AuditLogEntry[]> {
-    return Promise.resolve([]);
-  }
 }
 
 const OCCURRED_AT = '2026-06-27T10:00:00.000Z';

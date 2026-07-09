@@ -28,10 +28,6 @@ class FakeDomainEventRepository implements IDomainEventRepositoryPort {
     this.appended.push(event);
     return Promise.resolve({ inserted: this.nextInserted });
   }
-
-  public listByCorrelationId(): Promise<DomainEvent[]> {
-    return Promise.resolve([]);
-  }
 }
 
 const ROUTING_KEY = 'retail.order.placed';

@@ -650,9 +650,9 @@ aggregateId ← first present of a documented payload-key precedence). A missing
 `occurredAt` is warn-and-dropped.
 
 **No query surface.** The logs are written, idempotent, and proven by the
-`test/event-store-*.e2e-spec.ts` suites, but there is no HTTP or RPC endpoint to read them —
-today you inspect `ris_eventstore` with SQL. See
-[the scope note](docs/implementation/11-event-store-and-audit-log/05-no-query-endpoints-yet.md).
+`test/event-store-*.e2e-spec.ts` suites, but nothing reads them back — the two repository
+ports expose `append` and nothing else, and the service has no HTTP surface at all. Today
+you inspect `ris_eventstore` with SQL, exactly as those e2e suites do.
 
 ---
 
@@ -1484,7 +1484,7 @@ Deliberate gaps, each with the seam already in place:
 | Gap | Seam that exists |
 | --- | --- |
 | Reservation TTL sweeper | `Reservation.expire()` has no caller; manual release is the only reclaim tool |
-| Event-store read/query endpoints | both repositories expose reads (`listByCorrelationId`, `listByActor`); no controller |
+| Event-store read/query endpoints | both append-only tables are populated and already indexed for the reads (`IDX_DOMAIN_EVENT_CORRELATION`, `IDX_AUDIT_LOG_ENTRY_ACTOR`, `IDX_AUDIT_LOG_ENTRY_ACTION`); no repository read, no controller |
 | Event retention / purge / event-sourced replay | — |
 | Delivery-row purge worker | `RETENTION_DELIVERY_DAYS` is Joi-validated; nothing reads it yet |
 | Real payment processor, partial captures, a gateway `fail` outcome | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter` |

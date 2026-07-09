@@ -65,13 +65,13 @@ caller bug (the ingest use case shapes and validates the wire payload first), so
 throws a plain `Error`, not a typed domain exception. Field-level malformed-input
 rejection (drop + warn) is the ingest use case's responsibility, a later capability.
 
-### 2.2 The repositories expose only `append` + reads
+### 2.2 The repositories expose only `append`
 
 `DomainEventTypeormRepository` and `AuditLogEntryTypeormRepository` implement their
 ports **directly**. They deliberately do **not** extend `BaseTypeormRepository`, whose
 public `save` / `softDelete` surface would contradict append-only. The repository
-interface (`IDomainEventRepositoryPort` / `IAuditLogRepositoryPort`) declares only
-`append(...)` plus a future read — there is **no** `save` / `update` / `delete` /
+interface (`IDomainEventRepositoryPort` / `IAuditLogRepositoryPort`) declares
+`append(...)` and nothing else — there is **no** `save` / `update` / `delete` /
 `softDelete` method anywhere on the seam, so an UPDATE or DELETE is *not expressible*
 against these repositories. The single mutating verb, `append`, uses TypeORM's `insert`
 (never `save`-with-id semantics), so there is not even a preload-by-id round trip that
@@ -152,6 +152,6 @@ context module, the entity list registered on the eventstore connection in
 
 **Defers (later capabilities):** the firehose consumer + the in-consumer dispatch by
 routing key, the ingest use cases (including the `correlation_id = ''` coalescing in §3)
-and their idempotency proof, any read/query HTTP path (the `listByCorrelationId` /
-`listByActor` signatures are declared so the seam is complete, but no endpoint is built
-against them), and the producer dual-publish fan-out across the domain-event publishers.
+and their idempotency proof, any read/query path over the two logs (the ports carry no
+read at all — a query surface designs its own), and the producer dual-publish fan-out
+across the domain-event publishers.

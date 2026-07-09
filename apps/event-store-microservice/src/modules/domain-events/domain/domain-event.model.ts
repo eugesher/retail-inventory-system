@@ -58,9 +58,9 @@ export class DomainEvent {
 
   private constructor(props: IDomainEventProps) {
     // The identity invariant: a firehose row without an event type or a producer is
-    // meaningless. These are constructed by the ingest use case from already-shaped
-    // wire payloads, so a violation is an INTERNAL bug — a plain `Error`, not a typed
-    // exception a filter would surface (the event store has no HTTP/RPC surface).
+    // meaningless. These are constructed by the ingest use case from an already-validated
+    // wire payload, so a violation is an INTERNAL caller bug — a plain `Error`, not a
+    // typed domain exception (the `StockMovement.requireSignForType` precedent).
     DomainEvent.requireNonEmpty(props.eventType, 'eventType');
     DomainEvent.requireNonEmpty(props.producer, 'producer');
 

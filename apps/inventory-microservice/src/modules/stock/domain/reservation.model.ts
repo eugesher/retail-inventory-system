@@ -105,9 +105,10 @@ export class Reservation {
     });
   }
 
-  // The load path: rebuilds a persisted hold from storage in ANY state, including
-  // a past `expiresAt` (a stale `active` row that no sweeper has acted on yet). No
-  // guards beyond what the DB already enforced at write time.
+  // The load path: rebuilds a persisted hold from storage in ANY state, including an
+  // `active` row whose `expiresAt` is already in the past — expiry is a wall-clock
+  // fact, not a stored transition, so the row keeps its status until something flips
+  // it. No guards beyond what the DB already enforced at write time.
   public static reconstitute(props: IReservationProps): Reservation {
     return new Reservation(props);
   }
@@ -148,10 +149,9 @@ export class Reservation {
     this.bumpVersion();
   }
 
-  // active → expired (terminal). No caller in this capability beyond symmetry —
-  // the background sweeper that would flip stale holds is a later capability — but
-  // it ships with the status machine so every state is reachable in the domain
-  // spec.
+  // active → expired (terminal). Any other source status is rejected with
+  // `RESERVATION_INVALID_STATE`. Like `release`, it only flips the status: returning
+  // the counter the hold occupied to `available` is the caller's job.
   public expire(): void {
     this.requireActive('expire');
     this._status = ReservationStatusEnum.EXPIRED;
@@ -197,8 +197,8 @@ export class Reservation {
   }
 
   // Strict `<`: a hold whose `expiresAt` equals `now` is NOT yet expired (it
-  // expires the instant the clock passes it). `commit` and the future sweeper both
-  // key on this boundary.
+  // expires the instant the clock passes it). This boundary is the one every
+  // TTL decision keys on.
   public isExpired(now: Date): boolean {
     return this._expiresAt.getTime() < now.getTime();
   }
