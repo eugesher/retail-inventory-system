@@ -62,6 +62,12 @@ section is the reason to read it.
 - `main.ts`'s **first import MUST be** `@retail-inventory-system/observability/tracer`.
   OTel auto-instrumentation patches at module load; anything `require()`d before it is
   invisible to tracing.
+- `NestFactory.createMicroservice` returns an `INestMicroservice`, which cannot
+  `connectMicroservice`. A second transport forces the hybrid `NestFactory.create` form — as in
+  `apps/event-store-microservice/src/main.ts`, the only one. There, `connectMicroservice` marks
+  each transport initialized, so `startAllMicroservices()` never fires `onModuleInit`: the app
+  must `await app.init()` **first**, and must **never** `listen()` (it has no HTTP surface, and
+  `create` binds no port until you do).
 - Never call `PinoLogger.assign()` inside an `@EventPattern` handler — those are not
   request-scoped and it throws. Log `correlationId` inline (ADR-011 §7).
 
@@ -152,7 +158,7 @@ RabbitMQ (request-response RPC + events).
 | `inventory-microservice` | `inventory_queue` | `modules/stock/` |
 | `retail-microservice` | `retail_queue` | `modules/cart/`, `modules/orders/`, `modules/returns/` |
 | `notification-microservice` | `notification_events` | `modules/notifications/` (RMQ-only, no HTTP) |
-| `event-store-microservice` | `event_store_firehose_queue` | `audit-and-events` context; its **own** DB `ris_eventstore` (ADR-034) |
+| `event-store-microservice` | `event_store_firehose_queue` (events) + `event_store_query_queue` (RPC) | `audit-and-events` context; its **own** DB `ris_eventstore` (ADR-034) |
 
 ```
 apps/
@@ -172,13 +178,14 @@ migrations/       # TypeORM migrations + data-source config; migrations/eventsto
 ```
 
 **Queues:** `retail_queue`, `inventory_queue`, `notification_events`, `catalog_queue`,
-`event_store_firehose_queue`.
+`event_store_firehose_queue`, `event_store_query_queue`.
 
 **Exchange:** `EXCHANGES.RIS_EVENTS_TOPIC` (`ris.events`) is the **one live** member
 (`RETAIL`/`INVENTORY`/`NOTIFICATION` stay reserved, default-exchange-only). Every producer
 **dual-publishes** — the existing default-exchange `emit`, then a mirror onto `ris.events`
 via `RisEventsMirrorPublisher` (ADR-035). `event_store_firehose_queue` binds `#` and its
-`FirehoseConsumer` dispatches by routing key.
+`FirehoseConsumer` dispatches by routing key. `event_store_query_queue` is on the **default**
+exchange and carries the three `audit.*` RPCs (ADR-039).
 
 **Two logical databases, one MySQL instance** (ADR-034). Every operational context shares
 `retail_db` (`DATABASE_URL`); the event store owns `ris_eventstore`
@@ -240,6 +247,19 @@ Category and media operations emit **no** events.
 `notification.health.ping` on `health.controller.ts`.
 `record-outcome` is RPC-only by design (no gateway route — it is the ESP-webhook seam).
 
+### Event store (`event_store_query_queue`)
+
+| Routing key | Use case |
+| --- | --- |
+| `audit.event.query` | `QueryDomainEventsUseCase` |
+| `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
+| `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
+
+All three on the context-root `audit-query.controller.ts` (3 `@MessagePattern`), reached
+through `MicroserviceClientEventStoreModule` (`EVENT_STORE_MICROSERVICE`). RPC-only today — no
+gateway HTTP route. `audit.staff.action` is the one `audit.` **event**: it rides `ris.events`
+into the firehose queue and never reaches this controller (ADR-039).
+
 ### Event consumers
 
 | Consumer | Pattern | Dispatches to |
@@ -250,9 +270,10 @@ Category and media operations emit **no** events.
 | notification `ConsentEventsConsumer` | `customer.consent.updated` / `customer.erased` | `CONSENT_CACHE` write-through / evict |
 | event-store `FirehoseConsumer` (`modules/firehose.consumer.ts`) | `@EventPattern('#')` | `audit.staff.action` → `IngestAuditLogUseCase`; everything else → `IngestDomainEventUseCase` |
 
-`FirehoseConsumer` sits at the **context root**, registered as a controller in
-`AuditAndEventsModule` — it injects use cases from **both** sibling modules, and
-`eslint-plugin-boundaries` only lets a module's `infrastructure/` inject its own.
+`FirehoseConsumer` and `AuditQueryController` both sit at the **context root**, registered as
+controllers in `AuditAndEventsModule` — each injects use cases from **both** sibling modules,
+and `eslint-plugin-boundaries` only lets a module's `infrastructure/` (or `presentation/`)
+reach its own.
 
 **Reserved surfaces** (published, captured by the firehose, no business consumer):
 `catalog.product.*`, `catalog.price.*`, `inventory.stock-level.initialized`,
@@ -488,8 +509,13 @@ each declares its own `{ page, size }` request shape.
 Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEventsUseCase`,
 `QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts`
 (heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
-The three read use cases have **no caller** — no controller, no routing key, no HTTP route.
-Consumer: `modules/firehose.consumer.ts`. **No `presentation/` layer.** The event store has no
+The three read use cases are served over RPC; **no gateway HTTP route reaches them.**
+Context-root controllers (`modules/*.ts`, matching no `boundaries` element pattern — each
+injects use cases from both siblings): `firehose.consumer.ts` (`@EventPattern('#')`) and
+`audit-query.controller.ts` (`audit.event.query` / `audit.entry.query` /
+`audit.trace.by-correlation`). `main.ts` is the repo's only **hybrid boot**:
+`NestFactory.create` + two `connectMicroservice` + `init()` + `startAllMicroservices()`, never
+`listen()`. **No `presentation/` layer.** The event store has no
 `*DomainException` / `*RpcExceptionFilter` pair, on purpose (ADR-039): an inverted `from`/`to`
 range yields an empty page, and shape errors belong to the gateway DTO.
 Migrations: `1782521938896-CreateDomainEventTable`, `1782521942829-CreateAuditLogEntryTable`
@@ -504,7 +530,7 @@ Imported via the path aliases in `tsconfig.json` as `@retail-inventory-system/<n
 | `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `audit/` (the event-store read surface: `DomainEventView` / `AuditLogEntryView` + the two query payloads + the correlation-trace payload/result — ADR-039), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception — every `*View` is a **class** with `@ApiResponseProperty`, since `naming-convention` reserves the bare `interface` form for `I`-prefixed names. |
 | `auth` | `AuthModule.forRootAsync({ imports, providers, exports })` (Passport + JwtModule + `JwtStrategy` + the three guards, all global), `AUTH_USER_VALIDATOR`, `@Public` / `@Roles` / `@RequiresPermission` / `@CurrentUser`, runtime `RoleEnum` re-export. |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(entities)` / `.forRootWithUrl(entities, urlEnvVar)`. Apps call `forRoot` at `AppModule` level; per-module registration prefers `forFeature` (auth uses inline `TypeOrmModule.forFeature` — ADR-019). |
-| `messaging` | `MessagingModule`, `MicroserviceClient{Retail,Inventory,Notification,Catalog}Module` + `MicroserviceClientRisEventsModule` (`RIS_EVENTS_PUBLISHER`), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION`), `EXCHANGES`. |
+| `messaging` | `MessagingModule`, `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore}Module` + `MicroserviceClientRisEventsModule` (`RIS_EVENTS_PUBLISHER`), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION` + the three `AUDIT_*_QUERY` RPCs), `EXCHANGES`. |
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel spans), `CacheModule` (`@Global()`, register once at root), `@Cacheable()`, the `CACHE_KEYS` registry, `CacheHelper`. |
 | `observability` | `LoggerModuleConfig` (Pino + redaction + the `logMethod` hook injecting `traceId`/`spanId`), `CorrelationMiddleware`, `CorrelationId`, `CORRELATION_ID_HEADER`, `tracer.ts`, `TraceContextInterceptor` / `MetricsModule` (placeholders). |
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject<TProps>`, `DomainEvent<TAggregateId>`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |

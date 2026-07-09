@@ -107,4 +107,7 @@ export enum MicroserviceMessagePatternEnum {
   NOTIFICATION_DELIVERY_RECORD_OUTCOME = 'notification.delivery.record-outcome',
   NOTIFICATION_DELIVERY_RETRY = 'notification.delivery.retry',
   NOTIFICATIONS_DELIVERY_FAILED = 'notifications.delivery.failed',
+  AUDIT_EVENT_QUERY = 'audit.event.query',
+  AUDIT_ENTRY_QUERY = 'audit.entry.query',
+  AUDIT_TRACE_BY_CORRELATION = 'audit.trace.by-correlation',
 }

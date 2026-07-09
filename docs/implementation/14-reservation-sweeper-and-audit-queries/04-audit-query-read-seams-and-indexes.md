@@ -4,10 +4,10 @@ The event-store microservice has been recording everything and telling nobody. T
 describes the read seams that change that: two filtered, paginated queries over its two
 append-only logs, and one correlation-id trace that stitches them together.
 
-Nothing here is a transport. This slice adds no controller, no routing key, and no HTTP route
-— only application use cases, the repository methods they call, and the wire contracts they
-return. The queue and the RPC namespace that carry them are decided in
-[ADR-039](../../adr/039-audit-and-event-store-query-surface.md) §2.
+Nothing here is a transport — only application use cases, the repository methods they call, and
+the wire contracts they return. The queue and the RPC namespace that carry them are decided in
+[ADR-039](../../adr/039-audit-and-event-store-query-surface.md) §2 and described in the sibling
+note [`05-event-store-query-transport.md`](05-event-store-query-transport.md).
 
 ## 1. What the event store knew and could not say
 
@@ -282,6 +282,9 @@ The same rule applies to both queries, so there is exactly one behaviour to reme
 
 ## 10. Related reading
 
+- [`05-event-store-query-transport.md`](05-event-store-query-transport.md) — the
+  `event_store_query_queue` RPC transport that exposes these three use cases, and the hybrid
+  boot that connects it beside the firehose.
 - [ADR-039](../../adr/039-audit-and-event-store-query-surface.md) — the decision record for the
   whole query capability: the two queries, the trace, the dedicated RPC queue, the gateway
   proxy, and the alternatives each lost to.
