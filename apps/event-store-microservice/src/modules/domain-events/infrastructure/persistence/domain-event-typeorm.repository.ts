@@ -67,14 +67,4 @@ export class DomainEventTypeormRepository implements IDomainEventRepositoryPort 
       throw error;
     }
   }
-
-  public async listByCorrelationId(correlationId: string): Promise<DomainEvent[]> {
-    // Newest-first; the `id DESC` tiebreaker makes the order total when two rows share
-    // an `occurred_at`. A read — the append-only invariant is untouched.
-    const entities = await this.domainEventRepository.find({
-      where: { correlationId },
-      order: { occurredAt: 'DESC', id: 'DESC' },
-    });
-    return entities.map((entity) => DomainEventMapper.toDomain(entity));
-  }
 }

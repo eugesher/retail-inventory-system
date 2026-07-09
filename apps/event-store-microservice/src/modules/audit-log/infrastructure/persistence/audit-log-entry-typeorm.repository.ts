@@ -31,14 +31,4 @@ export class AuditLogEntryTypeormRepository implements IAuditLogRepositoryPort {
     // snapshots; the mapper already produced a concrete, well-formed row.
     await this.auditLogRepository.insert(partial as QueryDeepPartialEntity<AuditLogEntryEntity>);
   }
-
-  public async listByActor(actorId: string): Promise<AuditLogEntry[]> {
-    // Newest-first; the `id DESC` tiebreaker makes the order total when two rows share
-    // an `occurred_at`. A read — the append-only invariant is untouched.
-    const entities = await this.auditLogRepository.find({
-      where: { actorId },
-      order: { occurredAt: 'DESC', id: 'DESC' },
-    });
-    return entities.map((entity) => AuditLogEntryMapper.toDomain(entity));
-  }
 }

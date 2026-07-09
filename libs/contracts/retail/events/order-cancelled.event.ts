@@ -8,9 +8,7 @@ import { ICorrelationPayload } from '../../microservices';
 //
 // NOTE: this key was *retired* by ADR-028 with the old order model; it is
 // **re-introduced fresh here** with a live producer (Cancel Order), not resurrected
-// from any stub. Emitted onto `retail_queue` (the producer's own queue) as a reserved
-// surface today (no consumer bound yet), so it is a best-effort post-commit emit
-// (ADR-020).
+// from any stub. The emit is best-effort post-commit (ADR-020).
 //
 // `paymentFlaggedForRefund` is the key signal a downstream consumer branches on: `true`
 // means the cancelled order had a **captured** payment that is now flagged for a refund

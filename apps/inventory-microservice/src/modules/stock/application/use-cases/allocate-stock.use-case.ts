@@ -53,10 +53,11 @@ interface IAllocatedLine {
 
 // Allocate Stock converts a cart's active holds into an order's firm allocations at
 // place-time (ADR-030 §4). Per line it commits the hold (`active → committed`,
-// refreshing the TTL first when wall-clock-stale-but-still-held — the counters are
-// still occupied so honoring it is oversell-safe until a sweeper lands) and moves
-// the counter from reserved to allocated; when no active hold exists it falls back
-// to a direct allocation against `available`. Either way it appends one negative
+// refreshing the TTL first when wall-clock-stale-but-still-held — honoring such a
+// hold is oversell-safe because its quantity is still counted into
+// `quantity_reserved`, so the units it holds cannot be sold twice) and moves the
+// counter from reserved to allocated; when no active hold exists it falls back to a
+// direct allocation against `available`. Either way it appends one negative
 // `allocation` movement per line referencing the order.
 //
 // The whole order allocates **atomically or not at all**: all lines are computed

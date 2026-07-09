@@ -1,10 +1,11 @@
 import { ICorrelationPayload } from '../../microservices';
 
 // The reasons a hold is released. `cart-removed` (a line removed from a cart) is
-// the default; `expired` is the future sweeper's reason; `order-cancelled` the
-// later order-cancel flow's; `manual` an ops endpoint's. Shared by the release
-// payload, the `inventory.stock.released` wire event, and the domain
-// `StockReleasedEvent`, so the union lives in exactly one place.
+// the default; `expired` is recorded when a hold is released because its TTL
+// elapsed; `order-cancelled` is the order-cancel flow's; `manual` an ops
+// endpoint's. Shared by the release payload, the `inventory.stock.released` wire
+// event, and the domain `StockReleasedEvent`, so the union lives in exactly one
+// place.
 export type ReservationReleaseReason = 'cart-removed' | 'expired' | 'order-cancelled' | 'manual';
 
 // RPC payload for `inventory.reservation.release` (Gateway / Retail → Inventory).

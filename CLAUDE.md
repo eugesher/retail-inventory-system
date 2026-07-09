@@ -455,13 +455,13 @@ Domain: `DomainEvent` and `AuditLogEntry` are **frozen value objects** (every fi
 domain events, **not** `AggregateRoot`s). Invariants throw a plain `Error`.
 `AuditActorType` is domain-local, not a `libs/contracts` enum.
 Ports: `DOMAIN_EVENT_REPOSITORY` (`append` → `{ inserted }`; swallows the composite-UNIQUE
-`ER_DUP_ENTRY` via an **inlined** `isDuplicateEntryError`; `listByCorrelationId`) and
-`AUDIT_LOG_REPOSITORY` (`append`, `listByActor`). Both implement the port directly,
-`insert`-only, and are the sole `@InjectRepository` sites.
+`ER_DUP_ENTRY` via an **inlined** `isDuplicateEntryError`) and `AUDIT_LOG_REPOSITORY`
+(`append`). **Both ports are `append`-only** — no read, no `save`/`update`/`delete`. Both
+implement the port directly, `insert`-only, and are the sole `@InjectRepository` sites.
 Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, plus
 `firehose-extractors.ts` (heuristic `producer` / `aggregateType` / `aggregateId`).
-Consumer: `modules/firehose.consumer.ts`. **No `presentation/` layer** — the reads are wired
-but exposed by no endpoint.
+Consumer: `modules/firehose.consumer.ts`. **No `presentation/` layer** — nothing reads the
+two logs back; inspect `ris_eventstore` with SQL.
 Migrations: `1782521938896-CreateDomainEventTable`, `1782521942829-CreateAuditLogEntryTable`
 (eventstore pipeline).
 
