@@ -1,0 +1,23 @@
+name: sweep-reservations-custom-batch
+description: |-
+  POST /api/inventory/reservations/sweep  (Bearer — inventory:adjust)
+  The same sweep with an explicit { batchSize }. The value is an upper bound on rows
+  scanned in this invocation, and the inventory service CLAMPS it into
+  [1, RESERVATION_SWEEP_BATCH_SIZE] — the configured ceiling is an operational
+  property a caller may lower but never raise, so a 10000 here sweeps at most the
+  ceiling. A non-integer or a value below 1 is rejected at the gateway with a 400.
+  There is no Idempotency-Key: the sweep is idempotent by construction. Run this
+  straight after `sweepReservations` and it answers `expired: 0` — the first call
+  already settled those holds, so the second one finds nothing left to expire.
+method: POST
+url: $ENV_BASE_URL/inventory/reservations/sweep
+body:
+  content: |-
+    {
+      "batchSize": 5
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

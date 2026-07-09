@@ -2,6 +2,8 @@ import {
   IPage,
   IReservationReleasePayload,
   IReservationReleaseResult,
+  IReservationSweepPayload,
+  IReservationSweepResult,
   IStockMovementListPayload,
   IStockTransferResult,
   StockLevelView,
@@ -101,4 +103,12 @@ export interface IInventoryGatewayPort {
   // filter. Like the audit read, it takes the full payload (REQUIRED
   // `correlationId`).
   releaseReservation(payload: IReservationReleasePayload): Promise<IReservationReleaseResult>;
+
+  // On-demand reservation sweep: expires every `active` hold whose TTL has elapsed,
+  // in one bounded batch. The same use case the inventory service's timer ticks —
+  // the gateway only folds in the staff `actorId` (ADR-028), which the ledger rows
+  // then carry. `batchSize` is an override the service clamps to its configured
+  // ceiling. Like the audit read and the release, this takes the full payload
+  // (REQUIRED `correlationId`).
+  sweepReservations(payload: IReservationSweepPayload): Promise<IReservationSweepResult>;
 }

@@ -4,6 +4,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 import {
+  IReservationSweepResult,
   ReservationReleaseReason,
   StockMovementTypeEnum,
 } from '@retail-inventory-system/contracts';
@@ -41,6 +42,10 @@ import { runWithStockWriteRetry } from './stock-mutation';
 // (ADR-038). `type = 'release'` + `reason_code = 'expired'` is already unambiguous.
 const EXPIRY_RELEASE_REASON: ReservationReleaseReason = 'expired';
 
+// The scheduled tick calls `execute()` with nothing at all, so every field is optional;
+// the RPC's `IReservationSweepPayload` (which fixes `correlationId` as REQUIRED) is
+// assignable to this. The result shape is the wire contract itself —
+// `IReservationSweepResult` — so the timer and the RPC observe one type, declared once.
 export interface ISweepExpiredReservationsParams {
   // An operator override, clamped into `[1, RESERVATION_SWEEP_BATCH_SIZE]` — the
   // configured value is a ceiling, never a floor.
@@ -49,13 +54,6 @@ export interface ISweepExpiredReservationsParams {
   // `null` for an unattended tick; a staff id when a human triggered the sweep. It is
   // written verbatim into `stock_movement.actor_id`.
   actorId?: string | null;
-}
-
-export interface ISweepExpiredReservationsResult {
-  scanned: number;
-  expired: number;
-  skipped: number;
-  durationMs: number;
 }
 
 // One expired hold + the ledger row that records it, carried out of the transaction so
@@ -117,7 +115,7 @@ export class SweepExpiredReservationsUseCase {
 
   public async execute(
     params: ISweepExpiredReservationsParams = {},
-  ): Promise<ISweepExpiredReservationsResult> {
+  ): Promise<IReservationSweepResult> {
     const startedAt = Date.now();
     // Captured ONCE and threaded into every comparison, so a long sweep can never expire
     // a hold that was still live when the sweep began.
@@ -180,7 +178,7 @@ export class SweepExpiredReservationsUseCase {
       await Promise.all(outcome.rows.map((row) => this.emitExpired(row, correlationId)));
     }
 
-    const result: ISweepExpiredReservationsResult = {
+    const result: IReservationSweepResult = {
       scanned,
       expired,
       skipped,

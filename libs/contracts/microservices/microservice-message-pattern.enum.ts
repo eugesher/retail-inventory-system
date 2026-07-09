@@ -14,6 +14,7 @@ export enum MicroserviceMessagePatternEnum {
   INVENTORY_STOCK_MOVEMENT_LIST = 'inventory.stock-movement.list',
   INVENTORY_RESERVATION_RESERVE = 'inventory.reservation.reserve',
   INVENTORY_RESERVATION_RELEASE = 'inventory.reservation.release',
+  INVENTORY_RESERVATION_SWEEP = 'inventory.reservation.sweep',
   INVENTORY_RESERVATION_ALLOCATE = 'inventory.reservation.allocate',
   INVENTORY_ALLOCATION_CANCEL = 'inventory.allocation.cancel',
   INVENTORY_STOCK_RESERVED = 'inventory.stock.reserved',

@@ -31,12 +31,25 @@
 #       one movement kind; from/to are inclusive ISO-8601 bounds on occurredAt.
 #       Returns IPage<StockMovementView> { items, total, page, size }. An unknown
 #       variant (or one with no rows) is a 200 empty page, not a 404.
+#   - POST /inventory/reservations/sweep                   (Bearer — inventory:adjust)
+#       Expire every `active` hold whose TTL has elapsed, on demand. Optional body
+#       { batchSize? } — the inventory service clamps it to its configured ceiling.
+#       Returns { scanned, expired, skipped, durationMs }, where
+#       scanned = expired + skipped. Runs the SAME sweep the inventory service
+#       already ticks on a timer; no Idempotency-Key (a second call finds the holds
+#       already expired and skips them).
 #   - POST /inventory/reservations/:reservationId/release  (Bearer — inventory:adjust)
 #       Manually release ONE reservation hold by its UUID. No body. Frees the hold,
 #       returns the units to `available`, and writes a `manual`-reason `release`
 #       ledger row attributed to the staff actor. Returns { released: [...] }. An
-#       unknown id is a 404; an already-released/committed row a 409. This is the
-#       ONLY hold-freeing tool until a TTL-sweeper capability lands.
+#       unknown id is a 404; an already-released/committed row a 409.
+#
+# How a hold is freed
+#   Three ways, all live: an explicit release (by id here, or by cartId when a cart
+#   line is removed), cart conversion at order placement (Place allocates the hold,
+#   after which only a cancel-allocation frees it), and the TTL sweep — which the
+#   inventory service runs on a timer every RESERVATION_SWEEP_INTERVAL_SECONDS and
+#   which `sweepReservations` below triggers immediately.
 #
 # Stock locations
 #   The migration provisions one default location with id `default-warehouse`,
@@ -69,7 +82,8 @@
 #   3. The two variant-stock GETs send no token — they prove the @Public() route
 #      works unauthenticated. The receive/adjust POSTs need inventory:adjust; the
 #      transfer POST needs inventory:transfer; the movements GET needs
-#      inventory:read; the manual reservation release needs inventory:adjust.
+#      inventory:read; the manual reservation release and the reservation sweep
+#      need inventory:adjust.
 
 @baseUrl = {{ENV_BASE_URL}}
 
@@ -259,10 +273,10 @@ Authorization: Bearer {{accessToken}}
 # Manually release ONE hold by its UUID. No request body. Frees the hold, returns
 # the held units to `available`, flips the row to `released`, and appends a
 # `manual`-reason `release` row to the stock_movement ledger attributed to the staff
-# actor (visible afterwards via listVariantMovements). This is the ONLY hold-freeing
-# tool until a TTL-sweeper capability lands — a stale `active` hold otherwise keeps
-# occupying its counter until its TTL passes (and even then nothing reclaims it
-# automatically yet). Response is { released: [ ReservationView ] } (exactly one
+# actor (visible afterwards via listVariantMovements). It is the precise, immediate
+# tool: a hold is also freed by cart conversion at order placement, and — once its
+# TTL has elapsed — by the reservation sweep (`sweepReservations` below, or the
+# service's own timer). Response is { released: [ ReservationView ] } (exactly one
 # element for a by-id release). With the placeholder id above this 404s; paste a
 # real active hold's id to see the success path.
 POST {{baseUrl}}/inventory/reservations/{{reservationId}}/release
@@ -278,3 +292,42 @@ Authorization: Bearer {{accessToken}}
 # or committed hold is instead a 409 `INVENTORY_RESERVATION_INVALID_STATE`.)
 POST {{baseUrl}}/inventory/reservations/3f1c9b6e-4d2a-4f8e-9c1b-2a7d6e5f0a11/release
 Authorization: Bearer {{accessToken}}
+
+###
+
+# @name sweepReservations
+# POST /api/inventory/reservations/sweep  (Bearer — inventory:adjust)
+# Expire every `active` hold whose TTL has already elapsed, right now, instead of
+# waiting for the inventory service's next timer tick. No request body: the sweep
+# then scans up to its configured RESERVATION_SWEEP_BATCH_SIZE. Per expired hold it
+# returns the units to `available`, flips the row to `expired`, appends a negative
+# `release` row to the stock_movement ledger with reasonCode `expired` (attributed to
+# the staff actor who called this — a timer tick writes a null actor), and emits one
+# inventory.stock.released event. Response is
+# { scanned, expired, skipped, durationMs }, and scanned = expired + skipped always:
+# a `skipped` candidate is one a concurrent writer had already settled or whose TTL
+# was refreshed between the scan and the transaction. A clean table is
+# { scanned: 0, expired: 0, skipped: 0 }. To see it reclaim something, add a cart
+# line (which reserves), wait out RESERVATION_TTL_MINUTES, then run this.
+POST {{baseUrl}}/inventory/reservations/sweep
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name sweepReservationsCustomBatch
+# POST /api/inventory/reservations/sweep  (Bearer — inventory:adjust)
+# The same sweep with an explicit { batchSize }. The value is an upper bound on rows
+# scanned in this invocation, and the inventory service CLAMPS it into
+# [1, RESERVATION_SWEEP_BATCH_SIZE] — the configured ceiling is an operational
+# property a caller may lower but never raise, so a 10000 here sweeps at most the
+# ceiling. A non-integer or a value below 1 is rejected at the gateway with a 400.
+# There is no Idempotency-Key: the sweep is idempotent by construction. Run this
+# straight after `sweepReservations` and it answers `expired: 0` — the first call
+# already settled those holds, so the second one finds nothing left to expire.
+POST {{baseUrl}}/inventory/reservations/sweep
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "batchSize": 5
+}
