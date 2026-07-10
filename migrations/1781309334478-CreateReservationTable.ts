@@ -56,8 +56,10 @@ export class CreateReservationTable1781309334478 implements MigrationInterface {
       );
     `);
 
-    // The future background sweeper scans for stale active holds by expiry; both
-    // indexes serve that scan (the composite one narrows to a status first).
+    // The background sweeper scans for stale active holds by expiry
+    // (`status = 'active' AND expires_at < :now`). The composite index serves that
+    // scan: its `status` equality prefix leaves `expires_at` ordered, so the range
+    // and the ORDER BY come from one covering read.
     await queryRunner.query('CREATE INDEX IDX_RESERVATION_EXPIRES_AT ON reservation (expires_at);');
     await queryRunner.query(
       'CREATE INDEX IDX_RESERVATION_STATUS_EXPIRES_AT ON reservation (status, expires_at);',
