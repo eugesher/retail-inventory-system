@@ -7,10 +7,14 @@ import { DataSource } from 'typeorm';
 // `DataSource` directly rather than `InventoryAutoInitE2ESpecDataSource`, whose
 // `stock_level` reader targets a table that does not exist here.
 //
-// The event store has no query endpoint (a deferred capability), so a direct row read
-// is the only way to prove what the firehose ingest persisted. Both logs are written
-// asynchronously off the bus, so suites poll these readers (re-query with a short delay
-// up to a bounded timeout) rather than asserting immediately after the HTTP call.
+// It exists so a suite can assert a persisted row WITHOUT going through the query API.
+// `GET /api/audit/*` can answer these questions now, but a suite that proves INGESTION
+// must not depend on the read path to do it: a bug in the query filters would then hide a
+// bug in the ingest, and vice versa. The suites that prove the read path (`audit-*-query`,
+// `audit-trace-correlation`) go through the API on purpose; the ones that prove the write
+// path read the table. Both logs are written asynchronously off the bus, so suites poll
+// these readers (re-query with a short delay up to a bounded timeout) rather than
+// asserting immediately after the HTTP call.
 //
 // mysql2 returns BIGINT `id` columns as strings and already parses `json` columns to
 // objects, so `id` is coerced with `Number(...)` and `payload`/`before`/`after` are

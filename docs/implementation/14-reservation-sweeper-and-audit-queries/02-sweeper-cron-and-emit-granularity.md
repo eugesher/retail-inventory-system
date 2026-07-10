@@ -248,6 +248,9 @@ a request scope as code gets.
 
 - [`01-reservation-sweeper-design.md`](01-reservation-sweeper-design.md) — the sweep itself:
   the scan, the two bounds, the lock-free race.
+- [`08-sweep-vs-release-race-and-e2e-coverage.md`](08-sweep-vs-release-race-and-e2e-coverage.md)
+  — the end-to-end suite that drives this timer, asserts `actor_id IS NULL` on a tick's ledger
+  row, and proves the interval is unregistered when the container closes.
 - [ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md) — the decision record
   for the whole capability, including §6 on per-row emission and the Consequences that split
   the `try`/`catch` between driver and use case.

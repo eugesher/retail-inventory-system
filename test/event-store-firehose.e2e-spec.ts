@@ -19,8 +19,10 @@ import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto
 // through the gateway dual-publishes its whole event chain onto the topic exchange,
 // the event store's `event_store_firehose_queue` (bound `#`) consumes it, and the
 // `FirehoseConsumer` ingests each event into the isolated `ris_eventstore.domain_event`
-// log. The suite asserts the persisted rows directly by SQL — there is no query
-// endpoint (a deferred capability).
+// log. The suite asserts the persisted rows directly by SQL: it is proving INGESTION, and
+// reading through `GET /api/audit/events` would make that assertion depend on the read
+// path — a broken filter there would mask a broken ingest here. `audit-event-query.e2e-spec.ts`
+// proves the read path over the same chain.
 //
 // The whole flow (cart create → add line → place) is driven under ONE fixed
 // `x-correlation-id` header. The gateway's `CorrelationMiddleware` honors an inbound

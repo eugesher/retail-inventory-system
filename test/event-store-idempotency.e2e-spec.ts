@@ -28,8 +28,10 @@ import { EventStoreE2ESpecDataSource } from './data-source/event-store.e2e-spec.
 // The suite boots only the event store (the consumer + ingest) and emits onto
 // `ris.events` through a test `ClientProxy` shaped exactly like the producers' shared
 // `RIS_EVENTS_PUBLISHER` client (named topic exchange, `wildcards: true`). Reads are by
-// direct SQL — there is no query endpoint. Ingestion is async, so both cases poll up to
-// a bounded timeout.
+// direct SQL because the subject is the INGEST's dedupe rule — the composite UNIQUE — and
+// counting rows through `GET /api/audit/events` would make a write-path assertion depend
+// on the read path. It also keeps the suite free of the gateway and its query transport.
+// Ingestion is async, so both cases poll up to a bounded timeout.
 const EVENT_TYPE = 'retail.order.placed';
 const PRODUCER = 'retail-microservice'; // resolveProducer('retail.…')
 

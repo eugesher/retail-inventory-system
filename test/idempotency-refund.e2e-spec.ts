@@ -23,7 +23,10 @@ import { ReturnsRefundsE2ESpecDataSource } from './data-source/returns-refunds.e
 // `refunded_amount_minor`, and — the distinguishing oracle — writes exactly ONE
 // `audit.staff.action` into `ris_eventstore.audit_log_entry` (ADR-035). The two refund
 // requests are driven under one fixed `x-correlation-id`, so the audit rows can be counted
-// by that shared correlation id via direct SQL (there is no query endpoint).
+// by that shared correlation id via direct SQL. The count is what the replay DID NOT emit,
+// so it is read off the table rather than through `GET /api/audit/entries` — a write-path
+// assertion must not depend on the read path, and this suite need not boot the event store's
+// query transport to make it.
 //
 // Self-provisioned, disjoint fixture (`e2e-idem-refund-*`).
 const ADMIN_EMAIL = 'admin@example.com';
