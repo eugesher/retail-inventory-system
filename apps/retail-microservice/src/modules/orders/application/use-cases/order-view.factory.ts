@@ -16,6 +16,7 @@ export const toOrderLineView = (line: OrderLine): OrderLineView => ({
   sku: line.sku,
   nameSnapshot: line.nameSnapshot,
   quantity: line.quantity,
+  cancelledQuantity: line.cancelledQuantity,
   unitPriceMinor: line.unitPriceMinor,
   taxAmountMinor: line.taxAmountMinor,
   discountAmountMinor: line.discountAmountMinor,

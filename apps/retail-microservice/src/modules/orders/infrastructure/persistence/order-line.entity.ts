@@ -37,6 +37,12 @@ export class OrderLineEntity extends BaseEntity {
   @Column({ type: 'int' })
   public quantity: number;
 
+  // Units cancelled by Cancel Line (ADR-031). `quantity − cancelled_quantity` is the
+  // line's active (shippable, returnable) quantity. A DB CHECK holds it within
+  // `[0, quantity]`, mirroring the `OrderLine` domain invariant.
+  @Column({ type: 'int', default: 0 })
+  public cancelledQuantity: number;
+
   // Minor units (integer cents); mysql2 returns non-PK BIGINTs as strings, so the
   // mapper coerces back with `Number(...)`. Tax/discount default 0 in this
   // capability, so `line_total_minor = unit_price_minor × quantity`.

@@ -77,6 +77,31 @@ describe('AssignStaffRoleUseCase', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('throws BadRequestException when no role name is supplied', async () => {
+    await expect(useCase.execute({ staffUserId: 'staff-1', roleNames: [] })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  // A partially-resolvable request is rejected whole, and the message names only the
+  // *missing* roles — the resolvable ones must not leak into it. This is the only path
+  // that builds the `missing` diff (an all-unknown request resolves to an empty set and
+  // never computes one).
+  it('names only the unresolved roles when the request is partially resolvable', async () => {
+    const error = await useCase
+      .execute({ staffUserId: 'staff-1', roleNames: ['admin', 'nope'] })
+      .catch((e: Error) => e);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as Error).message).toContain('nope');
+    // The resolvable role must not leak into the missing-roles diff.
+    expect((error as Error).message).not.toContain('admin');
+
+    // Rejected whole: `admin` was not assigned as a side effect.
+    const untouched = await staffUsers.findById('staff-1');
+    expect(untouched!.roles.map((r) => r.name)).toEqual(['order-support']);
+  });
+
   it('throws NotFoundException when the staff user does not exist', async () => {
     await expect(
       useCase.execute({ staffUserId: 'missing', roleNames: ['admin'] }),

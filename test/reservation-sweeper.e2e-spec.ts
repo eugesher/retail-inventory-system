@@ -9,7 +9,7 @@ import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/
 import { AppModule as CatalogMicroserviceAppModule } from '@retail-inventory-system/apps/catalog-microservice';
 import { AppModule as EventStoreMicroserviceAppModule } from '@retail-inventory-system/apps/event-store-microservice';
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
-import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
+import { MicroserviceQueueEnum, ReservationView } from '@retail-inventory-system/contracts';
 
 import { EventStoreE2ESpecDataSource } from './data-source/event-store.e2e-spec.data-source';
 import { ReservationSweepE2ESpecDataSource } from './data-source/reservation-sweep.e2e-spec.data-source';
@@ -423,5 +423,82 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
 
     const level = await retailDb.getStockLevel(variantId, DEFAULT_WAREHOUSE);
     expect(level!.quantityReserved).toBe(reservedBeforeHold);
+  });
+
+  // `POST /api/inventory/reservations/:reservationId/release` (staff `inventory:adjust`) —
+  // the by-id manual lever beside the TTL sweep. Same release codepath, different reason
+  // code: an operator release is stamped `manual`, a swept one `expired`. Exercised here
+  // because the suite already owns a disjoint variant and a stock baseline to measure
+  // against; the aged hold above doubles as the invalid-state fixture.
+  describe('POST /api/inventory/reservations/:reservationId/release — manual by-id release', () => {
+    const releaseById = (id: string): supertest.Test =>
+      server().post(`/api/inventory/reservations/${id}/release`).set('Authorization', adminAuth);
+
+    it('releases an active hold, restores reserved, and stamps a `manual` release movement', async () => {
+      const manualCart = await server()
+        .post('/api/cart')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ currency: 'USD' });
+      expect(manualCart.status).toBe(HttpStatus.CREATED);
+      const manualCartId = (manualCart.body as ICartBody).id;
+
+      const addLine = await server()
+        .post(`/api/cart/${manualCartId}/lines`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ variantId, quantity: HELD_QUANTITY });
+      expect(addLine.status).toBe(HttpStatus.OK);
+
+      const holds = await retailDb.getReservationsByCartId(manualCartId);
+      expect(holds).toHaveLength(1);
+      const manualReservationId = holds[0].id;
+
+      const held = await retailDb.getStockLevel(variantId, DEFAULT_WAREHOUSE);
+      expect(held!.quantityReserved).toBe(reservedBeforeHold + HELD_QUANTITY);
+
+      const res = await releaseById(manualReservationId).send({});
+      expect(res.status).toBe(HttpStatus.OK);
+      // Exactly one element for a by-id release. The view keys the hold as
+      // `reservationId`, not `id`.
+      const released = (res.body as { released: ReservationView[] }).released;
+      expect(released).toHaveLength(1);
+      expect(released[0]).toMatchObject({
+        reservationId: manualReservationId,
+        variantId,
+        quantity: HELD_QUANTITY,
+        cartId: manualCartId,
+        status: 'released',
+      });
+
+      const after = await retailDb.getReservationById(manualReservationId);
+      expect(after!.status).toBe('released');
+
+      // A release moves the reserved counter and nothing else.
+      const level = await retailDb.getStockLevel(variantId, DEFAULT_WAREHOUSE);
+      expect(level!.quantityReserved).toBe(reservedBeforeHold);
+      expect(level!.quantityOnHand).toBe(ON_HAND);
+
+      const releases = (
+        await retailDb.getMovementsByCartAndVariant(manualCartId, variantId)
+      ).filter((m) => m.type === 'release');
+      expect(releases).toHaveLength(1);
+      expect(releases[0].quantity).toBe(-HELD_QUANTITY);
+      // The one field that distinguishes an operator release from a swept one.
+      expect(releases[0].reasonCode).toBe('manual');
+      expect(releases[0].actorId).toBe(ADMIN_STAFF_USER_ID);
+    });
+
+    it('rejects releasing the already-expired hold with 409 INVENTORY_RESERVATION_INVALID_STATE', async () => {
+      const res = await releaseById(reservationId).send({});
+
+      expect(res.status).toBe(HttpStatus.CONFLICT);
+      expect((res.body as { code: string }).code).toBe('INVENTORY_RESERVATION_INVALID_STATE');
+    });
+
+    it('rejects an unknown reservation id with 404 INVENTORY_RESERVATION_NOT_FOUND', async () => {
+      const res = await releaseById(randomUUID()).send({});
+
+      expect(res.status).toBe(HttpStatus.NOT_FOUND);
+      expect((res.body as { code: string }).code).toBe('INVENTORY_RESERVATION_NOT_FOUND');
+    });
   });
 });

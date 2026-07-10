@@ -349,6 +349,26 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
+  // Cancels `units` of ONE line (Cancel Line, ADR-031) — the narrower unwind that leaves
+  // the rest of the order standing. Routed through the root, not the child, for two
+  // reasons: an unknown `orderLineId` is the root's 404 to raise, and the cancelled count
+  // is aggregate state, so the write must bump the OCC token or a concurrent Cancel Line
+  // could read-modify-write the same units twice (ADR-036). Touches no status axis of the
+  // order itself and no money — the line records the cancellation, the order records the
+  // version.
+  public cancelLineQuantity(orderLineId: number, units: number): OrderLine {
+    const line = this._lines.find((candidate) => candidate.id === orderLineId);
+    if (!line) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_LINE_NOT_FOUND,
+        `Order line ${orderLineId} does not belong to order ${this.id}`,
+      );
+    }
+    line.cancelQuantity(units);
+    this.bumpVersion();
+    return line;
+  }
+
   // Delivery is the happy-path terminal: it advances **both** the lifecycle axis
   // (`→ DELIVERED`) and the fulfillment axis (`→ DELIVERED`) in one mutation. Driven by
   // Mark Delivered once every non-`cancelled` fulfillment of the order is delivered.

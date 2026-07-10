@@ -47,8 +47,7 @@ yarn test:seed                                        # scripts/test-db-seed.ts
 
 ## Landmines
 
-Non-obvious facts, each worth a debugging cycle. The rest of this file is a map; this
-section is the reason to read it.
+Non-obvious facts, each worth a debugging cycle.
 
 **Boot / observability**
 
@@ -103,6 +102,10 @@ section is the reason to read it.
   `idempotency_key`) implement their repository port **directly**, never through
   `BaseTypeormRepository` — its `save`/`softDelete` would break the invariant.
 - `condition` is a MySQL reserved word — backticked in the `return_line` migration.
+- `order_line.quantity` never shrinks; the units still owed are `OrderLine.activeQuantity`
+  (`quantity − cancelled_quantity`, ADR-040, which lists every rule measuring against it).
+  Using `quantity` re-releases cancelled units against the **shared** per-`(variant,
+  location)` `quantity_allocated`.
 - `reservation.cart_id` is overridden to `utf8mb4_unicode_ci` to match the retail `cart`
   column's collation.
 - `DatabaseModule.forRoot` pins `mysql2` to UTC (`timezone: 'Z'`); without it the driver
@@ -596,10 +599,8 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 ## Architecture decisions (ADRs)
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
-[`docs/adr/index.md`](docs/adr/index.md). ADRs are the durable record (3-digit padding,
-`001-…`; **next free number is `040`**). Write one for every architectural decision, under the
-rules in ADR-003; never edit an accepted ADR **merged to `main`** beyond its `Status` and a
-supersession pointer. On its feature branch an ADR is still a draft — amend it freely there.
+[`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
+rules. **Next free number is `041`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

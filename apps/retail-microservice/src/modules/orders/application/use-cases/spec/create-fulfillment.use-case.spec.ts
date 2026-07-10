@@ -222,4 +222,40 @@ describe('CreateFulfillmentUseCase', () => {
     expect(view.status).toBe(FulfillmentStatusEnum.PENDING);
     expect(view.stockLocationId).toBe('dropship-1');
   });
+
+  // Cancel Line has already released the cancelled units' allocation, so the shippable
+  // bound is the line's ACTIVE quantity (`ordered − cancelled`), not the place-time
+  // ordered count. Shipping past it would move stock inventory no longer holds against
+  // this order — the second consequence of the unrecorded-cancellation bug.
+  describe('cancelled units are not shippable', () => {
+    it('measures the remaining shippable quantity against the active quantity', async () => {
+      // Line 10 ordered 3, of which 1 is cancelled → only 2 may ship.
+      const { useCase } = await makeHarness(
+        buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
+          { orderLineId: 10, quantity: 3, cancelledQuantity: 1 },
+        ]),
+      );
+
+      await expect(
+        useCase.execute(createPayload({ lines: [{ orderLineId: 10, quantity: 3 }] })),
+      ).rejects.toMatchObject({ code: OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING });
+
+      const view = await useCase.execute(
+        createPayload({ lines: [{ orderLineId: 10, quantity: 2 }] }),
+      );
+      expect(view.status).toBe(FulfillmentStatusEnum.PENDING);
+    });
+
+    it('refuses to ship any unit of a fully-cancelled line', async () => {
+      const { useCase } = await makeHarness(
+        buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
+          { orderLineId: 10, quantity: 2, cancelledQuantity: 2 },
+        ]),
+      );
+
+      await expect(
+        useCase.execute(createPayload({ lines: [{ orderLineId: 10, quantity: 1 }] })),
+      ).rejects.toMatchObject({ code: OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING });
+    });
+  });
 });

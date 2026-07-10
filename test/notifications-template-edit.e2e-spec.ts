@@ -306,4 +306,109 @@ describe('Notifications — template edit takes effect on the next order (e2e)',
     expect(delivery.renderedBody).toContain(order.orderNumber);
     expect(delivery.renderedSubject).toContain('(v2)');
   });
+
+  // `GET /api/notifications/deliveries/:id` — the single-row read beside the paginated
+  // trail. It is the only route that surfaces `renderedBody` for one delivery by id.
+  describe('GET /api/notifications/deliveries/:id — single delivery read', () => {
+    it('reads back the delivery the placed order produced, rendered body included', async () => {
+      const listed = await waitForSentOrderDelivery(order.id);
+
+      const read = await server()
+        .get(`/api/notifications/deliveries/${listed.id}`)
+        .set('Authorization', adminAuth);
+
+      expect(read.status).toBe(HttpStatus.OK);
+      const delivery = read.body as NotificationDeliveryView;
+      expect(delivery.id).toBe(listed.id);
+      expect(delivery.eventReferenceId).toBe(String(order.id));
+      expect(delivery.status).toBe('sent');
+      expect(delivery.renderedBody).toContain(V2_MARKER);
+    });
+
+    it('resolves an unknown delivery id to 404', async () => {
+      const read = await server()
+        .get('/api/notifications/deliveries/99999999')
+        .set('Authorization', adminAuth);
+
+      expect(read.status).toBe(HttpStatus.NOT_FOUND);
+    });
+  });
+
+  // The staff registry browse + the rollback lever. Both are `notifications:write`.
+  //
+  // The fixture is pinned to an **unused locale** (`en-GB`): rendering resolves a template
+  // by `(eventType, channel, locale)` and every consumer passes the `en-US` default, so
+  // authoring — and later deactivating — this version cannot perturb any other suite's
+  // rendered output, even though all e2e suites share one database.
+  describe('GET /api/notifications/templates + PATCH templates/:id/active', () => {
+    const ISOLATED_LOCALE = 'en-GB';
+    let isolatedTemplateId: number;
+
+    it('authors a template version under an unused locale', async () => {
+      const res = await server()
+        .post('/api/notifications/templates')
+        .set('Authorization', adminAuth)
+        .send({
+          eventType: 'retail.order.placed',
+          channel: 'email',
+          locale: ISOLATED_LOCALE,
+          subject: 'Order #{{orderNumber}} confirmed (en-GB)',
+          body: 'Cheers — order #{{orderNumber}} confirmed.',
+        });
+
+      expect(res.status).toBe(HttpStatus.CREATED);
+      const template = res.body as NotificationTemplateView;
+      expect(template.active).toBe(true);
+      isolatedTemplateId = template.id;
+    });
+
+    it('lists every version for the narrowed (eventType, channel, locale) scan', async () => {
+      const res = await server()
+        .get('/api/notifications/templates')
+        .query({ eventType: 'retail.order.placed', channel: 'email', locale: ISOLATED_LOCALE })
+        .set('Authorization', adminAuth);
+
+      expect(res.status).toBe(HttpStatus.OK);
+      const templates = res.body as NotificationTemplateView[];
+      expect(templates.length).toBeGreaterThanOrEqual(1);
+      expect(templates.every((t) => t.locale === ISOLATED_LOCALE)).toBe(true);
+      expect(templates.map((t) => t.id)).toContain(isolatedTemplateId);
+    });
+
+    it('deactivates the version, then re-activates it (the rollback lever)', async () => {
+      const off = await server()
+        .patch(`/api/notifications/templates/${isolatedTemplateId}/active`)
+        .set('Authorization', adminAuth)
+        .send({ active: false });
+      expect(off.status).toBe(HttpStatus.OK);
+      expect((off.body as NotificationTemplateView).active).toBe(false);
+
+      // The registry browse returns every version, active or not — the deactivated row
+      // is still listed, which is what makes it recoverable.
+      const listed = await server()
+        .get('/api/notifications/templates')
+        .query({ eventType: 'retail.order.placed', channel: 'email', locale: ISOLATED_LOCALE })
+        .set('Authorization', adminAuth);
+      const deactivated = (listed.body as NotificationTemplateView[]).find(
+        (t) => t.id === isolatedTemplateId,
+      );
+      expect(deactivated?.active).toBe(false);
+
+      const on = await server()
+        .patch(`/api/notifications/templates/${isolatedTemplateId}/active`)
+        .set('Authorization', adminAuth)
+        .send({ active: true });
+      expect(on.status).toBe(HttpStatus.OK);
+      expect((on.body as NotificationTemplateView).active).toBe(true);
+    });
+
+    it('resolves an unknown template id to 404 NOTIFICATION_TEMPLATE_NOT_FOUND', async () => {
+      const res = await server()
+        .patch('/api/notifications/templates/99999999/active')
+        .set('Authorization', adminAuth)
+        .send({ active: false });
+
+      expect(res.status).toBe(HttpStatus.NOT_FOUND);
+    });
+  });
 });

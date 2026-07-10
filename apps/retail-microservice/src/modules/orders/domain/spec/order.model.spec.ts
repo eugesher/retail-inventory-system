@@ -392,4 +392,48 @@ describe('Order', () => {
       expect(order.lines[0].status).toBe(OrderLineStatusEnum.ALLOCATED);
     });
   });
+
+  // Cancel Line routes through the root so the OCC token advances: the cancelled count is
+  // aggregate state, and two concurrent cancels reading the same version must not both
+  // commit their own increment (ADR-036).
+  describe('cancelLineQuantity', () => {
+    it('cancels the units on the addressed line and bumps the version', () => {
+      const order = reconstituteOrder({});
+      const versionBefore = order.version;
+
+      const line = order.cancelLineQuantity(10, 1);
+
+      expect(line.cancelledQuantity).toBe(1);
+      expect(order.lines[0].cancelledQuantity).toBe(1);
+      expect(order.version).toBe(versionBefore + 1);
+    });
+
+    it('touches no status axis of the order itself', () => {
+      const order = reconstituteOrder({});
+
+      order.cancelLineQuantity(10, 2);
+
+      expect(order.status).toBe(OrderStatusEnum.PENDING);
+      expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.UNFULFILLED);
+      expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.AUTHORIZED);
+      // No money mutation — the order's totals stand.
+      expect(order.grandTotalMinor).toBe(3000);
+    });
+
+    it('rejects a line that does not belong to the order (404)', () => {
+      const order = reconstituteOrder({});
+
+      expect(() => order.cancelLineQuantity(999, 1)).toThrow(OrderDomainException);
+    });
+
+    it('does not bump the version when the line rejects the cancel', () => {
+      const order = reconstituteOrder({});
+      const versionBefore = order.version;
+
+      // The line is ordered 2 — cancelling 3 breaches its own bound.
+      expect(() => order.cancelLineQuantity(10, 3)).toThrow(OrderDomainException);
+      expect(order.version).toBe(versionBefore);
+      expect(order.lines[0].cancelledQuantity).toBe(0);
+    });
+  });
 });

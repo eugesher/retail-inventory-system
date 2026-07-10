@@ -238,4 +238,56 @@ describe('CancelOrderUseCase', () => {
       expect(h.publisher.orderCancelled[0]).toMatchObject({ paymentFlaggedForRefund: false });
     });
   });
+
+  // Cancel Line already released the units it cancelled, so Cancel Order must release only
+  // what the order still HOLDS — its lines' active quantity (ADR-040). Releasing the
+  // place-time ordered quantity would free those units twice against the shared
+  // per-`(variant, location)` `quantity_allocated`, eating other orders' allocations.
+  describe('a prior Cancel Line shrinks what remains to release', () => {
+    it('releases only the active quantity of a partially-cancelled line', async () => {
+      const h = await makeHarness({
+        order: buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
+          { orderLineId: 10, quantity: 5, cancelledQuantity: 2 },
+        ]),
+      });
+
+      await h.useCase.execute(cancelPayload());
+
+      expect(h.inventoryGateway.cancelCalls).toHaveLength(1);
+      // 3, not the ordered 5.
+      expect(h.inventoryGateway.cancelCalls[0].lines).toEqual([
+        { variantId: 10, stockLocationId: 'default-warehouse', quantity: 3 },
+      ]);
+    });
+
+    it('drops a fully-cancelled line from the release payload', async () => {
+      const h = await makeHarness({
+        order: buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
+          { orderLineId: 10, quantity: 2 },
+          { orderLineId: 20, quantity: 3, cancelledQuantity: 3 },
+        ]),
+      });
+
+      await h.useCase.execute(cancelPayload());
+
+      expect(h.inventoryGateway.cancelCalls[0].lines).toEqual([
+        { variantId: 10, stockLocationId: 'default-warehouse', quantity: 2 },
+      ]);
+    });
+
+    // Inventory rejects an empty `lines` array, so the RPC must not be made at all — and
+    // the cancel itself must still succeed.
+    it('skips the release RPC entirely when every line is already cancelled', async () => {
+      const h = await makeHarness({
+        order: buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
+          { orderLineId: 10, quantity: 2, cancelledQuantity: 2 },
+        ]),
+      });
+
+      const view = await h.useCase.execute(cancelPayload());
+
+      expect(view.status).toBe(OrderStatusEnum.CANCELLED);
+      expect(h.inventoryGateway.cancelCalls).toHaveLength(0);
+    });
+  });
 });

@@ -119,6 +119,26 @@ describe('RegisterStaffUserUseCase', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  // A partially-resolvable request is rejected whole, and the message names only the
+  // *missing* roles. This is the only path that builds the `missing` diff — an all-unknown
+  // request resolves to an empty set and never computes one.
+  it('names only the unresolved roles when the request is partially resolvable', async () => {
+    const error = await useCase
+      .execute({
+        email: 'half-known@example.com',
+        password: 'password123',
+        roleNames: [RoleEnum.ADMIN, 'nonexistent-role'],
+      })
+      .catch((e: Error) => e);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as Error).message).toContain('nonexistent-role');
+    expect((error as Error).message).not.toContain(RoleEnum.ADMIN);
+
+    // Rejected whole — no staff user was persisted.
+    expect(await users.findByEmail('half-known@example.com')).toBeNull();
+  });
+
   it('rejects on a uniqueness conflict (case-insensitive)', async () => {
     await useCase.execute({
       email: 'existing@example.com',

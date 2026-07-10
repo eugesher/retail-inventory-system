@@ -77,7 +77,13 @@ interface IOrderBody {
   status: string;
   paymentStatus: string;
   fulfillmentStatus: string;
-  lines: { id: number; variantId: number; quantity: number }[];
+  lines: {
+    id: number;
+    variantId: number;
+    quantity: number;
+    cancelledQuantity: number;
+    status: string;
+  }[];
   payment?: IPaymentBody;
 }
 
@@ -363,5 +369,140 @@ describe('Cancel Order pre-fulfillment: void payment + release allocation (e2e)'
 
     // No second release row — the idempotency guard stops a double release.
     expect(await listReleases(variantId)).toHaveLength(1);
+  });
+
+  // `POST /api/orders/:orderId/lines/:lineId/cancel` (staff `order:cancel`) — the narrower
+  // sibling of the whole-order cancel: it cancels the **unshipped quantity of one line**,
+  // releases exactly that slice's allocation, and mutates no money. The cancellable
+  // remainder is `ordered − alreadyFulfilled`; an omitted `quantity` cancels all of it.
+  //
+  // Runs on its own variant + order so the whole-order assertions above (which count this
+  // suite's `release` rows for `variantId`) keep measuring exactly one row.
+  describe('POST /api/orders/:orderId/lines/:lineId/cancel — staff partial line cancel', () => {
+    let lineVariantId: number;
+    let lineOrder: IOrderBody;
+
+    beforeAll(async () => {
+      lineVariantId = await provisionVariant('b', RECEIVED_QTY);
+
+      const create = await server()
+        .post('/api/cart')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ currency: 'USD' });
+      const lineCartId = (create.body as ICartBody).id;
+
+      const add = await server()
+        .post(`/api/cart/${lineCartId}/lines`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ variantId: lineVariantId, quantity: ORDERED_QTY });
+      expect(add.status).toBe(HttpStatus.OK);
+
+      const place = await server()
+        .post(`/api/cart/${lineCartId}/place`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .set('Idempotency-Key', `cancel-line-${stamp}-place`)
+        .send({ shippingAddress: ADDRESS, billingAddress: ADDRESS, paymentMethod: 'tok_visa' });
+      expect(place.status).toBe(HttpStatus.CREATED);
+      lineOrder = place.body as IOrderBody;
+    }, timeout);
+
+    const cancelLine = (quantity?: number): Promise<supertest.Response> =>
+      server()
+        .post(`/api/orders/${lineOrder.id}/lines/${lineOrder.lines[0].id}/cancel`)
+        .set('Authorization', adminAuth)
+        .send(quantity === undefined ? {} : { quantity });
+
+    it('cancels one of the two unshipped units: the slice’s allocation is released', async () => {
+      const before = await warehouseLevel(lineVariantId);
+      expect(before.quantityAllocated).toBe(ORDERED_QTY);
+
+      const res = await cancelLine(1);
+      expect(res.status).toBe(HttpStatus.OK);
+
+      // The cancelled count is recorded on the line (ADR-040) — the money snapshot stands.
+      const line = (res.body as IOrderBody).lines[0];
+      expect(line.cancelledQuantity).toBe(1);
+      expect(line.quantity).toBe(ORDERED_QTY);
+
+      const after = await warehouseLevel(lineVariantId);
+      expect(after.quantityAllocated).toBe(ORDERED_QTY - 1);
+      expect(after.available).toBe(before.available + 1);
+      // No money moves on a line cancel — on-hand is untouched too.
+      expect(after.quantityOnHand).toBe(before.quantityOnHand);
+
+      // `line-cancelled` is what distinguishes the ledger row from a whole-order cancel.
+      const releases = await listReleases(lineVariantId);
+      expect(releases).toHaveLength(1);
+      expect(releases[0].type).toBe('release');
+      expect(releases[0].quantity).toBe(-1);
+      expect(releases[0].reasonCode).toBe('line-cancelled');
+      expect(releases[0].referenceType).toBe('order');
+      expect(releases[0].referenceId).toBe(String(lineOrder.id));
+    });
+
+    it('rejects cancelling more than the unshipped remainder → 409 FULFILLMENT_QUANTITY_EXCEEDS_REMAINING', async () => {
+      const res = await cancelLine(ORDERED_QTY + 5);
+
+      expect(res.status).toBe(HttpStatus.CONFLICT);
+      expect((res.body as { code: string }).code).toBe('FULFILLMENT_QUANTITY_EXCEEDS_REMAINING');
+    });
+
+    it('rejects an order line that does not belong to the order → 404 ORDER_LINE_NOT_FOUND', async () => {
+      const res = await server()
+        .post(`/api/orders/${lineOrder.id}/lines/99999999/cancel`)
+        .set('Authorization', adminAuth)
+        .send({ quantity: 1 });
+
+      expect(res.status).toBe(HttpStatus.NOT_FOUND);
+      expect((res.body as { code: string }).code).toBe('ORDER_LINE_NOT_FOUND');
+    });
+
+    // The regression ADR-040 closes, asserted through the PUBLIC stock read: before the
+    // cancelled count was persisted, each repeat call released the same units again and
+    // drove `quantity_allocated` below zero.
+    it('cancels the second unit, then refuses a third — releasing the allocation exactly twice', async () => {
+      // One unit is already cancelled by the first test; cancel the remaining one.
+      const second = await cancelLine(1);
+      expect(second.status).toBe(HttpStatus.OK);
+
+      const line = (second.body as IOrderBody).lines[0];
+      expect(line.cancelledQuantity).toBe(ORDERED_QTY);
+      // Cancelling the last active unit is terminal for the line.
+      expect(line.status).toBe('cancelled');
+
+      const drained = await warehouseLevel(lineVariantId);
+      expect(drained.quantityAllocated).toBe(0);
+
+      // Nothing active remains, so a third cancel has nothing to cancel.
+      const third = await cancelLine(1);
+      expect(third.status).toBe(HttpStatus.CONFLICT);
+      expect((third.body as { code: string }).code).toBe('FULFILLMENT_QUANTITY_EXCEEDS_REMAINING');
+
+      // An omitted quantity ("cancel whatever remains") is refused for the same reason —
+      // it must not silently resolve to the already-cancelled units.
+      const fourth = await cancelLine();
+      expect(fourth.status).toBe(HttpStatus.CONFLICT);
+
+      // The decisive assertions: exactly two release rows, and the allocation never went
+      // negative. Before the fix both of these blew past their bound.
+      const releases = await listReleases(lineVariantId);
+      expect(releases).toHaveLength(2);
+      expect(releases.every((r) => r.quantity === -1)).toBe(true);
+
+      const settled = await warehouseLevel(lineVariantId);
+      expect(settled.quantityAllocated).toBe(0);
+      expect(settled.quantityOnHand).toBe(RECEIVED_QTY);
+      expect(settled.available).toBe(RECEIVED_QTY);
+    });
+
+    it('refuses to ship a fully-cancelled line', async () => {
+      const res = await server()
+        .post(`/api/orders/${lineOrder.id}/fulfillments`)
+        .set('Authorization', adminAuth)
+        .send({ lines: [{ orderLineId: lineOrder.lines[0].id, quantity: 1 }] });
+
+      expect(res.status).toBe(HttpStatus.CONFLICT);
+      expect((res.body as { code: string }).code).toBe('FULFILLMENT_QUANTITY_EXCEEDS_REMAINING');
+    });
   });
 });

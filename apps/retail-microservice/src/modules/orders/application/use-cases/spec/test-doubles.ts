@@ -345,7 +345,27 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
       status: order.status,
       paymentStatus: order.paymentStatus,
       fulfillmentStatus: order.fulfillmentStatus,
-      lines: [...order.lines] as OrderLine[],
+      // Deep-copy the child lines. A shallow `[...order.lines]` would hand the caller the
+      // very `OrderLine` objects the store holds, so a mutation (a line cancel, a
+      // `markFulfillment`) would be visible in the store BEFORE its `save` — and a
+      // rolled-back attempt could not undo it, because `snapshot()` only copies the Map.
+      // The real repository re-reads the graph from MySQL, so every read is independent.
+      lines: order.lines.map(
+        (line) =>
+          new OrderLine({
+            id: line.id,
+            variantId: line.variantId,
+            sku: line.sku,
+            nameSnapshot: line.nameSnapshot,
+            quantity: line.quantity,
+            cancelledQuantity: line.cancelledQuantity,
+            unitPriceMinor: line.unitPriceMinor,
+            taxAmountMinor: line.taxAmountMinor,
+            discountAmountMinor: line.discountAmountMinor,
+            lineTotalMinor: line.lineTotalMinor,
+            status: line.status,
+          }),
+      ),
       subtotalMinor: order.subtotalMinor,
       taxTotalMinor: order.taxTotalMinor,
       discountTotalMinor: order.discountTotalMinor,
@@ -1000,7 +1020,7 @@ export const buildOrderFixture = (
 export const buildOrderWithLinesFixture = (
   id: number,
   customerId: string | null,
-  lines: { orderLineId: number; quantity: number }[],
+  lines: { orderLineId: number; quantity: number; cancelledQuantity?: number }[],
   opts: {
     status?: OrderStatusEnum;
     paymentStatus?: OrderPaymentStatusEnum;
@@ -1009,20 +1029,25 @@ export const buildOrderWithLinesFixture = (
   } = {},
 ): Order => {
   const unitPriceMinor = opts.unitPriceMinor ?? 1000;
-  const orderLines = lines.map(
-    (line) =>
-      new OrderLine({
-        id: line.orderLineId,
-        variantId: line.orderLineId,
-        sku: `SKU-${line.orderLineId}`,
-        nameSnapshot: `Item ${line.orderLineId}`,
-        quantity: line.quantity,
-        unitPriceMinor,
-        taxAmountMinor: 0,
-        discountAmountMinor: 0,
-        status: OrderLineStatusEnum.ALLOCATED,
-      }),
-  );
+  const orderLines = lines.map((line) => {
+    const cancelledQuantity = line.cancelledQuantity ?? 0;
+    return new OrderLine({
+      id: line.orderLineId,
+      variantId: line.orderLineId,
+      sku: `SKU-${line.orderLineId}`,
+      nameSnapshot: `Item ${line.orderLineId}`,
+      quantity: line.quantity,
+      cancelledQuantity,
+      unitPriceMinor,
+      taxAmountMinor: 0,
+      discountAmountMinor: 0,
+      // A line seeded fully cancelled is terminal, exactly as `cancelQuantity` leaves it.
+      status:
+        cancelledQuantity === line.quantity
+          ? OrderLineStatusEnum.CANCELLED
+          : OrderLineStatusEnum.ALLOCATED,
+    });
+  });
   const subtotalMinor = orderLines.reduce((sum, line) => sum + line.lineTotalMinor, 0);
   return Order.reconstitute({
     id,
