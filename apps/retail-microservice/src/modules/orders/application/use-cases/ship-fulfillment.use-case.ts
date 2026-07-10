@@ -440,8 +440,16 @@ export class ShipFulfillmentUseCase {
   ): OrderFulfillmentStatusEnum {
     let everyLineFullyShipped = true;
     for (const line of order.lines) {
+      // A fully-cancelled line owes nothing: it is already terminal at `cancelled`, it can
+      // never accumulate shipped units, and it must not hold the order's fulfillment axis
+      // below `shipped` forever. `markFulfillment` would reject its status outright.
+      if (line.activeQuantity === 0) {
+        continue;
+      }
       const shipped = shippedByLine.get(line.id!) ?? 0;
-      if (shipped >= line.quantity) {
+      // Measured against the ACTIVE quantity — cancelled units are no longer owed, so a
+      // line whose remaining units have all shipped is fully shipped.
+      if (shipped >= line.activeQuantity) {
         line.markFulfillment(OrderLineStatusEnum.SHIPPED);
       } else if (shipped > 0) {
         line.markFulfillment(OrderLineStatusEnum.PARTIALLY_SHIPPED);

@@ -429,4 +429,56 @@ describe('Returns rejection: open-time guards + explicit staff reject (e2e)', ()
     expect(reReject.status).toBe(HttpStatus.CONFLICT);
     expect((reReject.body as IErrorBody).code).toBe('RETURN_INVALID_STATUS_TRANSITION');
   });
+
+  // `GET /api/returns/:rmaId` carries **no `@RequiresPermission`** — that would lock out
+  // the owning customer (ADR-024). The gateway resolves the staff override from
+  // `@CurrentUser().permissions` (`order:read`) and folds the caller into `actorId`; retail
+  // is the single enforcement point (ADR-028 §7 / ADR-032). Exercised against the RMA the
+  // reject test above left behind, so the read covers a terminal RMA too.
+  describe('GET /api/returns/:rmaId — owner-or-staff read', () => {
+    it('lets the owning customer read its own RMA', async () => {
+      const read = await server()
+        .get(`/api/returns/${rejectRmaId}`)
+        .set('Authorization', `Bearer ${customerToken}`);
+
+      expect(read.status).toBe(HttpStatus.OK);
+      const rma = read.body as IReturnBody;
+      expect(rma.id).toBe(rejectRmaId);
+      expect(rma.status).toBe('rejected');
+      expect(rma.lines).toHaveLength(1);
+    });
+
+    it('lets a staff caller holding order:read reach an RMA it does not own', async () => {
+      const read = await server()
+        .get(`/api/returns/${rejectRmaId}`)
+        .set('Authorization', adminAuth);
+
+      expect(read.status).toBe(HttpStatus.OK);
+      expect((read.body as IReturnBody).id).toBe(rejectRmaId);
+    });
+
+    it('refuses a different customer with 403 RETURN_ACCESS_FORBIDDEN', async () => {
+      const otherEmail = `e2e-return-rejected-other-${stamp}@example.com`;
+      await server()
+        .post('/api/auth/customer/register')
+        .send({ email: otherEmail, password: 'other1234', firstName: 'Other', lastName: 'Buyer' });
+      const otherToken = await customerLogin(otherEmail, 'other1234');
+
+      const read = await server()
+        .get(`/api/returns/${rejectRmaId}`)
+        .set('Authorization', `Bearer ${otherToken}`);
+
+      expect(read.status).toBe(HttpStatus.FORBIDDEN);
+      expect((read.body as IErrorBody).code).toBe('RETURN_ACCESS_FORBIDDEN');
+    });
+
+    // Not-found precedes the owner-check, so probing someone else's RMA id cannot
+    // distinguish "missing" from "not yours" by status code alone.
+    it('resolves a missing RMA to 404 RETURN_NOT_FOUND', async () => {
+      const read = await server().get('/api/returns/99999999').set('Authorization', adminAuth);
+
+      expect(read.status).toBe(HttpStatus.NOT_FOUND);
+      expect((read.body as IErrorBody).code).toBe('RETURN_NOT_FOUND');
+    });
+  });
 });

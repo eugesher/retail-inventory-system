@@ -133,18 +133,22 @@ export class CreateFulfillmentUseCase {
   }
 
   // For each requested line: the `orderLineId` must belong to the order (404), and the
-  // already-fulfilled-plus-requested quantity must not exceed the ordered quantity
-  // (409, the remaining count carried in the message). "Already fulfilled" sums the
-  // line's quantities across every existing **non-`cancelled`** fulfillment — a
+  // already-fulfilled-plus-requested quantity must not exceed the line's **active**
+  // quantity (409, the remaining count carried in the message). "Already fulfilled" sums
+  // the line's quantities across every existing **non-`cancelled`** fulfillment — a
   // cancelled shipment frees its slice back to the remaining pool.
+  //
+  // The bound is `activeQuantity` (`ordered − cancelled`), not the place-time `ordered`:
+  // Cancel Line has already released the cancelled units' allocation, so shipping them
+  // would move stock that inventory no longer holds against this order.
   private async assertWithinRemaining(
     order: Order,
     lines: { orderLineId: number; quantity: number }[],
   ): Promise<void> {
     const orderId = order.id!;
-    const orderedByLine = new Map<number, number>();
+    const activeByLine = new Map<number, number>();
     for (const line of order.lines) {
-      orderedByLine.set(line.id!, line.quantity);
+      activeByLine.set(line.id!, line.activeQuantity);
     }
 
     const existing = await this.fulfillmentRepository.listByOrderId(orderId);
@@ -156,7 +160,7 @@ export class CreateFulfillmentUseCase {
     // single line.
     const requestedByLine = new Map<number, number>();
     for (const requested of lines) {
-      if (!orderedByLine.has(requested.orderLineId)) {
+      if (!activeByLine.has(requested.orderLineId)) {
         throw new OrderDomainException(
           OrderErrorCodeEnum.ORDER_LINE_NOT_FOUND,
           `Order line ${requested.orderLineId} does not belong to order ${orderId}`,
@@ -169,13 +173,13 @@ export class CreateFulfillmentUseCase {
     }
 
     for (const [orderLineId, requested] of requestedByLine) {
-      const ordered = orderedByLine.get(orderLineId)!;
+      const active = activeByLine.get(orderLineId)!;
       const already = alreadyByLine.get(orderLineId) ?? 0;
-      const remaining = ordered - already;
+      const remaining = active - already;
       if (requested > remaining) {
         throw new OrderDomainException(
           OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING,
-          `Order line ${orderLineId}: requested ${requested} exceeds the remaining ${remaining} (ordered ${ordered}, already fulfilled ${already})`,
+          `Order line ${orderLineId}: requested ${requested} exceeds the remaining ${remaining} (active ${active}, already fulfilled ${already})`,
         );
       }
     }

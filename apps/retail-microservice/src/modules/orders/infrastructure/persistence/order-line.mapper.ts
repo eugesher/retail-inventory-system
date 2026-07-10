@@ -17,6 +17,7 @@ export class OrderLineMapper {
       sku: domain.sku,
       nameSnapshot: domain.nameSnapshot,
       quantity: domain.quantity,
+      cancelledQuantity: domain.cancelledQuantity,
       unitPriceMinor: domain.unitPriceMinor,
       taxAmountMinor: domain.taxAmountMinor,
       discountAmountMinor: domain.discountAmountMinor,
@@ -43,6 +44,9 @@ export class OrderLineMapper {
       sku: entity.sku,
       nameSnapshot: entity.nameSnapshot,
       quantity: entity.quantity,
+      // An INT column, so mysql2 already hands back a number — coerced for parity with
+      // the BIGINT scalars below, and to survive a `NULL` from a pre-migration row.
+      cancelledQuantity: Number(entity.cancelledQuantity ?? 0),
       unitPriceMinor: Number(entity.unitPriceMinor),
       taxAmountMinor: Number(entity.taxAmountMinor),
       discountAmountMinor: Number(entity.discountAmountMinor),

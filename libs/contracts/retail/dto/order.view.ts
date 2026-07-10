@@ -36,6 +36,11 @@ export class OrderLineView {
   @ApiResponseProperty()
   public quantity: number;
 
+  // Units of this line cancelled by Cancel Line. `quantity − cancelledQuantity` is what
+  // remains shippable and returnable; the money fields keep the place-time snapshot.
+  @ApiResponseProperty()
+  public cancelledQuantity: number;
+
   @ApiResponseProperty()
   public unitPriceMinor: number;
 

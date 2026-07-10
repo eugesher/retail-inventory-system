@@ -188,13 +188,23 @@ export class CancelOrderUseCase {
     );
 
     // After the local commit: release the order's stock allocation. Best-effort with
-    // retry-then-log-for-replay — never rolls the cancel back (ADR-031).
-    await releaseAllocationWithRetry(
-      this.inventoryGateway,
-      this.buildCancelAllocationPayload(order, actorId, correlationId),
-      this.logger,
+    // retry-then-log-for-replay — never rolls the cancel back (ADR-031). A line whose units
+    // were all cancelled beforehand holds no allocation, so it contributes nothing; if that
+    // is every line, there is nothing to release and inventory would reject the empty
+    // payload outright.
+    const allocationPayload = CancelOrderUseCase.buildCancelAllocationPayload(
+      order,
+      actorId,
       correlationId,
     );
+    if (allocationPayload.lines.length > 0) {
+      await releaseAllocationWithRetry(
+        this.inventoryGateway,
+        allocationPayload,
+        this.logger,
+        correlationId,
+      );
+    }
 
     // Resolve the buyer's email so the cancellation-confirmation consumer (which now binds
     // `retail.order.cancelled` off `notification_events`) has a recipient without a
@@ -235,23 +245,31 @@ export class CancelOrderUseCase {
     );
   }
 
-  // Releases the order's full allocation — nothing has shipped (the precondition), so the
-  // place-time allocation is intact for every line at its ordered quantity. The line's
-  // allocation location is `default-warehouse` (Place allocated there); a multi-location
-  // sourcing record is a later capability. `reason 'order-cancelled'` is the movement's
-  // `reason_code` (distinct from the optional human `reason` on the event).
-  private buildCancelAllocationPayload(
+  // Releases the allocation the order still holds. Nothing has shipped (the precondition),
+  // so each line's place-time allocation is intact **except** for units a prior Cancel Line
+  // already cancelled and released — hence `activeQuantity`, not `quantity` (ADR-040).
+  // Releasing the ordered quantity here would free those units a second time and drive the
+  // shared per-`(variant, location)` `quantity_allocated` below the truth, eating other
+  // orders' allocations. A fully-cancelled line holds nothing and is dropped: inventory
+  // rejects a non-positive line quantity.
+  //
+  // The line's allocation location is `default-warehouse` (Place allocated there); a
+  // multi-location sourcing record is a later capability. `reason 'order-cancelled'` is the
+  // movement's `reason_code` (distinct from the optional human `reason` on the event).
+  private static buildCancelAllocationPayload(
     order: Order,
     actorId: string,
     correlationId: string,
   ): IAllocationCancelPayload {
     return {
       orderId: order.id!,
-      lines: order.lines.map((line) => ({
-        variantId: line.variantId,
-        stockLocationId: INVENTORY_DEFAULT_STOCK_LOCATION,
-        quantity: line.quantity,
-      })),
+      lines: order.lines
+        .filter((line) => line.activeQuantity > 0)
+        .map((line) => ({
+          variantId: line.variantId,
+          stockLocationId: INVENTORY_DEFAULT_STOCK_LOCATION,
+          quantity: line.activeQuantity,
+        })),
       reason: 'order-cancelled',
       actorId,
       correlationId,

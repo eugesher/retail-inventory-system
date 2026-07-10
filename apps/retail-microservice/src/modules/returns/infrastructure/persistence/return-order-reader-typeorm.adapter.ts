@@ -23,6 +23,7 @@ interface IOrderLineRow {
   orderLineId: string;
   variantId: string;
   quantity: number;
+  cancelledQuantity: number;
   status: string;
 }
 
@@ -74,7 +75,8 @@ export class ReturnOrderReaderTypeormAdapter implements IReturnOrderReaderPort {
     const [header] = headerRows;
 
     const lineRows = await this.entityManager.query<IOrderLineRow[]>(
-      `SELECT id AS orderLineId, variant_id AS variantId, quantity, status
+      `SELECT id AS orderLineId, variant_id AS variantId, quantity,
+              cancelled_quantity AS cancelledQuantity, status
          FROM order_line
         WHERE order_id = ? AND deleted_at IS NULL
         ORDER BY id ASC`,
@@ -92,11 +94,12 @@ export class ReturnOrderReaderTypeormAdapter implements IReturnOrderReaderPort {
         orderLineId: Number(row.orderLineId),
         variantId: Number(row.variantId),
         quantity: Number(row.quantity),
-        // No per-line `cancelled_quantity` column exists; a whole line cancelled to the
-        // `cancelled` status removes its full ordered quantity from the returnable pool.
-        // Partial-quantity line cancellation is not persisted (Cancel Line only releases
-        // the allocation), so it cannot be read back here (a documented limitation).
-        cancelledQuantity: row.status === 'cancelled' ? Number(row.quantity) : 0,
+        // `order_line.cancelled_quantity` is the durable count Cancel Line writes, so a
+        // partial cancellation now shrinks the returnable pool by exactly its units. A
+        // whole line cancelled reaches `cancelled_quantity = quantity` (and the
+        // `cancelled` status), which zeroes the pool — the case the old status-only read
+        // tried to cover, back when nothing ever wrote that status.
+        cancelledQuantity: Number(row.cancelledQuantity),
       })),
     };
   }

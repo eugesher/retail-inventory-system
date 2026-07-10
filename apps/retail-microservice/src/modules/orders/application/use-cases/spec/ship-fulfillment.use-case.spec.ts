@@ -290,6 +290,43 @@ describe('ShipFulfillmentUseCase', () => {
       expect(order?.lines[0].status).toBe(OrderLineStatusEnum.PARTIALLY_SHIPPED);
       expect(order?.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.PARTIALLY_SHIPPED);
     });
+
+    // A cancelled unit is no longer owed, so it must not hold the order below `shipped`.
+    // The roll-up measures each line against its ACTIVE quantity (`ordered − cancelled`).
+    it('reaches shipped when every ACTIVE unit shipped and the rest was cancelled', async () => {
+      // Line 10 ordered 3, 1 cancelled → 2 active; ship exactly those 2.
+      const h = await makeHarness({
+        order: buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
+          { orderLineId: 10, quantity: 3, cancelledQuantity: 1 },
+        ]),
+        fulfillmentLines: [{ orderLineId: 10, quantity: 2 }],
+      });
+
+      await h.useCase.execute(shipPayload(h.fulfillmentId));
+
+      const order = await h.orderRepository.findById(ORDER_ID);
+      expect(order?.lines[0].status).toBe(OrderLineStatusEnum.SHIPPED);
+      expect(order?.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.SHIPPED);
+    });
+
+    // A fully-cancelled line is terminal at `cancelled`: the roll-up skips it entirely
+    // (`markFulfillment` would reject that status) and it never blocks the order axis.
+    it('ignores a fully-cancelled sibling line when rolling the order up to shipped', async () => {
+      const h = await makeHarness({
+        order: buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
+          { orderLineId: 10, quantity: 3 },
+          { orderLineId: 20, quantity: 2, cancelledQuantity: 2 },
+        ]),
+        fulfillmentLines: [{ orderLineId: 10, quantity: 3 }],
+      });
+
+      await h.useCase.execute(shipPayload(h.fulfillmentId));
+
+      const order = await h.orderRepository.findById(ORDER_ID);
+      expect(order?.lines[0].status).toBe(OrderLineStatusEnum.SHIPPED);
+      expect(order?.lines[1].status).toBe(OrderLineStatusEnum.CANCELLED);
+      expect(order?.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.SHIPPED);
+    });
   });
 
   describe('preconditions', () => {

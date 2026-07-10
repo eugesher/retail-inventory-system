@@ -125,5 +125,101 @@ describe('OrderLine', () => {
         OrderDomainException,
       );
     });
+
+    it('defaults cancelledQuantity to 0, so activeQuantity is the ordered quantity', () => {
+      const line = new OrderLine({ ...baseProps });
+
+      expect(line.cancelledQuantity).toBe(0);
+      expect(line.activeQuantity).toBe(3);
+    });
+
+    it('reconstitutes a persisted cancelled count', () => {
+      const line = new OrderLine({ ...baseProps, cancelledQuantity: 2 });
+
+      expect(line.cancelledQuantity).toBe(2);
+      expect(line.activeQuantity).toBe(1);
+    });
+
+    // The same bound the `cancelled_quantity` CHECK holds in storage, so a corrupted
+    // stored count is rejected on read rather than reconstituting silently.
+    it('rejects a cancelledQuantity outside [0, quantity]', () => {
+      expect(() => new OrderLine({ ...baseProps, cancelledQuantity: -1 })).toThrow(
+        OrderDomainException,
+      );
+      expect(() => new OrderLine({ ...baseProps, cancelledQuantity: 4 })).toThrow(
+        OrderDomainException,
+      );
+      expect(() => new OrderLine({ ...baseProps, cancelledQuantity: 1.5 })).toThrow(
+        OrderDomainException,
+      );
+    });
+  });
+
+  // The line's own bound on Cancel Line (ADR-031): the running cancelled total may never
+  // exceed the ordered quantity. The use case additionally subtracts the fulfilled units
+  // (which a child entity cannot see), so this is the last line of defence against the
+  // over-release an unrecorded cancellation produced.
+  describe('cancelQuantity', () => {
+    it('accumulates the cancelled units and shrinks activeQuantity', () => {
+      const line = new OrderLine({ ...baseProps });
+
+      line.cancelQuantity(1);
+      expect(line.cancelledQuantity).toBe(1);
+      expect(line.activeQuantity).toBe(2);
+
+      line.cancelQuantity(1);
+      expect(line.cancelledQuantity).toBe(2);
+      expect(line.activeQuantity).toBe(1);
+    });
+
+    it('leaves the money snapshot and the ordered quantity untouched', () => {
+      const line = new OrderLine({ ...baseProps });
+
+      line.cancelQuantity(2);
+
+      expect(line.quantity).toBe(3);
+      expect(line.lineTotalMinor).toBe(4500);
+    });
+
+    it('moves the line to the terminal cancelled status once nothing is active', () => {
+      const line = new OrderLine({ ...baseProps });
+
+      line.cancelQuantity(3);
+
+      expect(line.activeQuantity).toBe(0);
+      expect(line.status).toBe(OrderLineStatusEnum.CANCELLED);
+    });
+
+    it('leaves the fulfillment-progress status alone on a partial cancel', () => {
+      const line = new OrderLine({ ...baseProps });
+
+      line.cancelQuantity(1);
+
+      expect(line.status).toBe(OrderLineStatusEnum.ALLOCATED);
+    });
+
+    it('rejects cancelling more than the active quantity', () => {
+      const line = new OrderLine({ ...baseProps, cancelledQuantity: 1 });
+
+      expect(() => line.cancelQuantity(3)).toThrow(OrderDomainException);
+      // The rejected call left nothing behind.
+      expect(line.cancelledQuantity).toBe(1);
+    });
+
+    it('rejects re-cancelling the units of an already fully-cancelled line', () => {
+      const line = new OrderLine({ ...baseProps });
+      line.cancelQuantity(3);
+
+      expect(() => line.cancelQuantity(1)).toThrow(OrderDomainException);
+      expect(line.cancelledQuantity).toBe(3);
+    });
+
+    it('rejects a non-positive or fractional unit count', () => {
+      const line = new OrderLine({ ...baseProps });
+
+      expect(() => line.cancelQuantity(0)).toThrow(OrderDomainException);
+      expect(() => line.cancelQuantity(-1)).toThrow(OrderDomainException);
+      expect(() => line.cancelQuantity(1.5)).toThrow(OrderDomainException);
+    });
   });
 });

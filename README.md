@@ -501,7 +501,11 @@ redelivered cancel collapses to a store replay. A downstream failure is warn-log
 swallowed, leaving `flagged_for_refund` set as the durable manual-retry anchor.
 
 **Cancel Line** (staff only) cancels a single line's **unshipped** quantity and releases
-just that slice of the allocation. No money-total change, no event.
+just that slice of the allocation. The count is recorded on `order_line.cancelled_quantity`
+(ADR-040), so `quantity − cancelled_quantity` is the line's **active** quantity — the bound
+Cancel Line, Create Fulfillment, Ship's roll-up, and the returnable pool all measure
+against. The write is a version-checked CAS and commits **before** the release, so the same
+units can never be cancelled (and released) twice. No money-total change, no event.
 
 **Issue Refund** enforces the refundable ceiling (`amount ≤ amount_minor − refunded_amount_minor`),
 calls the gateway **outside** the transaction, then runs `Payment.refund` +

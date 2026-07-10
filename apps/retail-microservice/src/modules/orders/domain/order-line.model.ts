@@ -9,6 +9,9 @@ export interface IOrderLineProps {
   sku: string;
   nameSnapshot: string;
   quantity: number;
+  // Units of this line cancelled by Cancel Line (ADR-031). Defaults to 0; on the load
+  // path it carries the persisted `order_line.cancelled_quantity`.
+  cancelledQuantity?: number;
   unitPriceMinor: number;
   taxAmountMinor?: number;
   discountAmountMinor?: number;
@@ -48,6 +51,7 @@ export class OrderLine extends Entity<number | null> {
   public readonly discountAmountMinor: number;
   public readonly lineTotalMinor: number;
   private _status: OrderLineStatusEnum;
+  private _cancelledQuantity: number;
 
   constructor(props: IOrderLineProps) {
     if (!Number.isInteger(props.variantId) || props.variantId <= 0) {
@@ -60,6 +64,19 @@ export class OrderLine extends Entity<number | null> {
       throw new OrderDomainException(
         OrderErrorCodeEnum.ORDER_LINE_QUANTITY_INVALID,
         `OrderLine.quantity must be a positive integer, got ${props.quantity}`,
+      );
+    }
+    // `0 ≤ cancelledQuantity ≤ quantity` — the same bound the `cancelled_quantity`
+    // CHECK enforces in storage, so a corrupted stored count is rejected on read.
+    const cancelledQuantity = props.cancelledQuantity ?? 0;
+    if (
+      !Number.isInteger(cancelledQuantity) ||
+      cancelledQuantity < 0 ||
+      cancelledQuantity > props.quantity
+    ) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_LINE_QUANTITY_INVALID,
+        `OrderLine.cancelledQuantity must be an integer within [0, ${props.quantity}], got ${cancelledQuantity}`,
       );
     }
     if (typeof props.sku !== 'string' || props.sku.trim().length === 0) {
@@ -104,6 +121,7 @@ export class OrderLine extends Entity<number | null> {
     this.taxAmountMinor = taxAmountMinor;
     this.discountAmountMinor = discountAmountMinor;
     this.lineTotalMinor = expected;
+    this._cancelledQuantity = cancelledQuantity;
     // A line starts `ALLOCATED` at place-time — a forward-compatible sentinel; real
     // allocation lands with the inventory-reservation capability.
     this._status = props.status ?? OrderLineStatusEnum.ALLOCATED;
@@ -111,6 +129,52 @@ export class OrderLine extends Entity<number | null> {
 
   public get status(): OrderLineStatusEnum {
     return this._status;
+  }
+
+  public get cancelledQuantity(): number {
+    return this._cancelledQuantity;
+  }
+
+  // The units of this line that are still live: what remains shippable, and (once
+  // delivered) returnable. Every quantity rule downstream measures against THIS, not the
+  // place-time `quantity` — cancelling units removes them from the order's obligations
+  // without rewriting the buyer's money snapshot.
+  public get activeQuantity(): number {
+    return this.quantity - this._cancelledQuantity;
+  }
+
+  // Records `units` of this line as cancelled (Cancel Line, ADR-031). The caller has
+  // already established that the units are unshipped — the fulfilled count lives on the
+  // order's `fulfillment` rows, which a child entity cannot see. What the line owns is
+  // its own bound: the running total may never exceed the ordered quantity, so a repeat
+  // cancel of the same units is rejected here even if the caller's remainder maths were
+  // wrong. That makes this the last line of defence against the over-release the
+  // unrecorded-cancellation bug produced.
+  //
+  // Carries **no money mutation** — `lineTotalMinor` stays the place-time snapshot; a
+  // credit is the refund capability's job. Cancelling the whole line moves it to the
+  // terminal `cancelled` status; a partial cancel leaves the fulfillment-progress status
+  // alone (the remaining units still ship).
+  public cancelQuantity(units: number): void {
+    if (!Number.isInteger(units) || units <= 0) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_LINE_QUANTITY_INVALID,
+        `OrderLine.cancelQuantity: units must be a positive integer, got ${units}`,
+      );
+    }
+    if (units > this.activeQuantity) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING,
+        `OrderLine ${this.id}: cannot cancel ${units} — only ${this.activeQuantity} of the ${this.quantity} ordered remain uncancelled`,
+      );
+    }
+    this._cancelledQuantity += units;
+    // A fully-cancelled line is terminal. It can only reach here with nothing fulfilled
+    // (the caller cancels unshipped units only), so no fulfillment-progress status is
+    // being overwritten.
+    if (this.activeQuantity === 0) {
+      this._status = OrderLineStatusEnum.CANCELLED;
+    }
   }
 
   // Advances the line's fulfillment progress along `allocated → partially-shipped →
