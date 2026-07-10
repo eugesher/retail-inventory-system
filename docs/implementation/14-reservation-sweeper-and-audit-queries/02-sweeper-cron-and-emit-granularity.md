@@ -175,11 +175,27 @@ crash loop — one per tick, forever. Contention is transient by definition: the
 re-reads a fresh snapshot and, most likely, succeeds. Swallow and `warn`, exactly as
 `DeliveryRetryScheduler` and `IdempotencyPurgeScheduler` do.
 
-Two invocations never overlap in a *harmful* way even if a sweep outruns its interval:
-`setInterval` will start a second `sweep()` while the first is still awaiting, but the sweep
-is re-entrant by construction — every candidate row is re-read under its transaction and a
-row another writer already expired falls into the `status !== 'active'` skip. The same
-mechanism that makes two sweeper *processes* safe makes two overlapping ticks safe.
+A sweep that outruns its interval would overlap itself, and `setInterval` does not care: it
+fires on its cadence whether or not the previous callback has settled. That overlap is never
+*harmful* — the sweep is re-entrant by construction, because every candidate row is re-read
+under its transaction and a row another writer already expired falls into the
+`status !== 'active'` skip. The same mechanism that makes two sweeper *processes* safe makes
+two overlapping ticks safe.
+
+Safe is not the same as useful. The loser of the race re-reads every row the winner already
+expired, skips all of them, and — where the two chunks touch a shared `StockLevel` — burns its
+whole `OCC_RETRY_ATTEMPTS` budget losing the compare-and-swap, reclaiming nothing for double
+the database work. `RESERVATION_SWEEP_INTERVAL_SECONDS` has a Joi floor of `1`, so overlap is
+reachable by configuration alone, not just by a pathological backlog. So `sweep()` holds a
+private `sweeping` boolean and returns early — at `debug`, not `warn`, because a skipped tick
+is a healthy system draining a backlog, not a fault. The flag is cleared in a `finally`: a
+throw that wedged it on would silence the timer for the life of the process.
+
+The guard is deliberately *not* a lock. It excludes a tick from a tick within one process; it
+does nothing about a second replica, or about the `inventory.reservation.sweep` RPC firing
+mid-tick. It does not need to. Those paths stay correct by the re-entrancy argument above —
+which is exactly why this is an efficiency guard that may be removed without a correctness
+review, and why the sweep must never grow one that a caller depends on.
 
 ## 6. Emission granularity: one event per reservation row
 

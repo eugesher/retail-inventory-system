@@ -99,6 +99,15 @@ These two live in different places on purpose.
 - `@IsISO8601()` on `from` / `to`, plus a cross-property `@IsOnOrAfter('from')` on `to`.
 - `@Type(() => Number) @IsInt() @Min(1)` on `page` / `pageSize`.
 
+`@IsISO8601()` accepts a **zone-less** date-time (`2026-06-01T00:00:00`, no `Z`, no `±hh:mm`),
+and `new Date()` resolves that in the *host's local zone* while resolving a date-only
+`2026-06-01` as UTC. `occurred_at` is stored and compared in UTC, so both parse sites — the
+validator here and `parseInstant` in each event-store repository — pin a zone-less date-time to
+UTC before reading it. Without that, `?from=2026-06-01T00:00:00` silently shifts the window by
+the host's offset, and a `from` carrying an offset compared against a `to` that does not would
+reject a valid range. `DatabaseModule`'s `timezone: 'Z'` pin does **not** cover this: it governs
+driver serialization, not `Date` parsing.
+
 The `from <= to` check earns its place. The event store answers an inverted window with an
 **empty page**, not a rejection — `BETWEEN hi AND lo` selects nothing in MySQL, and growing the
 event store its first `*DomainException` + `*ErrorCodeEnum` + `*RpcExceptionFilter` triple for

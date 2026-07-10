@@ -104,8 +104,16 @@ and never `process.env` inside the use case ([ADR-017](017-architecture-lint-via
 the `RESERVATION_TTL_MINUTES` / `OCC_RETRY_ATTEMPTS` precedent). Both are Joi-defaulted, so
 a missing var never fails boot.
 
-A caller may pass a smaller `batchSize`; it is clamped into `[1, RESERVATION_SWEEP_BATCH_SIZE]`.
-**The configured value is a ceiling an override cannot raise.**
+A caller may pass a smaller `batchSize`; a **finite number** is clamped into
+`[1, RESERVATION_SWEEP_BATCH_SIZE]`. **The configured value is a ceiling an override cannot
+raise.**
+
+Anything that is *not* a finite number means "no override" and falls back to the ceiling —
+not to the floor. `undefined` is the scheduled tick. `null` reaches the use case through the
+gateway, because `@IsOptional()` skips its validators for `null` as well as `undefined`. A
+string or an object reaches it through a direct RPC, which no pipe guards. Reading "absent"
+as `=== undefined` would have made `null` clamp to `1` — a one-row sweep reporting success —
+and a string clamp to `NaN`, which reaches `find({ take: NaN })` as a TypeORM error.
 
 ### 4. Cache invalidation is per chunk, through `withInvalidation`
 

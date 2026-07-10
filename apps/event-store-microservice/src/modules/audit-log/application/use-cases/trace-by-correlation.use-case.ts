@@ -62,6 +62,23 @@ export class TraceByCorrelationUseCase {
       'Received RPC: trace by correlation id (cross-log causal chain)',
     );
 
+    // The gateway DTO rejects a blank target, but this RPC is directly reachable on the bus.
+    // An absent one must not reach the reads: TypeORM DROPS an `undefined` value from a
+    // `where` clause rather than matching nothing, so `listByCorrelationId(undefined)` would
+    // degrade into an unbounded `SELECT *` over the whole audit trail. `''` is no better —
+    // it is the stored sentinel for "ingested without a correlation id"
+    // (`domain_event.correlation_id` is `NOT NULL DEFAULT ''`), so it would return that
+    // entire bucket rather than one request's chain (ADR-039 §6). Neither names a request,
+    // and an id that names no request traces to two empty arrays — the same answer an
+    // unknown id gets.
+    if (typeof targetCorrelationId !== 'string' || targetCorrelationId.trim() === '') {
+      this.logger.warn(
+        { correlationId },
+        'Trace by correlation id: blank target — returning an empty trace',
+      );
+      return { events: [], auditEntries: [] };
+    }
+
     // Two different tables, so no ordering constraint binds them — issue both at once.
     const [events, auditEntries] = await Promise.all([
       this.domainEventReader.listByCorrelationId(targetCorrelationId),

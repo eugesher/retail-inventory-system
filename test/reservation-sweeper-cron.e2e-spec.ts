@@ -220,11 +220,15 @@ describe('Reservation sweeper — the timer reclaims a stale hold unprompted (e2
     await retailMicroservice?.close();
     await catalogMicroservice?.close();
 
-    // Closing the container must take the imperatively-registered timer with it. If this
-    // ever fails, `onModuleDestroy` stopped calling `deleteInterval` — fix the scheduler,
-    // never paper over the hanging worker with `--forceExit`.
     await inventoryMicroservice?.close();
-    expect(schedulerRegistry.doesExist('interval', RESERVATION_SWEEP_INTERVAL_NAME)).toBe(false);
+
+    // Capture the assertion's subject BEFORE tearing the rest down, then assert LAST. A
+    // failing `expect` here throws, and anything after it would never run: the mysql pool
+    // would stay open and the worker would hang on the leak instead of reporting the leak.
+    const timerSurvivedClose = schedulerRegistry.doesExist(
+      'interval',
+      RESERVATION_SWEEP_INTERVAL_NAME,
+    );
 
     await retailDb?.destroy();
 
@@ -233,6 +237,11 @@ describe('Reservation sweeper — the timer reclaims a stale hold unprompted (e2
     } else {
       process.env.RESERVATION_SWEEP_INTERVAL_SECONDS = previousSweepInterval;
     }
+
+    // Closing the container must take the imperatively-registered timer with it. If this
+    // ever fails, `onModuleDestroy` stopped calling `deleteInterval` — fix the scheduler,
+    // never paper over the hanging worker with `--forceExit`.
+    expect(timerSurvivedClose).toBe(false);
   });
 
   it('arms the sweep timer at the configured cadence', () => {

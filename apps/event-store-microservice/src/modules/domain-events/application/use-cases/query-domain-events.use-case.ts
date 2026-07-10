@@ -40,7 +40,11 @@ export class QueryDomainEventsUseCase {
   ) {}
 
   public async execute(payload: IDomainEventQueryPayload): Promise<IPage<DomainEventView>> {
-    const { filters, correlationId } = payload;
+    const { correlationId } = payload;
+    // Same reasoning as the page clamp below: this handler is directly reachable on the bus,
+    // so `filters` is only guaranteed present by the gateway. An omitted filter set means
+    // "no predicate" — the whole log — not a `TypeError` in the repository.
+    const filters = payload.filters ?? {};
 
     // Clamp the untrusted (page, pageSize) — an RMQ handler is directly reachable, so a
     // malformed page (0, negative, fractional) or an oversized pageSize must be normalized

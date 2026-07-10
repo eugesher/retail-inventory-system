@@ -9,12 +9,7 @@ import {
   StockMovementTypeEnum,
 } from '@retail-inventory-system/contracts';
 
-import {
-  Reservation,
-  ReservationStatusEnum,
-  StockMovement,
-  StockReleasedEvent,
-} from '../../domain';
+import { ReservationStatusEnum, StockMovement } from '../../domain';
 import {
   IReservationRepositoryPort,
   IStockCachePort,
@@ -33,8 +28,8 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
-import { emitMovementRecorded } from './movement-recorded.emitter';
 import { runWithStockWriteRetry } from './stock-mutation';
+import { emitReservationReleased, IReleasedReservationRow } from './stock-released.emitter';
 
 // A TTL-driven reclaim reuses the existing `ReservationReleaseReason` member rather
 // than minting a bespoke string: `StockReleasedEvent.reason` is typed by that union,
@@ -56,17 +51,12 @@ export interface ISweepExpiredReservationsParams {
   actorId?: string | null;
 }
 
-// One expired hold + the ledger row that records it, carried out of the transaction so
-// the post-commit emits can fire per row (the `ReleaseReservationUseCase` shape).
-interface IExpiredRow {
-  reservation: Reservation;
-  movement: StockMovement;
-}
-
 // The outcome of one chunk's transaction: the rows it expired, and how many candidates
-// it declined to touch because the row moved under it.
+// it declined to touch because the row moved under it. An expired row is exactly the
+// `IReleasedReservationRow` pair `ReleaseReservationUseCase` produces — same hold, same
+// negative ledger row, same post-commit announce (`stock-released.emitter.ts`).
 interface IExpiredChunk {
-  rows: IExpiredRow[];
+  rows: IReleasedReservationRow[];
   skipped: number;
 }
 
@@ -175,7 +165,17 @@ export class SweepExpiredReservationsUseCase {
 
       // Post-commit, best-effort (ADR-020): the counters are already durable, so a broker
       // hiccup is warn-logged, never raised.
-      await Promise.all(outcome.rows.map((row) => this.emitExpired(row, correlationId)));
+      await Promise.all(
+        outcome.rows.map((row) =>
+          emitReservationReleased(
+            this.publisher,
+            this.logger,
+            row,
+            EXPIRY_RELEASE_REASON,
+            correlationId,
+          ),
+        ),
+      );
     }
 
     const result: IReservationSweepResult = {
@@ -202,8 +202,16 @@ export class SweepExpiredReservationsUseCase {
   // The configured batch size is a CEILING an operator override cannot raise, and `1` is
   // the floor — a caller asking for zero rows gets one, never an empty scan that looks
   // like a clean table.
+  //
+  // "Absent" must mean every non-number, not just `undefined`. `@IsOptional()` on the
+  // gateway DTO skips its validators for `null` as well, so `{"batchSize": null}` arrives
+  // here intact; and the `inventory.reservation.sweep` RPC is directly reachable on the bus
+  // with no pipe at all, so `batchSize` may be a string or an object. Falling through with
+  // either is worse than ignoring it: `Math.trunc(null)` is `0`, which the floor lifts to a
+  // one-row sweep that reports success, and `Math.trunc('x')` is `NaN`, which reaches
+  // `find({ take: NaN })` as a TypeORM error. Both collapse to the configured ceiling.
   private resolveLimit(requested?: number): number {
-    if (requested === undefined) {
+    if (typeof requested !== 'number' || !Number.isFinite(requested)) {
       return this.configuredBatchSize;
     }
     return Math.min(Math.max(Math.trunc(requested), 1), this.configuredBatchSize);
@@ -218,7 +226,7 @@ export class SweepExpiredReservationsUseCase {
     now: Date,
     actorId: string | null,
   ): Promise<IExpiredChunk> {
-    const rows: IExpiredRow[] = [];
+    const rows: IReleasedReservationRow[] = [];
     let skipped = 0;
 
     for (const id of ids) {
@@ -282,34 +290,6 @@ export class SweepExpiredReservationsUseCase {
     }
 
     return { rows, skipped };
-  }
-
-  // Emitted PER RESERVATION ROW, never coalesced per `(variantId, stockLocationId)`:
-  // coalescing would have to sum quantities and null `cartId` / `reservationId`, which is
-  // the whole correlation value the event carries (ADR-038).
-  private async emitExpired(row: IExpiredRow, correlationId: string): Promise<void> {
-    const { reservation, movement } = row;
-
-    try {
-      await this.publisher.publishStockReleased(
-        new StockReleasedEvent({
-          variantId: reservation.variantId,
-          stockLocationId: reservation.stockLocationId,
-          quantity: reservation.quantity,
-          cartId: reservation.cartId,
-          reservationId: reservation.id,
-          reason: EXPIRY_RELEASE_REASON,
-        }),
-        correlationId,
-      );
-    } catch (error) {
-      this.logger.warn(
-        { err: error as Error, correlationId, variantId: reservation.variantId },
-        'Failed to publish inventory.stock.released (expiry already committed)',
-      );
-    }
-
-    await emitMovementRecorded(this.publisher, this.logger, movement, correlationId);
   }
 }
 

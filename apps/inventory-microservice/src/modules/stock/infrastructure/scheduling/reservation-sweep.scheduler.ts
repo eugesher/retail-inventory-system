@@ -30,6 +30,16 @@ export const RESERVATION_SWEEP_INTERVAL_NAME = 'reservation-ttl-sweep';
 // the TTL (ADR-038 Consequences).
 @Injectable()
 export class ReservationSweepScheduler implements OnModuleInit, OnModuleDestroy {
+  // `setInterval` fires on a fixed cadence regardless of how long the previous callback ran.
+  // `RESERVATION_SWEEP_INTERVAL_SECONDS` has a Joi floor of 1, and a full-ceiling batch under
+  // write contention takes far longer than that, so an overlapping tick is reachable by
+  // configuration alone. Two concurrent sweeps are CORRECT — they scan the same candidates
+  // and the loser's compare-and-swap turns into a skip (ADR-038) — but the loser reclaims
+  // nothing while burning its whole `OCC_RETRY_ATTEMPTS` budget against the winner. Skipping
+  // the tick outright is strictly better than racing ourselves. It does not (and need not)
+  // exclude the `inventory.reservation.sweep` RPC: that path is safe by the same re-read.
+  private sweeping = false;
+
   constructor(
     private readonly sweeper: SweepExpiredReservationsUseCase,
     private readonly schedulerRegistry: SchedulerRegistry,
@@ -70,6 +80,12 @@ export class ReservationSweepScheduler implements OnModuleInit, OnModuleDestroy 
   // The use case mints its own `correlationId` per invocation and reads its own bounds, so
   // the tick passes nothing.
   private async sweep(): Promise<void> {
+    if (this.sweeping) {
+      this.logger.debug({}, 'Reservation sweep still running — skipping this tick');
+      return;
+    }
+
+    this.sweeping = true;
     try {
       await this.sweeper.execute();
     } catch (err) {
@@ -79,6 +95,10 @@ export class ReservationSweepScheduler implements OnModuleInit, OnModuleDestroy 
       // `OCC_RETRY_ATTEMPTS` budget surfaces `STOCK_WRITE_CONFLICT` here, and under
       // contention that is a transient condition the next tick resolves.
       this.logger.warn({ reason }, 'Reservation sweep failed');
+    } finally {
+      // `finally`, never after the `catch`: a throw must not wedge the flag on and silence
+      // the timer for the life of the process.
+      this.sweeping = false;
     }
   }
 }

@@ -164,6 +164,24 @@ describe('TraceByCorrelationUseCase', () => {
     expect(result).toEqual({ events: [], auditEntries: [] });
   });
 
+  it('never issues a read for a blank target — a blank id names no request', async () => {
+    reader.seed(eventRow({ correlationId: '' }));
+    repository.seed(auditEntry({ correlationId: 'some-request' }));
+
+    // The gateway rejects these, but this RPC is directly reachable. `undefined` would be
+    // DROPPED from a TypeORM `where`, turning the trace into an unbounded scan of the whole
+    // audit trail; `''` is the stored sentinel for "ingested without a correlation id", so it
+    // would return that entire bucket. Both must reach neither seam.
+    for (const targetCorrelationId of [undefined, '', '   '] as unknown as string[]) {
+      const result = await useCase.execute(payload({ targetCorrelationId }));
+
+      expect(result).toEqual({ events: [], auditEntries: [] });
+    }
+
+    expect(reader.lastCorrelationId).toBeNull();
+    expect(repository.lastCorrelationId).toBeNull();
+  });
+
   it('yields a populated auditEntries array and an empty events array', async () => {
     repository.seed(auditEntry({ id: 5 }));
 
