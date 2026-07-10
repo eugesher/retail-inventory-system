@@ -138,6 +138,23 @@ describe('SweepExpiredReservationsUseCase', () => {
     expect(scan.mock.calls.map(([, limit]) => limit)).toEqual([BATCH_SIZE, 1, BATCH_SIZE]);
   });
 
+  it('falls back to the ceiling for a batch size that is not a finite number', async () => {
+    const scan = jest.spyOn(reservations, 'listExpiredActive');
+    const useCase = makeUseCase();
+
+    // `null` reaches here through the gateway: `@IsOptional()` skips its validators for
+    // `null` as well as `undefined`. The rest reach here through a direct RPC, which no
+    // pipe guards. None of them may collapse to a one-row sweep (`Math.trunc(null) === 0`)
+    // or to `take: NaN`.
+    for (const batchSize of [null, 'abc', NaN, Infinity, {}, []] as unknown as number[]) {
+      await useCase.execute({ batchSize });
+    }
+
+    expect(scan.mock.calls.map(([, limit]) => limit)).toEqual(
+      new Array(6).fill(BATCH_SIZE) as number[],
+    );
+  });
+
   it('opens one transaction and one invalidation per transaction-sized chunk', async () => {
     for (let i = 1; i <= 7; i++) {
       seedExpiredHold(`res-${i}`, i, 1, minutesAgo(10 - i));
