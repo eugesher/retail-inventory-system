@@ -170,7 +170,13 @@ and `query({ correlationId }, page)` already covers the paginated case.
   `(producer, event_type, aggregate_id, occurred_at, correlation_id)` on every redelivery. An
   event ingested with no correlation id therefore stores `''`, and is reachable by no trace
   and by no `correlationId` filter. The gateway DTO rejects an empty `targetCorrelationId` so
-  a caller cannot ask for that bucket by accident.
+  an HTTP caller cannot ask for that bucket by accident — and `TraceByCorrelationUseCase`
+  rejects it a second time, because the DTO does not stand between the RPC and the bus (§2).
+  That second guard is **not** belt-and-braces: TypeORM *drops* an `undefined` value from a
+  `where` clause rather than matching nothing, so an absent `targetCorrelationId` would make
+  `listByCorrelationId` an unbounded `SELECT *` over the whole audit trail. A blank target
+  answers with two empty arrays — the same answer an unknown id gets — so the guard costs the
+  event store no exception type.
 - `audit_log_entry.correlation_id` **is nullable** — the audit trail has no dedupe key, so
   nothing forced it non-null. A `WHERE correlation_id = ?` never matches a null-correlation
   row, which is correct: such a row belongs to no request's causal chain.

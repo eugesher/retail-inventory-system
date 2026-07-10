@@ -118,6 +118,15 @@ and the service enforces it silently — the clamp is documented in the DTO comm
 `.http` file, and the OpenAPI description, so a caller who asks for more than the ceiling can
 tell from the `scanned` count that it was lowered.
 
+The split has one seam, and it is worth stating rather than enumerating around. **`"batchSize":
+null` is a shape the gateway does not reject**: `@IsOptional()` skips a property's validators
+for `null` as well as for `undefined`, and `whitelist` does not strip a decorated field. So
+`null` arrives at the use case, where `Math.trunc(null)` is `0` — not `NaN` — and a naive
+`[1, ceiling]` clamp would lift it to a **one-row sweep that reports success**. The service
+therefore treats *every* non-finite-number as "no override" and falls back to the ceiling,
+rather than testing `=== undefined`. The same line covers the direct RPC, which reaches
+`SweepExpiredReservationsUseCase` with no pipe in front of it at all.
+
 The clamp is one-directional by design: `RESERVATION_SWEEP_BATCH_SIZE` is a **ceiling**, not a
 default. An operator may sweep fewer rows than configured (to probe carefully); an operator may
 never make one invocation do more work than the service was configured to allow.

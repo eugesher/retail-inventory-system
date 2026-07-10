@@ -2,17 +2,10 @@
 
 Guidance for Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Charter — read this before editing this file.**
->
-> This file is a **map**: *what exists and where*, plus the constraints and landmines an
-> agent cannot discover cheaply. It is **not** a place for operation mechanics, business
-> rules, rationale, or history. Those drift — and a stale copy here is **worse than no
-> copy**, because an agent trusts this file over the code.
->
-> Authoritative detail lives in four places. Cite them; do not summarise them:
-> the **code**; each module's **`*RpcExceptionFilter`** (the error-code → HTTP tables);
-> the **ADRs** under [`docs/adr/`](docs/adr/); and **[`README.md`](README.md)** (the
-> human-facing description of how the system behaves).
+**A map, not a manual.** *What exists and where*, plus constraints and landmines. Operation
+mechanics, business rules, rationale, and history belong in the code, each module's
+`*RpcExceptionFilter`, [`docs/adr/`](docs/adr/), and [`README.md`](README.md). Cite them; never
+summarise them here — a stale copy is worse than none, because an agent trusts this file.
 
 ## Commands
 
@@ -98,6 +91,14 @@ section is the reason to read it.
 - `audit_log_entry.action` holds the `IAuditLogEvent.name` string (`StaffUserRolesAssigned`,
   `RefundIssued`) — **never** a `PermissionCodeEnum` value. A permission code in an `?action=`
   filter is a well-formed query that matches nothing.
+- TypeORM **drops** an `undefined` from a `where` clause instead of matching nothing:
+  `find({ where: { correlationId: undefined } })` is an unbounded `SELECT *`. A `@MessagePattern`
+  has no pipe in front of it, so the use case must reject a blank filter itself
+  (`TraceByCorrelationUseCase`); a gateway DTO guards only the HTTP caller.
+- `new Date('2026-06-01T00:00:00')` (no `Z`, no `±hh:mm`) resolves in the **Node host's local
+  zone**; `new Date('2026-06-01')` resolves as UTC. `timezone: 'Z'` does not reach this — it is
+  `Date` parsing, not driver serialization. `@IsISO8601()` accepts the zone-less form, so pin a
+  `from`/`to` bound to UTC before parsing (both `parseInstant` copies, the gateway's `IsOnOrAfter`).
 - Append-only tables (`stock_movement`, `domain_event`, `audit_log_entry`,
   `idempotency_key`) implement their repository port **directly**, never through
   `BaseTypeormRepository` — its `save`/`softDelete` would break the invariant.
@@ -107,6 +108,14 @@ section is the reason to read it.
 - `DatabaseModule.forRoot` pins `mysql2` to UTC (`timezone: 'Z'`); without it the driver
   falls back to the Node host's local zone and the pricing publish probe's
   `price.valid_from` vs `UTC_TIMESTAMP()` comparison skews.
+
+**Validation**
+
+- `@IsOptional()` skips a property's validators for `null` as well as `undefined`, and
+  `whitelist` does not strip a decorated `null`, so `{"batchSize": null}` clears a
+  `@IsInt() @Min(1)` DTO. `Math.trunc(null)` is `0`, not `NaN`, so a use case reading "absent"
+  as `=== undefined` mishandles it — test `typeof x !== 'number'`
+  (`SweepExpiredReservationsUseCase.resolveLimit`).
 
 **Config / DI**
 
@@ -118,10 +127,9 @@ section is the reason to read it.
   `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only, read off `process.env` inside a `useFactory`).
   `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects: a
-  configured cadence cannot go in an `@Interval`/`@Cron` decorator (its argument is evaluated
-  at class definition), so `ReservationSweepScheduler` registers the timer through
-  `SchedulerRegistry.addInterval` in `onModuleInit` — and **must** `deleteInterval` in
-  `onModuleDestroy`, or a leaked timer hangs the Jest e2e worker.
+  decorator's argument is evaluated at class definition, so `ReservationSweepScheduler` registers
+  the timer via `SchedulerRegistry.addInterval` in `onModuleInit` — and **must** `deleteInterval`
+  in `onModuleDestroy`, or a leaked timer hangs the Jest e2e worker.
 - A new `PermissionCodeEnum` member auto-seeds to the `admin` role **only if** it is also
   added to `PERMISSION_SEEDS` in `scripts/test-db-seed.ts`.
 - `EVENTSTORE_DATABASE_URL` is a **required** Joi key in the shared schema, so it must be
@@ -396,8 +404,8 @@ not the use case's), `OCC_RETRY_ATTEMPTS`.
 the wire contract `IReservationSweepResult`, never a local interface.
 Shared application helpers: `use-cases/stock-mutation.ts` (`runWithStockWriteRetry`,
 `applyOnHandChange`), `reservation-mutation.ts`, `low-stock.emitter.ts`,
-`movement-recorded.emitter.ts`, `stock-write-conflict.error.ts`, `stock-location.guard.ts`,
-the view factories.
+`movement-recorded.emitter.ts`, `stock-released.emitter.ts` (Release + the TTL sweep share it),
+`stock-write-conflict.error.ts`, `stock-location.guard.ts`, the view factories.
 Infra: `persistence/` (4 entities/mappers; `StockMovementTypeormRepository` implements the
 port **directly**; `TypeormTransactionAdapter`), `cache/stock.cache.ts` (`getOrLoad` +
 `withInvalidation`), `consumers/catalog-events.consumer.ts`,
@@ -590,7 +598,8 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). ADRs are the durable record (3-digit padding,
 `001-…`; **next free number is `040`**). Write one for every architectural decision, under the
-rules in ADR-003; never edit an accepted ADR beyond its `Status` and a supersession pointer.
+rules in ADR-003; never edit an accepted ADR **merged to `main`** beyond its `Status` and a
+supersession pointer. On its feature branch an ADR is still a draft — amend it freely there.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

@@ -150,6 +150,15 @@ query is built means every caller inherits it — today's gateway, tomorrow's op
 and any future caller nobody has thought of. A DTO-side copy would be a second source of truth
 that drifts the first time the cap is retuned.
 
+"Directly reachable" is an argument about the *whole payload*, not just its page window, and
+each use case defends `filters` for the same reason it clamps `page`: `payload.filters ?? {}`.
+An omitted filter set means the widest predicate — the whole log — and must not reach
+`repository.query(undefined, …)`, whose first line dereferences it. The trace guards its
+`targetCorrelationId` on the same principle and for a sharper reason (see
+[ADR-039](../../adr/039-audit-and-event-store-query-surface.md) §6): TypeORM drops an
+`undefined` from a `where` clause rather than matching nothing, turning an unguarded read into
+an unbounded scan.
+
 The response is the canonical `IPage<T>` envelope: `{ items, total, page, size }`. Note the
 asymmetry between request and response — the wire **asks** for `pageSize` and the page
 **answers** with `size`. That is not an oversight; it is the shape `inventory.stock-movement.list`
