@@ -1,0 +1,13 @@
+name: query-events-forbidden
+description: |-
+  GET /api/audit/events  (Bearer — warehouse-staff token, no audit:read)
+  403 from the gateway's global PermissionsGuard, before any RPC is sent. audit:read is
+  seeded onto `admin` alone; warehouse-staff carries inventory:read / :adjust /
+  :transfer, order:fulfill, order:cancel and inventory:receive-return — none of which
+  open the audit log.
+
+  $warehouseAccessToken is published by `warehouse-login`; run that first.
+url: $ENV_BASE_URL/audit/events?pageSize=5
+headers:
+- name: Authorization
+  value: Bearer $warehouseAccessToken

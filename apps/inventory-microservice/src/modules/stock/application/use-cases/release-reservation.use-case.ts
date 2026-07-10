@@ -11,10 +11,8 @@ import {
 import {
   InventoryDomainException,
   InventoryErrorCodeEnum,
-  Reservation,
   ReservationStatusEnum,
   StockMovement,
-  StockReleasedEvent,
 } from '../../domain';
 import {
   IReservationRepositoryPort,
@@ -32,18 +30,11 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
-import { emitMovementRecorded } from './movement-recorded.emitter';
 import { toReservationView } from './reservation-view.factory';
 import { runWithStockWriteRetry } from './stock-mutation';
+import { emitReservationReleased, IReleasedReservationRow } from './stock-released.emitter';
 
 const DEFAULT_RELEASE_REASON: ReservationReleaseReason = 'cart-removed';
-
-// One released hold + the ledger row that records it, carried out of the
-// transaction so the post-commit emits can fire per row.
-interface IReleasedRow {
-  reservation: Reservation;
-  movement: StockMovement;
-}
 
 // Release Reservation returns held units to `available` and leaves an audit trail
 // (ADR-030 §4). It accepts EXACTLY one selector family — `reservationId` (one row)
@@ -146,7 +137,11 @@ export class ReleaseReservationUseCase {
     );
 
     // Post-commit, best-effort (ADR-020), per released row.
-    await Promise.all(releasedRows.map((row) => this.emitReleased(row, reason, correlationId)));
+    await Promise.all(
+      releasedRows.map((row) =>
+        emitReservationReleased(this.publisher, this.logger, row, reason, correlationId),
+      ),
+    );
 
     return { released: releasedRows.map((row) => toReservationView(row.reservation)) };
   }
@@ -199,8 +194,8 @@ export class ReleaseReservationUseCase {
     targetIds: string[],
     reason: ReservationReleaseReason,
     actorId: string | null,
-  ): Promise<IReleasedRow[]> {
-    const released: IReleasedRow[] = [];
+  ): Promise<IReleasedReservationRow[]> {
+    const released: IReleasedReservationRow[] = [];
 
     for (const id of targetIds) {
       const row = await this.reservationRepository.findById(id, scope);
@@ -245,34 +240,5 @@ export class ReleaseReservationUseCase {
     }
 
     return released;
-  }
-
-  private async emitReleased(
-    row: IReleasedRow,
-    reason: ReservationReleaseReason,
-    correlationId: string,
-  ): Promise<void> {
-    const { reservation, movement } = row;
-
-    try {
-      await this.publisher.publishStockReleased(
-        new StockReleasedEvent({
-          variantId: reservation.variantId,
-          stockLocationId: reservation.stockLocationId,
-          quantity: reservation.quantity,
-          cartId: reservation.cartId,
-          reservationId: reservation.id,
-          reason,
-        }),
-        correlationId,
-      );
-    } catch (error) {
-      this.logger.warn(
-        { err: error as Error, correlationId, variantId: reservation.variantId },
-        'Failed to publish inventory.stock.released (release already committed)',
-      );
-    }
-
-    await emitMovementRecorded(this.publisher, this.logger, movement, correlationId);
   }
 }

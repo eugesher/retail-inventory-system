@@ -1,0 +1,269 @@
+# Audit + event-store query endpoints
+# (apps/api-gateway/src/modules/audit/presentation/audit.controller.ts)
+#
+# The API gateway fronts the event store's three audit.* query RPCs over HTTP at
+# /api/audit. They read the two append-only logs the event store fills from the
+# ris.events firehose: `domain_event` (every business event the system publishes)
+# and `audit_log_entry` (the staff action trail). Every route is STAFF-ONLY —
+# each carries @RequiresPermission(audit:read) and there is NO owner-check.
+# Customer tokens carry no `permissions` claim, so a code-gated route is staff-only
+# by construction; there is no customer-facing audit route to design.
+#   - GET /audit/events                     (Bearer — audit:read)
+#       "What did the system do." A paginated, NEWEST-FIRST page of domain_event.
+#       Query { eventType?, aggregateType?, aggregateId?, correlationId?, from?, to?,
+#       page?, pageSize? } — every filter optional and narrowing; page defaults 1,
+#       pageSize defaults 20 and is CAPPED AT 100 by the event store (not by the
+#       gateway DTO, so a direct RPC caller inherits the same ceiling). Returns
+#       IPage<DomainEventView> { items, total, page, size }.
+#   - GET /audit/entries                    (Bearer — audit:read)
+#       "What did a person do." A paginated, NEWEST-FIRST page of audit_log_entry.
+#       Query { actorId?, entityType?, entityId?, action?, correlationId?, from?, to?,
+#       page?, pageSize? }. Returns IPage<AuditLogEntryView> { items, total, page, size }.
+#   - GET /audit/trace/:correlationId       (Bearer — audit:read)
+#       "What did this one request cause." Both logs for one correlation id, each
+#       ordered FORWARD in time (occurredAt ascending) and returned as its own array —
+#       never merged. Unpaginated: a correlation id scopes one bounded causal chain.
+#       Returns { events: [DomainEventView], auditEntries: [AuditLogEntryView] }.
+#
+# EMPTY IS NOT MISSING
+#   No route here ever 404s. An unmatched filter set is a 200 empty page; an unknown
+#   correlation id is a 200 with two empty arrays. The absence of a trace is not the
+#   absence of a resource.
+#
+# The `pageSize` -> `size` asymmetry
+#   The request asks for pageSize; the page answers with size. That is the shape
+#   GET /inventory/variants/:variantId/movements already returns — matched here rather
+#   than inventing a third one.
+#
+# What the JSON columns are for
+#   DomainEventView.payload and AuditLogEntryView.before/after are returned VERBATIM
+#   and are NOT searchable. Every filter above names an indexed column. A LIKE or a
+#   JSON_EXTRACT predicate over an ever-growing append-only table degrades into a full
+#   scan, so it is deliberately unavailable. Filter on indexed columns, then read.
+#
+# Where the rows come from
+#   Every producer dual-publishes: the ordinary emit, then a mirror onto the ris.events
+#   topic exchange, where the event store's firehose queue (bound to a lone `#`) captures
+#   it. So `domain_event` fills as soon as ANY business flow runs — place an order, adjust
+#   stock, open a return. `audit_log_entry` fills from the audit.staff.action stream, which
+#   a privileged staff action emits: a login, a role assignment, a refund. The `login`
+#   request below writes a `UserLoggedIn` row all by itself, so the entries reads are never
+#   empty once you have authenticated once.
+#
+# All routes sit behind the global "api" prefix configured in main.ts via
+# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
+# resolves to http://localhost:3000/api.
+#
+# Prereqs:
+#   1. Start the backing services and the gateway, then migrate + seed. The
+#      event-store microservice must be running — it is the only consumer of
+#      event_store_query_queue, and with nothing listening these calls hang on an
+#      RPC reply that never comes rather than failing fast:
+#        docker compose up -d
+#        yarn migration:run
+#        yarn migration:run:eventstore
+#        yarn test:seed
+#        yarn start:dev
+#   2. Run the `login` block FIRST. It captures a seeded staff bearer token into
+#      @accessToken, which the protected requests substitute into their Authorization
+#      header. audit:read is bound to the `admin` role ONLY, so admin@example.com
+#      reaches these routes and the seeded warehouse@example.com (warehouse-staff)
+#      gets a 403 — `queryEventsForbidden` below demonstrates exactly that.
+#   3. Run `queryEventsByAggregate` before `queryEventsByCorrelation` and
+#      `traceByCorrelation`: it captures a real correlation id out of its first result
+#      row into @tracedCorrelationId, which both of them consume.
+
+@baseUrl = {{ENV_BASE_URL}}
+
+###
+
+# @name login
+# POST /api/auth/staff/login
+# Seeded admin login (admin@example.com / admin1234). Response is
+# TokenResponseDto { accessToken, refreshToken, expiresIn }. This call is itself
+# audited: it emits an audit.staff.action event whose `action` is `UserLoggedIn`,
+# so it seeds a row the entries reads below can find.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin1234"
+}
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+
+###
+
+# @name warehouseLogin
+# POST /api/auth/staff/login
+# Seeded warehouse-staff login (warehouse@example.com / warehouse1234). That role
+# carries inventory + fulfillment codes and NOT audit:read — the token this captures
+# is what `queryEventsForbidden` uses to prove the permission gate.
+POST {{baseUrl}}/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "warehouse@example.com",
+  "password": "warehouse1234"
+}
+
+###
+@warehouseAccessToken = {{warehouseLogin.response.body.$.accessToken}}
+
+###
+
+# @name queryEventsByAggregate
+# GET /api/audit/events  (Bearer — audit:read)
+# Every captured event for ONE aggregate instance, newest first. `aggregateType` is the
+# routing key's second token (`retail.order.placed` -> `order`), `aggregateId` the
+# aggregate's own id — both derived at ingest by the firehose extractors, not declared by
+# the producer. pageSize=50 is under the event store's 100 ceiling; ask for 500 and you
+# get 100. An order id with no events is a 200 empty page, not a 404.
+#
+# This filter is NARROWER than it looks. `aggregateType=order` matches
+# retail.order.placed and retail.order.cancelled, and nothing else: the payment,
+# fulfillment, refund and stock events that same order produced were extracted under
+# their OWN aggregate types (`payment`, `fulfillment`, `refund`, `stock`), each keyed by
+# its own id. To follow one order across all of them, filter by correlation id or trace
+# it — the next request and `traceByCorrelation` do exactly that.
+GET {{baseUrl}}/audit/events?aggregateType=order&aggregateId=1&pageSize=50
+Authorization: Bearer {{accessToken}}
+
+###
+# The first returned row's correlation id — the thread that ties one request's work
+# together across every service that touched it. If the query above returned an empty
+# page, place an order first (see http/kulala/order.http); the two requests below have
+# nothing to chain off until domain_event holds at least one row for order 1.
+@tracedCorrelationId = {{queryEventsByAggregate.response.body.$.items[0].correlationId}}
+
+###
+
+# @name queryEventsByCorrelation
+# GET /api/audit/events  (Bearer — audit:read)
+# The same firehose log, narrowed to ONE request's cross-service chain. Placing an order
+# fans out well beyond retail: retail.order.placed and retail.payment.authorized from the
+# retail service, inventory.stock.allocated and inventory.stock-movement.recorded from
+# inventory — four events from two services, all carrying the one correlation id the
+# gateway minted when that HTTP request arrived.
+#
+# A correlation id scopes ONE REQUEST, not one order. Capturing the payment, shipping the
+# fulfillment and cancelling the order are separate HTTP calls, so each carries its own
+# id and appears in its own chain. That is the boundary the trace draws.
+#
+# NOTE the two meanings of "correlation id" here. This `?correlationId=` is a FILTER
+# VALUE, the id being searched FOR. The x-correlation-id header this very request
+# carries is a different id — the trace id of the request asking the question. They
+# never collapse into one field, on the wire or in the logs.
+GET {{baseUrl}}/audit/events?correlationId={{tracedCorrelationId}}&pageSize=50
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name queryEventsByTypeAndRange
+# GET /api/audit/events  (Bearer — audit:read)
+# One event type inside one inclusive time window — the "how many orders were placed
+# last quarter, and by whom" read. `eventType` is the FULL dotted routing key, not the
+# aggregate token. `from`/`to` are ISO-8601 instants bounding occurredAt inclusively.
+# Widen the window if this returns nothing; the seed writes no domain events, only a
+# running system does.
+GET {{baseUrl}}/audit/events?eventType=retail.order.placed&from=2026-01-01T00:00:00.000Z&to=2027-01-01T00:00:00.000Z
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name queryEventsInvertedRange
+# GET /api/audit/events  (Bearer — audit:read)
+# A transposed window (from > to) is a 400 from the gateway DTO. The event store would
+# have answered it with an empty page — `BETWEEN hi AND lo` selects nothing in MySQL —
+# and an operator who swapped two dates would then read that empty page as "nothing
+# happened". The rejection lives at the HTTP edge, where every other shape error lives.
+GET {{baseUrl}}/audit/events?from=2030-01-01T00:00:00.000Z&to=2020-01-01T00:00:00.000Z
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name queryEventsForbidden
+# GET /api/audit/events  (Bearer — warehouse-staff token, no audit:read)
+# 403 from the gateway's global PermissionsGuard, before any RPC is sent. audit:read is
+# seeded onto `admin` alone; warehouse-staff carries inventory:read / :adjust /
+# :transfer, order:fulfill, order:cancel and inventory:receive-return — none of which
+# open the audit log.
+GET {{baseUrl}}/audit/events?pageSize=5
+Authorization: Bearer {{warehouseAccessToken}}
+
+###
+
+# @name queryEntriesByAction
+# GET /api/audit/entries  (Bearer — audit:read)
+# "What did a person do", narrowed to one kind of action.
+#
+# `action` takes the stable EVENT-NAME string the audit row carries —
+# `StaffUserRolesAssigned` — and NOT the permission code that gated the route which
+# produced it. The ingest maps `action <- IAuditLogEvent.name`
+# (docs/adr/035-event-store-firehose-topic-exchange.md), so a PermissionCodeEnum value
+# (an `<area>:<verb>` string) matches nothing at all and returns a silently empty page.
+# This is the single easiest thing to get wrong about this endpoint.
+#
+# Other names in circulation today: UserLoggedIn, LoginFailed, LogoutPerformed,
+# RefreshTokenRotated, RefreshReuseDetected, StaffUserRegistered, StaffUserRoleRevoked,
+# RoleCreated, RolePermissionsReplaced, CustomerRegistered, CustomerLoggedIn,
+# CustomerErased, RefundIssued. Run http/kulala/iam.http's role-assignment block to
+# produce a StaffUserRolesAssigned row; `UserLoggedIn` is there already, from the
+# login above.
+GET {{baseUrl}}/audit/entries?action=StaffUserRolesAssigned&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name queryEntriesByActor
+# GET /api/audit/entries  (Bearer — audit:read)
+# Everything ONE staff principal did, newest first — the seeded admin, whose id is a
+# fixed UUID (scripts/test-db-seed.ts). Rows written with a NULL actor (a pre-auth
+# LoginFailed, an unattributed background mutation such as the auto-refund-from-cancel
+# path) are matched by no actorId a caller can pass: `WHERE actor_id = ?` never matches
+# a NULL. Their actorType is `system` rather than `staff-user`; list them by dropping
+# this filter.
+GET {{baseUrl}}/audit/entries?actorId=00000000-0000-4000-a000-000000000001&pageSize=10
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name traceByCorrelation
+# GET /api/audit/trace/:correlationId  (Bearer — audit:read)
+# The whole causal chain of one request, reassembled from the two logs by the single id
+# that threads them. Returns { events, auditEntries } — two arrays, each ordered FORWARD
+# in time (occurredAt ascending, id ascending as the tiebreaker for rows sharing a
+# millisecond), never merged into one interleaved stream: they answer different questions
+# and their ids live in different spaces. Unpaginated, because a correlation id scopes
+# exactly one request's chain, which is bounded and small.
+#
+# Read the `events` array top to bottom and it tells the story: an order cancellation, for
+# instance, reads inventory.stock-movement.recorded -> inventory.stock.released ->
+# retail.order.cancelled -> retail.refund.issued, with the matching RefundIssued row
+# sitting in `auditEntries`. That is one HTTP call fanning out across two services and an
+# in-service consumer, recovered from two tables by one id.
+#
+# `auditEntries` may hold more than one copy of the same action. audit_log_entry has no
+# dedupe key, so an at-least-once redelivery of an audit.staff.action message appends a
+# second row; domain_event carries a composite UNIQUE and swallows the duplicate.
+GET {{baseUrl}}/audit/trace/{{tracedCorrelationId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+# @name traceUnknownCorrelation
+# GET /api/audit/trace/:correlationId  (Bearer — audit:read)
+# A correlation id that matches nothing is a 200 with two EMPTY ARRAYS —
+# { "events": [], "auditEntries": [] } — never a 404. The absence of a trace is not the
+# absence of a resource: nothing was deleted, nothing is missing, that request simply
+# never ran. A 404 here would invite a caller to treat "no history" as "bad id".
+#
+# The one id you cannot ask for is the empty string. domain_event.correlation_id is
+# NOT NULL DEFAULT '' (MySQL treats NULLs as distinct inside a UNIQUE, which would have
+# defeated the ingest dedupe key), so '' is the sentinel for "ingested without a
+# correlation id" and would match every such row rather than none. The controller
+# rejects a blank path segment with a 400.
+GET {{baseUrl}}/audit/trace/00000000-0000-4000-9999-ffffffffffff
+Authorization: Bearer {{accessToken}}

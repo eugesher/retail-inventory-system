@@ -2,17 +2,10 @@
 
 Guidance for Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Charter — read this before editing this file.**
->
-> This file is a **map**: *what exists and where*, plus the constraints and landmines an
-> agent cannot discover cheaply. It is **not** a place for operation mechanics, business
-> rules, rationale, or history. Those drift — and a stale copy here is **worse than no
-> copy**, because an agent trusts this file over the code.
->
-> Authoritative detail lives in four places. Cite them; do not summarise them:
-> the **code**; each module's **`*RpcExceptionFilter`** (the error-code → HTTP tables);
-> the **ADRs** under [`docs/adr/`](docs/adr/); and **[`README.md`](README.md)** (the
-> human-facing description of how the system behaves).
+**A map, not a manual.** *What exists and where*, plus constraints and landmines. Operation
+mechanics, business rules, rationale, and history belong in the code, each module's
+`*RpcExceptionFilter`, [`docs/adr/`](docs/adr/), and [`README.md`](README.md). Cite them; never
+summarise them here — a stale copy is worse than none, because an agent trusts this file.
 
 ## Commands
 
@@ -62,6 +55,12 @@ section is the reason to read it.
 - `main.ts`'s **first import MUST be** `@retail-inventory-system/observability/tracer`.
   OTel auto-instrumentation patches at module load; anything `require()`d before it is
   invisible to tracing.
+- `NestFactory.createMicroservice` returns an `INestMicroservice`, which cannot
+  `connectMicroservice`. A second transport forces the hybrid `NestFactory.create` form — as in
+  `apps/event-store-microservice/src/main.ts`, the only one. There, `connectMicroservice` marks
+  each transport initialized, so `startAllMicroservices()` never fires `onModuleInit`: the app
+  must `await app.init()` **first**, and must **never** `listen()` (it has no HTTP surface, and
+  `create` binds no port until you do).
 - Never call `PinoLogger.assign()` inside an `@EventPattern` handler — those are not
   request-scoped and it throws. Log `correlationId` inline (ADR-011 §7).
 
@@ -74,13 +73,32 @@ section is the reason to read it.
   queue of whoever consumes it, not the producer's own.
 - `RisEventsMirrorPublisher.mirror` is non-throwing best-effort and is ordered **after**
   the primary `emit`, so a `ris.events` failure can never shadow the real publish.
-- A single Nest app binds every `@EventPattern` to every connected transport — two queues
-  with disjoint pattern sets in one app is not supported.
+- A single Nest app binds every handler pattern to every connected transport. Two queues with
+  disjoint **`@EventPattern`** sets in one app is therefore not supported. An **event** queue
+  plus an **RPC** queue is (ADR-039): `ServerRMQ.getHandlerByPattern` does an exact map lookup
+  when `wildcards: false`, so a wildcard pattern is inert there — but a `wildcards: true`
+  transport binds *every* registered pattern as a routing key on its exchange, so the other
+  queue's patterns show up as inert bindings in the RabbitMQ UI.
 
 **Persistence**
 
 - MySQL treats `NULL`s as distinct inside a UNIQUE. `IngestDomainEventUseCase` coalesces
   an empty `correlationId` to `''`, otherwise the `domain_event` dedupe UNIQUE never bites.
+  Consequence: `domain_event.correlation_id` is `NOT NULL DEFAULT ''`, so an event ingested
+  without one is reachable by **no** `correlationId` filter and by no trace.
+  `audit_log_entry.correlation_id` is nullable, and a `WHERE correlation_id = ?` never
+  matches a null row either.
+- `audit_log_entry.action` holds the `IAuditLogEvent.name` string (`StaffUserRolesAssigned`,
+  `RefundIssued`) — **never** a `PermissionCodeEnum` value. A permission code in an `?action=`
+  filter is a well-formed query that matches nothing.
+- TypeORM **drops** an `undefined` from a `where` clause instead of matching nothing:
+  `find({ where: { correlationId: undefined } })` is an unbounded `SELECT *`. A `@MessagePattern`
+  has no pipe in front of it, so the use case must reject a blank filter itself
+  (`TraceByCorrelationUseCase`); a gateway DTO guards only the HTTP caller.
+- `new Date('2026-06-01T00:00:00')` (no `Z`, no `±hh:mm`) resolves in the **Node host's local
+  zone**; `new Date('2026-06-01')` resolves as UTC. `timezone: 'Z'` does not reach this — it is
+  `Date` parsing, not driver serialization. `@IsISO8601()` accepts the zone-less form, so pin a
+  `from`/`to` bound to UTC before parsing (both `parseInstant` copies, the gateway's `IsOnOrAfter`).
 - Append-only tables (`stock_movement`, `domain_event`, `audit_log_entry`,
   `idempotency_key`) implement their repository port **directly**, never through
   `BaseTypeormRepository` — its `save`/`softDelete` would break the invariant.
@@ -91,13 +109,27 @@ section is the reason to read it.
   falls back to the Node host's local zone and the pricing publish probe's
   `price.valid_from` vs `UTC_TIMESTAMP()` comparison skews.
 
+**Validation**
+
+- `@IsOptional()` skips a property's validators for `null` as well as `undefined`, and
+  `whitelist` does not strip a decorated `null`, so `{"batchSize": null}` clears a
+  `@IsInt() @Min(1)` DTO. `Math.trunc(null)` is `0`, not `NaN`, so a use case reading "absent"
+  as `=== undefined` mishandles it — test `typeof x !== 'number'`
+  (`SweepExpiredReservationsUseCase.resolveLimit`).
+
 **Config / DI**
 
 - **A use case never reads `process.env`.** Config arrives through a value-provider token:
-  `OCC_RETRY_ATTEMPTS`, `RESERVATION_TTL_MINUTES`, `RETURN_WINDOW_DAYS`,
+  `OCC_RETRY_ATTEMPTS`, `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
+  `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS`,
+  `RETURN_WINDOW_DAYS`,
   `IDEMPOTENCY_KEY_TTL_HOURS`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
   `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only, read off `process.env` inside a `useFactory`).
+  `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects: a
+  decorator's argument is evaluated at class definition, so `ReservationSweepScheduler` registers
+  the timer via `SchedulerRegistry.addInterval` in `onModuleInit` — and **must** `deleteInterval`
+  in `onModuleDestroy`, or a leaked timer hangs the Jest e2e worker.
 - A new `PermissionCodeEnum` member auto-seeds to the `admin` role **only if** it is also
   added to `PERMISSION_SEEDS` in `scripts/test-db-seed.ts`.
 - `EVENTSTORE_DATABASE_URL` is a **required** Joi key in the shared schema, so it must be
@@ -105,8 +137,9 @@ section is the reason to read it.
 
 **Repo**
 
-- `.env.local` **is git-tracked** (CI reads it). `CLAUDE.md` is **untracked**, excluded via
-  `.git/info/exclude` — edits to it never show up in `git status`.
+- `.env.local` **is git-tracked** (CI reads it), but `.env.example` is **not** — `.gitignore`'s
+  `.env.*` glob swallows it and only `.env.local` is force-tracked. An edit to `.env.example`
+  never shows up in `git status`; do not conclude it was missed.
 - Bare `npx jest` fails with a Babel TypeScript parse error (not a code bug). Always pass
   `--config jest.unit.config.js`.
 - `yarn lint` is the **source of truth for where a file belongs**. Never weaken a
@@ -121,8 +154,8 @@ of them** — they are not restated here, on purpose.
 
 | Convention | Where it is specified |
 | --- | --- |
-| Request-level idempotency on the four money-/stock-moving writes (`Idempotency-Key` required, replay / `422` / `400`) | ADR-036; [`README.md` §5](README.md#5-cross-cutting-guarantees) |
-| Version-checked OCC on every aggregate write, bounded by `OCC_RETRY_ATTEMPTS`, exhaustion → `409 VERSION_MISMATCH` | ADR-036; the `*-write.ts` helper in each module's `application/use-cases/` |
+| Request-level idempotency on the four money-/stock-moving writes | ADR-036; [`README.md` §5](README.md#5-cross-cutting-guarantees) |
+| Version-checked OCC on every aggregate write, bounded by `OCC_RETRY_ATTEMPTS` | ADR-036; the `*-write.ts` helper in each module's `application/use-cases/` |
 | No-oversell, reservation TTL, "audit not balance" | ADR-027 / ADR-030; `stock-mutation.ts` |
 | Privacy: tombstone-only erasure, **no PII in an event payload or an audit row**, default-transactional-on / default-marketing-off consent | ADR-037 |
 
@@ -140,33 +173,16 @@ RabbitMQ (request-response RPC + events).
 | `inventory-microservice` | `inventory_queue` | `modules/stock/` |
 | `retail-microservice` | `retail_queue` | `modules/cart/`, `modules/orders/`, `modules/returns/` |
 | `notification-microservice` | `notification_events` | `modules/notifications/` (RMQ-only, no HTTP) |
-| `event-store-microservice` | `event_store_firehose_queue` | `audit-and-events` context; its **own** DB `ris_eventstore` (ADR-034) |
-
-```
-apps/
-libs/
-  auth/           # JWT + RBAC framework glue (AuthModule.forRootAsync, guards, decorators)
-  cache/          # ICachePort + RedisCacheAdapter + @Cacheable + CACHE_KEYS registry
-  common/         # framework-free: Result, DomainException, pagination, bodyFingerprint
-  config/         # configModuleConfig (Joi env schema)
-  contracts/      # cross-service message + DTO contracts (auth, microservices, retail,
-                  #   inventory, catalog, notifications)
-  database/       # BaseEntity, BaseTypeormRepository, SnakeNamingStrategy, DatabaseModule
-  ddd/            # Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort
-  messaging/      # MessagingModule, MicroserviceClient*Module, RabbitmqClientFactory,
-                  #   RisEventsMirrorPublisher, ROUTING_KEYS, EXCHANGES
-  observability/  # Pino LoggerModuleConfig + correlation + OTel tracer.ts + MetricsModule
-migrations/       # TypeORM migrations + data-source config; migrations/eventstore/
-```
+| `event-store-microservice` | `event_store_firehose_queue` (events) + `event_store_query_queue` (RPC) | `audit-and-events` context; its **own** DB `ris_eventstore` (ADR-034) |
 
 **Queues:** `retail_queue`, `inventory_queue`, `notification_events`, `catalog_queue`,
-`event_store_firehose_queue`.
+`event_store_firehose_queue`, `event_store_query_queue`.
 
 **Exchange:** `EXCHANGES.RIS_EVENTS_TOPIC` (`ris.events`) is the **one live** member
 (`RETAIL`/`INVENTORY`/`NOTIFICATION` stay reserved, default-exchange-only). Every producer
-**dual-publishes** — the existing default-exchange `emit`, then a mirror onto `ris.events`
-via `RisEventsMirrorPublisher` (ADR-035). `event_store_firehose_queue` binds `#` and its
-`FirehoseConsumer` dispatches by routing key.
+dual-publishes onto it through `RisEventsMirrorPublisher` (ADR-035);
+`event_store_firehose_queue` consumes it. `event_store_query_queue` is on the **default**
+exchange and carries the three `audit.*` RPCs (ADR-039).
 
 **Two logical databases, one MySQL instance** (ADR-034). Every operational context shares
 `retail_db` (`DATABASE_URL`); the event store owns `ris_eventstore`
@@ -176,10 +192,8 @@ volume by `scripts/mysql-init/01-create-eventstore-db.sql`.
 ## Message patterns
 
 Defined in `libs/contracts/microservices`, mirrored as `ROUTING_KEYS` in `libs/messaging`.
-Wire format is dotted `<service>.<aggregate>.<action>` (ADR-008). A domain rejection throws
-the module's `*DomainException` (`*ErrorCodeEnum`); the module's presentation
-`*RpcExceptionFilter` maps it to HTTP. **Those filters are the authoritative code → status
-tables.** Behaviour lives in the use case — read it, don't look for it here.
+Wire format is dotted `<service>.<aggregate>.<action>` (ADR-008). Behaviour lives in the use
+case; the code → status table is the module's `*RpcExceptionFilter`. Neither is restated here.
 
 ### Retail (`retail_queue`)
 
@@ -200,12 +214,12 @@ tables.** Behaviour lives in the use case — read it, don't look for it here.
 | `inventory.stock-level.get` / `.receive` / `.adjust` / `.transfer` | `QueryAvailability` / `ReceiveStock` / `AdjustStock` / `TransferStock` |
 | `inventory.location.list` | `ListLocations` |
 | `inventory.stock-movement.list` | `ListStockMovements` |
-| `inventory.reservation.reserve` / `.release` / `.allocate` | `ReserveStock` / `ReleaseReservation` / `AllocateStock` |
+| `inventory.reservation.reserve` / `.release` / `.sweep` / `.allocate` | `ReserveStock` / `ReleaseReservation` / `SweepExpiredReservations` / `AllocateStock` |
 | `inventory.allocation.cancel` | `CancelAllocation` |
 | `inventory.stock.commit-sale` | `CommitSale` |
 | `inventory.stock.restock-from-return` | `RestockFromReturn` |
 
-Served by `stock.controller.ts` (12 `@MessagePattern`). The reserve / allocate /
+Served by `stock.controller.ts` (13 `@MessagePattern`). The reserve / allocate /
 cancel-allocation / commit-sale / restock RPCs have **no gateway HTTP route** — retail
 drives them.
 
@@ -226,7 +240,21 @@ Category and media operations emit **no** events.
 `notification.delivery.list` / `.get` / `.record-outcome` / `.retry`;
 `notification.marketing.send` — all on `notifications.controller.ts` (8).
 `notification.health.ping` on `health.controller.ts`.
-`record-outcome` is RPC-only by design (no gateway route — it is the ESP-webhook seam).
+`record-outcome` is RPC-only by design — no gateway route.
+
+### Event store (`event_store_query_queue`)
+
+| Routing key | Use case |
+| --- | --- |
+| `audit.event.query` | `QueryDomainEventsUseCase` |
+| `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
+| `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
+
+All three on the context-root `audit-query.controller.ts` (3 `@MessagePattern`), reached
+through `MicroserviceClientEventStoreModule` (`EVENT_STORE_MICROSERVICE`) — from the gateway's
+`modules/audit/` behind `GET /api/audit/{events,entries,trace/:correlationId}`.
+`audit.staff.action` is the one `audit.` **event**: it rides `ris.events` into the firehose
+queue and never reaches this controller (ADR-039).
 
 ### Event consumers
 
@@ -238,16 +266,27 @@ Category and media operations emit **no** events.
 | notification `ConsentEventsConsumer` | `customer.consent.updated` / `customer.erased` | `CONSENT_CACHE` write-through / evict |
 | event-store `FirehoseConsumer` (`modules/firehose.consumer.ts`) | `@EventPattern('#')` | `audit.staff.action` → `IngestAuditLogUseCase`; everything else → `IngestDomainEventUseCase` |
 
-`FirehoseConsumer` sits at the **context root**, registered as a controller in
-`AuditAndEventsModule` — it injects use cases from **both** sibling modules, and
-`eslint-plugin-boundaries` only lets a module's `infrastructure/` inject its own.
+`FirehoseConsumer` and `AuditQueryController` both sit at the **context root**, registered as
+controllers in `AuditAndEventsModule` — each injects use cases from **both** sibling modules,
+and `eslint-plugin-boundaries` only lets a module's `infrastructure/` (or `presentation/`)
+reach its own.
 
-**Reserved surfaces** (published, captured by the firehose, no business consumer):
-`catalog.product.*`, `catalog.price.*`, `inventory.stock-level.initialized`,
-`inventory.stock.{received,adjusted,reserved,allocated,released,committed,returned}`,
-`inventory.stock-movement.recorded`, `retail.cart.*`,
-`retail.payment.{authorized,captured}`, `retail.fulfillment.created`,
-`retail.refund.failed`, `retail.return.{rejected,closed}`, `notifications.delivery.failed`.
+A routing key that is published but absent from that table is a **reserved surface**: no
+business consumer, still captured by the firehose. [`README.md`
+§2](README.md#2-architecture-at-a-glance) enumerates them.
+
+## Background jobs (cron)
+
+Three timers, in three services. `ScheduleModule.forRoot()` is wired in each one's Nest module.
+
+| Job | Registering file | Cadence from |
+| --- | --- | --- |
+| Reservation TTL sweep | `apps/inventory-microservice/src/modules/stock/infrastructure/scheduling/reservation-sweep.scheduler.ts` | `RESERVATION_SWEEP_INTERVAL_SECONDS` |
+| Idempotency-key TTL purge | `apps/retail-microservice/src/modules/orders/infrastructure/idempotency/idempotency-purge.scheduler.ts` | `@Cron(CronExpression.EVERY_10_MINUTES)` |
+| Notification delivery retry sweep | `apps/notification-microservice/src/modules/notifications/infrastructure/scheduling/delivery-retry.scheduler.ts` | the `SWEEP_INTERVAL_MS` constant |
+
+Cadence *values* and what a missed tick costs are in [`README.md`
+§13](README.md#13-background-jobs).
 
 ## Service Structure
 
@@ -270,8 +309,7 @@ catalog ADR-004/018/025; pricing ADR-026.
 `CorrelationMiddleware` + two global `APP_FILTER`s: `app/filters/duplicate-key-exception.filter.ts`
 (MySQL dup-entry → `409`) and `common/filters/optimistic-lock.exception-filter.ts`
 (`OptimisticLockVersionMismatchError` → `409 VERSION_MISMATCH`).
-`common/utils/throw-rpc-error.util.ts` forwards an RPC rejection's typed `code` +
-object-valued `details` to the HTTP client verbatim.
+`common/utils/throw-rpc-error.util.ts` forwards an RPC rejection's `code` + `details` verbatim.
 `common/decorators/` holds the reusable `@IdempotencyKey()` and `@IfMatch()` param decorators.
 
 Each RPC-fronting module has `application/ports` (`*_GATEWAY_PORT`),
@@ -287,6 +325,7 @@ Each RPC-fronting module has `application/ports` (`*_GATEWAY_PORT`),
 | `modules/orders/` | `/api/orders` | `orders.controller.ts` + sibling `refunds.controller.ts` |
 | `modules/returns/` | `/api/returns/*`, `/api/orders/:orderId/returns` | `returns.controller.ts` (empty-prefix `@Controller()`) |
 | `modules/notifications/` | `/api/notifications` | `notifications.controller.ts`; all staff-only |
+| `modules/audit/` | `/api/audit/*` | `audit.controller.ts`; three `GET`s, all `audit:read`; DTOs carry **no** `pageSize` cap (the event store's `clampPageWindow` owns it) and a local `IsOnOrAfter` cross-property validator |
 | `modules/auth/` | `/api/auth/*` | the only gateway module with real `domain/` + DB rows |
 | `modules/iam/` | `/api/iam/*` | admin shell over the auth aggregates; **no `domain/`** |
 | `modules/customer-admin/` | `/api/admin/customers/*` | admin shell over `Customer`; **no `domain/`** |
@@ -314,8 +353,8 @@ Controllers: `staff-login`, `auth`, `customer-auth`, `customer-consent`, `auth-a
 is the precise gate; `@Roles(<RoleEnum>)` is coarse role-bundle gating (rare). Inject the
 user with `@CurrentUser()`. `PermissionCodeEnum`
 (`libs/contracts/auth/permission.enum.ts`) is the single source of truth. Customer tokens
-carry **no** `permissions` claim — a code-gated route is staff-only by construction, and a
-permission code is a *staff override over an owner-check*, never a customer gate.
+carry **no** `permissions` claim, so a code-gated route is staff-only by construction
+([`README.md` §7](README.md#7-authentication-and-authorization)).
 
 ### Microservices
 
@@ -339,14 +378,13 @@ Infra: `catalog-rabbitmq.publisher.ts` (only `ClientProxy` site; two clients).
 `catalog_queue`, keys on the same `variantId`. *Not* a separate deployable.
 Domain: framework-free `Price` (append-only ledger), `TaxCategory`,
 `PricingDomainException` + `PricingErrorCodeEnum`.
-Port: `PRICING_REPOSITORY` — `appendPrice` closes the predecessor + inserts the successor in
-one tx; `attach`/`findVariantTaxHeader` use parameterized SQL through the injected manager,
-**never** importing the catalog entity.
+Port: `PRICING_REPOSITORY` — `appendPrice`; `attach`/`findVariantTaxHeader` use parameterized
+SQL through the injected manager, **never** importing the catalog entity.
 Infra: `pricing-rabbitmq.publisher.ts`. No `CacheModule`.
 Both catalog modules share one connection:
 `DatabaseModule.forRoot([...catalogEntities, ...pricingEntities])`.
 
-**inventory** `modules/stock/` (ADR-027/030/031/032) — keyed on the opaque catalog `variantId`.
+**inventory** `modules/stock/` (ADR-027/030/031/032/038) — keyed on the opaque catalog `variantId`.
 Aggregates: `StockLevel` (per-location running totals; `available` a pure getter; `version`),
 `StockLocation` (caller-assigned string PK), `Reservation` (TTL hold; app-generated
 `CHAR(36)` UUID; all-statuses UNIQUE `(cartId, variantId, stockLocationId)`), plus the
@@ -354,18 +392,25 @@ immutable `StockMovement` ledger record (frozen, fixed sign per type, no mutator
 `InventoryDomainException` (carries optional `details`) + `InventoryErrorCodeEnum`.
 Events: `Stock{Received,Adjusted,Low}Event`, `StockLevelInitializedEvent`,
 `Stock{Reserved,Released,Allocated,Committed,Returned}Event`.
-Ports: `STOCK_REPOSITORY`, `RESERVATION_REPOSITORY`, `STOCK_MOVEMENT_REPOSITORY`
+Ports: `STOCK_REPOSITORY`, `RESERVATION_REPOSITORY` (its `listExpiredActive` is the sweep's
+advisory candidate scan), `STOCK_MOVEMENT_REPOSITORY`
 (`append` / `listByVariant` / `existsByReference` — no `save`/`update`/`delete`),
 `STOCK_CACHE`, `STOCK_EVENTS_PUBLISHER`, `TRANSACTION_PORT` (opaque `ITransactionScope`),
-`RESERVATION_TTL_MINUTES`, `OCC_RETRY_ATTEMPTS`.
+`RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
+`RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS` (the scheduler's,
+not the use case's), `OCC_RETRY_ATTEMPTS`.
+`SweepExpiredReservationsUseCase` (ADR-038) has one implementation and two callers:
+`ReservationSweepScheduler` and the `inventory.reservation.sweep` `@MessagePattern`. It returns
+the wire contract `IReservationSweepResult`, never a local interface.
 Shared application helpers: `use-cases/stock-mutation.ts` (`runWithStockWriteRetry`,
 `applyOnHandChange`), `reservation-mutation.ts`, `low-stock.emitter.ts`,
-`movement-recorded.emitter.ts`, `stock-write-conflict.error.ts`, `stock-location.guard.ts`,
-the view factories.
+`movement-recorded.emitter.ts`, `stock-released.emitter.ts` (Release + the TTL sweep share it),
+`stock-write-conflict.error.ts`, `stock-location.guard.ts`, the view factories.
 Infra: `persistence/` (4 entities/mappers; `StockMovementTypeormRepository` implements the
 port **directly**; `TypeormTransactionAdapter`), `cache/stock.cache.ts` (`getOrLoad` +
 `withInvalidation`), `consumers/catalog-events.consumer.ts`,
-`messaging/stock-rabbitmq.publisher.ts` (two clients).
+`messaging/stock-rabbitmq.publisher.ts` (two clients),
+`scheduling/reservation-sweep.scheduler.ts`.
 Presentation: `stock.controller.ts` + `inventory-rpc-exception.filter.ts`.
 
 **retail** `modules/cart/` (ADR-028) — the mutable checkout side.
@@ -377,9 +422,8 @@ Use cases: `CreateCart`/`GetCart`/`AddToCart`/`ChangeCartLineQuantity`/`RemoveFr
 `ClaimCart`, plus the shared `loadOwnedCart` owner-check and
 `use-cases/cart-write.ts` (`runWithCartWriteRetry`, `assertCartVersion`,
 `CartWriteConflictError`).
-Infra: `persistence/` (`CartTypeormRepository` — one-tx version-checked root CAS → line
-reconciliation → re-read), three `ClientProxy` adapters (`cart-catalog`, `cart-inventory`,
-`cart-rabbitmq.publisher`).
+Infra: `persistence/` (`CartTypeormRepository`), three `ClientProxy` adapters
+(`cart-catalog`, `cart-inventory`, `cart-rabbitmq.publisher`).
 Presentation: `cart.controller.ts` + `cart-rpc-exception.filter.ts` (forwards `details`).
 
 **retail** `modules/orders/` (ADR-028/031/032/036) — the immutable checkout side.
@@ -401,8 +445,7 @@ Use cases: `PlaceOrder`, `AuthorizePayment`, `CapturePayment`, `GetOrder`, `List
 `fulfillment-quantities.ts`, `resolve-customer-email.ts`, `retry-then-log-for-replay.ts`,
 `cancel-allocation-retry.ts`, the view factories.
 Infra: `persistence/`, `payment-gateway/`, `messaging/`, `audit/`, `consumers/`
-(`order-cancelled.consumer.ts`), `idempotency/` (`IdempotencyPurgeScheduler`,
-`@Cron(EVERY_10_MINUTES)`; `ScheduleModule.forRoot()` is wired in `orders.module.ts`).
+(`order-cancelled.consumer.ts`), `idempotency/` (`IdempotencyPurgeScheduler`).
 Presentation: `orders.controller.ts` + `orders-rpc-exception.filter.ts`.
 
 **retail** `modules/returns/` (ADR-032) — the RMA bounded context (a separate module, not a
@@ -438,30 +481,34 @@ view factories.
 Infra: `persistence/`, `consumers/` (seven; `dispatch-customer-email.ts` is the shared
 missing-recipient skip), `delivery/` (`log` / `email` / `webhook` notifier adapters),
 `render/`, `cache/consent.cache.ts`, `messaging/notification-rabbitmq.publisher.ts`,
-`scheduling/delivery-retry.scheduler.ts` (`@Interval`).
+`scheduling/delivery-retry.scheduler.ts`.
 `app.module.ts` wires `CacheModule` (this service's first) + `DatabaseModule.forRoot(notificationEntities)`.
 Presentation: `health.controller.ts`, `notifications.controller.ts`,
 `notification-rpc-exception.filter.ts`.
-Seeds: `scripts/seeds/notification-template.sql` (eleven active `v1` `email`/`en-US` rows),
-`scripts/seeds/consent-record.sql`.
+Seeds: `scripts/seeds/notification-template.sql`, `scripts/seeds/consent-record.sql`.
 
-**event-store** `modules/audit-and-events.module.ts` (ADR-034/035) — RMQ-only, no HTTP,
+**event-store** `modules/audit-and-events.module.ts` (ADR-034/035/039) — RMQ-only, no HTTP,
 **its own** DB `ris_eventstore` via
 `DatabaseModule.forRootWithUrl([DomainEventEntity, AuditLogEntryEntity], 'EVENTSTORE_DATABASE_URL')`.
 One bounded context (`audit-and-events`) split into two sibling modules: `domain-events/`
 (→ `domain_event`) and `audit-log/` (→ `audit_log_entry`).
-Domain: `DomainEvent` and `AuditLogEntry` are **frozen value objects** (every field
-`public readonly`, `Object.freeze`d, `create` / `reconstitute` factories, no mutators, no
-domain events, **not** `AggregateRoot`s). Invariants throw a plain `Error`.
-`AuditActorType` is domain-local, not a `libs/contracts` enum.
-Ports: `DOMAIN_EVENT_REPOSITORY` (`append` → `{ inserted }`; swallows the composite-UNIQUE
-`ER_DUP_ENTRY` via an **inlined** `isDuplicateEntryError`; `listByCorrelationId`) and
-`AUDIT_LOG_REPOSITORY` (`append`, `listByActor`). Both implement the port directly,
-`insert`-only, and are the sole `@InjectRepository` sites.
-Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, plus
-`firehose-extractors.ts` (heuristic `producer` / `aggregateType` / `aggregateId`).
-Consumer: `modules/firehose.consumer.ts`. **No `presentation/` layer** — the reads are wired
-but exposed by no endpoint.
+Domain: `DomainEvent` and `AuditLogEntry` are **frozen value objects**, not `AggregateRoot`s;
+an invariant violation throws a plain `Error`. `AuditActorType` is domain-local, not a
+`libs/contracts` enum.
+Ports: `DOMAIN_EVENT_REPOSITORY` (`append` + `query`), `AUDIT_LOG_REPOSITORY` (`append` +
+`query` + `listByCorrelationId`), `TRACE_DOMAIN_EVENT_READER` (audit-log-owned raw-SQL reader
+over the sibling module's `domain_event` — the trace may not inject the sibling's repository).
+**`append` is the only mutating verb on either log** — no `save`/`update`/`delete`. Both
+repositories implement their port directly and are the sole `@InjectRepository` sites.
+`application/ports` may not import `lib-common`, so each declares its own `{ page, size }`
+request shape.
+Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEventsUseCase`,
+`QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts`
+(heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
+Context-root controllers (`modules/*.ts`, matching no `boundaries` element pattern — each
+injects use cases from both siblings): `firehose.consumer.ts` and `audit-query.controller.ts`.
+`main.ts` is the repo's only hybrid boot (see Landmines). **No `presentation/` layer**, and no
+`*DomainException` / `*RpcExceptionFilter` pair, on purpose (ADR-039).
 Migrations: `1782521938896-CreateDomainEventTable`, `1782521942829-CreateAuditLogEntryTable`
 (eventstore pipeline).
 
@@ -471,10 +518,10 @@ Imported via the path aliases in `tsconfig.json` as `@retail-inventory-system/<n
 
 | Library | Contents |
 | --- | --- |
-| `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception. |
+| `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `audit/` (the event-store read surface: `DomainEventView` / `AuditLogEntryView` + the two query payloads + the correlation-trace payload/result — ADR-039), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception — every `*View` is a **class** with `@ApiResponseProperty`, since `naming-convention` reserves the bare `interface` form for `I`-prefixed names. |
 | `auth` | `AuthModule.forRootAsync({ imports, providers, exports })` (Passport + JwtModule + `JwtStrategy` + the three guards, all global), `AUTH_USER_VALIDATOR`, `@Public` / `@Roles` / `@RequiresPermission` / `@CurrentUser`, runtime `RoleEnum` re-export. |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(entities)` / `.forRootWithUrl(entities, urlEnvVar)`. Apps call `forRoot` at `AppModule` level; per-module registration prefers `forFeature` (auth uses inline `TypeOrmModule.forFeature` — ADR-019). |
-| `messaging` | `MessagingModule`, `MicroserviceClient{Retail,Inventory,Notification,Catalog}Module` + `MicroserviceClientRisEventsModule` (`RIS_EVENTS_PUBLISHER`), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION`), `EXCHANGES`. |
+| `messaging` | `MessagingModule`, `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore}Module` + `MicroserviceClientRisEventsModule` (`RIS_EVENTS_PUBLISHER`), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION` + the three `AUDIT_*_QUERY` RPCs), `EXCHANGES`. |
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel spans), `CacheModule` (`@Global()`, register once at root), `@Cacheable()`, the `CACHE_KEYS` registry, `CacheHelper`. |
 | `observability` | `LoggerModuleConfig` (Pino + redaction + the `logMethod` hook injecting `traceId`/`spanId`), `CorrelationMiddleware`, `CorrelationId`, `CORRELATION_ID_HEADER`, `tracer.ts`, `TraceContextInterceptor` / `MetricsModule` (placeholders). |
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject<TProps>`, `DomainEvent<TAggregateId>`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |
@@ -490,8 +537,7 @@ are **reserved** (no caller).
 ## Conventions & boundaries (authoritative — ADR-017)
 
 The per-layer / per-lib import constraints plus cross-service and cross-module isolation are
-enforced by `eslint-plugin-boundaries` in `eslint.config.mjs`. When unsure where a file
-belongs, run `yarn lint`; **do not weaken a rule to make code pass.** The bumper is
+enforced by `eslint-plugin-boundaries` in `eslint.config.mjs`. The bumper is
 `spec/architecture-lint.spec.ts` — a fixture per rule that intentionally violates it and
 asserts the expected `boundaries/*` ruleId fires.
 
@@ -500,29 +546,16 @@ asserts the expected `boundaries/*` ruleId fires.
 Reach those via ports. The `application-use-case` denylist forbids both `@nestjs/typeorm`
 and bare `typeorm`.
 
-**Recurring patterns.**
+**Recurring patterns.** The five in [`README.md`
+§3](README.md#3-repository-layout), plus: a port is named after the **consuming** module when
+two modules need the same seam (`ORDER_INVENTORY_GATEWAY` vs `CART_INVENTORY_GATEWAY`).
 
-- One throwable per module (`*DomainException` + `*ErrorCodeEnum`), mapped by one
-  `*RpcExceptionFilter`.
-- A separate repository **port per aggregate seam** (`ACTIVE_PRICE_PROBE`,
-  `CATEGORY_REPOSITORY`, `RESERVATION_REPOSITORY` are the precedent).
-- Cross-module reads go through a raw-parameterized-SQL **reader port** rather than
-  importing the other module's entities (`ORDER_CART_READER`, `RETURN_ORDER_READER`,
-  `CONSENT_READER`, the customer-contact readers).
-- A gateway adapter wraps a rejection in `RpcException(err)` so the upstream
-  `{ code, details }` reaches the gateway verbatim.
-- A human-facing number (`order_number`, `rma_number`) is finalized from the generated id
-  via the "re-read then finalize a derived field" idiom.
-- Ports named after the consuming module when two modules need the same seam
-  (`ORDER_INVENTORY_GATEWAY` vs `CART_INVENTORY_GATEWAY`).
-
-**Cache-key convention** (ADR-016 + ADR-022). Keys follow
-`ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]`. Apps under `apps/*/src`
-MUST NOT write cache-key string literals (call a `CACHE_KEYS` builder) and MUST NOT import
-`@nestjs/cache-manager` / `@keyv/redis` / `cacheable` directly (depend on `ICachePort` /
-`CACHE_PORT`). Write paths invalidate via `CACHE_KEYS.<aggregate>Prefix` + `delByPrefix`,
-awaited post-commit. On stock this is type-enforced (ADR-023): `IStockCachePort` has no
-public `invalidate` — route writes through `withInvalidation(work, resolveItems, opts)`.
+**Cache-key convention** (ADR-016 + ADR-022). Apps under `apps/*/src` MUST NOT write cache-key
+string literals (call a `CACHE_KEYS` builder) and MUST NOT import `@nestjs/cache-manager` /
+`@keyv/redis` / `cacheable` directly (depend on `ICachePort` / `CACHE_PORT`). Write paths
+invalidate via `CACHE_KEYS.<aggregate>Prefix` + `delByPrefix`, awaited post-commit. On stock
+this is type-enforced (ADR-023): `IStockCachePort` has no public `invalidate` — route writes
+through `withInvalidation(work, resolveItems, opts)`.
 
 ## Database
 
@@ -560,23 +593,17 @@ them in place (ADR-037).
 correlation_id)`) and `audit_log_entry` (no dedupe key). **Neither extends `BaseEntity`** —
 no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
-Run `docker-compose up` for MySQL, RabbitMQ, and Redis locally; add
-`-f docker-compose.observability.yml` for the OTel collector + Jaeger.
-
 ## Architecture decisions (ADRs)
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). ADRs are the durable record (3-digit padding,
-`001-…`; **next free number is `038`**). When making an architectural decision, write an
-ADR — Nygard hybrid (Status, Context, Decision, Alternatives, Consequences), one decision
-per file, slug describes the decision not the area (ADR-003). Do not edit an accepted ADR
-beyond flipping its `Status` and adding a pointer; if a decision is reversed, write a new
-one that **supersedes** it.
+`001-…`; **next free number is `040`**). Write one for every architectural decision, under the
+rules in ADR-003; never edit an accepted ADR **merged to `main`** beyond its `Status` and a
+supersession pointer. On its feature branch an ADR is still a draft — amend it freely there.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under
 [`docs/audits/`](docs/audits/).
 
-**No outstanding architectural exceptions.** The old `ARCH-LINT-EX-01` is closed by the
-`ITransactionPort` / opaque `ITransactionScope` abstraction; the `EntityManager` downcast
-lives only in `TypeormTransactionAdapter` and `StockTypeormRepository` (ADR-017 §6, ADR-019).
+**No outstanding architectural exceptions.** The `EntityManager` downcast lives only in
+`TypeormTransactionAdapter` and `StockTypeormRepository` (ADR-017 §6, ADR-019).

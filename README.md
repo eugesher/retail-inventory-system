@@ -27,8 +27,9 @@ start at [`docs/adr/index.md`](docs/adr/index.md).
 10. [Seed data](#10-seed-data)
 11. [Observability](#11-observability)
 12. [Caching](#12-caching)
-13. [Not built yet](#13-not-built-yet)
-14. [Documentation map](#14-documentation-map)
+13. [Background jobs](#13-background-jobs)
+14. [Not built yet](#14-not-built-yet)
+15. [Documentation map](#15-documentation-map)
 
 ---
 
@@ -135,10 +136,10 @@ state (the identity tables).
    best-effort) — the event store binds `#`                        │
                                                                    │
                                ┌───────────────────────────────────┘
-                               │  event_store_firehose_queue
+                               │  event_store_firehose_queue  (ingest, topic exchange)
              ┌─────────────────▼─────────────────┐
-             │    event-store microservice       │
-             │  MySQL: ris_eventstore            │
+             │    event-store microservice       │◀── event_store_query_queue
+             │  MySQL: ris_eventstore            │    (audit.* RPCs, default exchange)
              │  domain_event · audit_log_entry   │
              └───────────────────────────────────┘
 ```
@@ -156,7 +157,7 @@ legibility. Redis is used by **inventory** (stock availability) and **notificati
 | `inventory-microservice` | RMQ `inventory_queue` | `StockLevel` running totals, `StockLocation`, TTL `Reservation` holds, append-only `StockMovement` ledger |
 | `retail-microservice` | RMQ `retail_queue` | Checkout — mutable `Cart`; immutable `Order` + `OrderLine` + `Address` + `Payment` + `Fulfillment` + `Refund`; the `ReturnRequest` RMA context |
 | `notification-microservice` | RMQ `notification_events` | Versioned templates, delivery audit trail, render-and-dispatch pipeline, consent gate, retry sweeper |
-| `event-store-microservice` | RMQ `event_store_firehose_queue` | Append-only sink: `domain_event` (event firehose) + `audit_log_entry` (staff audit log), in its **own** database |
+| `event-store-microservice` | RMQ `event_store_firehose_queue` + `event_store_query_queue` | Append-only sink: `domain_event` (event firehose) + `audit_log_entry` (staff audit log), in its **own** database; answers the three `audit.*` query RPCs |
 
 ### Two logical databases
 
@@ -182,8 +183,10 @@ on the producer's own queue as reserved surfaces.
 Beside the primary `emit`, each publisher mirrors the same routing key + payload onto the
 durable topic exchange `ris.events` via the shared `RisEventsMirrorPublisher`. The mirror is
 **non-throwing best-effort** and ordered *after* the primary emit, so a `ris.events` outage can
-never shadow the publish that feeds a real consumer. The event store binds one queue with the
-catch-all `#` and dispatches inside the consumer — no existing consumer was re-bound.
+never shadow the publish that feeds a real consumer. The event store binds a single queue to
+`ris.events` with the catch-all `#` and dispatches inside the consumer — no existing consumer
+was re-bound. Its second queue, `event_store_query_queue`, carries RPCs on the default
+exchange and is not bound to this exchange at all.
 
 > The binding pattern is a lone `#`, **not** `#.#`. RabbitMQ routes both, but Nest's
 > `matchRmqPattern` rejects `#.#` for any multi-word routing key and nacks the message.
@@ -249,7 +252,7 @@ Imported via path aliases as `@retail-inventory-system/<name>`.
 
 | Library | What it gives you |
 | --- | --- |
-| `contracts` | Wire contracts — `microservices/`, `auth/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs. |
+| `contracts` | Wire contracts — `microservices/`, `auth/`, `audit/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs. |
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |
 | `common` | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (canonical-JSON + SHA-256 request digest). |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`. |
@@ -386,14 +389,15 @@ routes through `stockCache.withInvalidation(...)` (post-commit invalidation,
 | `inventory.stock-level.transfer` | `TransferStockUseCase` | atomic two-location on-hand move — two `StockLevel` writes + a paired `transfer-out`/`transfer-in` `adjustment` movement |
 | `inventory.reservation.reserve` | `ReserveStockUseCase` | no-oversell guard; idempotent by *absolute* quantity on the triple; `expiresAt = now + RESERVATION_TTL_MINUTES` |
 | `inventory.reservation.release` | `ReleaseReservationUseCase` | selector is `reservationId` **or** `cartId` (+ optional facets); both/neither → `400` |
+| `inventory.reservation.sweep` | `SweepExpiredReservationsUseCase` | the on-demand twin of the sweep timer — same use case, plus a staff `actorId` on every ledger row; `batchSize` clamped to `RESERVATION_SWEEP_BATCH_SIZE` |
 | `inventory.reservation.allocate` | `AllocateStockUseCase` | cart holds → order allocation at place-time; per line refresh-then-commit, drift-rebalance, or `allocateDirect` fallback; all-lines-atomic |
 | `inventory.allocation.cancel` | `CancelAllocationUseCase` | reverses an order's allocation; touches no reservation rows |
 | `inventory.stock.commit-sale` | `CommitSaleUseCase` | ship-from-allocated; **idempotency-first on `fulfillmentId`**; decrements on-hand **and** allocated |
 | `inventory.stock.restock-from-return` | `RestockFromReturnUseCase` | **idempotency-first on `returnRequestId`**; raises on-hand only, so no low-stock re-fire |
 
-The reservation/allocate/commit-sale/restock RPCs have **no gateway HTTP route** — they are
-driven retail → inventory. `CatalogEventsConsumer` handles `catalog.variant.created` →
-`AutoInitStockLevelUseCase`.
+The reserve / allocate / cancel-allocation / commit-sale / restock RPCs have **no gateway HTTP
+route** — they are driven retail → inventory. `CatalogEventsConsumer` handles
+`catalog.variant.created` → `AutoInitStockLevelUseCase`.
 
 ADRs: [027](docs/adr/027-stocklevel-running-totals-and-stocklocation.md),
 [030](docs/adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md),
@@ -649,10 +653,33 @@ module's `infrastructure/` inject its own.
 aggregateId ← first present of a documented payload-key precedence). A missing or `NaN`
 `occurredAt` is warn-and-dropped.
 
-**No query surface.** The logs are written, idempotent, and proven by the
-`test/event-store-*.e2e-spec.ts` suites, but there is no HTTP or RPC endpoint to read them —
-today you inspect `ris_eventstore` with SQL. See
-[the scope note](docs/implementation/11-event-store-and-audit-log/05-no-query-endpoints-yet.md).
+**The logs can be read back over RPC** ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)).
+`QueryDomainEventsUseCase` and `QueryAuditLogEntriesUseCase` are filtered, paginated and
+newest-first, over **indexed columns only** (the JSON `payload` / `before` / `after` are
+returned but never searched); `TraceByCorrelationUseCase` is an unpaginated ascending timeline
+of everything one correlation id touched, across both logs. Page size is capped at 100 in the
+use case, so every caller inherits the cap. An unknown id or an inverted `from`/`to` range
+yields an empty result, never an error: the event store has no domain-exception type, and
+therefore no RPC exception filter.
+
+They are served by the context-root `AuditQueryController` on a **second queue**,
+`event_store_query_queue`, bound to the default exchange — command traffic never rides the
+`ris.events` topic exchange:
+
+| Routing key | Use case |
+| --- | --- |
+| `audit.event.query` | `QueryDomainEventsUseCase` |
+| `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
+| `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
+
+`main.ts` is therefore a **hybrid app**: `NestFactory.create` + two `connectMicroservice`
+calls + `init()` + `startAllMicroservices()`. It never calls `listen()`, so the service still
+opens no TCP port. `audit.staff.action` remains the one `audit.` *event* — it rides
+`ris.events` into the firehose queue and is never routed here.
+
+The gateway's `modules/audit/` fronts all three at `GET /api/audit/events`,
+`GET /api/audit/entries` and `GET /api/audit/trace/:correlationId`, behind `audit:read`
+([§6](#6-http-api)).
 
 ---
 
@@ -732,10 +759,15 @@ racing for the last unit deterministic: exactly one reserve wins, the loser sees
 
 **Reservation TTL.** Every Reserve (re)sets `expiresAt = now + RESERVATION_TTL_MINUTES`, so
 an active line refreshes its lease as the shopper edits the cart. A hold returns to
-`available` three ways: cart Remove **releases** it, Place **allocates** it (after which only
-a cancel-allocation frees it), or an operator **manually releases** it by id. There is **no
-expiry sweeper yet** (`Reservation.expire()` has no caller), so a stranded hold over-holds
-stock — but is never lost: the next Reserve on the same triple reuses the row.
+`available` four ways: cart Remove **releases** it, Place **allocates** it (after which only a
+cancel-allocation frees it), an operator **manually releases** it by id, or — for a hold nobody
+touches — `SweepExpiredReservationsUseCase` **expires** it, driven by the inventory service's
+timer or by `POST /api/inventory/reservations/sweep` on demand
+([§13](#13-background-jobs)). Between a hold's `expiresAt` and the tick that observes it,
+`available` understates reality — the system under-sells, never over-sells — so the sweep
+should tick well inside the TTL. A stranded hold is never lost either way: the next Reserve on
+the same triple reuses the row. See
+[ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md).
 
 **Audit, not balance.** `stock_movement` is an append-only audit trail; the running totals on
 `stock_level` are the source of truth, and **summing ledger rows never reconstructs on-hand**.
@@ -859,12 +891,17 @@ An unknown media owner is a `200 []`, not a `404`.
 | `POST` | `/inventory/variants/:variantId/stock/receive` | `inventory:adjust` — `{ stockLocationId?, quantity }` |
 | `POST` | `/inventory/variants/:variantId/stock/adjust` | `inventory:adjust` — `{ stockLocationId?, quantityDelta, reasonCode }` |
 | `POST` | `/inventory/variants/:variantId/stock/transfer` | `inventory:transfer` — `{ fromLocationId, toLocationId, quantity }` |
+| `POST` | `/inventory/reservations/sweep` | `inventory:adjust` — `{ batchSize? }`, expires elapsed holds on demand |
 | `POST` | `/inventory/reservations/:reservationId/release` | `inventory:adjust` — the operator manual release |
 
 A variant with no stock rows is a `200` zero-availability answer (`locations: []`), not a
-`404`. The manual release is the **only operator-reachable hold-freeing tool** until a TTL
-sweeper lands; source the `reservationId` from the reserve-path logs, the
-`inventory.stock.reserved` event, or the DB — there is no reservation read endpoint by design.
+`404`. The two reservation routes share `inventory:adjust` because they do the same thing to
+the books — return held units to `available` and append a `release` ledger row. The sweep runs
+the same use case the inventory service's timer ticks and answers
+`{ scanned, expired, skipped, durationMs }` where `scanned = expired + skipped`; it needs no
+`Idempotency-Key`, since a second call finds the holds already `expired` and skips them. The
+by-id release needs a `reservationId` — source it from the reserve-path logs, the
+`inventory.stock.reserved` event, or the DB; there is no reservation read endpoint by design.
 
 ### Cart
 
@@ -930,6 +967,43 @@ directly. A permission code is a *staff override over an owner-check*, never a c
 The gateway resolves the `marketing.email.promo` default and **mints a fresh `campaignId`
 per request**, so repeated sends are distinct rows. `customerEmail` is a documented operator
 input, not a cross-module lookup.
+
+### Audit and event store (staff-only)
+
+| Method | Route | Auth |
+| --- | --- | --- |
+| `GET` | `/audit/events` | `audit:read` — `?eventType`, `?aggregateType`, `?aggregateId`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize` |
+| `GET` | `/audit/entries` | `audit:read` — `?actorId`, `?entityType`, `?entityId`, `?action`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize` |
+| `GET` | `/audit/trace/:correlationId` | `audit:read` — both logs for one request, each oldest-first |
+
+Three questions: *what did the system do* (`domain_event`), *what did a person do*
+(`audit_log_entry`), *what did this one request cause* (both, joined by correlation id). Every
+filter is optional and names an **indexed** column — the JSON bodies (`payload`, `before`,
+`after`) are returned but never searched.
+
+`pageSize` defaults to 20 and is **capped at 100 by the event store's use case**, not by the
+gateway DTO, so a direct RPC caller inherits the same ceiling. The DTO owns shape instead: an
+inverted `from`/`to` window is a `400` here, because the event store would answer it with a
+silently empty page. Nothing in this area ever returns a `404` — an unknown correlation id is a
+`200` with two empty arrays, and an unmatched filter set a `200` empty page.
+
+`?action=` takes the stable **event-name** string (`StaffUserRolesAssigned`, `RefundIssued`),
+never a permission code — the ingest maps `action ← IAuditLogEvent.name`. A permission code in
+that slot is a well-formed query that matches nothing.
+
+One worked example each:
+
+```http
+GET /api/audit/events?eventType=retail.order.placed&from=2026-07-01T00:00:00.000Z&to=2026-08-01T00:00:00.000Z&pageSize=50
+GET /api/audit/entries?action=StaffUserRolesAssigned&actorId=00000000-0000-4000-a000-000000000001
+GET /api/audit/trace/9f1c0e2a-7b4d-4c8e-9a11-6d3f5b2c0e77
+```
+
+`aggregateType` and `aggregateId` are the routing key's **second token** and the payload id it
+names, resolved per event — so `?aggregateType=order` matches `retail.order.placed` and
+`retail.order.cancelled`, and *not* that order's payment, fulfillment or refund events, which are
+extracted under their own type and their own id. Reassembling one order's whole story is what
+`?correlationId=` and the trace route are for.
 
 ### Admin
 
@@ -1097,12 +1171,15 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 | `CACHE_TTL_MS_DEFAULT` | `60000` | global default for an unscoped `set()` |
 | `CACHE_TTL_MS_PRODUCT_STOCK` | `60000` | TTL for a cached availability read (the name predates the running-totals rewrite) |
 | `RESERVATION_TTL_MINUTES` | `15` | hold lifetime — `expiresAt = now + this` on every Reserve |
+| `RESERVATION_SWEEP_BATCH_SIZE` | `200` | rows one expired-reservation sweep scans and expires; a ceiling a caller cannot raise |
+| `RESERVATION_SWEEP_TRANSACTION_SIZE` | `25` | rows one sweep transaction expires — bounds how long it holds row locks |
+| `RESERVATION_SWEEP_INTERVAL_SECONDS` | `60` | seconds between sweep invocations; decides how promptly an already-expired hold is reclaimed |
 | `RETURN_WINDOW_DAYS` | `30` | a `shipped` order is returnable only within this window; a `delivered` one always is |
 | `OCC_RETRY_ATTEMPTS` | `5` | bounded retry budget for version-checked writes |
 | `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows |
 | `OPS_NOTIFICATIONS_EMAIL` | `ops@example.com` | mailbox for system-only notifications with no customer recipient |
 | `MAX_DELIVERY_ATTEMPTS` | `3` | attempts before a delivery is abandoned and `notifications.delivery.failed` is emitted |
-| `RETENTION_DELIVERY_DAYS` | `90` | delivery-row retention; Joi-validated, no reader — see [Not built yet](#13-not-built-yet) |
+| `RETENTION_DELIVERY_DAYS` | `90` | delivery-row retention; Joi-validated, no reader — see [Not built yet](#14-not-built-yet) |
 | `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300` | staleness safety net; the consent cache is kept fresh by events, not TTL |
 | `NOTIFIER_TEST_FLAKY` | `false` | **test-only** — swaps in a flaky notifier that fails the first dispatch of any `__FAIL_ONCE__`-marked body. Never set it outside the retry e2e suite. |
 | `AUTH_ARGON2_MEMORY_COST` | `19456` KiB | OWASP 2024 minimum for argon2id |
@@ -1169,16 +1246,23 @@ public stock read, the uncached movements ledger, the delivery audit reads, and 
 | Capability | Suites |
 | --- | --- |
 | Reservations + movements | `cart-reserve-release`, `place-order-allocates`, `inventory-movements-audit`, **`concurrent-oversell`** |
+| Reservation TTL sweep | `reservation-sweeper`, `reservation-sweeper-cron`, **`concurrent-sweep-release`** |
 | Fulfillment + ship + cancel | `fulfillment-happy-path`, `fulfillment-partial-ship`, `cancel-order-pre-fulfillment`, `cancel-order-blocked-after-ship`, `ship-triggers-capture`, **`concurrent-ship-cancel`** |
 | Returns + refunds | `return-restock-refund`, `return-rejected`, `auto-refund-from-cancel`, `manual-refund` |
 | Notifications | `notifications-place-order`, `notifications-ship-fulfillment`, `notifications-low-stock`, `notifications-template-edit`, `notifications-retry`, `notification` |
 | Event store | `event-store-firehose`, `event-store-audit-log`, `event-store-idempotency` |
+| Audit + event-store reads | `audit-event-query`, `audit-entry-query`, `audit-trace-correlation` |
 | Idempotency + OCC | `idempotency-{place-order,different-body,capture,ship,refund,purge}`, `occ-cart`, `concurrent-place-order`, `inventory-concurrency` |
 | Consent + erasure | `consent-roundtrip`, `notification-consent-gating`, `erase-customer-tombstone`, `erase-customer-confirm-guard` |
 
-The two concurrency proofs (`concurrent-oversell`, `concurrent-ship-cancel`) are
-**winner-agnostic** and must stay green across five consecutive runs. See
-[the concurrent-oversell walkthrough](docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md).
+The three concurrency proofs (`concurrent-oversell`, `concurrent-ship-cancel`,
+`concurrent-sweep-release`) are **winner-agnostic** and must stay green across five consecutive
+runs. See [the concurrent-oversell walkthrough](docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md)
+and [the sweep-vs-release walkthrough](docs/implementation/14-reservation-sweeper-and-audit-queries/08-sweep-vs-release-race-and-e2e-coverage.md).
+
+The ingest suites (`event-store-*`, `idempotency-place-order`, `idempotency-refund`) assert by
+direct SQL even though `GET /api/audit/*` could answer the same questions: a suite proving the
+**write** path must not depend on the read path to do it.
 
 ### Request collections
 
@@ -1477,15 +1561,57 @@ ADRs: [002](docs/adr/002-redis-cache-aside-product-stock.md),
 
 ---
 
-## 13. Not built yet
+## 13. Background jobs
+
+Three timers run inside three different services. Each one only decides how *promptly* an
+already-due row is handled — none of them is load-bearing for correctness, and each wraps its
+tick in a `try` / `catch` that warn-logs and returns, so a fault never stops the loop.
+
+| Job | Registering file | Cadence | What a missed tick costs |
+| --- | --- | --- | --- |
+| Reservation TTL sweep | `apps/inventory-microservice/…/stock/infrastructure/scheduling/reservation-sweep.scheduler.ts` | `RESERVATION_SWEEP_INTERVAL_SECONDS` (default `60`) | stranded holds keep depressing `available` — the system under-sells |
+| Idempotency-key TTL purge | `apps/retail-microservice/…/orders/infrastructure/idempotency/idempotency-purge.scheduler.ts` | fixed `@Cron`, every 10 minutes | `idempotency_key` keeps rows past `IDEMPOTENCY_KEY_TTL_HOURS`; the table grows |
+| Notification delivery retry sweep | `apps/notification-microservice/…/notifications/infrastructure/scheduling/delivery-retry.scheduler.ts` | fixed `@Interval`, 60 s | a `failed` delivery waits one more interval for its next attempt |
+
+Only the reservation sweep's cadence is configurable, which is why it alone registers its timer
+imperatively through `SchedulerRegistry.addInterval` — a `@Cron` / `@Interval` argument is fixed
+when the class is defined, before any injected value exists. The other two hardcode theirs in a
+constant beside the decorator.
+
+### Watching the reservation sweep
+
+The sweep is the only job that moves stock, so it is the one worth observing. It leaves four
+signals, in this order:
+
+1. One `info` line at boot — `Reservation sweep scheduled` with `{ intervalSeconds }`. This is
+   the only proof from outside the process that the timer is armed, and at what cadence.
+2. Per invocation that expired something, one `info` line `Reservation sweep completed` carrying
+   `{ correlationId, scanned, expired, skipped, durationMs, batches }`. A sweep that found no
+   candidates returns early — before opening a transaction — at `debug`, as does one whose
+   every candidate another writer had already handled.
+3. One `inventory.stock.released` event **per hold**, carrying that hold's `cartId` and
+   `reservationId` and `reason: 'expired'`. Events are never coalesced per variant, because
+   coalescing would have to null exactly the two ids that make the event traceable.
+4. One negative `release` row in `stock_movement` per hold, with `reason_code = 'expired'` and
+   `reference_type = 'cart'`. A timer tick writes `actor_id = NULL`; the same sweep triggered
+   through `POST /api/inventory/reservations/sweep` stamps the staff principal.
+
+Each invocation mints its own `correlationId`, so a swept release joins no customer's request
+trace — `GET /api/audit/trace/:correlationId` on a sweep's id returns only the sweep's own rows.
+See [ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md).
+
+---
+
+## 14. Not built yet
 
 Deliberate gaps, each with the seam already in place:
 
 | Gap | Seam that exists |
 | --- | --- |
-| Reservation TTL sweeper | `Reservation.expire()` has no caller; manual release is the only reclaim tool |
-| Event-store read/query endpoints | both repositories expose reads (`listByCorrelationId`, `listByActor`); no controller |
-| Event retention / purge / event-sourced replay | — |
+| Free-text / JSON-path search over an event `payload` or an audit `before` / `after` | the columns are returned by `GET /api/audit/*` but no index can serve a predicate over them, so none is offered ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
+| Keyset (cursor) pagination for deep offsets over `domain_event` | `clampPageWindow` bounds the page, not the offset; `skip((page - 1) * size)` still walks the skipped rows ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
+| Reservation retention / purge of `expired` rows | the sweep flips a hold to `expired` and leaves the row; the `(status, expires_at)` index that finds the sweep's candidates would find a purge's, and `stock_movement` already carries the release trail ([ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md)) |
+| Event retention / purge / event-sourced replay | `ris_eventstore` is a separate, independently truncatable database ([ADR-034](docs/adr/034-isolated-eventstore-database.md)) and `domain_event` stores every `payload` verbatim — but `append` is the only mutating verb on either log's port, so nothing can delete a row |
 | Delivery-row purge worker | `RETENTION_DELIVERY_DAYS` is Joi-validated; nothing reads it yet |
 | Real payment processor, partial captures, a gateway `fail` outcome | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter` |
 | ESP webhook ingestion (signature verification, provider-payload mapping) | `notification.delivery.record-outcome` RPC, no HTTP route |
@@ -1500,7 +1626,7 @@ Deliberate gaps, each with the seam already in place:
 
 ---
 
-## 14. Documentation map
+## 15. Documentation map
 
 | Where | What it holds |
 | --- | --- |

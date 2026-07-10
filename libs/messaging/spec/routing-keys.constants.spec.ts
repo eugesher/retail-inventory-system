@@ -44,6 +44,9 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_RELEASE,
     );
+    expect(ROUTING_KEYS.INVENTORY_RESERVATION_SWEEP).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_SWEEP,
+    );
     expect(ROUTING_KEYS.INVENTORY_RESERVATION_ALLOCATE).toBe(
       MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_ALLOCATE,
     );
@@ -293,6 +296,11 @@ describe('ROUTING_KEYS', () => {
     );
     expect(ROUTING_KEYS.NOTIFICATIONS_DELIVERY_FAILED).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATIONS_DELIVERY_FAILED,
+    );
+    expect(ROUTING_KEYS.AUDIT_EVENT_QUERY).toBe(MicroserviceMessagePatternEnum.AUDIT_EVENT_QUERY);
+    expect(ROUTING_KEYS.AUDIT_ENTRY_QUERY).toBe(MicroserviceMessagePatternEnum.AUDIT_ENTRY_QUERY);
+    expect(ROUTING_KEYS.AUDIT_TRACE_BY_CORRELATION).toBe(
+      MicroserviceMessagePatternEnum.AUDIT_TRACE_BY_CORRELATION,
     );
   });
 

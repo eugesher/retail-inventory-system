@@ -359,6 +359,22 @@ export class InMemoryReservationRepository implements IReservationRepositoryPort
     return Promise.resolve(matching.map((row) => this.clone(row)));
   }
 
+  // Mirrors the real scan: `active` + strict `expiresAt < now`, oldest first with an id
+  // tiebreaker, capped at `limit`.
+  public listExpiredActive(now: Date, limit: number): Promise<Reservation[]> {
+    const matching = [...this.rows.values()]
+      .filter(
+        (row) =>
+          row.status === ReservationStatusEnum.ACTIVE && row.expiresAt.getTime() < now.getTime(),
+      )
+      .sort(
+        (a, b) =>
+          a.expiresAt.getTime() - b.expiresAt.getTime() || (a.id ?? '').localeCompare(b.id ?? ''),
+      )
+      .slice(0, limit);
+    return Promise.resolve(matching.map((row) => this.clone(row)));
+  }
+
   public save(reservation: Reservation): Promise<Reservation> {
     if (reservation.id === null) {
       throw new Error('InMemoryReservationRepository.save: reservation id is null');

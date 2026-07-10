@@ -23,8 +23,10 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // a single `?? ''` line in the ingest use case to prevent that, `correlation_id` is
 // `NOT NULL DEFAULT ''`: the dedupe key is correct BY CONSTRUCTION for any writer (a
 // backfill, a replay tool, a test fixture), and the use-case coalescing becomes
-// belt-and-braces. The three secondary indexes back future query paths (by aggregate, by
-// event type, by correlation).
+// belt-and-braces. The flip side: an event ingested with no correlation id stores `''` and is
+// therefore reachable by no correlation filter and by no trace. The three secondary indexes
+// serve the read surface — by aggregate, by event type, by correlation
+// (docs/adr/039-audit-and-event-store-query-surface.md).
 //
 // No FK on any column: the firehose references no other schema and lives in its own
 // isolated database.
@@ -56,7 +58,7 @@ export class CreateDomainEventTable1782521938896 implements MigrationInterface {
     await queryRunner.query(
       'CREATE INDEX IDX_DOMAIN_EVENT_TYPE ON domain_event (event_type, occurred_at DESC);',
     );
-    // The cross-service-trace join (the `listByCorrelationId` read path).
+    // The cross-service trace, and the `correlationId` filter of the paginated query.
     await queryRunner.query(
       'CREATE INDEX IDX_DOMAIN_EVENT_CORRELATION ON domain_event (correlation_id);',
     );

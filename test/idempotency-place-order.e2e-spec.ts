@@ -24,10 +24,12 @@ import { IdempotencyE2ESpecDataSource } from './data-source/idempotency.e2e-spec
 // the event publisher, so it emits nothing; the second HTTP response carries
 // `Idempotent-Replay: true` and downgrades to `200` (a fresh place is `201`).
 //
-// The event-store oracle is asserted by direct SQL (there is no query endpoint — a deferred
-// capability), keyed on `(event_type, aggregate_id)` so it is independent of the correlation
-// id. Ingestion is asynchronous (publish → broker → consume → insert), so the suite polls
-// the log until the placed event appears before asserting the count.
+// The event-store oracle is asserted by direct SQL, keyed on `(event_type, aggregate_id)` so
+// it is independent of the correlation id. The subject here is what the replay DID NOT
+// publish, and a count read through `GET /api/audit/events` would make that assertion depend
+// on the read path — as well as forcing this suite to boot the event store's query transport.
+// Ingestion is asynchronous (publish → broker → consume → insert), so the suite polls the log
+// until the placed event appears before asserting the count.
 //
 // Self-provisioned, disjoint fixture (`e2e-idem-place-*`): its own product/price/published/
 // received stock, so the shared seeded variants are never touched.

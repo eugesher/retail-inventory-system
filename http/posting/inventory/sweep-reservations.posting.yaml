@@ -1,0 +1,20 @@
+name: sweep-reservations
+description: |-
+  POST /api/inventory/reservations/sweep  (Bearer — inventory:adjust)
+  Expire every `active` hold whose TTL has already elapsed, right now, instead of
+  waiting for the inventory service's next timer tick. No request body: the sweep
+  then scans up to its configured RESERVATION_SWEEP_BATCH_SIZE. Per expired hold it
+  returns the units to `available`, flips the row to `expired`, appends a negative
+  `release` row to the stock_movement ledger with reasonCode `expired` (attributed to
+  the staff actor who called this — a timer tick writes a null actor), and emits one
+  inventory.stock.released event. Response is
+  { scanned, expired, skipped, durationMs }, and scanned = expired + skipped always:
+  a `skipped` candidate is one a concurrent writer had already settled or whose TTL
+  was refreshed between the scan and the transaction. A clean table is
+  { scanned: 0, expired: 0, skipped: 0 }. To see it reclaim something, add a cart
+  line (which reserves), wait out RESERVATION_TTL_MINUTES, then run this.
+method: POST
+url: $ENV_BASE_URL/inventory/reservations/sweep
+headers:
+- name: Authorization
+  value: Bearer $accessToken

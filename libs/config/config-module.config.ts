@@ -40,6 +40,23 @@ export const configModuleConfig = {
     // Defaulted, so a missing var never fails boot.
     RESERVATION_TTL_MINUTES: Joi.number().integer().positive().default(15),
 
+    // Upper bound on the rows a single expired-reservation sweep invocation scans and
+    // expires — it caps the work per tick, so a backlog drains across successive sweeps
+    // (ADR-038). Defaulted, so a missing var never fails boot (the
+    // `RESERVATION_TTL_MINUTES` precedent).
+    RESERVATION_SWEEP_BATCH_SIZE: Joi.number().integer().min(1).default(200),
+
+    // How many reservations one sweep transaction expires. It bounds how long the sweep
+    // holds row locks, keeping the concurrent checkout writes it races with responsive
+    // (ADR-038). Defaulted, so a missing var never fails boot.
+    RESERVATION_SWEEP_TRANSACTION_SIZE: Joi.number().integer().min(1).default(25),
+
+    // Seconds between expired-reservation sweep invocations (ADR-038). It decides only how
+    // promptly an ALREADY-expired hold is reclaimed — `RESERVATION_TTL_MINUTES` is what
+    // bounds a hold's life — so it should tick well inside the TTL. Defaulted, so a missing
+    // var never fails boot (the `RESERVATION_TTL_MINUTES` precedent).
+    RESERVATION_SWEEP_INTERVAL_SECONDS: Joi.number().integer().min(1).default(60),
+
     // Return-eligibility window (days) — a `shipped` order is returnable only within
     // `RETURN_WINDOW_DAYS` of its ship date; a `delivered` order is always returnable
     // (ADR-032). The Open return use case reads it. Defaulted, so a missing var never

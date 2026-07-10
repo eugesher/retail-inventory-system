@@ -25,6 +25,11 @@ export const ROUTING_KEYS = {
   // `IReservationReleaseResult` (ADR-030 §5).
   INVENTORY_RESERVATION_RESERVE: 'inventory.reservation.reserve',
   INVENTORY_RESERVATION_RELEASE: 'inventory.reservation.release',
+  // `inventory.reservation.sweep` → `SweepExpiredReservationsUseCase` (RPC, Gateway →
+  // Inventory): expires `active` holds whose TTL has elapsed, returns their quantity to
+  // `available`, writes one negative `release` movement each, and emits
+  // `inventory.stock.released` per hold. Runs the same code the scheduled sweep runs.
+  INVENTORY_RESERVATION_SWEEP: 'inventory.reservation.sweep',
   // `inventory.reservation.allocate` → `AllocateStockUseCase` → `IAllocationResult`
   // (converts a cart's holds into an order's allocations at place-time, with a
   // direct-allocation fallback) and `inventory.allocation.cancel` →
@@ -35,8 +40,9 @@ export const ROUTING_KEYS = {
   INVENTORY_RESERVATION_ALLOCATE: 'inventory.reservation.allocate',
   INVENTORY_ALLOCATION_CANCEL: 'inventory.allocation.cancel',
   // Reservation + ledger events — reserved surfaces on `inventory_queue` (no
-  // cross-service consumer yet; the intended consumer is a future event-store
-  // capability — the `inventory.stock.{received,adjusted}` precedent).
+  // *business* consumer; captured by the event-store firehose, which binds `#` on
+  // the `ris.events` mirror — ADR-035 — the `inventory.stock.{received,adjusted}`
+  // precedent).
   // `inventory.stock.reserved` (Reserve) / `inventory.stock.allocated` (Allocate) /
   // `inventory.stock.released` (Release + Cancel-Allocation) and the high-volume
   // `inventory.stock-movement.recorded` (every ledger insert).
@@ -50,7 +56,7 @@ export const ROUTING_KEYS = {
   // `StockLevel.commitSale` and appends one strictly-negative `sale` movement
   // referencing the fulfillment. All-lines-atomic + idempotent on `fulfillmentId`
   // (ADR-031). `inventory.stock.committed` is the past-tense reserved-surface event
-  // it emits per committed line onto `inventory_queue` (no consumer yet — the
+  // it emits per committed line onto `inventory_queue` (no *business* consumer — the
   // `inventory.stock.{reserved,allocated,released}` precedent).
   INVENTORY_STOCK_COMMIT_SALE: 'inventory.stock.commit-sale',
   INVENTORY_STOCK_COMMITTED: 'inventory.stock.committed',
@@ -209,17 +215,17 @@ export const ROUTING_KEYS = {
   // auto-refund-from-cancel consumer calls `IssueRefundUseCase` directly (not over RMQ).
   RETAIL_REFUND_ISSUE: 'retail.refund.issue',
   RETAIL_REFUND_LIST: 'retail.refund.list',
-  // Reserved-surface cart events (no consumer bound yet) — emitted onto
-  // `retail_queue` by the cart operations. These are past-tense notifications,
-  // distinct from the imperative command keys above.
+  // Reserved-surface cart events (no *business* consumer; captured by the
+  // event-store firehose) — emitted onto `retail_queue` by the cart operations.
+  // These are past-tense notifications, distinct from the imperative command keys
+  // above.
   RETAIL_CART_CREATED: 'retail.cart.created',
   RETAIL_CART_LINE_ADDED: 'retail.cart.line-added',
   RETAIL_CART_LINE_REMOVED: 'retail.cart.line-removed',
   RETAIL_CART_LINE_QUANTITY_CHANGED: 'retail.cart.line-quantity-changed',
   // `retail.order.placed` — emitted onto `notification_events` after a successful
-  // place so the notification service can fan out an order confirmation. An active
-  // consumer arrives with the notification re-point capability; for now it is a
-  // best-effort post-commit emit (ADR-020).
+  // place; the notification service binds a consumer for it (an order-confirmation
+  // fan-out). The emit is best-effort post-commit (ADR-020).
   RETAIL_ORDER_PLACED: 'retail.order.placed',
   // `retail.payment.authorized` — emitted onto `retail_queue` (the producer's own
   // queue) after authorize-on-place succeeds. A reserved surface today, like the
@@ -242,15 +248,18 @@ export const ROUTING_KEYS = {
   RETAIL_FULFILLMENT_SHIPPED: 'retail.fulfillment.shipped',
   // `retail.fulfillment.delivered` — emitted onto `retail_queue` (the producer's own
   // queue) after a shipment is marked delivered. The past-tense event paired with the
-  // imperative `retail.fulfillment.deliver` command. A reserved surface today (no
-  // consumer bound yet), like `retail.fulfillment.created`.
+  // imperative `retail.fulfillment.deliver` command. The notification service binds
+  // a consumer for it (a delivery-confirmation fan-out), like
+  // `retail.fulfillment.shipped`.
   RETAIL_FULFILLMENT_DELIVERED: 'retail.fulfillment.delivered',
   // `retail.order.cancelled` — emitted onto `retail_queue` (the producer's own queue)
   // after an order is cancelled. It carries `paymentFlaggedForRefund` so a downstream
   // consumer can tell a captured-and-flagged cancellation (a refund is owed) from a
   // simple voided-authorization one. NOTE: this key was *retired* by ADR-028 with the
   // old order model; it is **re-introduced fresh here** with a live producer (Cancel
-  // Order), not resurrected from any stub. A reserved surface today (no consumer yet).
+  // Order), not resurrected from any stub. Two consumers bind it: retail's own
+  // auto-refund-from-cancel consumer, and the notification cancellation fan-out (the
+  // event is dual-emitted onto `retail_queue` and `notification_events`).
   RETAIL_ORDER_CANCELLED: 'retail.order.cancelled',
   // Return (RMA) lifecycle events — the past-tense surfaces paired with the imperative
   // `retail.return.*` commands (ADR-032). Two destinations by the
@@ -341,6 +350,16 @@ export const ROUTING_KEYS = {
   // service queue, because the audit log is a destination of its own, decoupled
   // from the operational request/response paths.
   AUDIT_STAFF_ACTION: 'audit.staff.action',
+  // Audit + event-store query RPCs (Gateway → Event Store on `event_store_query_queue`),
+  // served by `AuditQueryController`. Commands, not events — they never travel over
+  // `ris.events`, whose `audit.staff.action` key is the one `audit.` EVENT (ADR-035/039).
+  // `audit.event.query` → `QueryDomainEventsUseCase` → `IPage<DomainEventView>`,
+  // `audit.entry.query` → `QueryAuditLogEntriesUseCase` → `IPage<AuditLogEntryView>`,
+  // `audit.trace.by-correlation` → `TraceByCorrelationUseCase` → `ICorrelationTraceResult`
+  // (unpaginated, ascending, both logs).
+  AUDIT_EVENT_QUERY: 'audit.event.query',
+  AUDIT_ENTRY_QUERY: 'audit.entry.query',
+  AUDIT_TRACE_BY_CORRELATION: 'audit.trace.by-correlation',
 } as const;
 
 export type RoutingKey = (typeof ROUTING_KEYS)[keyof typeof ROUTING_KEYS];

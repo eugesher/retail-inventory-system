@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepPartial, EntityManager, Repository } from 'typeorm';
+import { DeepPartial, EntityManager, LessThan, Repository } from 'typeorm';
 
 import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
@@ -73,6 +73,25 @@ export class ReservationTypeormRepository
     const entities = await this.repo(scope).find({
       where: { cartId, variantId, status: ReservationStatusEnum.ACTIVE },
       order: { id: 'ASC' },
+    });
+    return entities.map((entity) => ReservationMapper.toDomain(entity));
+  }
+
+  // `WHERE status = 'active' AND expires_at < :now ORDER BY expires_at ASC, id ASC
+  // LIMIT :limit` — served by `IDX_RESERVATION_STATUS_EXPIRES_AT (status, expires_at)`.
+  // The strict `<` matches `Reservation.isExpired(now)`, so a hold whose `expiresAt`
+  // equals `now` is not a candidate. Oldest-first makes a capped scan reclaim the
+  // longest-stranded holds first; the `id` tiebreaker totalises the order, so a repeated
+  // scan over an unchanged table returns the same page.
+  public async listExpiredActive(
+    now: Date,
+    limit: number,
+    scope?: ITransactionScope,
+  ): Promise<Reservation[]> {
+    const entities = await this.repo(scope).find({
+      where: { status: ReservationStatusEnum.ACTIVE, expiresAt: LessThan(now) },
+      order: { expiresAt: 'ASC', id: 'ASC' },
+      take: limit,
     });
     return entities.map((entity) => ReservationMapper.toDomain(entity));
   }

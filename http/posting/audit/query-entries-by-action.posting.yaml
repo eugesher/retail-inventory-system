@@ -1,0 +1,22 @@
+name: query-entries-by-action
+description: |-
+  GET /api/audit/entries  (Bearer — audit:read)
+  "What did a person do", narrowed to one kind of action.
+
+  `action` takes the stable EVENT-NAME string the audit row carries —
+  `StaffUserRolesAssigned` — and NOT the permission code that gated the route which
+  produced it. The ingest maps `action <- IAuditLogEvent.name`
+  (docs/adr/035-event-store-firehose-topic-exchange.md), so a PermissionCodeEnum value
+  (an `<area>:<verb>` string) matches nothing at all and returns a silently empty page.
+  This is the single easiest thing to get wrong about this endpoint.
+
+  Other names in circulation today: UserLoggedIn, LoginFailed, LogoutPerformed,
+  RefreshTokenRotated, RefreshReuseDetected, StaffUserRegistered, StaffUserRoleRevoked,
+  RoleCreated, RolePermissionsReplaced, CustomerRegistered, CustomerLoggedIn,
+  CustomerErased, RefundIssued. Run the `iam` subcollection's role-assignment request to
+  produce a StaffUserRolesAssigned row; `UserLoggedIn` is there already, from the login
+  above.
+url: $ENV_BASE_URL/audit/entries?action=StaffUserRolesAssigned&pageSize=20
+headers:
+- name: Authorization
+  value: Bearer $accessToken

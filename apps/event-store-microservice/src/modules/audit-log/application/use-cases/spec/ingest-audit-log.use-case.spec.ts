@@ -1,6 +1,6 @@
 import { PinoLogger } from 'nestjs-pino';
 
-import { IAuditStaffActionEvent } from '@retail-inventory-system/contracts';
+import { IAuditStaffActionEvent, IPage } from '@retail-inventory-system/contracts';
 import { makePinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
 import { AuditLogEntry } from '../../../domain';
@@ -24,7 +24,14 @@ class FakeAuditLogRepository implements IAuditLogRepositoryPort {
     return Promise.resolve();
   }
 
-  public listByActor(): Promise<AuditLogEntry[]> {
+  // The two reads are present only to satisfy the port; the ingest path never reads. They are
+  // exercised by `query-audit-log-entries.use-case.spec.ts` and
+  // `trace-by-correlation.use-case.spec.ts`.
+  public query(): Promise<IPage<AuditLogEntry>> {
+    return Promise.resolve({ items: [], total: 0, page: 1, size: 20 });
+  }
+
+  public listByCorrelationId(): Promise<AuditLogEntry[]> {
     return Promise.resolve([]);
   }
 }

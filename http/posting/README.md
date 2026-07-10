@@ -66,12 +66,13 @@ The Kulala `{{$guid}}` maps to a `setup` script. Two shapes exist:
 
 ## Subcollections
 
-All 16 Kulala files are ported (185 requests). Each folder mirrors the
+All 17 Kulala files are ported (198 requests). Each folder mirrors the
 same-named `../kulala/<name>.http` and carries its own `scripts.py`.
 
 | Folder | Requests | Folder | Requests |
 | --- | ---: | --- | ---: |
-| `auth/` | 9 | `inventory/` | 13 |
+| `audit/` | 11 | `iam/` | 7 |
+| `auth/` | 9 | `inventory/` | 15 |
 | `cart/` | 10 | `notifications/` | 13 |
 | `catalog/` | 10 | `order/` | 12 |
 | `catalog-categories/` | 18 | `order-cancel/` | 13 |
@@ -79,9 +80,14 @@ same-named `../kulala/<name>.http` and carries its own `scripts.py`.
 | `consent/` | 5 | `refunds/` | 16 |
 | `customer-admin/` | 5 | `returns/` | 16 |
 | `fulfillment/` | 13 | | |
-| `iam/` | 7 | | |
 
 > Note: `notifications/author-template` authors a Handlebars notification
 > template whose body contains `{{orderId}}` / `{{grandTotalMinor}}`. Those are
 > **template** placeholders (resolved server-side at render time), not Posting
 > variables — they are sent verbatim, exactly as in the Kulala original.
+
+> Note: `audit/query-events-by-aggregate` captures `$tracedCorrelationId` out of
+> its **first result row** (`items[0].correlationId`), which
+> `audit/query-events-by-correlation` and `audit/trace-by-correlation` consume.
+> Its hook sets nothing when the page is empty, so those two then fail with a
+> `SubstitutionError` rather than querying a fabricated id — place an order first.

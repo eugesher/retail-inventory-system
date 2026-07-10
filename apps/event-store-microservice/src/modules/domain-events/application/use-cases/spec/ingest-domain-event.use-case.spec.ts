@@ -2,6 +2,8 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { makePinoLoggerMock } from '@retail-inventory-system/observability/testing';
 
+import { IPage } from '@retail-inventory-system/contracts';
+
 import { DomainEvent } from '../../../domain';
 import { IDomainEventAppendResult, IDomainEventRepositoryPort } from '../../ports';
 import { IngestDomainEventUseCase } from '../ingest-domain-event.use-case';
@@ -29,8 +31,10 @@ class FakeDomainEventRepository implements IDomainEventRepositoryPort {
     return Promise.resolve({ inserted: this.nextInserted });
   }
 
-  public listByCorrelationId(): Promise<DomainEvent[]> {
-    return Promise.resolve([]);
+  // Present only to satisfy the port; the ingest path never reads. The read surface is
+  // exercised by `query-domain-events.use-case.spec.ts`.
+  public query(): Promise<IPage<DomainEvent>> {
+    return Promise.resolve({ items: [], total: 0, page: 1, size: 20 });
   }
 }
 

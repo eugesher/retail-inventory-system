@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
 import {
@@ -12,6 +13,9 @@ import {
 import {
   OCC_RETRY_ATTEMPTS,
   RESERVATION_REPOSITORY,
+  RESERVATION_SWEEP_BATCH_SIZE,
+  RESERVATION_SWEEP_INTERVAL_SECONDS,
+  RESERVATION_SWEEP_TRANSACTION_SIZE,
   RESERVATION_TTL_MINUTES,
   STOCK_CACHE,
   STOCK_EVENTS_PUBLISHER,
@@ -32,12 +36,14 @@ import {
   ReleaseReservationUseCase,
   ReserveStockUseCase,
   RestockFromReturnUseCase,
+  SweepExpiredReservationsUseCase,
   TransferStockUseCase,
 } from '../application/use-cases';
 import { InventoryRpcExceptionFilter, StockController } from '../presentation';
 import { StockCache } from './cache';
 import { CatalogEventsConsumer } from './consumers';
 import { StockRabbitmqPublisher } from './messaging';
+import { ReservationSweepScheduler } from './scheduling';
 import {
   ReservationEntity,
   ReservationTypeormRepository,
@@ -63,6 +69,9 @@ import {
 // `RisEventsMirrorPublisher` dual-publish). The transaction adapter backs the
 // Receive/Adjust write path and the optimistic writes the inventory-reservation
 // capability adds.
+//
+// `ScheduleModule.forRoot()` brings in the `SchedulerRegistry` that `ReservationSweepScheduler`
+// registers its timer with (ADR-038). This is the inventory service's only scheduled job.
 @Module({
   imports: [
     DatabaseModule.forFeature([
@@ -74,6 +83,7 @@ import {
     MicroserviceClientNotificationModule,
     MicroserviceClientInventoryModule,
     MicroserviceClientRisEventsModule,
+    ScheduleModule.forRoot(),
   ],
   controllers: [StockController, CatalogEventsConsumer],
   providers: [
@@ -113,6 +123,35 @@ import {
       inject: [ConfigService],
     },
 
+    // The two bounds the expired-reservation sweep runs under (ADR-038), resolved from
+    // `RESERVATION_SWEEP_BATCH_SIZE` (Joi default 200) and
+    // `RESERVATION_SWEEP_TRANSACTION_SIZE` (Joi default 25) — the batch size caps the rows
+    // one invocation scans and expires, the transaction size the rows one transaction
+    // locks. Value providers, so the use case never reads env (the `OCC_RETRY_ATTEMPTS`
+    // precedent above; ADR-017).
+    {
+      provide: RESERVATION_SWEEP_BATCH_SIZE,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('RESERVATION_SWEEP_BATCH_SIZE') ?? 200,
+      inject: [ConfigService],
+    },
+    {
+      provide: RESERVATION_SWEEP_TRANSACTION_SIZE,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('RESERVATION_SWEEP_TRANSACTION_SIZE') ?? 25,
+      inject: [ConfigService],
+    },
+
+    // The sweep's cadence (seconds, Joi default 60), injected into `ReservationSweepScheduler`
+    // rather than baked into a schedule decorator — a decorator argument is evaluated at class
+    // definition, before any `ConfigService` exists (ADR-038).
+    {
+      provide: RESERVATION_SWEEP_INTERVAL_SECONDS,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('RESERVATION_SWEEP_INTERVAL_SECONDS') ?? 60,
+      inject: [ConfigService],
+    },
+
     StockCache,
     { provide: STOCK_CACHE, useExisting: StockCache },
 
@@ -130,11 +169,16 @@ import {
     AdjustStockUseCase,
     ReserveStockUseCase,
     ReleaseReservationUseCase,
+    SweepExpiredReservationsUseCase,
     AllocateStockUseCase,
     CancelAllocationUseCase,
     CommitSaleUseCase,
     RestockFromReturnUseCase,
     TransferStockUseCase,
+
+    // The timer that drives `SweepExpiredReservationsUseCase` (ADR-038). It registers its
+    // interval imperatively in `onModuleInit` and deletes it in `onModuleDestroy`.
+    ReservationSweepScheduler,
 
     // Terminates `InventoryDomainException` into the `{ statusCode, message, code }`
     // wire shape the gateway maps (ADR-027). Registered via APP_FILTER so it
