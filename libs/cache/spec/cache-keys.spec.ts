@@ -266,15 +266,9 @@ describe('CACHE_KEYS', () => {
     });
   });
 
-  describe('productStock (pre-ADR-016 legacy — kept for original transition window)', () => {
-    it('uses the bare stock prefix', () => {
+  describe('productStockPrefix (pre-ADR-016 legacy — invalidate-only)', () => {
+    it('is the bare stock prefix — the exact wire shape `delByPrefix` must still SCAN for', () => {
       expect(CACHE_KEYS.productStockPrefix(42)).toBe('stock:42:');
-      expect(CACHE_KEYS.productStock(42)).toBe('stock:42:*');
-    });
-
-    it('joins storageIds via the legacy charCodeAt comparator (preserves wire format)', () => {
-      // Legacy bug preserved intentionally: any new code uses inventoryStock.
-      expect(CACHE_KEYS.productStock(42, ['head-warehouse'])).toBe('stock:42:head-warehouse');
     });
   });
 });
