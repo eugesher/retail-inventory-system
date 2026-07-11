@@ -236,8 +236,9 @@ follows when the historical prose disagrees with the source of truth.
   CACHE-002 by [ADR-023](023-cache-invalidate-post-commit-by-type.md)
   (post-commit ordering type-enforced — no public `invalidate`, no
   fire-and-forget); CACHE-005 by the `available` flag on
-  `IStockCachePort.get`'s return shape (a Redis-down read collapses the
-  per-request warn count from three to one). The closure register is
+  the internal `get`'s return shape (a Redis-down read collapses the
+  per-request warn count from three to one — `get` is private to `StockCache`
+  since [ADR-049](049-the-port-methods-nothing-calls.md)). The closure register is
   [`docs/audits/audit-2026-05-20-followup.md`](../audits/audit-2026-05-20-followup.md);
   the only `AUDIT-2026-05-08` annotation
   surviving in the stock module today is `[CODE-001]` inside

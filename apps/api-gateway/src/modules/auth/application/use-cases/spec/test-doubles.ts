@@ -48,9 +48,10 @@ export class InMemoryStaffUserRepository implements IStaffUserRepositoryPort {
     return Promise.resolve(user);
   }
 
-  public softDelete(id: string): Promise<void> {
+  // Arrangement only — NOT on the port (ADR-049). Drops the row so a spec can assert
+  // that a token minted for a staff user who no longer exists is rejected.
+  public remove(id: string): void {
     this.byId.delete(id);
-    return Promise.resolve();
   }
 }
 
