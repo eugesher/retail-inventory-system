@@ -30,7 +30,7 @@ import {
   PAYMENT_REPOSITORY,
   REFUND_REPOSITORY,
   TRANSACTION_PORT,
-} from '../application/ports';
+} from './application/ports';
 import {
   AuthorizePaymentUseCase,
   CancelLineUseCase,
@@ -46,19 +46,19 @@ import {
   PlaceOrderUseCase,
   PurgeExpiredIdempotencyKeysUseCase,
   ShipFulfillmentUseCase,
-} from '../application/use-cases';
-import { OrderCancelledConsumer } from './consumers';
+} from './application/use-cases';
+import { OrderCancelledConsumer } from './infrastructure/consumers';
 import {
   IdempotencyKeyEntity,
   IdempotencyPurgeScheduler,
   IdempotencyStoreTypeormRepository,
-} from './idempotency';
+} from './infrastructure/idempotency';
 import {
   OrderCatalogRabbitmqAdapter,
   OrderCommitSaleRabbitmqAdapter,
   OrderInventoryRabbitmqAdapter,
   OrderRabbitmqPublisher,
-} from './messaging';
+} from './infrastructure/messaging';
 import {
   AddressEntity,
   AddressTypeormRepository,
@@ -75,10 +75,10 @@ import {
   RefundEntity,
   RefundTypeormRepository,
   TypeormTransactionAdapter,
-} from './persistence';
-import { FakePaymentGatewayAdapter } from './payment-gateway';
-import { RmqAuditLogPublisher } from './audit';
-import { OrdersController, OrdersRpcExceptionFilter } from '../presentation';
+} from './infrastructure/persistence';
+import { FakePaymentGatewayAdapter } from './infrastructure/payment-gateway';
+import { RmqAuditLogPublisher } from './infrastructure/audit';
+import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
 
 // The orders bounded-context module: the `Order` / `Address` / `Payment` /
 // `Fulfillment` / `Refund` repositories, the `PAYMENT_GATEWAY` seam (default

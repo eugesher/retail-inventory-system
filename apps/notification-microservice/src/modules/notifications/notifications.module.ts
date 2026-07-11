@@ -21,7 +21,7 @@ import {
   NOTIFIER,
   OPS_NOTIFICATIONS_EMAIL,
   TEMPLATE_RENDERER,
-} from '../application/ports';
+} from './application/ports';
 import {
   AuthorTemplateUseCase,
   GetDeliveryUseCase,
@@ -33,11 +33,11 @@ import {
   RetryFailedDeliveriesUseCase,
   SendMarketingUseCase,
   SetTemplateActiveUseCase,
-} from '../application/use-cases';
-import { HealthController } from '../presentation/health.controller';
-import { NotificationRpcExceptionFilter } from '../presentation/notification-rpc-exception.filter';
-import { NotificationsController } from '../presentation/notifications.controller';
-import { ConsentCache } from './cache';
+} from './application/use-cases';
+import { HealthController } from './presentation/health.controller';
+import { NotificationRpcExceptionFilter } from './presentation/notification-rpc-exception.filter';
+import { NotificationsController } from './presentation/notifications.controller';
+import { ConsentCache } from './infrastructure/cache';
 import {
   ConsentEventsConsumer,
   FulfillmentEventsConsumer,
@@ -46,18 +46,18 @@ import {
   OrderEventsConsumer,
   RefundEventsConsumer,
   ReturnEventsConsumer,
-} from './consumers';
-import { FlakyLogNotifierAdapter, LogNotifierAdapter } from './delivery';
-import { NotificationRabbitmqPublisher } from './messaging';
+} from './infrastructure/consumers';
+import { FlakyLogNotifierAdapter, LogNotifierAdapter } from './infrastructure/delivery';
+import { NotificationRabbitmqPublisher } from './infrastructure/messaging';
 import {
   ConsentReaderTypeormAdapter,
   NotificationDeliveryEntity,
   NotificationDeliveryTypeormRepository,
   NotificationTemplateEntity,
   NotificationTemplateTypeormRepository,
-} from './persistence';
-import { HandlebarsTemplateRendererAdapter } from './render';
-import { DeliveryRetryScheduler } from './scheduling';
+} from './infrastructure/persistence';
+import { HandlebarsTemplateRendererAdapter } from './infrastructure/render';
+import { DeliveryRetryScheduler } from './infrastructure/scheduling';
 
 // `NOTIFIER` is bound to `LogNotifierAdapter` today; swap to
 // `EmailNotifierAdapter` / `WebhookNotifierAdapter` is a one-line `useExisting`

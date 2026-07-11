@@ -56,10 +56,9 @@ Non-obvious facts, each worth a debugging cycle.
   invisible to tracing.
 - `NestFactory.createMicroservice` returns an `INestMicroservice`, which cannot
   `connectMicroservice`. A second transport forces the hybrid `NestFactory.create` form — as in
-  `apps/event-store-microservice/src/main.ts`, the only one. There, `connectMicroservice` marks
-  each transport initialized, so `startAllMicroservices()` never fires `onModuleInit`: the app
-  must `await app.init()` **first**, and must **never** `listen()` (it has no HTTP surface, and
-  `create` binds no port until you do).
+  `apps/event-store-microservice/src/main.ts`, the only one. It must `await app.init()`
+  **first** (`startAllMicroservices()` will not fire `onModuleInit`), and must **never**
+  `listen()`.
 - Never call `PinoLogger.assign()` inside an `@EventPattern` handler — those are not
   request-scoped and it throws. Log `correlationId` inline (ADR-011 §7).
 
@@ -70,14 +69,12 @@ Non-obvious facts, each worth a debugging cycle.
   `matchRmqPattern` nacks every multi-word routing key under `#.#`.
 - **Producer targets the consumer's queue** (ADR-008/020): an event is emitted onto the
   queue of whoever consumes it, not the producer's own.
-- `RisEventsMirrorPublisher.mirror` is non-throwing best-effort and is ordered **after**
-  the primary `emit`, so a `ris.events` failure can never shadow the real publish.
+- `RisEventsMirrorPublisher.mirror` is non-throwing best-effort, ordered **after** the
+  primary `emit`.
 - A single Nest app binds every handler pattern to every connected transport. Two queues with
-  disjoint **`@EventPattern`** sets in one app is therefore not supported. An **event** queue
-  plus an **RPC** queue is (ADR-039): `ServerRMQ.getHandlerByPattern` does an exact map lookup
-  when `wildcards: false`, so a wildcard pattern is inert there — but a `wildcards: true`
-  transport binds *every* registered pattern as a routing key on its exchange, so the other
-  queue's patterns show up as inert bindings in the RabbitMQ UI.
+  disjoint **`@EventPattern`** sets in one app is therefore not supported; an **event** queue
+  plus an **RPC** queue is (ADR-039 §, which explains why). Fallout: the other queue's patterns
+  appear as inert bindings in the RabbitMQ UI.
 
 **Persistence**
 
@@ -147,6 +144,10 @@ Non-obvious facts, each worth a debugging cycle.
   `--config jest.unit.config.js`.
 - `yarn lint` is the **source of truth for where a file belongs**. Never weaken a
   `boundaries/*` rule to make code pass.
+- `boundaries` takes the **first** matching element pattern, so order in `boundariesElements`
+  is load-bearing: `shared-module-barrel` (`modules/auth/index.ts`) must stay ahead of
+  `nest-module` (`modules/*/*.ts`), which matches it too. Mirror any change into
+  `spec/architecture-lint.spec.ts`, which **inlines its own copy** of the taxonomy.
 - `test:infra:reload` runs **both** migration pipelines; `yarn migration:run` alone leaves
   `ris_eventstore` empty.
 
@@ -269,10 +270,8 @@ queue and never reaches this controller (ADR-039).
 | notification `ConsentEventsConsumer` | `customer.consent.updated` / `customer.erased` | `CONSENT_CACHE` write-through / evict |
 | event-store `FirehoseConsumer` (`modules/firehose.consumer.ts`) | `@EventPattern('#')` | `audit.staff.action` → `IngestAuditLogUseCase`; everything else → `IngestDomainEventUseCase` |
 
-`FirehoseConsumer` and `AuditQueryController` both sit at the **context root**, registered as
-controllers in `AuditAndEventsModule` — each injects use cases from **both** sibling modules,
-and `eslint-plugin-boundaries` only lets a module's `infrastructure/` (or `presentation/`)
-reach its own.
+`FirehoseConsumer` and `AuditQueryController` sit at the **context root** (see Service
+Structure → event-store), not in either sibling module.
 
 A routing key that is published but absent from that table is a **reserved surface**: no
 business consumer, still captured by the firehose. [`README.md`
@@ -295,8 +294,9 @@ Cadence *values* and what a missed tick costs are in [`README.md`
 
 Every service uses the **per-module hexagonal layout** (`domain/` → `application/` (ports +
 use-cases) → `infrastructure/` (persistence + messaging) → `presentation/`). The
-notification module is the canonical template. The Nest module file sits under
-`infrastructure/` **except in catalog**, where it sits at the module root.
+notification module is the canonical template. The Nest module file is the module's
+**composition root**, not a layer: it sits at `modules/<m>/<m>.module.ts` everywhere, no
+exceptions (ADR-041). Element type `nest-module` — which also covers the module-root barrel.
 
 **Boundary rule:** `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
 `infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts`. Controllers, use cases, and
@@ -309,9 +309,9 @@ catalog ADR-004/018/025; pricing ADR-026.
 ### API Gateway (`apps/api-gateway/src/`)
 
 `main.ts` first import is the tracer. `app/app.module.ts` wires the top module +
-`CorrelationMiddleware` + two global `APP_FILTER`s: `app/filters/duplicate-key-exception.filter.ts`
-(MySQL dup-entry → `409`) and `common/filters/optimistic-lock.exception-filter.ts`
-(`OptimisticLockVersionMismatchError` → `409 VERSION_MISMATCH`).
+`CorrelationMiddleware` + two global `APP_FILTER`s:
+`app/filters/duplicate-key-exception.filter.ts` and
+`common/filters/optimistic-lock.exception-filter.ts`.
 `common/utils/throw-rpc-error.util.ts` forwards an RPC rejection's `code` + `details` verbatim.
 `common/decorators/` holds the reusable `@IdempotencyKey()` and `@IfMatch()` param decorators.
 
@@ -355,9 +355,8 @@ Controllers: `staff-login`, `auth`, `customer-auth`, `customer-consent`, `auth-a
 `RolesGuard` → `PermissionsGuard`. Opt out with `@Public()`. `@RequiresPermission(<code>)`
 is the precise gate; `@Roles(<RoleEnum>)` is coarse role-bundle gating (rare). Inject the
 user with `@CurrentUser()`. `PermissionCodeEnum`
-(`libs/contracts/auth/permission.enum.ts`) is the single source of truth. Customer tokens
-carry **no** `permissions` claim, so a code-gated route is staff-only by construction
-([`README.md` §7](README.md#7-authentication-and-authorization)).
+(`libs/contracts/auth/permission.enum.ts`) is the single source of truth. Who a code-gated
+route admits: [`README.md` §7](README.md#7-authentication-and-authorization).
 
 ### Microservices
 
@@ -485,7 +484,7 @@ Infra: `persistence/`, `consumers/` (seven; `dispatch-customer-email.ts` is the 
 missing-recipient skip), `delivery/` (`log` / `email` / `webhook` notifier adapters),
 `render/`, `cache/consent.cache.ts`, `messaging/notification-rabbitmq.publisher.ts`,
 `scheduling/delivery-retry.scheduler.ts`.
-`app.module.ts` wires `CacheModule` (this service's first) + `DatabaseModule.forRoot(notificationEntities)`.
+`app.module.ts` wires `CacheModule` + `DatabaseModule.forRoot(notificationEntities)`.
 Presentation: `health.controller.ts`, `notifications.controller.ts`,
 `notification-rpc-exception.filter.ts`.
 Seeds: `scripts/seeds/notification-template.sql`, `scripts/seeds/consent-record.sql`.
@@ -501,15 +500,14 @@ an invariant violation throws a plain `Error`. `AuditActorType` is domain-local,
 Ports: `DOMAIN_EVENT_REPOSITORY` (`append` + `query`), `AUDIT_LOG_REPOSITORY` (`append` +
 `query` + `listByCorrelationId`), `TRACE_DOMAIN_EVENT_READER` (audit-log-owned raw-SQL reader
 over the sibling module's `domain_event` — the trace may not inject the sibling's repository).
-**`append` is the only mutating verb on either log** — no `save`/`update`/`delete`. Both
-repositories implement their port directly and are the sole `@InjectRepository` sites.
-`application/ports` may not import `lib-common`, so each declares its own `{ page, size }`
-request shape.
+**`append` is the only mutating verb on either log**; both repositories are the sole
+`@InjectRepository` sites. `application/ports` may not import `lib-common`, so each declares
+its own `{ page, size }` request shape.
 Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEventsUseCase`,
 `QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts`
 (heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
-Context-root controllers (`modules/*.ts`, matching no `boundaries` element pattern — each
-injects use cases from both siblings): `firehose.consumer.ts` and `audit-query.controller.ts`.
+Context-root controllers (`modules/*.ts`, the `context-root` element type — each injects use
+cases from both siblings): `firehose.consumer.ts` and `audit-query.controller.ts`.
 `main.ts` is the repo's only hybrid boot (see Landmines). **No `presentation/` layer**, and no
 `*DomainException` / `*RpcExceptionFilter` pair, on purpose (ADR-039).
 Migrations: `1782521938896-CreateDomainEventTable`, `1782521942829-CreateAuditLogEntryTable`
@@ -548,6 +546,10 @@ asserts the expected `boundaries/*` ruleId fires.
 `@retail-inventory-system/{messaging,cache,observability,database}` or any `@nestjs/*`.
 Reach those via ports. The `application-use-case` denylist forbids both `@nestjs/typeorm`
 and bare `typeorm`.
+
+**Cross-module imports** are rejected through a module's `index.ts` barrel exactly as through a
+deep path (ADR-041). The sole exception is the gateway `auth` barrel, typed
+`shared-module-barrel`, which `iam` / `customer-admin` consume by design (ADR-024).
 
 **Recurring patterns.** The five in [`README.md`
 §3](README.md#3-repository-layout), plus: a port is named after the **consuming** module when
@@ -600,11 +602,12 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `041`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `042`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under
 [`docs/audits/`](docs/audits/).
 
-**No outstanding architectural exceptions.** The `EntityManager` downcast lives only in
-`TypeormTransactionAdapter` and `StockTypeormRepository` (ADR-017 §6, ADR-019).
+**One architectural exception: `ARCH-LINT-EX-02`** (ADR-017 §6) — the gateway `auth` barrel is
+the sole cross-module-consumable barrel (`iam` / `customer-admin`). The `EntityManager`
+downcast lives only in `TypeormTransactionAdapter` and `StockTypeormRepository` (ADR-019).

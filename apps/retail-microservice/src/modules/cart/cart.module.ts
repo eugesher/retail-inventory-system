@@ -16,7 +16,7 @@ import {
   CART_INVENTORY_GATEWAY,
   CART_REPOSITORY,
   OCC_RETRY_ATTEMPTS,
-} from '../application/ports';
+} from './application/ports';
 import {
   AddToCartUseCase,
   ChangeCartLineQuantityUseCase,
@@ -24,14 +24,14 @@ import {
   CreateCartUseCase,
   GetCartUseCase,
   RemoveFromCartUseCase,
-} from '../application/use-cases';
+} from './application/use-cases';
 import {
   CartCatalogRabbitmqAdapter,
   CartInventoryRabbitmqAdapter,
   CartRabbitmqPublisher,
-} from './messaging';
-import { CartEntity, CartLineEntity, CartTypeormRepository } from './persistence';
-import { CartController, CartRpcExceptionFilter } from '../presentation';
+} from './infrastructure/messaging';
+import { CartEntity, CartLineEntity, CartTypeormRepository } from './infrastructure/persistence';
+import { CartController, CartRpcExceptionFilter } from './presentation';
 
 // The cart bounded-context module: the `Cart` aggregate's two-table repository,
 // the six cart operations, their RPC controller, and the two outbound seams.

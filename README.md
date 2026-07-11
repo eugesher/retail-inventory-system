@@ -269,6 +269,8 @@ the canonical template ([ADR-011](docs/adr/011-notifier-port-and-adapters.md)).
 
 ```
 modules/notifications/
+├── notifications.module.ts  # the composition root — wires all four layers below (ADR-041)
+├── index.ts                 # the module's public barrel — the only way in from outside
 ├── domain/            # aggregates, value objects, error codes — framework-free
 ├── application/
 │   ├── ports/         # interfaces + DI symbols (NOTIFIER, TEMPLATE_RENDERER, CONSENT_CACHE…)
@@ -277,6 +279,10 @@ modules/notifications/
 │                      #   Handlebars renderer, schedulers — the only ClientProxy site
 └── presentation/      # @MessagePattern handlers + the RPC exception filter
 ```
+
+The `@Module` file sits **beside** the hexagon, never inside a layer of it: binding the ports to
+the adapters and the controllers to the use cases means it must see all four at once, so it
+belongs to none of them ([ADR-041](docs/adr/041-nest-module-as-the-module-composition-root.md)).
 
 **Boundary rule.** `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
 `infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts`. Controllers, use cases, and
@@ -296,7 +302,12 @@ The layering plus cross-service and cross-module isolation are enforced by
 - `application/ports/` may import only `domain` types and `libs/contracts`.
 - `infrastructure/` is the only layer allowed to touch concrete adapters.
 - `presentation/` may import `application` + `libs/{auth,contracts,messaging,observability}`.
-- Cross-service (`apps/X` → `apps/Y`) and cross-module imports are rejected outright.
+- `<m>.module.ts` and the module-root `index.ts` are the `nest-module` element: they see every
+  layer of their **own** module and nothing of a sibling's.
+- Cross-service (`apps/X` → `apps/Y`) and cross-module imports are rejected outright — through a
+  module's barrel just as much as through a deep path. The **one** exception is the gateway
+  `auth` barrel, which the `iam` and `customer-admin` admin shells consume by design (ADR-024;
+  encoded as the `shared-module-barrel` element type, ADR-017 §6).
 
 Each rule has a fixture in [`spec/architecture-lint.spec.ts`](spec/architecture-lint.spec.ts)
 that intentionally violates it and asserts the expected `boundaries/*` ruleId fires — so

@@ -62,6 +62,26 @@ const ELEMENTS = [
     mode: 'file',
     capture: ['app', 'module'],
   },
+  // ADR-041. `shared-module-barrel` MUST precede `nest-module` — the plugin
+  // takes the first matching pattern, and `auth/index.ts` matches both.
+  {
+    type: 'shared-module-barrel',
+    pattern: 'apps/*/src/modules/auth/index.ts',
+    mode: 'file',
+    capture: ['app'],
+  },
+  {
+    type: 'nest-module',
+    pattern: 'apps/*/src/modules/*/*.ts',
+    mode: 'file',
+    capture: ['app', 'module'],
+  },
+  {
+    type: 'context-root',
+    pattern: 'apps/*/src/modules/*.ts',
+    mode: 'file',
+    capture: ['app'],
+  },
   { type: 'lib-contracts', pattern: 'libs/contracts/**', mode: 'file' },
   { type: 'lib-ddd', pattern: 'libs/ddd/**', mode: 'file' },
   { type: 'lib-common', pattern: 'libs/common/**', mode: 'file' },
@@ -80,6 +100,9 @@ const sameModule = (type: string): object => ({
     },
   },
 });
+const sameApp = (type: string): object => ({
+  to: { type, captured: { app: '{{from.captured.app}}' } },
+});
 const lib = (type: string): object => ({ to: { type } });
 
 const DEPENDENCY_RULES = [
@@ -95,6 +118,7 @@ const DEPENDENCY_RULES = [
     allow: [
       sameModule('domain'),
       sameModule('application-port'),
+      sameApp('shared-module-barrel'),
       lib('lib-ddd'),
       lib('lib-common'),
       lib('lib-contracts'),
@@ -109,6 +133,7 @@ const DEPENDENCY_RULES = [
     allow: [
       sameModule('application-use-case'),
       sameModule('application-port'),
+      sameApp('shared-module-barrel'),
       lib('lib-contracts'),
       lib('lib-messaging'),
     ],
@@ -122,6 +147,34 @@ const DEPENDENCY_RULES = [
       lib('lib-cache'),
       lib('lib-messaging'),
       lib('lib-contracts'),
+    ],
+  },
+  // ADR-041 — the module composition root sees every layer of its own module
+  // and the `auth` barrel, but never a sibling module's internals or barrel.
+  {
+    from: { type: 'nest-module' },
+    allow: [
+      sameModule('domain'),
+      sameModule('application-port'),
+      sameModule('application-use-case'),
+      sameModule('infrastructure'),
+      sameModule('presentation'),
+      sameApp('shared-module-barrel'),
+      lib('lib-cache'),
+      lib('lib-database'),
+      lib('lib-messaging'),
+      lib('lib-contracts'),
+    ],
+  },
+  // ADR-039/041 — the bounded-context root composes sibling module barrels
+  // and nothing deeper.
+  {
+    from: { type: 'context-root' },
+    allow: [
+      sameApp('nest-module'),
+      sameApp('context-root'),
+      lib('lib-contracts'),
+      lib('lib-messaging'),
     ],
   },
   // External denylists per source layer.
@@ -868,6 +921,64 @@ describe('boundaries rules (ADR-017)', () => {
         expect(source).not.toMatch(/\b(save|update|delete|softDelete|remove)\s*\(/);
       },
     );
+  });
+
+  // ADR-041. Before this taxonomy existed, `modules/<m>/<m>.module.ts` and the module-root
+  // `index.ts` barrel matched no element pattern, so `boundaries/dependencies` skipped them
+  // entirely — cross-module isolation held for a deep path (`../orders/application/ports`)
+  // but not for the barrel (`../orders`). These fixtures pin the closed hole: the sole
+  // cross-module seam is the `auth` barrel (ADR-024), and everything else stays shut.
+  describe('boundaries/dependencies — module composition root (ADR-041)', () => {
+    it('nest-module may not reach a sibling module through a deep path', () => {
+      const code = `import { ORDER_REPOSITORY } from '../orders/application/ports';\nexport const x = ORDER_REPOSITORY;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/__fixture__.module.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('nest-module may not reach a sibling module through its barrel', () => {
+      const code = `import { orderEntities } from '../orders';\nexport const x = orderEntities;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/__fixture__.module.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('a use case may not reach a sibling module through its barrel', () => {
+      const code = `import { orderEntities } from '../../../orders';\nexport const x = orderEntities;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('nest-module may wire its own module’s use cases', () => {
+      const code = `import { ReserveStockUseCase } from './application/use-cases';\nexport const x = ReserveStockUseCase;\n`;
+      const messages = lint(
+        code,
+        'apps/inventory-microservice/src/modules/stock/__fixture__.module.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    it('the gateway auth barrel is the one sanctioned cross-module seam (ADR-024)', () => {
+      const code = `import { ROLE_REPOSITORY } from '../../../auth';\nexport const x = ROLE_REPOSITORY;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/iam/application/use-cases/__fixture__.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    it('context-root may compose sibling module barrels (ADR-039)', () => {
+      const code = `import { IngestAuditLogUseCase } from './audit-log';\nexport const x = IngestAuditLogUseCase;\n`;
+      const messages = lint(code, 'apps/event-store-microservice/src/modules/__fixture__.ts');
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
   });
 
   describe('positive cases — allowed edges do not flag', () => {

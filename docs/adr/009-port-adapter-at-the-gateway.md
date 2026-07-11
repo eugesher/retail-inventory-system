@@ -1,9 +1,16 @@
 # ADR-009: Port-and-adapter split at the API gateway
 
 - **Date**: 2026-05-10
-- **Status**: Accepted
+- **Status**: Accepted — **amended on one point** by [ADR-041](041-nest-module-as-the-module-composition-root.md)
 
 ---
+
+> **Amendment (ADR-041, 2026-07-11).** The tree and the layer table below place the Nest module
+> file at `infrastructure/<svc>.module.ts`. No gateway module ever followed it, and ADR-041
+> supersedes that point repo-wide: the `@Module` file is the module's **composition root**, not a
+> layer of it, and lives at `modules/<m>/<m>.module.ts`. Everything else here — the port/adapter
+> split, `ClientProxy` confined to `infrastructure/messaging/`, the gateway's missing `domain/` —
+> stands unchanged.
 
 ## Context
 
