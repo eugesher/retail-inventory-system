@@ -40,12 +40,9 @@ import { CatalogRabbitmqPublisher } from './infrastructure/messaging';
 import {
   ActivePriceProbeTypeormAdapter,
   CatalogTypeormRepository,
-  CategoryEntity,
   CategoryTypeormRepository,
-  MediaAssetEntity,
   MediaAssetTypeormRepository,
-  ProductEntity,
-  ProductVariantEntity,
+  catalogEntities,
 } from './infrastructure/persistence';
 import {
   CatalogController,
@@ -76,16 +73,11 @@ const DEFAULT_CURRENCY_PROVIDER = {
 // `MicroserviceClientRisEventsModule` provides the `ris.events` topic-exchange
 // client so the publisher can mirror every catalog event onto the event-store
 // firehose (ADR-035, the `RisEventsMirrorPublisher` dual-publish). The
-// `forFeature` array is the entity-classes literal (the loose `catalogEntities`
-// const type does not satisfy `forFeature`).
+// `forFeature` takes `catalogEntities` — the same list `app.module.ts` spreads into the
+// shared connection, so an added entity is a one-line edit in `infrastructure/persistence/`.
 @Module({
   imports: [
-    DatabaseModule.forFeature([
-      ProductEntity,
-      ProductVariantEntity,
-      CategoryEntity,
-      MediaAssetEntity,
-    ]),
+    DatabaseModule.forFeature(catalogEntities),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
     MicroserviceClientRisEventsModule,

@@ -45,14 +45,11 @@ import { CatalogEventsConsumer } from './infrastructure/consumers';
 import { StockRabbitmqPublisher } from './infrastructure/messaging';
 import { ReservationSweepScheduler } from './infrastructure/scheduling';
 import {
-  ReservationEntity,
   ReservationTypeormRepository,
-  StockLevelEntity,
-  StockLocationEntity,
-  StockMovementEntity,
   StockMovementTypeormRepository,
   StockTypeormRepository,
   TypeormTransactionAdapter,
+  stockEntities,
 } from './infrastructure/persistence';
 
 // `useExisting` shares the single adapter instance with code that injects the
@@ -74,12 +71,7 @@ import {
 // registers its timer with (ADR-038). This is the inventory service's only scheduled job.
 @Module({
   imports: [
-    DatabaseModule.forFeature([
-      StockLocationEntity,
-      StockLevelEntity,
-      ReservationEntity,
-      StockMovementEntity,
-    ]),
+    DatabaseModule.forFeature(stockEntities),
     MicroserviceClientNotificationModule,
     MicroserviceClientInventoryModule,
     MicroserviceClientRisEventsModule,

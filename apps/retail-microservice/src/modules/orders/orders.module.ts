@@ -49,7 +49,6 @@ import {
 } from './application/use-cases';
 import { OrderCancelledConsumer } from './infrastructure/consumers';
 import {
-  IdempotencyKeyEntity,
   IdempotencyPurgeScheduler,
   IdempotencyStoreTypeormRepository,
 } from './infrastructure/idempotency';
@@ -60,21 +59,15 @@ import {
   OrderRabbitmqPublisher,
 } from './infrastructure/messaging';
 import {
-  AddressEntity,
   AddressTypeormRepository,
   CartReaderTypeormAdapter,
   CustomerContactReaderTypeormAdapter,
-  FulfillmentEntity,
-  FulfillmentLineEntity,
   FulfillmentTypeormRepository,
-  OrderEntity,
-  OrderLineEntity,
   OrderTypeormRepository,
-  PaymentEntity,
   PaymentTypeormRepository,
-  RefundEntity,
   RefundTypeormRepository,
   TypeormTransactionAdapter,
+  orderEntities,
 } from './infrastructure/persistence';
 import { FakePaymentGatewayAdapter } from './infrastructure/payment-gateway';
 import { RmqAuditLogPublisher } from './infrastructure/audit';
@@ -123,16 +116,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
 // isolation line, ADR-017); it never imports the cart module.
 @Module({
   imports: [
-    DatabaseModule.forFeature([
-      OrderEntity,
-      OrderLineEntity,
-      AddressEntity,
-      PaymentEntity,
-      FulfillmentEntity,
-      FulfillmentLineEntity,
-      RefundEntity,
-      IdempotencyKeyEntity,
-    ]),
+    DatabaseModule.forFeature(orderEntities),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
     MicroserviceClientNotificationModule,

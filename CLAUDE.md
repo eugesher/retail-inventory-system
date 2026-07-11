@@ -100,6 +100,9 @@ Non-obvious facts, each worth a debugging cycle.
   `idempotency_key`) implement their repository port **directly**, never through
   `BaseTypeormRepository`.
 - `condition` is a MySQL reserved word — backticked in the `return_line` migration.
+- Never annotate an `<x>Entities` const with `TypeOrmModuleOptions['entities']` — a *parameter*
+  type (`MixedList | undefined`), so the value stops being spreadable and stops satisfying
+  `forFeature`. Leave it unannotated (note on `DatabaseModule.forRoot`).
 - `order_line.quantity` never shrinks; the units still owed are `OrderLine.activeQuantity`
   (`quantity − cancelled_quantity`, ADR-040, which lists every rule measuring against it).
   Using `quantity` re-releases cancelled units against the **shared** per-`(variant,
@@ -501,12 +504,11 @@ an invariant violation throws a plain `Error`. `AuditActorType` is domain-local,
 Ports: `DOMAIN_EVENT_REPOSITORY` and `AUDIT_LOG_REPOSITORY`, mirror surfaces — `append` +
 `query` + `listByCorrelationId` (the unpaginated ascending trace read) each.
 **`append` is the only mutating verb on either log**; both repositories are the sole
-`@InjectRepository` sites. `application/ports` may not import `lib-common`, so each declares
-its own `{ page, size }` request shape.
+`@InjectRepository` sites. `application/ports` may not import `lib-common`, hence its local
+`{ page, size }` shapes.
 Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEventsUseCase`,
-`QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase` (injects **both** repositories),
-plus `firehose-extractors.ts` (heuristic `producer` / `aggregateType` / `aggregateId`) and the
-two view factories.
+`QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts`
+(heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
 Infra: `persistence/` (2 entities/mappers/repos + the shared `parse-instant.ts`).
 Presentation: `firehose.consumer.ts`, `audit-query.controller.ts`. No `*DomainException` /
 `*RpcExceptionFilter` pair, on purpose (ADR-039).

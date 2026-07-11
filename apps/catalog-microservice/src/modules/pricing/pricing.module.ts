@@ -17,11 +17,7 @@ import {
   SetPriceUseCase,
 } from './application/use-cases';
 import { PricingRabbitmqPublisher } from './infrastructure/messaging';
-import {
-  PriceEntity,
-  PricingTypeormRepository,
-  TaxCategoryEntity,
-} from './infrastructure/persistence';
+import { PricingTypeormRepository, pricingEntities } from './infrastructure/persistence';
 import { PricingController, PricingRpcExceptionFilter } from './presentation';
 
 // The pricing bounded context colocates with the catalog microservice — it shares
@@ -44,7 +40,7 @@ import { PricingController, PricingRpcExceptionFilter } from './presentation';
 // (ADR-026).
 @Module({
   imports: [
-    DatabaseModule.forFeature([PriceEntity, TaxCategoryEntity]),
+    DatabaseModule.forFeature(pricingEntities),
     MicroserviceClientCatalogModule,
     MicroserviceClientRisEventsModule,
   ],

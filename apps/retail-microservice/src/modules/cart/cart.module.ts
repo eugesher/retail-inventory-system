@@ -30,7 +30,7 @@ import {
   CartInventoryRabbitmqAdapter,
   CartRabbitmqPublisher,
 } from './infrastructure/messaging';
-import { CartEntity, CartLineEntity, CartTypeormRepository } from './infrastructure/persistence';
+import { CartTypeormRepository, cartEntities } from './infrastructure/persistence';
 import { CartController, CartRpcExceptionFilter } from './presentation';
 
 // The cart bounded-context module: the `Cart` aggregate's two-table repository,
@@ -52,7 +52,7 @@ import { CartController, CartRpcExceptionFilter } from './presentation';
 // `CartDomainException` onto the wire status the gateway resolves.
 @Module({
   imports: [
-    DatabaseModule.forFeature([CartEntity, CartLineEntity]),
+    DatabaseModule.forFeature(cartEntities),
     MicroserviceClientCatalogModule,
     MicroserviceClientInventoryModule,
     MicroserviceClientRetailModule,
