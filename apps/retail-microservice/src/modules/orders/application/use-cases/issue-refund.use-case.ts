@@ -428,7 +428,7 @@ export class IssueRefundUseCase {
   }
 
   // The always-audit money-movement record (ADR-032/035). Awaited (not best-effort) —
-  // auditing is integral to a refund; the bound `RmqAuditLogPublisher` swallows its own
+  // auditing is integral to a refund; the bound `AuditLogRabbitmqPublisher` swallows its own
   // broker failures (warn-log, never rethrow per ADR-020), so the await never blocks the
   // refund. No `targetKind` member fits an order/payment/refund, so the ids ride the
   // structured payload and `targetKind` stays null.

@@ -1,7 +1,7 @@
 import { IAuditLogEvent, IAuditStaffActionEvent } from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS, RisEventsMirrorPublisher } from '@retail-inventory-system/messaging';
 
-import { RmqAuditLogPublisher } from '../rmq-audit-log.publisher';
+import { AuditLogRabbitmqPublisher } from '../audit-log.rabbitmq.publisher';
 
 // Mirrors the shape `IssueRefundUseCase.writeAudit` produces: a `RefundIssued`
 // event with `targetKind` null (no audit target-kind member fits a refund, so the
@@ -24,17 +24,17 @@ const buildRefundEvent = (overrides: Partial<IAuditLogEvent> = {}): IAuditLogEve
   ...overrides,
 });
 
-describe('RmqAuditLogPublisher (retail orders)', () => {
+describe('AuditLogRabbitmqPublisher (retail orders)', () => {
   let mirror: jest.Mock;
   let risEvents: RisEventsMirrorPublisher;
-  let publisher: RmqAuditLogPublisher;
+  let publisher: AuditLogRabbitmqPublisher;
 
   beforeEach(() => {
     // The shared mirror publisher owns the emit + best-effort swallow (covered by its own
     // spec); here we only assert this adapter maps + delegates to it.
     mirror = jest.fn().mockResolvedValue(undefined);
     risEvents = { mirror } as unknown as RisEventsMirrorPublisher;
-    publisher = new RmqAuditLogPublisher(risEvents);
+    publisher = new AuditLogRabbitmqPublisher(risEvents);
   });
 
   const firstMirror = (): [string, IAuditStaffActionEvent] =>

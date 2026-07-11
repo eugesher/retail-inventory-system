@@ -69,13 +69,13 @@ import {
   orderEntities,
 } from './infrastructure/persistence';
 import { FakePaymentGatewayAdapter } from './infrastructure/payment-gateway';
-import { RmqAuditLogPublisher } from './infrastructure/audit';
+import { AuditLogRabbitmqPublisher } from './infrastructure/audit';
 import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
 
 // The orders bounded-context module: the `Order` / `Address` / `Payment` /
 // `Fulfillment` / `Refund` repositories, the `PAYMENT_GATEWAY` seam (default
 // `FakePaymentGatewayAdapter`, ADR-028 §4), the `AUDIT_LOG_PUBLISHER` seam (the real
-// `RmqAuditLogPublisher` onto `ris.events`, the always-audit money-movement rule,
+// `AuditLogRabbitmqPublisher` onto `ris.events`, the always-audit money-movement rule,
 // ADR-032/035), the
 // transactional unit-of-work (`TRANSACTION_PORT`), the outbound seams (catalog snapshot
 // reads, the inventory allocate/cancel + commit-sale seams, and the
@@ -101,7 +101,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
 // `MicroserviceClientNotificationModule` so `retail.order.placed` lands on
 // `notification_events` (the consumer's queue); `MicroserviceClientRetailModule`
 // so the reserved `retail.payment.authorized` event lands on the service's own
-// `retail_queue`; and `MicroserviceClientRisEventsModule` so `RmqAuditLogPublisher`
+// `retail_queue`; and `MicroserviceClientRisEventsModule` so `AuditLogRabbitmqPublisher`
 // can emit `audit.staff.action` onto the `ris.events` topic exchange (ADR-035).
 // `useExisting` shares each adapter
 // instance with code that injects the concrete class while use cases depend on the
@@ -121,7 +121,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
     MicroserviceClientNotificationModule,
     MicroserviceClientRetailModule,
     // The producer-side client for the `ris.events` topic exchange — the real
-    // `RmqAuditLogPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy` to
+    // `AuditLogRabbitmqPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy` to
     // emit `audit.staff.action` for the always-audit refund money movements (ADR-035).
     MicroserviceClientRisEventsModule,
     // Discovers the `@Cron` on `IdempotencyPurgeScheduler` so the TTL sweep fires on its
@@ -197,8 +197,8 @@ import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
     { provide: ORDER_EVENTS_PUBLISHER, useExisting: OrderRabbitmqPublisher },
     // The always-audit seam for refund money movements (ADR-032/035): the real RMQ
     // adapter publishes `audit.staff.action` onto the `ris.events` topic exchange.
-    RmqAuditLogPublisher,
-    { provide: AUDIT_LOG_PUBLISHER, useExisting: RmqAuditLogPublisher },
+    AuditLogRabbitmqPublisher,
+    { provide: AUDIT_LOG_PUBLISHER, useExisting: AuditLogRabbitmqPublisher },
 
     AuthorizePaymentUseCase,
     PlaceOrderUseCase,
