@@ -263,4 +263,95 @@ describe('IAM admin endpoints (e2e)', () => {
       expect((body as { message: string }).message).toBe('No-op patch');
     });
   });
+
+  // POST /api/iam/staff — the route ADR-047 added. `RegisterStaffUserUseCase` had been written,
+  // unit-tested and registered as a provider since the identity baseline, but no controller ever
+  // injected it: the only way to mint a staff principal was the seed script. The DI-graph sweep
+  // is what found it.
+  //
+  // The test that matters is not the 201 — it is that the created user can then LOG IN. A 201
+  // only proves a row was written; the login proves the argon2 hash and the role bundle are real
+  // and that the new principal is a first-class one.
+  describe('POST /api/iam/staff', () => {
+    const NEW_STAFF_EMAIL = `staff-${Date.now()}@example.com`;
+    const NEW_STAFF_PASSWORD = 'newstaff1234';
+
+    it('rejects a caller without iam:staff-create with 403', async () => {
+      // The warehouse fixture holds iam:assign-adjacent codes but not this one. Minting a
+      // principal is a higher privilege than granting an existing one a role bundle — sharing a
+      // code would make role assignment a silent user-creation escalation.
+      const fixture = await login(FIXTURE_EMAIL, FIXTURE_PASSWORD);
+      await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/iam/staff')
+        .set('Authorization', `Bearer ${fixture.accessToken}`)
+        .send({ email: 'nope@example.com', password: 'nope12345', roleNames: ['admin'] })
+        .expect(HttpStatus.FORBIDDEN);
+    });
+
+    it('creates a staff user with its roles', async () => {
+      const auth = await adminAuth();
+      const { body } = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/iam/staff')
+        .set('Authorization', auth)
+        .send({
+          email: NEW_STAFF_EMAIL,
+          password: NEW_STAFF_PASSWORD,
+          roleNames: ['warehouse-staff'],
+        })
+        .expect(HttpStatus.CREATED);
+
+      const created = body as { id: string; email: string; roleNames: string[] };
+      expect(created.id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(created.email).toBe(NEW_STAFF_EMAIL);
+      expect(created.roleNames).toEqual(['warehouse-staff']);
+    });
+
+    it('the created staff user can log in — the hash and the roles are real', async () => {
+      const tokens = await login(NEW_STAFF_EMAIL, NEW_STAFF_PASSWORD);
+      expect(tokens.accessToken).toEqual(expect.any(String));
+
+      // ...and it carries the role's permissions, not an empty bundle: warehouse-staff has no
+      // audit:read, so the guard chain must reject it exactly as it rejects the seeded fixture.
+      await supertest(apiGatewayApp.getHttpServer())
+        .get('/api/auth/admin/ping')
+        .set('Authorization', `Bearer ${tokens.accessToken}`)
+        .expect(HttpStatus.FORBIDDEN);
+    });
+
+    it('rejects a duplicate email with 409', async () => {
+      const auth = await adminAuth();
+      await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/iam/staff')
+        .set('Authorization', auth)
+        .send({
+          email: NEW_STAFF_EMAIL,
+          password: NEW_STAFF_PASSWORD,
+          roleNames: ['warehouse-staff'],
+        })
+        .expect(HttpStatus.CONFLICT);
+    });
+
+    it('rejects an unknown role name with 400', async () => {
+      const auth = await adminAuth();
+      const { body } = await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/iam/staff')
+        .set('Authorization', auth)
+        .send({
+          email: `ghost-${Date.now()}@example.com`,
+          password: 'ghost12345',
+          roleNames: ['no-such-role'],
+        })
+        .expect(HttpStatus.BAD_REQUEST);
+      expect((body as { message: string }).message).toContain('no-such-role');
+    });
+
+    it('rejects an empty roleNames with 400 — a principal that can do nothing is worse', async () => {
+      const auth = await adminAuth();
+      await supertest(apiGatewayApp.getHttpServer())
+        .post('/api/iam/staff')
+        .set('Authorization', auth)
+        .send({ email: `empty-${Date.now()}@example.com`, password: 'empty12345', roleNames: [] })
+        .expect(HttpStatus.BAD_REQUEST);
+    });
+  });
 });

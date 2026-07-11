@@ -100,6 +100,11 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     description: 'Authorize, reject, and close return requests',
   },
   {
+    id: '00000000-0000-4000-b000-000000000016',
+    code: PermissionCodeEnum.IAM_STAFF_CREATE,
+    description: 'Create a staff user',
+  },
+  {
     id: '00000000-0000-4000-b000-00000000000a',
     code: PermissionCodeEnum.IAM_ASSIGN,
     description: 'Assign roles to staff users',

@@ -79,12 +79,21 @@ const authLibProviders = [
 const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
   imports: [TypeOrmModule.forFeature([StaffUserEntity, CustomerEntity])],
   providers: authLibProviders,
-  exports: [
-    STAFF_USER_REPOSITORY,
-    CUSTOMER_REPOSITORY,
-    AUTH_USER_VALIDATOR,
-    ValidateJwtSubjectUseCase,
-  ],
+  // Both of these are LOAD-BEARING, for different reasons — and the difference is worth stating,
+  // because it is not visible from the file layout:
+  //
+  //   `STAFF_USER_REPOSITORY` leaves the app entirely: re-exporting the dynamic module is what
+  //   propagates it to AuthModule's downstream consumers (today: IAM).
+  //
+  //   `CUSTOMER_REPOSITORY` never leaves AuthModule — but its PROVIDER lives here, inside the
+  //   dynamic AuthLibModule, while its eight consumers (Login/Logout/Register/Refresh/Erase/…)
+  //   are AuthModule's own use cases. Those are two different Nest modules despite sharing a
+  //   directory, so without this export the whole gateway fails to boot.
+  //
+  // `AUTH_USER_VALIDATOR` and `ValidateJwtSubjectUseCase` used to ride along and are gone:
+  // `libs/auth`'s `JwtStrategy` resolves the validator from `providers` above, inside the same
+  // module, and nothing else consumed either.
+  exports: [STAFF_USER_REPOSITORY, CUSTOMER_REPOSITORY],
 });
 
 @Module({

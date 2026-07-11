@@ -30,5 +30,13 @@ export { StaffUserRolesAssignedEvent, StaffUserRoleRevokedEvent } from './domain
 // cross-module seam — the `iam` module reaches auth's aggregates the same way (the
 // deep `application/use-cases` path is blocked by the boundaries lint). The result
 // type rides along so the admin controller can annotate its response.
-export { ReadConsentUseCase, EraseCustomerUseCase } from './application/use-cases';
+// `RegisterStaffUserUseCase` joins them: `modules/iam/` fronts staff creation over
+// `POST /api/iam/staff` (ADR-047), while the StaffUser aggregate stays in the module that
+// owns it. It was provided and exported by `auth.module.ts` all along — but never from this
+// barrel, so DI could see it and TypeScript could not.
+export {
+  ReadConsentUseCase,
+  EraseCustomerUseCase,
+  RegisterStaffUserUseCase,
+} from './application/use-cases';
 export type { IEraseCustomerResult } from './application/use-cases';

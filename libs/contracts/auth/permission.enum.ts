@@ -18,6 +18,10 @@ export enum PermissionCodeEnum {
   ORDER_RETURN_AUTHORIZE = 'order:return-authorize',
   NOTIFICATIONS_READ = 'notifications:read',
   NOTIFICATIONS_WRITE = 'notifications:write',
+  // Creating a staff user is a HIGHER privilege than assigning a role to one: `iam:assign`
+  // grants an existing principal a bundle, this mints the principal. Gating both on the same
+  // code would make role-assignment a silent user-creation escalation (ADR-024).
+  IAM_STAFF_CREATE = 'iam:staff-create',
   IAM_ASSIGN = 'iam:assign',
   IAM_ROLE_EDIT = 'iam:role-edit',
   AUDIT_READ = 'audit:read',
