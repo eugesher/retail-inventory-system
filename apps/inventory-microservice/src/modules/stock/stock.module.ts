@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 
-import { DatabaseModule } from '@retail-inventory-system/database';
+import { DatabaseModule, TypeormTransactionAdapter } from '@retail-inventory-system/database';
 import {
   MicroserviceClientInventoryModule,
   MicroserviceClientNotificationModule,
@@ -48,7 +48,6 @@ import {
   ReservationTypeormRepository,
   StockMovementTypeormRepository,
   StockTypeormRepository,
-  TypeormTransactionAdapter,
   stockEntities,
 } from './infrastructure/persistence';
 

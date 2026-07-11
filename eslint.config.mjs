@@ -290,9 +290,14 @@ const dependencyRules = [
       lib('lib-database'),
     ],
   },
+  // `lib-database` may reach `lib-ddd` (ADR-043): `TypeormTransactionAdapter` implements
+  // `ITransactionPort`, an abstraction the domain kernel owns. That is dependency inversion
+  // in the correct direction — infrastructure depends on the domain's contract, never the
+  // reverse. The reverse stays shut: `lib-ddd`'s own allow list is `lib-ddd` alone, and its
+  // denylist forbids `typeorm` / `@nestjs/*`, so no cycle is expressible.
   {
     from: { type: 'lib-database' },
-    allow: [lib('lib-database'), lib('lib-common'), lib('lib-contracts')],
+    allow: [lib('lib-database'), lib('lib-common'), lib('lib-contracts'), lib('lib-ddd')],
   },
   {
     from: { type: 'lib-cache' },
