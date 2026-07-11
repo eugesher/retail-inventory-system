@@ -13,7 +13,7 @@ A structural sweep of all six deployables, run after the module-layout work
 reader would expect to be uniform: layer folders, entity registration, exceptions, filters,
 file naming, DI tokens, shared helpers, bootstrap shape.
 
-Seven findings. Five are fixed; two remain open.
+Seven findings. Six are fixed; one remains open (`SYM-007`).
 
 | Code | Finding | Status |
 |------|---------|--------|
@@ -22,7 +22,7 @@ Seven findings. Five are fixed; two remain open.
 | `SYM-003` | `MessagingModule` dead — one importer, and it injected nothing | **fixed** (ADR-043) |
 | `SYM-004` | The `ClientProxy` filename rule in the docs did not match the code | **fixed** (2026-07-12) |
 | `SYM-005` | Exception-file and RPC-filter naming drift | **fixed** (2026-07-12) |
-| `SYM-006` | Functional asymmetries (health surface, gateway admin shells) | open |
+| `SYM-006` | Functional asymmetries (health surface, gateway admin shells) | **fixed** (ADR-044) |
 | `SYM-007` | The four `runWith<X>WriteRetry` helpers are one protocol, written four times | open |
 
 ### What SYM-001 and SYM-002 had in common
@@ -101,11 +101,30 @@ Under that rule there were exactly two violations, and neither was about plurals
 The invariant now holds across all seven modules, and it is stated in `README.md` §3 — it had
 never been written down, which is how it drifted.
 
-## `SYM-006` — functional asymmetries
+## `SYM-006` — functional asymmetries — **FIXED**
 
-- **Health surface.** Only the notification service has a `health.controller.ts`
-  (`notification.health.ping`). The other five deployables expose no health check at all. This
-  is a gap, not a naming drift — decide whether every service gets one or the one is removed.
+**Resolution (2026-07-12, [ADR-044](../adr/044-system-health-fan-out.md)).** The health half of
+this finding was **stated backwards**, and correcting it changed the fix.
+
+Not "five services are missing a health check" — `notification.health.ping` had **no caller at
+all**: no gateway route, no e2e, no `http/` collection, and `docker-compose`'s `healthcheck`
+blocks cover RabbitMQ / MySQL / Redis only (the services are not in compose). The system had one
+**dead RPC** and no liveness surface. Adding a ping to the other five would have produced *six*
+dead RPCs: a probe's value is entirely in its consumer. So the fix built the consumer —
+`@Public() GET /api/health` on the gateway, fanning out to all five over the real broker — and
+the dead ping became a live capability. See ADR-044 for the design (liveness not readiness,
+`degraded` not 503, concurrent probes, a never-rejecting adapter).
+
+The other two items are **not** defects and are recorded as accepted:
+
+- **Gateway admin shells.** Deliberate (ADR-024): `iam` and `customer-admin` are shells over the
+  `auth` aggregates and reach them through the sanctioned `shared-module-barrel` seam
+  (`ARCH-LINT-EX-02`). Giving them their own ports would reverse that decision — the same
+  alternative ADR-041 already rejected.
+- **`app.module.ts` import order.** Aligned to `Config → Logger → Database → Cache` across all
+  six. Cosmetic; `CacheModule` is `@Global()`.
+
+### Original finding
 - **Gateway admin shells.** `modules/iam/` has `application/use-cases/` but no
   `application/ports/` and no `infrastructure/`; `modules/customer-admin/` has only
   `presentation/`. They are the only modules in the repo without an application-port layer.

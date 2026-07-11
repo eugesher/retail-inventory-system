@@ -21,6 +21,7 @@ import { AuthModule } from '../modules/auth';
 import { CartModule } from '../modules/cart';
 import { CatalogModule } from '../modules/catalog';
 import { CustomerAdminModule } from '../modules/customer-admin';
+import { HealthModule } from '../modules/health';
 import { IamModule } from '../modules/iam';
 import { InventoryModule } from '../modules/inventory';
 import { NotificationsModule } from '../modules/notifications';
@@ -41,6 +42,7 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
       ConsentRecordEntity,
     ]),
     AuthModule,
+    HealthModule,
     IamModule,
     CustomerAdminModule,
     CatalogModule,

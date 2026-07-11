@@ -10,6 +10,8 @@ import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
 import { stockEntities, StockModule } from '../modules/stock';
 
+import { HealthController } from './health.controller';
+
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),
@@ -18,5 +20,6 @@ import { stockEntities, StockModule } from '../modules/stock';
     CacheModule,
     StockModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}
