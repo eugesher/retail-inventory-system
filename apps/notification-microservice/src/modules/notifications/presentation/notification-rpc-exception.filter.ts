@@ -6,7 +6,7 @@ import { NotificationDomainException, NotificationErrorCodeEnum } from '../domai
 // Maps each notification domain error code onto the HTTP status the gateway should
 // surface. HTTP status is a transport concern, so the table lives here in the
 // presentation layer — never in the transport-free domain (the
-// `CatalogRpcExceptionFilter` / `OrdersRpcExceptionFilter` precedent, ADR-025). The
+// `CatalogRpcExceptionFilter` / `OrderRpcExceptionFilter` precedent, ADR-025). The
 // mapping is a *total* `Record` keyed on the enum, so it is exhaustive at compile
 // time: a new `NotificationErrorCodeEnum` member fails the build until it is given a
 // status. Every code is mapped now even though the template authoring operations
