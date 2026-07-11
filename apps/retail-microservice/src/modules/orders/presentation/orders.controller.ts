@@ -46,7 +46,7 @@ import {
 // are the fulfillment keys, and `retail.order.cancel` / `retail.order.cancel-line` the
 // order-cancellation keys — a fulfillment is a sibling aggregate in the orders module
 // (ADR-031), so all are served here too. Each handler is a thin delegate; an
-// `OrderDomainException` is terminated by the `OrdersRpcExceptionFilter` into the
+// `OrderDomainException` is terminated by the `OrderRpcExceptionFilter` into the
 // `{ statusCode, ... }` wire shape the gateway maps.
 @Controller()
 export class OrdersController {
