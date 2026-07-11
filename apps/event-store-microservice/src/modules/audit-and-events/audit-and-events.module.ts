@@ -11,9 +11,8 @@ import {
   TraceByCorrelationUseCase,
 } from './application/use-cases';
 import {
-  AuditLogEntryEntity,
+  auditAndEventsEntities,
   AuditLogEntryTypeormRepository,
-  DomainEventEntity,
   DomainEventTypeormRepository,
 } from './infrastructure/persistence';
 import { AuditQueryController, FirehoseConsumer } from './presentation';
@@ -44,7 +43,7 @@ import { AuditQueryController, FirehoseConsumer } from './presentation';
 //     default-exchange `event_store_query_queue`, whose `wildcards: false` exact-match lookup
 //     never resolves `#`.
 @Module({
-  imports: [DatabaseModule.forFeature([DomainEventEntity, AuditLogEntryEntity])],
+  imports: [DatabaseModule.forFeature(auditAndEventsEntities)],
   controllers: [FirehoseConsumer, AuditQueryController],
   providers: [
     { provide: DOMAIN_EVENT_REPOSITORY, useClass: DomainEventTypeormRepository },

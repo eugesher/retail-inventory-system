@@ -1,7 +1,8 @@
 import { CartEntity } from './cart.entity';
 import { CartLineEntity } from './cart-line.entity';
 
-// A concrete entity array (spreadable) so retail `app.module.ts` can merge it with
+// A concrete entity array — UNANNOTATED on purpose (see the note on `DatabaseModule.forRoot`)
+// — so it is spreadable and retail `app.module.ts` can merge it with
 // `orderEntities` into the one `DatabaseModule.forRoot([...])` connection.
 export const cartEntities = [CartEntity, CartLineEntity];
 
