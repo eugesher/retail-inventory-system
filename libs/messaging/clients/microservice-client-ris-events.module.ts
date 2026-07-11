@@ -4,8 +4,8 @@ import { ClientsModule, RmqOptions, Transport } from '@nestjs/microservices';
 
 import { MicroserviceClientTokenEnum } from '@retail-inventory-system/contracts';
 
-import { EXCHANGES } from './exchanges.constants';
-import { RisEventsMirrorPublisher } from './ris-events-mirror.publisher';
+import { EXCHANGES } from '../exchanges.constants';
+import { RisEventsMirrorPublisher } from '../ris-events-mirror.publisher';
 
 // The producer-side wiring for the `ris.events` topic exchange (ADR-035).
 //

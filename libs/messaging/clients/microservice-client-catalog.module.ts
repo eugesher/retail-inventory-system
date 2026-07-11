@@ -7,7 +7,7 @@ import {
   MicroserviceQueueEnum,
 } from '@retail-inventory-system/contracts';
 
-import { MicroserviceClientConfiguration } from './microservice-client.configuration';
+import { MicroserviceClientConfiguration } from '../clients/microservice-client.configuration';
 
 // Registers a `ClientProxy` bound to `catalog_queue` under the
 // `CATALOG_MICROSERVICE` token. The catalog microservice itself imports this

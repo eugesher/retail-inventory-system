@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import type { Observable } from 'rxjs';
 
-import { IS_PUBLIC_KEY } from './public.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 // Wraps Passport's `AuthGuard('jwt')` and short-circuits routes/controllers
 // marked with `@Public()`. Registered globally via `APP_GUARD` so every

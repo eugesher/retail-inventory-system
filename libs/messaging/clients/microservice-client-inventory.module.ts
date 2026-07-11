@@ -7,7 +7,7 @@ import {
   MicroserviceQueueEnum,
 } from '@retail-inventory-system/contracts';
 
-import { MicroserviceClientConfiguration } from './microservice-client.configuration';
+import { MicroserviceClientConfiguration } from '../clients/microservice-client.configuration';
 
 @Module({
   imports: [

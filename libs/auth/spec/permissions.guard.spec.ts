@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 
 import { ICurrentUser } from '@retail-inventory-system/contracts';
 
-import { PermissionsGuard } from '../permissions.guard';
+import { PermissionsGuard } from '../guards/permissions.guard';
 import { RoleEnum } from '../role.enum';
 
 // Build a minimal ExecutionContext whose `switchToHttp().getRequest()` returns
