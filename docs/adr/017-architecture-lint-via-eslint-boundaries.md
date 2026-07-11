@@ -43,12 +43,15 @@ Defined in `eslint.config.mjs` as `boundariesElements`:
 | `application-dto`       | `apps/*/src/modules/*/application/dto/**`            | `app`, `module`   |
 | `infrastructure`        | `apps/*/src/modules/*/infrastructure/**`             | `app`, `module`   |
 | `presentation`          | `apps/*/src/modules/*/presentation/**`               | `app`, `module`   |
+| `shared-module-barrel`  | `apps/*/src/modules/auth/index.ts` ([ADR-041](041-nest-module-as-the-module-composition-root.md)) | `app` |
+| `nest-module`           | `apps/*/src/modules/*/*.ts` (ADR-041 — the `@Module` file **and** the module-root barrel) | `app`, `module` |
+| `context-root`          | `apps/*/src/modules/*.ts` (ADR-041 — the ADR-039 event-store files) | `app` |
 | `app-bootstrap`         | `apps/*/src/main.ts`, `apps/*/src/app/**`            | `app`             |
 | `app-shared`            | `apps/*/src/common/**`                               | `app`             |
 | `lib-shim`              | `libs/{inventory,retail}/**`, the `libs/common/{cache,config,correlation,modules}/**` subfolders, `libs/config/{cache-module,logger-module}.config.ts` | —                 |
 | `lib-{auth,cache,common,config,contracts,database,ddd,messaging,observability}` | `libs/<name>/**`       | —                 |
 
-The shim entry must come before the broad `libs/common/**` entry — the plugin matches the first pattern hit, so narrower patterns inside `libs/common/<subfolder>/**` would otherwise be shadowed.
+The shim entry must come before the broad `libs/common/**` entry — the plugin matches the first pattern hit, so narrower patterns inside `libs/common/<subfolder>/**` would otherwise be shadowed. The same hazard applies to `shared-module-barrel`, which must precede `nest-module`: `apps/api-gateway/src/modules/auth/index.ts` matches both patterns.
 
 ### 3. Dependency rules (`boundaries/dependencies`, internal edges)
 
@@ -60,6 +63,8 @@ The shim entry must come before the broad `libs/common/**` entry — the plugin 
 - **`application-dto`** → own-module `domain`, plus `lib-contracts`.
 - **`infrastructure`** → anything inside its own module + any shared lib (this is where adapters live).
 - **`presentation`** → own-module `application-*`, `presentation`, and `app-shared`; plus `lib-auth`, `lib-contracts`, `lib-messaging` (for `ROUTING_KEYS`), `lib-observability` (for `@CorrelationId`).
+- **`nest-module`** ([ADR-041](041-nest-module-as-the-module-composition-root.md)) → every layer of its **own** module + every shared lib + the `auth` barrel. It may not reach a sibling module, by deep path *or* through the sibling's barrel — the composition root wires its own hexagon, it does not couple to a neighbour's.
+- **`context-root`** (ADR-041) → sibling module **barrels** and nothing deeper, on `presentation`'s lib set (the two files that sit here are controllers, ADR-039).
 - **`app-bootstrap`** → anything within its own app + every shared lib.
 - **`app-shared`** → own-app `app-shared`, plus `lib-contracts` and `lib-common`.
 - **`lib-ddd`** → `lib-ddd` only.
@@ -88,7 +93,10 @@ If clearer per-rule failure messages become valuable later, a sibling script `ya
 
 ### 6. Documented exceptions
 
-No outstanding exceptions.
+**`ARCH-LINT-EX-02` — the gateway `auth` barrel is cross-module consumable.**
+([ADR-041](041-nest-module-as-the-module-composition-root.md) §4.) The gateway's `iam` and `customer-admin` modules are **admin shells** over the aggregates `auth` owns — neither has a `domain/`, and both reuse auth's repositories and use cases rather than registering a second set of adapters over the same tables (ADR-024, ADR-037). The `shared-module-barrel` element type (`apps/*/src/modules/auth/index.ts`) names that seam, and `application-use-case` / `presentation` / `nest-module` / `app-bootstrap` may reach it.
+
+This is an exception *narrowed*, not an exception *opened*. Before ADR-041 the module-root barrel matched no element pattern at all, so **any** file could import **any** sibling module's barrel unchecked — cross-module isolation only held for deep paths. Pinning the allow to `modules/auth/index.ts` means every other cross-module edge, barrel or deep, now fails `yarn lint`. The next such seam is a config change with an ADR behind it.
 
 The previous `ARCH-LINT-EX-01` exception is closed. It covered two files in the stock module that leaked TypeORM's `EntityManager` across the application/infrastructure boundary so the `ReserveStockForOrderUseCase` could compose transactional reads/writes inside a single `transaction(...)` callback:
 
@@ -104,6 +112,7 @@ The fix introduces an `ITransactionPort` abstraction (`apps/inventory-microservi
 - the per-layer external denylists (domain, use-case, port, presentation, lib-contracts, lib-ddd);
 - the per-layer element-type denials (domain ↛ infrastructure, port ↛ infrastructure, presentation ↛ infrastructure, presentation ↛ lib-database);
 - the cross-service rule (use-case ↛ another app's domain);
+- the composition-root rules ([ADR-041](041-nest-module-as-the-module-composition-root.md)): `nest-module` ↛ a sibling module by deep path *or* barrel; `application-use-case` ↛ a sibling module's barrel; and the positive `nest-module` → own use-cases, `iam` use-case → the `auth` barrel, `context-root` → a sibling barrel;
 - positive cases (domain → lib-ddd, infrastructure → lib-cache) to guard against an over-broad rule swallowing legitimate edges.
 
 The fixture file paths are virtual — `Linter.verify(code, config, { filename })` accepts a synthetic path and the boundaries plugin matches it against the element patterns the same way it matches real files. The cross-element tests aim their imports at real production files (so the plugin's module resolver can map the import back to an element-typed target).

@@ -6,13 +6,13 @@ import {
   IngestAuditLogUseCase,
   QueryAuditLogEntriesUseCase,
   TraceByCorrelationUseCase,
-} from '../application/use-cases';
-import { AUDIT_LOG_REPOSITORY, TRACE_DOMAIN_EVENT_READER } from '../application/ports';
+} from './application/use-cases';
+import { AUDIT_LOG_REPOSITORY, TRACE_DOMAIN_EVENT_READER } from './application/ports';
 import {
   AuditLogEntryEntity,
   AuditLogEntryTypeormRepository,
   TraceDomainEventReader,
-} from './persistence';
+} from './infrastructure/persistence';
 
 // The `audit-log` module of the event store's `audit-and-events` context — the staff
 // audit trail (who did what, when, ADR-035), distinct from the raw event firehose the

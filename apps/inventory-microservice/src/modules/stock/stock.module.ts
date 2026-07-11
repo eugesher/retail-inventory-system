@@ -22,7 +22,7 @@ import {
   STOCK_MOVEMENT_REPOSITORY,
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
-} from '../application/ports';
+} from './application/ports';
 import {
   AdjustStockUseCase,
   AllocateStockUseCase,
@@ -38,12 +38,12 @@ import {
   RestockFromReturnUseCase,
   SweepExpiredReservationsUseCase,
   TransferStockUseCase,
-} from '../application/use-cases';
-import { InventoryRpcExceptionFilter, StockController } from '../presentation';
-import { StockCache } from './cache';
-import { CatalogEventsConsumer } from './consumers';
-import { StockRabbitmqPublisher } from './messaging';
-import { ReservationSweepScheduler } from './scheduling';
+} from './application/use-cases';
+import { InventoryRpcExceptionFilter, StockController } from './presentation';
+import { StockCache } from './infrastructure/cache';
+import { CatalogEventsConsumer } from './infrastructure/consumers';
+import { StockRabbitmqPublisher } from './infrastructure/messaging';
+import { ReservationSweepScheduler } from './infrastructure/scheduling';
 import {
   ReservationEntity,
   ReservationTypeormRepository,
@@ -53,7 +53,7 @@ import {
   StockMovementTypeormRepository,
   StockTypeormRepository,
   TypeormTransactionAdapter,
-} from './persistence';
+} from './infrastructure/persistence';
 
 // `useExisting` shares the single adapter instance with code that injects the
 // concrete class directly. The read path (Query Availability + List Locations)
