@@ -53,7 +53,7 @@ conventions remain instead of three.
 
 ### Original finding
 
-`CLAUDE.md` and `README.md` §3 both state:
+[`README.md` §3](../../README.md#3-repository-layout) states:
 
 > `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
 > `infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts`.
@@ -156,7 +156,7 @@ the invariant.
 `cart-write.ts` (99 lines), `order-write.ts` (83), `return-write.ts` (80), and
 `stock-mutation.ts` (183, which also carries `applyOnHandChange`) each define a
 `<X>WriteConflictError` and a `runWith<X>WriteRetry`. [ADR-036](../adr/036-idempotency-key-store-and-enforced-occ.md)
-treats the per-module helper as a convention, and `CLAUDE.md` records it as such.
+treats the per-module helper as a convention, so each copy reads as intentional rather than as drift.
 
 Unlike `SYM-001` / `SYM-002` these are **not byte-identical** — so this is not a move, it is a
 generalisation, and it needs its own ADR.

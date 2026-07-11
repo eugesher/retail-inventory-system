@@ -27,7 +27,7 @@ The third row is the problem. `libs/messaging`'s flat list reads as a dozen unre
 | `MetricsModule` | *"Empty today **so app modules can already declare the import**"* | **zero** app modules import it |
 | `TraceContextInterceptor` | *"a no-op **so app modules can declare the import** without churn"* | **zero** app modules import it |
 
-The two placeholders justify themselves by a usage the code contradicts: they exist so that callers can import them, and no caller imports them. That is not a reserved surface — it is dead code with a story attached, and the story is what makes it dangerous. `CLAUDE.md`, `README.md` and ADR-008 all list `RabbitmqClientFactory` as part of the messaging API, so the next contributor believes it is load-bearing.
+The two placeholders justify themselves by a usage the code contradicts: they exist so that callers can import them, and no caller imports them. That is not a reserved surface — it is dead code with a story attached, and the story is what makes it dangerous. `README.md` and ADR-008 both list `RabbitmqClientFactory` as part of the messaging API, so the next contributor believes it is load-bearing.
 
 This is the [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md) `MessagingModule` pattern exactly: a lib export whose only importer was one that did not use it.
 
@@ -35,7 +35,7 @@ This is the [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md) `Messag
 
 ### The map was wrong in both directions
 
-`CLAUDE.md` was validated (2026-07-12) for "everything stated exists". It was never validated for **"everything that exists is stated"** — and that blind spot let both errors stand:
+The repo's documentation was validated (2026-07-12) for "everything stated exists". It was never validated for **"everything that exists is stated"** — and that blind spot let both errors stand:
 
 - it **lists** `RabbitmqClientFactory` (dead);
 - it **omits** `sendPreservingRpcError` (live — four retail adapters) and `enforceRequiredClaim` (live — two guards).
@@ -74,7 +74,7 @@ The honest framing: **§2 is cosmetics.** It buys readability and nothing else, 
 
 ### 4. The map now lists what is live, and only what is live
 
-`CLAUDE.md` and `README.md` drop the three dead names and gain `sendPreservingRpcError` (the RPC-error-preserving `send` the four cross-service retail adapters use) and `enforceRequiredClaim`.
+The docs drop the three dead names and gain `sendPreservingRpcError` (the RPC-error-preserving `send` the four cross-service retail adapters use) and `enforceRequiredClaim`.
 
 ## Consequences
 
@@ -91,7 +91,7 @@ The honest framing: **§2 is cosmetics.** It buys readability and nothing else, 
 
 ## Alternatives considered
 
-- **Keep the placeholders, they cost nothing.** They cost the thing that matters most in a map: trust. `CLAUDE.md` listed `RabbitmqClientFactory` as API and an agent would have used it believing it was exercised. A reserved surface that is *one line in a registry* is cheap; a file with an implementation and a false claim of use is not.
+- **Keep the placeholders, they cost nothing.** They cost the thing that matters most in a map: trust. The docs listed `RabbitmqClientFactory` as API and a reader would have used it believing it was exercised. A reserved surface that is *one line in a registry* is cheap; a file with an implementation and a false claim of use is not.
 - **Group `database` / `ddd` / `config` too, for uniformity.** Rejected: uniformity is not the goal, legibility is. Six files in `libs/ddd` are already legible; a folder would add a hop and explain nothing.
 - **A `constants/` folder in `libs/messaging`** for the two `*.constants.ts`. Rejected for the same reason — two files.
 - **Move `tracer.ts` under a folder for symmetry.** Rejected outright: it is a deep-import path with a `tsconfig` alias, and `main.ts`'s first-import contract (ADR-007) depends on it resolving.

@@ -73,7 +73,7 @@ Two tables, one isolated `ris_eventstore` schema (ADR-034), one connection, two 
 
 - **Keep the split; keep the context root.** ADR-041 had just typed those three files, so they were at least no longer invisible to the linter. Rejected: a documented anomaly is still an anomaly, and it left the four duplications, the aggregator, the missing `presentation/` layers, and the exported use cases all in place. Typing an odd shape is not the same as not needing the odd shape.
 - **Keep the split; move `TraceByCorrelationUseCase` to the context root.** It could inject both modules' use cases from there, which deletes the reader port and the duplication. Rejected: it buys the smallest win by adding the worst anomaly — a *use case* living outside any module is a deeper layering break than a controller doing so, and differences 1–4 all survive.
-- **Keep the split; let `audit-log/` import `domain-events/`'s port.** That is precisely the cross-module edge the isolation rule exists to forbid, and weakening the rule to fit is what `CLAUDE.md` prohibits outright. If the boundary should not hold, the answer is to remove the boundary, not to punch through it.
+- **Keep the split; let `audit-log/` import `domain-events/`'s port.** That is precisely the cross-module edge the isolation rule exists to forbid, and weakening the rule to fit is what [ADR-017](017-architecture-lint-via-eslint-boundaries.md)'s fixture spec exists to catch. If the boundary should not hold, the answer is to remove the boundary, not to punch through it.
 - **Split further — a third module for the shared query surface.** More structure to justify the original structure. Rejected without much thought.
 
 ---
