@@ -80,7 +80,7 @@ describe('Catalog media gateway endpoints (e2e)', () => {
 
   const login = async (email: string, password: string): Promise<string> => {
     const { body } = await supertest(apiGatewayApp.getHttpServer())
-      .post('/api/auth/login')
+      .post('/api/auth/staff/login')
       .send({ email, password });
     return `Bearer ${(body as ITokenResponse).accessToken}`;
   };

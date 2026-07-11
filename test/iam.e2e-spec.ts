@@ -37,7 +37,7 @@ describe('IAM admin endpoints (e2e)', () => {
 
   const login = async (email: string, password: string): Promise<ITokenResponse> => {
     const { body } = await supertest(apiGatewayApp.getHttpServer())
-      .post('/api/auth/login')
+      .post('/api/auth/staff/login')
       .send({ email, password });
     return body as ITokenResponse;
   };

@@ -47,7 +47,7 @@ describe('Auth flow (e2e)', () => {
 
   const login = async (email: string, password: string): Promise<ITokenResponse> => {
     const { body } = await supertest(apiGatewayApp.getHttpServer())
-      .post('/api/auth/login')
+      .post('/api/auth/staff/login')
       .send({ email, password });
     return body as ITokenResponse;
   };
@@ -112,10 +112,10 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  describe('POST /api/auth/login (admin)', () => {
+  describe('POST /api/auth/staff/login (admin)', () => {
     it('returns 401 when the password is wrong', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/auth/staff/login')
         .send({ email: ADMIN_EMAIL, password: 'WRONG-PASSWORD' });
 
       expect(status).toBe(HttpStatus.UNAUTHORIZED);
@@ -124,7 +124,7 @@ describe('Auth flow (e2e)', () => {
 
     it('returns access + refresh tokens on success', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/auth/staff/login')
         .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
 
       expect(status).toBe(HttpStatus.OK);

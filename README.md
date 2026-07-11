@@ -948,7 +948,6 @@ one dead service costs one timeout, not five.
 | Method | Route | Auth |
 | --- | --- | --- |
 | `POST` | `/auth/staff/login` | public |
-| `POST` | `/auth/login` | public — deprecated alias |
 | `POST` | `/auth/refresh` | public |
 | `POST` | `/auth/logout` | bearer |
 | `GET` | `/auth/me` | bearer |
@@ -1164,7 +1163,7 @@ on a stable code rather than a message:
 Three global guards run on every route, in order: `JwtAuthGuard` (presence + signature) →
 `RolesGuard` (`@Roles(...)`, coarse) → `PermissionsGuard` (`@RequiresPermission(...)`, precise).
 
-`@Public()` routes today: `/auth/staff/login`, `/auth/login`, `/auth/refresh`,
+`@Public()` routes today: `/auth/staff/login`, `/auth/refresh`,
 `/auth/customer/register`, `/auth/customer/login`, `/auth/customer/guest-session`, the public
 catalog browse/resolve + price/tax-category reads, and `GET /inventory/variants/:id/stock`.
 
