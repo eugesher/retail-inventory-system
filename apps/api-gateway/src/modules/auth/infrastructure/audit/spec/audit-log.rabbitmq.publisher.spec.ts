@@ -1,7 +1,7 @@
 import { IAuditLogEvent, IAuditStaffActionEvent } from '@retail-inventory-system/contracts';
 import { ROUTING_KEYS, RisEventsMirrorPublisher } from '@retail-inventory-system/messaging';
 
-import { RmqAuditLogPublisher } from '../rmq-audit-log.publisher';
+import { AuditLogRabbitmqPublisher } from '../audit-log.rabbitmq.publisher';
 
 const buildEvent = (overrides: Partial<IAuditLogEvent> = {}): IAuditLogEvent => ({
   name: 'StaffUserRolesAssigned',
@@ -14,17 +14,17 @@ const buildEvent = (overrides: Partial<IAuditLogEvent> = {}): IAuditLogEvent => 
   ...overrides,
 });
 
-describe('RmqAuditLogPublisher (api-gateway auth)', () => {
+describe('AuditLogRabbitmqPublisher (api-gateway auth)', () => {
   let mirror: jest.Mock;
   let risEvents: RisEventsMirrorPublisher;
-  let publisher: RmqAuditLogPublisher;
+  let publisher: AuditLogRabbitmqPublisher;
 
   beforeEach(() => {
     // The shared mirror publisher owns the emit + best-effort swallow (covered by its own
     // spec); here we only assert this adapter maps + delegates to it.
     mirror = jest.fn().mockResolvedValue(undefined);
     risEvents = { mirror } as unknown as RisEventsMirrorPublisher;
-    publisher = new RmqAuditLogPublisher(risEvents);
+    publisher = new AuditLogRabbitmqPublisher(risEvents);
   });
 
   // Reads the first `mirror` call as a typed [routingKey, wirePayload] tuple.

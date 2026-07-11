@@ -302,10 +302,10 @@ notification module is the canonical template. The Nest module file is the modul
 **composition root**, not a layer: it sits at `modules/<m>/<m>.module.ts` everywhere, no
 exceptions (ADR-041). Element type `nest-module` — which also covers the module-root barrel.
 
-**Boundary rule:** `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
-`infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts`. Controllers, use cases, and
-pipes inject the port symbol instead. Adapters use `ROUTING_KEYS`, not the legacy
-`MicroserviceMessagePatternEnum`.
+**Boundary rule:** `ClientProxy` only inside `infrastructure/messaging/` — **enforced** by a
+`no-restricted-imports` `importNames` rule, not by `boundaries`. Elsewhere, inject the port. Two filename forms: `<module>-rabbitmq.{adapter,publisher}.ts` and
+`<seam>.rabbitmq.{adapter,publisher}.ts` (mirrors `<seam>.gateway.port.ts`). Adapters use
+`ROUTING_KEYS`.
 
 ADRs: gateway ADR-009; notification ADR-011; inventory ADR-027; retail ADR-013/028;
 catalog ADR-004/018/025; pricing ADR-026.
@@ -320,7 +320,7 @@ catalog ADR-004/018/025; pricing ADR-026.
 `common/decorators/` holds the reusable `@IdempotencyKey()` and `@IfMatch()` param decorators.
 
 Each RPC-fronting module has `application/ports` (`*_GATEWAY_PORT`),
-`application/use-cases`, `infrastructure/messaging` (the sole `ClientProxy` holder), and
+`application/use-cases`, `infrastructure/messaging`, and
 `presentation`. Gateway use cases resolve the staff override from
 `@CurrentUser().permissions` and fold `@CurrentUser().id` into the command (ADR-028).
 
@@ -349,8 +349,8 @@ Use cases: `Login`, `LoginCustomer`, `RegisterCustomer`, `CreateGuestSession`,
 `libs/auth`'s `JwtStrategy` through `AUTH_USER_VALIDATOR`), `GetCurrentCustomer`,
 `RecordConsent`, `ReadConsent`, `EraseCustomer`.
 Infra: TypeORM repos, `jwt-token.adapter`, `argon2-password.adapter`,
-`rmq-audit-log.publisher` (the real `AUDIT_LOG_PUBLISHER`),
-`rmq-customer-events.publisher`, `customer-erasure-writer.adapter`.
+`audit-log.rabbitmq.publisher` (the real `AUDIT_LOG_PUBLISHER`),
+`customer-events.rabbitmq.publisher`, `customer-erasure-writer.adapter`.
 `auth.module.ts` re-exports the repository tokens + `AUDIT_LOG_PUBLISHER` +
 `ReadConsentUseCase` + `EraseCustomerUseCase` (the two admin shells resolve them).
 Controllers: `staff-login`, `auth`, `customer-auth`, `customer-consent`, `auth-admin`.
@@ -376,7 +376,7 @@ Use cases: `Register`/`AddVariant`/`Publish`/`ArchiveProduct`, `ListProducts`/
 `GetProductBySlug`/`GetVariant`; `CreateCategory`/`ReparentCategory`/`ListCategories`/
 `GetCategoryTree`/`ListCategoryProducts`/`ReclassifyProduct`; `AttachMedia`/`ReorderMedia`/
 `DetachMedia`/`ListMedia`.
-Infra: `catalog-rabbitmq.publisher.ts` (only `ClientProxy` site; two clients).
+Infra: `catalog-rabbitmq.publisher.ts` (two clients).
 `variantId` is the downstream backbone key. `product_categories` is a bare N↔M join with
 **no entity** (repository-maintained `INSERT IGNORE` / `DELETE`).
 
@@ -427,7 +427,7 @@ Use cases: `CreateCart`/`GetCart`/`AddToCart`/`ChangeCartLineQuantity`/`RemoveFr
 `ClaimCart`, plus the shared `loadOwnedCart` owner-check and
 `use-cases/cart-write.ts` (`runWithCartWriteRetry`, `assertCartVersion`,
 `CartWriteConflictError`).
-Infra: `persistence/` (`CartTypeormRepository`), three `ClientProxy` adapters
+Infra: `persistence/` (`CartTypeormRepository`), three adapters
 (`cart-catalog`, `cart-inventory`, `cart-rabbitmq.publisher`).
 Presentation: `cart.controller.ts` + `cart-rpc-exception.filter.ts` (forwards `details`).
 
