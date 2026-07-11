@@ -577,8 +577,12 @@ export default typescriptEslint.config(
       '**/spec/**',
       '**/*.spec.ts',
       '**/*.d.ts',
-      // Barrel files are pure re-exports and aren't useful targets for the
-      // dependency graph. The files they re-export are still linted.
+      // Barrels are skipped as dependency *sources* only: a barrel re-exports
+      // its own folder, so it has nothing to violate, and the files it
+      // re-exports are linted on their own. They remain first-class dependency
+      // *targets* — a module-root `index.ts` is typed `nest-module` /
+      // `shared-module-barrel`, which is what makes a cross-module import
+      // routed through a barrel catchable at all (ADR-041).
       '**/index.ts',
     ],
     plugins: {
@@ -604,8 +608,13 @@ export default typescriptEslint.config(
           rules: dependencyRules,
         },
       ],
+      // Every file under `apps/` and `libs/` must claim an element type. This
+      // only became enforceable once ADR-041 typed the module composition roots
+      // and the module-root barrels — before that, a file at `modules/<m>/` was
+      // invisible to the whole rule set, which is exactly how the placement
+      // drift went unnoticed. A new orphan file now fails CI instead.
+      'boundaries/no-unknown-files': 'error',
       'boundaries/no-unknown': 'off',
-      'boundaries/no-unknown-files': 'off',
       'boundaries/no-ignored': 'off',
     },
   },
