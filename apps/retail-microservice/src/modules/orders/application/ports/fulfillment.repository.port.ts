@@ -1,5 +1,5 @@
 import { Fulfillment } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const FULFILLMENT_REPOSITORY = Symbol('FULFILLMENT_REPOSITORY');
 

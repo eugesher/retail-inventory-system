@@ -1,5 +1,5 @@
 import { Order } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const ORDER_REPOSITORY = Symbol('ORDER_REPOSITORY');
 

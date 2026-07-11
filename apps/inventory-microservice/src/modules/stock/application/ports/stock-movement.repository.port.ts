@@ -1,7 +1,7 @@
 import { StockMovementTypeEnum } from '@retail-inventory-system/contracts';
 
 import { StockMovement } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const STOCK_MOVEMENT_REPOSITORY = Symbol('STOCK_MOVEMENT_REPOSITORY');
 

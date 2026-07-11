@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
 
-import { DatabaseModule } from '@retail-inventory-system/database';
+import { DatabaseModule, TypeormTransactionAdapter } from '@retail-inventory-system/database';
 import {
   MicroserviceClientInventoryModule,
   MicroserviceClientNotificationModule,
@@ -38,7 +38,6 @@ import {
   CustomerContactReaderTypeormAdapter,
   ReturnOrderReaderTypeormAdapter,
   ReturnRequestTypeormRepository,
-  TypeormTransactionAdapter,
   returnEntities,
 } from './infrastructure/persistence';
 import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';

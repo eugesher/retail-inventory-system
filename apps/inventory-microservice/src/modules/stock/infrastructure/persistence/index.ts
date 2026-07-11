@@ -21,4 +21,3 @@ export * from './stock-movement.mapper';
 export * from './stock-typeorm.repository';
 export * from './reservation-typeorm.repository';
 export * from './stock-movement-typeorm.repository';
-export * from './typeorm-transaction.adapter';

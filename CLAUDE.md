@@ -130,10 +130,10 @@ Non-obvious facts, each worth a debugging cycle.
   `IDEMPOTENCY_KEY_TTL_HOURS`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
   `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only, read off `process.env` inside a `useFactory`).
-  `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects: a
-  decorator's argument is evaluated at class definition, so `ReservationSweepScheduler` registers
-  the timer via `SchedulerRegistry.addInterval` in `onModuleInit` — and **must** `deleteInterval`
-  in `onModuleDestroy`, or a leaked timer hangs the Jest e2e worker.
+  `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects, so
+  `ReservationSweepScheduler` registers its timer via `SchedulerRegistry.addInterval` in
+  `onModuleInit` — and **must** `deleteInterval` in `onModuleDestroy`, or a leaked timer hangs
+  the Jest e2e worker.
 - A new `PermissionCodeEnum` member auto-seeds to the `admin` role **only if** it is also
   added to `PERMISSION_SEEDS` in `scripts/test-db-seed.ts`.
 - `EVENTSTORE_DATABASE_URL` is a **required** Joi key in the shared schema, so it must be
@@ -401,7 +401,7 @@ Events: `Stock{Received,Adjusted,Low}Event`, `StockLevelInitializedEvent`,
 Ports: `STOCK_REPOSITORY`, `RESERVATION_REPOSITORY` (its `listExpiredActive` is the sweep's
 advisory candidate scan), `STOCK_MOVEMENT_REPOSITORY`
 (`append` / `listByVariant` / `existsByReference` — no `save`/`update`/`delete`),
-`STOCK_CACHE`, `STOCK_EVENTS_PUBLISHER`, `TRANSACTION_PORT` (opaque `ITransactionScope`),
+`STOCK_CACHE`, `STOCK_EVENTS_PUBLISHER`, `TRANSACTION_PORT`,
 `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
 `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS` (the scheduler's,
 not the use case's), `OCC_RETRY_ATTEMPTS`.
@@ -511,7 +511,7 @@ Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEven
 (heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
 Infra: `persistence/` (2 entities/mappers/repos + the shared `parse-instant.ts`).
 Presentation: `firehose.consumer.ts`, `audit-query.controller.ts`. No `*DomainException` /
-`*RpcExceptionFilter` pair, on purpose (ADR-039).
+`*RpcExceptionFilter` pair (ADR-039).
 `main.ts` is the repo's only hybrid boot (see Landmines).
 Migrations: `1782521938896-CreateDomainEventTable`, `1782521942829-CreateAuditLogEntryTable`
 (eventstore pipeline).
@@ -522,13 +522,13 @@ Imported via the path aliases in `tsconfig.json` as `@retail-inventory-system/<n
 
 | Library | Contents |
 | --- | --- |
-| `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `audit/` (the event-store read surface: `DomainEventView` / `AuditLogEntryView` + the two query payloads + the correlation-trace payload/result — ADR-039), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception — every `*View` is a **class** with `@ApiResponseProperty`, since `naming-convention` reserves the bare `interface` form for `I`-prefixed names. |
+| `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `audit/` (the event-store read surface: `DomainEventView` / `AuditLogEntryView` + the two query payloads + the correlation-trace payload/result — ADR-039), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception. Every `*View` is a **class** with `@ApiResponseProperty`, never an `interface`. |
 | `auth` | `AuthModule.forRootAsync({ imports, providers, exports })` (Passport + JwtModule + `JwtStrategy` + the three guards, all global), `AUTH_USER_VALIDATOR`, `@Public` / `@Roles` / `@RequiresPermission` / `@CurrentUser`, runtime `RoleEnum` re-export. |
-| `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(entities)` / `.forRootWithUrl(entities, urlEnvVar)`. Apps call `forRoot` at `AppModule` level; per-module registration prefers `forFeature` (auth uses inline `TypeOrmModule.forFeature` — ADR-019). |
-| `messaging` | `MessagingModule`, `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore}Module` + `MicroserviceClientRisEventsModule` (`RIS_EVENTS_PUBLISHER`), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION` + the three `AUDIT_*_QUERY` RPCs), `EXCHANGES`. |
+| `database` | `BaseEntity`, `BaseTypeormRepository`, `TypeormTransactionAdapter` (the sole `ITransactionPort` impl, ADR-043), `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(entities)` / `.forRootWithUrl(entities, urlEnvVar)`. Apps call `forRoot` at `AppModule` level; per-module registration prefers `forFeature` (auth uses inline `TypeOrmModule.forFeature` — ADR-019). |
+| `messaging` | `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore}Module` + `MicroserviceClientRisEventsModule` (`RIS_EVENTS_PUBLISHER`), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION` + the three `AUDIT_*_QUERY` RPCs), `EXCHANGES`. |
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel spans), `CacheModule` (`@Global()`, register once at root), `@Cacheable()`, the `CACHE_KEYS` registry, `CacheHelper`. |
 | `observability` | `LoggerModuleConfig` (Pino + redaction + the `logMethod` hook injecting `traceId`/`spanId`), `CorrelationMiddleware`, `CorrelationId`, `CORRELATION_ID_HEADER`, `tracer.ts`, `TraceContextInterceptor` / `MetricsModule` (placeholders). |
-| `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject<TProps>`, `DomainEvent<TAggregateId>`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |
+| `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject<TProps>`, `DomainEvent<TAggregateId>`, `IRepositoryPort`, and the shared transaction seam `ITransactionPort` / `ITransactionScope` / `TRANSACTION_PORT` (ADR-043). **No `@nestjs/*`, no TypeORM.** |
 | `common` | `Result<T, E>`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (canonical-JSON + SHA-256, under `idempotency/`; Node `crypto` only). |
 | `config` | `configModuleConfig` (the Joi env schema). No Nest-binding helpers. |
 
@@ -605,7 +605,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `043`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `044`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

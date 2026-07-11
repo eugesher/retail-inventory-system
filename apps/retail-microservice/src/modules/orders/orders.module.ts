@@ -4,7 +4,7 @@ import { APP_FILTER } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import { AUDIT_LOG_PUBLISHER } from '@retail-inventory-system/contracts';
-import { DatabaseModule } from '@retail-inventory-system/database';
+import { DatabaseModule, TypeormTransactionAdapter } from '@retail-inventory-system/database';
 import {
   MicroserviceClientCatalogModule,
   MicroserviceClientInventoryModule,
@@ -66,7 +66,6 @@ import {
   OrderTypeormRepository,
   PaymentTypeormRepository,
   RefundTypeormRepository,
-  TypeormTransactionAdapter,
   orderEntities,
 } from './infrastructure/persistence';
 import { FakePaymentGatewayAdapter } from './infrastructure/payment-gateway';
