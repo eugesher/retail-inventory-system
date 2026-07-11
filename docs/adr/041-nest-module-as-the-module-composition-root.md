@@ -73,7 +73,15 @@ That seam is real and intentional, and it must not be re-labelled a violation. B
 
 The narrow form is the point. Allowing *any* module to consume *any* sibling's barrel would have reproduced today's de-facto behaviour and let a future `cart` → `orders` coupling land silently. Pinning the pattern to `modules/auth/index.ts` means the next cross-module seam is a config change with an ADR behind it, not a diff nobody notices.
 
-### 5. Regression fixtures
+### 5. `boundaries/no-unknown-files` is turned on
+
+With the composition roots, the barrels, and the context root all typed, **every** file under `apps/` and `libs/` now claims an element — so the rule that asserts exactly that flips from `off` to `error`.
+
+This is the gate that stops the drift from coming back. The placement drift was possible in the first place because a file could exist outside the taxonomy and no rule would notice; an orphan file is, by construction, a file that none of the other rules can govern. `no-unknown-files` makes creating one fail CI rather than quietly opening a new blind spot. Two fixtures pin it: an orphan is rejected, and `cart.module.ts` is not.
+
+Barrels stay out of the rule's scope as dependency *sources* (a barrel re-exports its own folder and has nothing to violate; the files it re-exports are linted on their own). They are fully in scope as *targets* — which is the whole point of §2.
+
+### 6. Regression fixtures
 
 `spec/architecture-lint.spec.ts` gains six fixtures under `boundaries/dependencies — module composition root (ADR-041)`: a `nest-module` may not reach a sibling through a deep path, nor through its barrel; a use case may not reach a sibling through its barrel; a `nest-module` may wire its own module's use cases; the gateway `auth` barrel *is* reachable from an `iam` use case; a `context-root` may compose sibling barrels. Weakening any of the new rules fails the unit suite.
 
@@ -95,7 +103,7 @@ The narrow form is the point. Allowing *any* module to consume *any* sibling's b
 ### Open
 
 - The two event-store `context-root` controllers remain outside any module's `presentation/`. ADR-039's reasoning stands; the new element type governs their imports without relocating them.
-- `boundaries/no-unknown-files` stays off. With module roots, barrels, and context roots now typed, the remaining unknowns in `apps/` are the spec fixtures — flipping the rule on is a small follow-up, not part of this decision.
+- `boundaries/no-unknown` (an element importing an *untyped* file) stays off. With every file under `apps/` and `libs/` now typed it has nothing left to catch, so turning it on would be a no-op today — it is worth revisiting only if a future element pattern leaves a gap.
 
 ## Alternatives considered
 

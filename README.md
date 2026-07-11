@@ -304,6 +304,8 @@ The layering plus cross-service and cross-module isolation are enforced by
 - `presentation/` may import `application` + `libs/{auth,contracts,messaging,observability}`.
 - `<m>.module.ts` and the module-root `index.ts` are the `nest-module` element: they see every
   layer of their **own** module and nothing of a sibling's.
+- Every file under `apps/` and `libs/` must claim an element type (`boundaries/no-unknown-files`).
+  A file the taxonomy cannot place is a file no other rule can govern.
 - Cross-service (`apps/X` → `apps/Y`) and cross-module imports are rejected outright — through a
   module's barrel just as much as through a deep path. The **one** exception is the gateway
   `auth` barrel, which the `iam` and `customer-admin` admin shells consume by design (ADR-024;

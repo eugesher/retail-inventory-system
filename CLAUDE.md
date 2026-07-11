@@ -97,7 +97,7 @@ Non-obvious facts, each worth a debugging cycle.
   `from`/`to` bound to UTC before parsing (both `parseInstant` copies, the gateway's `IsOnOrAfter`).
 - Append-only tables (`stock_movement`, `domain_event`, `audit_log_entry`,
   `idempotency_key`) implement their repository port **directly**, never through
-  `BaseTypeormRepository` — its `save`/`softDelete` would break the invariant.
+  `BaseTypeormRepository`.
 - `condition` is a MySQL reserved word — backticked in the `return_line` migration.
 - `order_line.quantity` never shrinks; the units still owed are `OrderLine.activeQuantity`
   (`quantity − cancelled_quantity`, ADR-040, which lists every rule measuring against it).
@@ -538,9 +538,9 @@ are **reserved** (no caller).
 ## Conventions & boundaries (authoritative — ADR-017)
 
 The per-layer / per-lib import constraints plus cross-service and cross-module isolation are
-enforced by `eslint-plugin-boundaries` in `eslint.config.mjs`. The bumper is
-`spec/architecture-lint.spec.ts` — a fixture per rule that intentionally violates it and
-asserts the expected `boundaries/*` ruleId fires.
+enforced by `eslint-plugin-boundaries` in `eslint.config.mjs`; the bumper is
+`spec/architecture-lint.spec.ts` (a fixture per rule). `no-unknown-files` is `error`: a new
+file that matches no element pattern fails lint — put it where the taxonomy already reaches.
 
 **Forbidden imports.** Domain code (`apps/*/src/.../domain/` and `libs/ddd`) MUST NOT import
 `@retail-inventory-system/{messaging,cache,observability,database}` or any `@nestjs/*`.

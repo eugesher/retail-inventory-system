@@ -241,6 +241,7 @@ function buildLinter(): { linter: Linter; config: Linter.Config[] } {
           'error',
           { default: 'disallow', checkAllOrigins: true, rules: DEPENDENCY_RULES },
         ] as Linter.RuleEntry,
+        'boundaries/no-unknown-files': 'error' as Linter.RuleEntry,
       },
     },
   ];
@@ -978,6 +979,21 @@ describe('boundaries rules (ADR-017)', () => {
       const code = `import { IngestAuditLogUseCase } from './audit-log';\nexport const x = IngestAuditLogUseCase;\n`;
       const messages = lint(code, 'apps/event-store-microservice/src/modules/__fixture__.ts');
       expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    // `no-unknown-files` only became enforceable once the composition roots and barrels were
+    // typed. It is the bumper against the drift returning: a file that belongs to no element
+    // is a file no other rule can govern.
+    it('a file matching no element pattern is rejected outright', () => {
+      const code = `export const orphan = 1;\n`;
+      const messages = lint(code, 'apps/api-gateway/src/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/no-unknown-files');
+    });
+
+    it('the module composition root itself matches an element pattern', () => {
+      const code = `export const x = 1;\n`;
+      const messages = lint(code, 'apps/retail-microservice/src/modules/cart/cart.module.ts');
+      expect(ruleIds(messages)).not.toContain('boundaries/no-unknown-files');
     });
   });
 
