@@ -1,6 +1,6 @@
 ---
 date: 2026-07-12
-status: open
+status: closed
 ---
 
 # Audit Report — 2026-07-12 — Structural symmetry across the six services
@@ -13,7 +13,7 @@ A structural sweep of all six deployables, run after the module-layout work
 reader would expect to be uniform: layer folders, entity registration, exceptions, filters,
 file naming, DI tokens, shared helpers, bootstrap shape.
 
-Seven findings. Six are fixed; one remains open (`SYM-007`).
+Seven findings. **All seven are fixed.**
 
 | Code | Finding | Status |
 |------|---------|--------|
@@ -23,7 +23,7 @@ Seven findings. Six are fixed; one remains open (`SYM-007`).
 | `SYM-004` | The `ClientProxy` filename rule in the docs did not match the code | **fixed** (2026-07-12) |
 | `SYM-005` | Exception-file and RPC-filter naming drift | **fixed** (2026-07-12) |
 | `SYM-006` | Functional asymmetries (health surface, gateway admin shells) | **fixed** (ADR-044) |
-| `SYM-007` | The four `runWith<X>WriteRetry` helpers are one protocol, written four times | open |
+| `SYM-007` | The four `runWith<X>WriteRetry` helpers are one protocol, written four times | **fixed** (ADR-045) |
 
 ### What SYM-001 and SYM-002 had in common
 
@@ -134,7 +134,24 @@ The other two items are **not** defects and are recorded as accepted:
 - **`app.module.ts` import order.** notification puts `CacheModule` before `DatabaseModule`,
   inventory after. `CacheModule` is `@Global()`, so this is cosmetic.
 
-## `SYM-007` — the four `runWith<X>WriteRetry` helpers are one protocol, written four times
+## `SYM-007` — the four `runWith<X>WriteRetry` helpers are one protocol, written four times — **FIXED**
+
+**Resolution (2026-07-12, [ADR-045](../adr/045-one-occ-retry-protocol.md)).** Reading this as a
+*duplication* problem was the trap. The shared `for`/`try`/`catch` is **eight lines**; the rest of
+each 80–180 line file is comments and module-specific logging and exception construction. The
+naive generalisation would have made the code **longer while enforcing nothing**.
+
+It is an **invariant** problem: what is duplicated is a *rule* — ADR-036's levels, its
+only-a-lost-CAS-retries policy, its bounded budget — and in all four copies that rule was
+unenforced and untested. So the core (`runWithOccRetry`, `libs/common/concurrency/`) owns the
+loop, the levels and both message texts; the module owns its conflict type, its trace fields and
+its terminal exception. `onExhausted` is typed `never`, making "you must throw" a compile error.
+The protocol now has a unit test — it never had one.
+
+The code got **longer** (445 → 482 lines), and ADR-045 says so in its Consequences. The win is
+the invariant.
+
+### Original finding
 
 `cart-write.ts` (99 lines), `order-write.ts` (83), `return-write.ts` (80), and
 `stock-mutation.ts` (183, which also carries `applyOnHandChange`) each define a

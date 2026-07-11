@@ -103,7 +103,7 @@ Non-obvious facts, each worth a debugging cycle.
   type (`MixedList | undefined`), so the value stops being spreadable and stops satisfying
   `forFeature`. Leave it unannotated (note on `DatabaseModule.forRoot`).
 - `order_line.quantity` never shrinks; the units still owed are `OrderLine.activeQuantity`
-  (`quantity − cancelled_quantity`, ADR-040, which lists every rule measuring against it).
+  (`quantity − cancelled_quantity`, ADR-040).
   Using `quantity` re-releases cancelled units against the **shared** per-`(variant,
   location)` `quantity_allocated`.
 - `reservation.cart_id` is overridden to `utf8mb4_unicode_ci` to match the retail `cart`
@@ -128,7 +128,7 @@ Non-obvious facts, each worth a debugging cycle.
   `RETURN_WINDOW_DAYS`,
   `IDEMPOTENCY_KEY_TTL_HOURS`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
   `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`, `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
-  `NOTIFIER_TEST_FLAKY` (test-only, read off `process.env` inside a `useFactory`).
+  `NOTIFIER_TEST_FLAKY` (test-only).
   `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects, so
   `ReservationSweepScheduler` registers its timer via `SchedulerRegistry.addInterval` in
   `onModuleInit` — and **must** `deleteInterval` in `onModuleDestroy`, or a leaked timer hangs
@@ -162,7 +162,7 @@ of them** — they are not restated here, on purpose.
 | Convention | Where it is specified |
 | --- | --- |
 | Request-level idempotency on the four money-/stock-moving writes | ADR-036; [`README.md` §5](README.md#5-cross-cutting-guarantees) |
-| Version-checked OCC on every aggregate write, bounded by `OCC_RETRY_ATTEMPTS` | ADR-036; the `*-write.ts` helper in each module's `application/use-cases/` |
+| Version-checked OCC on every aggregate write, bounded by `OCC_RETRY_ATTEMPTS` | ADR-036/045; `runWithOccRetry` (`libs/common/concurrency/`) — the module's `*-write.ts` only binds to it |
 | No-oversell, reservation TTL, "audit not balance" | ADR-027 / ADR-030; `stock-mutation.ts` |
 | Privacy: tombstone-only erasure, **no PII in an event payload or an audit row**, default-transactional-on / default-marketing-off consent | ADR-037 |
 
@@ -348,7 +348,7 @@ Each RPC-fronting module has `application/ports` (`*_GATEWAY_PORT`),
 1:1 with `Customer`, no `BaseEntity`).
 Ports: `STAFF_USER_REPOSITORY`, `CUSTOMER_REPOSITORY`, `ROLE_REPOSITORY`,
 `PERMISSION_REPOSITORY`, `CONSENT_RECORD_REPOSITORY`, `CUSTOMER_EVENTS_PUBLISHER`,
-`CUSTOMER_ERASURE_WRITER` (gateway-owned raw-SQL one-transaction PII nuller over `retail_db`),
+`CUSTOMER_ERASURE_WRITER` (gateway-owned raw-SQL PII nuller),
 `ITokenPort`, `IPasswordPort`.
 Use cases: `Login`, `LoginCustomer`, `RegisterCustomer`, `CreateGuestSession`,
 `RegisterStaffUser`, `RefreshToken`, `Logout`, `ValidateJwtSubject` (consumed by
@@ -383,8 +383,7 @@ Use cases: `Register`/`AddVariant`/`Publish`/`ArchiveProduct`, `ListProducts`/
 `GetCategoryTree`/`ListCategoryProducts`/`ReclassifyProduct`; `AttachMedia`/`ReorderMedia`/
 `DetachMedia`/`ListMedia`.
 Infra: `catalog-rabbitmq.publisher.ts` (two clients).
-`variantId` is the downstream backbone key. `product_categories` is a bare N↔M join with
-**no entity** (repository-maintained `INSERT IGNORE` / `DELETE`).
+`variantId` is the downstream backbone key. `product_categories` is a bare N↔M join with **no entity**.
 
 **pricing** `modules/pricing/` (ADR-026) — colocated in `catalog-microservice`, shares
 `catalog_queue`, keys on the same `variantId`. *Not* a separate deployable.
@@ -429,8 +428,8 @@ Ports: `CART_REPOSITORY`, `CART_CATALOG_GATEWAY`, `CART_INVENTORY_GATEWAY`,
 `CART_EVENTS_PUBLISHER`, `OCC_RETRY_ATTEMPTS`.
 Use cases: `CreateCart`/`GetCart`/`AddToCart`/`ChangeCartLineQuantity`/`RemoveFromCart`/
 `ClaimCart`, plus the shared `loadOwnedCart` owner-check and
-`use-cases/cart-write.ts` (`runWithCartWriteRetry`, `assertCartVersion`,
-`CartWriteConflictError`).
+`use-cases/cart-write.ts` (`runWithCartWriteRetry`, `assertCartVersion`) +
+`cart-write-conflict.error.ts`.
 Infra: `persistence/` (`CartTypeormRepository`), three adapters
 (`cart-catalog`, `cart-inventory`, `cart-rabbitmq.publisher`).
 Presentation: `cart.controller.ts` + `cart-rpc-exception.filter.ts` (forwards `details`).
@@ -440,7 +439,7 @@ Presentation: `cart.controller.ts` + `cart-rpc-exception.filter.ts` (forwards `d
 (`ownerType ∈ {customer, order}`), `Payment`, `Fulfillment` (owns `FulfillmentLine`),
 `Refund`. One throwable for all of them: `OrderDomainException` + `OrderErrorCodeEnum`.
 Ports: `ORDER_REPOSITORY`, `ADDRESS_REPOSITORY`, `PAYMENT_REPOSITORY`,
-`FULFILLMENT_REPOSITORY` (its `findByIdForUpdate` is a `SELECT … FOR UPDATE` re-read),
+`FULFILLMENT_REPOSITORY`,
 `REFUND_REPOSITORY`, `PAYMENT_GATEWAY` (`authorize`/`capture`/`refund`, no transport import
 — bound to `FakePaymentGatewayAdapter`), `TRANSACTION_PORT`, `ORDER_CART_READER` (raw SQL
 over the cart tables), `ORDER_CATALOG_GATEWAY`, `ORDER_INVENTORY_GATEWAY`,
@@ -450,7 +449,7 @@ over the cart tables), `ORDER_CATALOG_GATEWAY`, `ORDER_INVENTORY_GATEWAY`,
 Use cases: `PlaceOrder`, `AuthorizePayment`, `CapturePayment`, `GetOrder`, `ListMyOrders`,
 `CreateFulfillment`, `ListFulfillments`, `ShipFulfillment`, `MarkDelivered`, `CancelOrder`,
 `CancelLine`, `IssueRefund`, `ListRefundsForOrder`, `PurgeExpiredIdempotencyKeys`; plus
-`order-write.ts` (`runWithOrderWriteRetry`, `OrderWriteConflictError`), `order-access.ts`,
+`order-write.ts` (`runWithOrderWriteRetry`) + `order-write-conflict.error.ts`, `order-access.ts`,
 `fulfillment-quantities.ts`, `resolve-customer-email.ts`, `retry-then-log-for-replay.ts`,
 `cancel-allocation-retry.ts`, the view factories.
 Infra: `persistence/`, `payment-gateway/`, `messaging/`, `audit/`, `consumers/`
@@ -468,7 +467,7 @@ Ports: `RETURN_REQUEST_REPOSITORY`, `RETURN_ORDER_READER` (raw SQL over `order` 
 `RETURN_WINDOW_DAYS`, `OCC_RETRY_ATTEMPTS`.
 Use cases: `OpenReturnRequest`, `AuthorizeReturn`, `RejectReturn`, `ReceiveReturn`,
 `InspectAndDisposition`, `CloseReturn`, `GetReturn`, `ListReturnsForOrder`; plus
-`return-write.ts` (`runWithReturnWriteRetry`, `ReturnWriteConflictError`),
+`return-write.ts` (`runWithReturnWriteRetry`) + `return-write-conflict.error.ts`,
 `return-access.ts`, `return-view.factory.ts`, and a **local copy** of
 `retry-then-log-for-replay.ts` (returns cannot import `orders/`).
 Presentation: `returns.controller.ts` + `return-rpc-exception.filter.ts`.
@@ -530,7 +529,7 @@ Imported via the path aliases in `tsconfig.json` as `@retail-inventory-system/<n
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel spans), `CacheModule` (`@Global()`, register once at root), `@Cacheable()`, the `CACHE_KEYS` registry, `CacheHelper`. |
 | `observability` | `LoggerModuleConfig` (Pino + redaction + the `logMethod` hook injecting `traceId`/`spanId`), `CorrelationMiddleware`, `CorrelationId`, `CORRELATION_ID_HEADER`, `tracer.ts`, `TraceContextInterceptor` / `MetricsModule` (placeholders). |
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject<TProps>`, `DomainEvent<TAggregateId>`, `IRepositoryPort`, and the shared transaction seam `ITransactionPort` / `ITransactionScope` / `TRANSACTION_PORT` (ADR-043). **No `@nestjs/*`, no TypeORM.** |
-| `common` | `Result<T, E>`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (under `idempotency/`), `OCC_RETRY_ATTEMPTS` (under `concurrency/`; the shared DI token — ADR-043). Node `crypto` only. |
+| `common` | `Result<T, E>`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (under `idempotency/`); under `concurrency/`: `OCC_RETRY_ATTEMPTS` + `runWithOccRetry` — the **one** OCC retry protocol, which the four `runWith<X>WriteRetry` helpers now bind to (ADR-043/045). Node `crypto` only. |
 | `config` | `configModuleConfig` (the Joi env schema). No Nest-binding helpers. |
 
 **Cache keys** live in `libs/cache/cache-keys.ts`. `INVENTORY_STOCK_KEY_VERSION` is `v3`;
@@ -606,7 +605,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `045`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `046`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under
