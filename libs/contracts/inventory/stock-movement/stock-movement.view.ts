@@ -13,8 +13,7 @@ import { StockMovementTypeEnum } from '../enums';
 // pair carries **no foreign key** (the polymorphic `media_asset.owner_id` precedent, ADR-029): do
 // not join on it.
 //
-// `actorId` is `null` for a **system** action — the auto-init and the sweeper have no principal. `occurredAt`
-// is the ISO-8601 instant the movement was recorded.
+// `actorId` is `null` for a **system** action — the auto-init and the sweeper have no principal.
 export class StockMovementView {
   @ApiResponseProperty()
   public id: number;

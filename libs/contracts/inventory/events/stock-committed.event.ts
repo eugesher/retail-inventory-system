@@ -1,19 +1,12 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `inventory.stock.committed` event, published by the
-// inventory microservice when a Commit Sale ships an order's allocated stock at
-// fulfillment time (ADR-031). Framework-free — a `DomainEvent` subclass is never
-// serialized across services (ADR-011); the Commit Sale use case maps the
-// in-process `StockCommittedEvent` to this interface before emitting.
+// `inventory.stock.committed` — a **reserved surface** (README §2). Not dead code.
 //
-// A reserved surface: emitted onto `inventory_queue` (the inventory service's own
-// queue) with no *business* consumer — it is captured by the event-store firehose,
-// which binds `#` on the `ris.events` mirror
-// (docs/adr/035-event-store-firehose-topic-exchange.md), the
-// `inventory.stock.{reserved,allocated,released}` precedent. `quantity` is the
-// shipped quantity for the line; `fulfillmentId` is the shipment that triggered
-// the commit (the idempotency anchor). `eventVersion` is pinned to `'v1'`;
-// `occurredAt` is ISO-8601.
+// **The only event on which stock physically leaves.** A commit decrements `quantity_on_hand`
+// *and* `quantity_allocated` together (ADR-031) — every earlier event in the reserve → allocate
+// chain moved counters around without shipping anything.
+//
+// `fulfillmentId` is the idempotency anchor: replaying a commit for the same shipment is a no-op.
 export interface IInventoryStockCommittedEvent extends ICorrelationPayload {
   variantId: number;
   stockLocationId: string;

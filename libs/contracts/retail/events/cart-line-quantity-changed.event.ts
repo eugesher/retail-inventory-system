@@ -1,14 +1,10 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.cart.line-quantity-changed` event, published
-// when a line's quantity is set to a new positive value (a `0` is rejected at the
-// domain — removal is the explicit op). Framework-free — a `DomainEvent` subclass
-// is never serialized across services (ADR-011); the cart use case maps the
-// in-process `CartLineQuantityChangedEvent` to this interface before emitting.
+// `retail.cart.line-quantity-changed` — a **reserved surface** (README §2). Not dead code.
 //
-// A reserved surface today (no cross-service consumer bound). `lineId` is the
-// BIGINT `cart_line.id`; `quantity` is the new quantity. `eventVersion` is pinned
-// to `'v1'`; `occurredAt` is an ISO-8601 string.
+// `quantity` is the new absolute quantity, and it is always **positive**: a `0` is rejected at the
+// domain, because removal is its own operation. A consumer will never see this event announce a
+// line's disappearance. `occurredAt` is ISO-8601.
 export interface IRetailCartLineQuantityChangedEvent extends ICorrelationPayload {
   cartId: string;
   lineId: number;

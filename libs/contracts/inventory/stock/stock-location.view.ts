@@ -1,15 +1,14 @@
 import { ApiResponseProperty } from '@nestjs/swagger';
 
-// RPC response element for `inventory.location.list` — the public projection of a
-// `StockLocation` aggregate. A **class** with `@ApiResponseProperty` so the
-// gateway can declare it as a response type (ADR-005 / ADR-017), mirroring the
-// catalog view DTOs.
+// The public projection of a `StockLocation`.
 //
-// `type` is the location kind (`warehouse` / `store` / `dropship-virtual`),
-// carried as a plain string on the wire — the `StockLocationTypeEnum` is an
-// internal domain concept, not a wire contract (the catalog `*StatusEnum`
-// precedent, ADR-025). `gln` is the 13-digit GLN or `null`. `address` is omitted
-// from the view for now — add it later if a consumer needs it.
+// `type` (`warehouse` / `store` / `dropship-virtual`) crosses the wire as a **plain string, not
+// an enum**: `StockLocationTypeEnum` is an internal domain concept and is deliberately not a wire
+// contract (ADR-025). A consumer that switches on it is switching on a string, and must handle a
+// value it has not seen.
+//
+// `gln` is the 13-digit GLN or `null`. The location's **address is not projected here** — the
+// view is an identity, not a dossier.
 export class StockLocationView {
   @ApiResponseProperty()
   public id: string;
