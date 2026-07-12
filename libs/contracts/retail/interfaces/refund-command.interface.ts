@@ -1,38 +1,28 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format command payloads for the refund RPCs (API Gateway → Retail, served by the
-// orders controller). Each extends `ICorrelationPayload` so the correlation id threads
-// through to the retail handler's inline logging (ADR-001 / ADR-011). They are the single
-// source of truth for both ends: the gateway adapter sends them and the retail refund use
-// cases consume them as their `execute(payload)` input, so a drift fails TypeScript on
-// both sides (the contract test).
+// Wire-format command payloads for the refund RPCs (ADR-032). One type, both ends: a drift fails
+// TypeScript on the gateway *and* in retail. That is the contract test.
 //
-// **Authorization is split across the boundary (ADR-024 / ADR-028 §7).** Issue Refund is
-// **staff-only** (`order:refund`), gated with `@RequiresPermission` at the gateway, so the
-// payload carries only the resolved `actorId` (the staff caller, for the audit row) — no
-// owner-check flag. List Refunds is **owner-or-staff** `order:read`: the customer is never
-// permission-gated for its own order's refunds (the route is bearer-protected and the use
-// case owner-checks), while the staff override is computed at the gateway from
-// `@CurrentUser().permissions` and forwarded here as `isStaff`.
+// **Issue Refund is staff-only**, gated at the gateway with `@RequiresPermission`, which is why
+// it carries no owner-check flag. **List Refunds is owner-or-staff**, so it carries `isStaff` —
+// the gateway resolves the permission and forwards the *result*, never the permissions.
 
-// `retail.refund.issue` — issues a refund against a captured payment (staff `order:refund`).
-// `amountMinor` is the amount to refund in integer minor units (cents); the use case
-// validates it against the refundable ceiling (`payment.amountMinor −
-// payment.refundedAmountMinor`). `reason` is the required human-supplied refund reason
-// (recorded on the `refund` row + the audit log). `idempotencyKey` is **required and
-// deduped** (ADR-036) — the use case fingerprints `{orderId, paymentId, amountMinor, reason}`
-// and replays the stored `RefundView` on a same-key/same-body hit (before the gateway call
-// AND before the audit emit), `422` on a different body, `400` when absent (the manual
-// endpoint forwards the client header; the auto-refund-from-cancel consumer synthesizes a
-// deterministic `order-cancelled:<orderId>:<paymentId>` key). The gateway-reference natural
-// idempotency + the `refunded_amount_minor` ceiling remain the backstop against an over-refund.
+// **`actorId` is nullable, and that is the whole design.** For the manual endpoint it is the staff
+// caller. It is **`null` on the auto-refund-from-cancel path**: retail's own consumer reacts to
+// `retail.order.cancelled` with `paymentFlaggedForRefund=true` and calls `IssueRefundUseCase`
+// directly, with no human behind it. The audit contract already models a null actor as a system
+// movement, so both paths share one use case without inventing a sentinel id.
 //
-// `actorId` is the resolved caller for the audit row. It is the staff caller's id for the
-// manual endpoint, and **`null` for the system-initiated auto-refund-from-cancel path** (a
-// retail consumer reacting to `retail.order.cancelled` with `paymentFlaggedForRefund=true`
-// calls `IssueRefundUseCase` directly with no human actor). The audit contract already
-// models a null actor as a system / pre-auth movement (`IAuditLogEvent.actorId: string |
-// null`), so the two paths share one use case without a sentinel id.
+// `amountMinor` is checked against the refundable ceiling — `payment.amountMinor` minus what has
+// already been refunded — so a partial refund is legal and a second one that would overshoot is
+// not. `reason` is required, and lands on both the `refund` row and the audit log.
+//
+// `idempotencyKey` is optional in the type and **required in fact** (ADR-036). The use case
+// fingerprints `{orderId, paymentId, amountMinor, reason}` and replays the stored `RefundView` on
+// a same-key/same-body hit — **before the gateway call and before the audit emit**, so a replay
+// moves no money and writes no second audit row. A different body is a `422`, an absent key a
+// `400`. The auto-refund consumer has no client header to forward, so it synthesizes a
+// deterministic `order-cancelled:<orderId>:<paymentId>` key instead.
 export interface IRetailRefundIssuePayload extends ICorrelationPayload {
   orderId: number;
   paymentId: number;
@@ -42,9 +32,8 @@ export interface IRetailRefundIssuePayload extends ICorrelationPayload {
   idempotencyKey?: string;
 }
 
-// `retail.refund.list` — lists an order's refunds newest-first (owner-or-staff
-// `order:read`). `actorId` is the resolved caller; `isStaff` is the staff override (a
-// non-staff caller may read only its own order's refunds, else `REFUND_ACCESS_FORBIDDEN`).
+// A non-staff caller reading someone else's order's refunds gets `REFUND_ACCESS_FORBIDDEN`, not an
+// empty list.
 export interface IRetailRefundListPayload extends ICorrelationPayload {
   orderId: number;
   actorId: string;
