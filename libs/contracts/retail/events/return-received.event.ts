@@ -15,8 +15,8 @@ import { ICorrelationPayload } from '../../microservices';
 // producer-side from the RMA's `customerId` against the shared `customer` table (a raw-SQL
 // reader, no gateway-entity import) so the returns consumer has a recipient WITHOUT a
 // per-delivery cross-service RPC (ADR-033 choice). The email is `null` for a
-// tombstoned/missing customer; `customerLocale` is a placeholder shipped `null` today
-// (locale deferred). Both optional — additive on the wire.
+// tombstoned/missing customer; `customerLocale` always ships `null` — nothing in this system
+// resolves a locale. Both optional — additive on the wire.
 export interface IRetailReturnReceivedEvent extends ICorrelationPayload {
   rmaId: number;
   rmaNumber: string;

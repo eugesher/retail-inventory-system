@@ -1,22 +1,14 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `inventory.stock.returned` event, published by the
-// inventory microservice when a Restock from Return puts a return request's
-// `restock`-disposition stock back on-hand (ADR-032). Framework-free — a
-// `DomainEvent` subclass is never serialized across services (ADR-011); the
-// Restock use case maps the in-process `StockReturnedEvent` to this interface
-// before emitting.
+// `inventory.stock.returned` — a **reserved surface** (README §2). Not dead code.
 //
-// It is the typed alias for the positive `return`-type movement, exposed as its
-// own routing key so a downstream consumer can filter returned-stock events
-// without scanning every `inventory.stock-movement.recorded`. A reserved surface
-// today: emitted onto `inventory_queue` (the inventory service's own queue) with
-// no cross-service consumer bound yet — the intended consumer is a future
-// event-store / audit capability (the `inventory.stock.{reserved,allocated,
-// released,committed}` precedent). `quantity` is the restocked quantity for the
-// line; `returnRequestId` is the RMA whose inspection triggered the restock (the
-// idempotency anchor), `returnLineId` the specific line. `eventVersion` is pinned
-// to `'v1'`; `occurredAt` is ISO-8601.
+// A typed alias for the positive `return`-type movement, given its own routing key so a consumer
+// can filter returned stock without scanning every `inventory.stock-movement.recorded`. Only
+// `restock`-disposition lines get here — scrapped and quarantined goods never re-enter sellable
+// inventory and raise no event.
+//
+// `returnRequestId` is the idempotency anchor: the restock is all-lines-atomic and replaying it
+// for the same RMA is a no-op (ADR-032).
 export interface IInventoryStockReturnedEvent extends ICorrelationPayload {
   variantId: number;
   stockLocationId: string;

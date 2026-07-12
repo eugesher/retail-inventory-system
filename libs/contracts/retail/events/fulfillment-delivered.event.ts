@@ -19,7 +19,7 @@ import { ICorrelationPayload } from '../../microservices';
 // producer-side from the shared `customer` table (a raw-SQL reader, no gateway-entity
 // import) so the delivery-confirmation consumer has a recipient WITHOUT a per-delivery
 // cross-service RPC (ADR-033 choice). The email is `null` for a tombstoned/missing
-// customer; `customerLocale` is a placeholder shipped `null` today (locale deferred).
+// customer; `customerLocale` always ships `null` — nothing in this system resolves a locale.
 // Both optional — the field is additive on the wire.
 export interface IRetailFulfillmentDeliveredEvent extends ICorrelationPayload {
   orderId: number;
