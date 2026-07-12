@@ -1,13 +1,11 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Fires when a Commit Sale ships an order's allocated stock at fulfillment time
-// (ADR-031). `aggregateId` is the `variantId` (the downstream backbone key);
-// `quantity` is the shipped quantity for the line, `orderId` the order being
-// fulfilled, and `fulfillmentId` the shipment that triggered the commit — the
-// idempotency anchor (the `sale` movement references it). `StockLevel` is not an
-// `AggregateRoot`, so the Commit Sale use case constructs this event after the
-// save commits rather than pulling it from a model (the `StockAllocatedEvent`
-// precedent).
+// **The one event on which stock physically leaves.** A commit decrements `quantity_on_hand` *and*
+// `quantity_allocated` together (ADR-031); every earlier event in the reserve → allocate chain only
+// moved counters between columns.
+//
+// `fulfillmentId` is the idempotency anchor — the `sale` movement references it, so replaying a
+// commit for the same shipment decrements nothing.
 export class StockCommittedEvent extends DomainEvent<number> {
   public readonly stockLocationId: string;
   public readonly quantity: number;

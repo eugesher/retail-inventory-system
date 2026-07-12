@@ -5,17 +5,17 @@ import { INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD } from '@retail-inventory-system/
 import { StockLevel, StockLowEvent } from '../../domain';
 import { IStockEventsPublisherPort } from '../ports';
 
-// The preserved low-stock alert, hoisted out of `AdjustStockUseCase` so Adjust and
-// Transfer share one depletion-signal policy (ADR-012 §low-stock / ADR-030). It is
-// best-effort and post-commit: the write already committed, so a publish failure is
-// warn-logged, never raised.
+// The one depletion-signal policy, shared by every write that can lower on-hand — so a warehouse
+// emptied by a transfer, by an adjustment or by a shipment all alert identically.
 //
-// It is a **depletion** signal — it fires only when a DECREASE (`quantityDelta < 0`)
-// drives the post-commit on-hand to at/below `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`.
-// A write that raises stock (a positive delta) has not "fallen" and never raises a
-// reorder alert. A transfer-out is always a negative delta on the source, so a
-// transfer that empties a warehouse alerts exactly like a negative adjustment; the
-// transfer's destination (a positive delta) is correctly never a low-stock event.
+// **It is a DEPLETION signal, not a level check.** It fires only when a *decrease* drives the
+// post-commit on-hand to at-or-below the threshold. A positive delta has not "fallen" and never
+// alerts — which is right for a transfer's destination leg, and is also why **silence proves
+// nothing**: a level that is already low and stays low raises no event, because nothing crossed the
+// line.
+//
+// Best-effort and post-commit: the write is already durable, so a publish failure is warn-logged
+// and swallowed. Losing the alert must never lose the stock movement.
 export const maybeEmitLowStock = async (
   publisher: IStockEventsPublisherPort,
   logger: PinoLogger,

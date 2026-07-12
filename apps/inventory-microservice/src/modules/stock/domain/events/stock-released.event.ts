@@ -1,13 +1,13 @@
 import { ReservationReleaseReason } from '@retail-inventory-system/contracts';
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Fires when a Release returns held units to `available` (ADR-030). `aggregateId`
-// is the `variantId`; `quantity` is the (positive) amount returned, `reason` why
-// the hold was released. `cartId` / `reservationId` are **nullable** so the later
-// order-cancel emitter (which releases by order, not a single hold) can omit them
-// — the by-cart / by-id Release paths of this capability always set both.
-// `ReservationReleaseReason` is a wire union from `libs/contracts`; the domain may
-// import `libs/{ddd,common,contracts}` (ADR-017).
+// Raised when a release returns held units to `available` (ADR-030).
+//
+// **`cartId` and `reservationId` are both nullable, because a release does not always come from a
+// hold.** Cancelling an order releases by order (`CancelAllocationUseCase`), and the sweep releases
+// by expiry — neither has a cart or a single reservation to name. A consumer keying on `cartId`
+// silently drops both. **`reason` is the discriminator** that tells the paths apart, and it is the
+// only one.
 export class StockReleasedEvent extends DomainEvent<number> {
   public readonly stockLocationId: string;
   public readonly quantity: number;
