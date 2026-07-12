@@ -24,9 +24,11 @@ import { toNotificationDeliveryView } from './notification-delivery-view.factory
 // Returns the resulting `NotificationDeliveryView` (sent, or the `skipped-no-consent`
 // row, or a pre-existing duplicate), or `null` when no active marketing template resolves.
 //
-// **On a fresh database that `null` is the only outcome.** No marketing template is seeded
-// anywhere — not by a migration, not by `scripts/test-db-seed.ts` — so this succeeds, sends
-// nothing, and returns `null` until a staff member authors one and activates it.
+// **A `null` almost always means the seed did not run.** The marketing template is seeded — by
+// `scripts/seeds/notification-template.sql`, authored under `marketing.email.promo`
+// (`ROUTING_KEYS.MARKETING_EMAIL_PROMO`), which is the `eventType` the gateway defaults to. But
+// migrations do not seed it: `yarn migration:run` alone leaves the registry empty, and only
+// `yarn test:seed` authors the row. So a `null` here is a **missing seed**, not a missing feature.
 @Injectable()
 export class SendMarketingUseCase {
   constructor(

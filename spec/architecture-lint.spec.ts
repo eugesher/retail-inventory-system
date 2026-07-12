@@ -1,8 +1,17 @@
-// Regression test for the eslint-plugin-boundaries rules wired in
-// `eslint.config.mjs` (ADR-017). The fixtures below intentionally violate
-// each rule in §3 of the recommendation; the spec asserts that ESLint
-// reports the expected `boundaries/*` ruleId for each fixture so the rules
-// cannot be silently weakened in a future refactor without a failing test.
+// Fixture suite for the eslint-plugin-boundaries rules of ADR-017. Each fixture below
+// intentionally violates one rule, and the spec asserts ESLint reports the expected
+// `boundaries/*` ruleId for it.
+//
+// **Read this before you trust it: the suite does NOT lint against `eslint.config.mjs`.** It builds
+// its own `Linter` from the `ELEMENTS` / `DEPENDENCY_RULES` copies below (see `buildLinter`). So it
+// pins **the plugin's behaviour given this taxonomy** — the v6 `DependencySelector` shape, the
+// `{{from.captured.module}}` templating, the first-match ordering — which is real protection against
+// a plugin upgrade changing semantics under us.
+//
+// **It is not protection against the production rules being weakened.** Turn
+// `boundaries/no-unknown-files` off in `eslint.config.mjs` and every test here still passes. If you
+// change that file, you must mirror it here by hand; forget, and the two drift in silence while this
+// suite stays green — defending a config nobody runs.
 
 import { Linter } from 'eslint';
 import * as fs from 'fs';
@@ -28,9 +37,9 @@ type Plugin = NonNullable<Linter.Config['plugins']>[string];
 
 const ROOT = path.resolve(__dirname, '..');
 
-// Element-type taxonomy and rules — keep mirrored with eslint.config.mjs.
-// Inlined here so the spec is hermetic and independent of any future
-// refactor that splits the production config into multiple files.
+// Element-type taxonomy and rules — a HAND-MIRRORED copy of `eslint.config.mjs`. Nothing enforces
+// that the two agree: this is the duplication that makes the suite unable to catch a weakened
+// production rule (see the header). Keep it mirrored, and know that forgetting costs you the check.
 const ELEMENTS = [
   {
     type: 'domain',

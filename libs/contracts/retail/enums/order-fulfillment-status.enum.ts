@@ -3,10 +3,13 @@
 // and of payment. A wire contract surfacing on `OrderView` and mapped to the
 // `order.fulfillment_status` ENUM column.
 //
-// `UNFULFILLED` is the place-time default; `PARTIALLY_SHIPPED` / `SHIPPED` /
-// `DELIVERED` are reached by the later fulfillment capability. This foundation only
-// ever sets `UNFULFILLED` (at place-time); the shipment transitions arrive with the
-// fulfillment operations that drive them.
+// `UNFULFILLED` is the place-time default. **All four values are reached today**:
+// Ship recomputes this axis from the order's lines and lands `SHIPPED` when every
+// line is fully shipped, `PARTIALLY_SHIPPED` otherwise; Deliver sets `DELIVERED`.
+//
+// This is the axis that carries shipment progress — **not** `OrderStatusEnum`, whose
+// own `SHIPPED` member has no producer precisely because the two axes are orthogonal
+// (ADR-028 §2). Read shipment state from here.
 export enum OrderFulfillmentStatusEnum {
   UNFULFILLED = 'unfulfilled',
   PARTIALLY_SHIPPED = 'partially-shipped',
