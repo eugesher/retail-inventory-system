@@ -33,18 +33,14 @@ import { applyOnHandChange } from './stock-mutation';
 import { requireActiveLocation } from './stock-location.guard';
 import { toStockLevelView } from './stock-view.factory';
 
-// Receive Stock is the first Stage-1 write operation on the new model (ADR-027):
-// it raises a variant's on-hand quantity at one stock location by a positive
-// amount. The transactional read-modify-write is wrapped in
-// `stockCache.withInvalidation(...)` so the cached availability is invalidated
-// **after** the commit (ADR-023) — the write body is `work`, `resolveItems`
-// yields the `(variantId, stockLocationId)` to wipe, and the prefix delete runs
-// post-commit. Receive never lowers on-hand, so there is no low-stock check.
+// Raises a variant's on-hand at one location by a positive amount (ADR-027), and appends a positive
+// `receipt` movement **inside the same transaction** as the counter write (ADR-030 §2) — the
+// counter stays the balance authority; the ledger row is the immutable record of *why* it rose.
 //
-// Receive also appends a positive `receipt` `StockMovement` row **inside the same
-// transaction** as the counter write (ADR-030 §2): the running total stays the
-// balance authority (ADR-027), and the ledger row is the immutable audit record of
-// why on-hand rose, attributed to the acting staff user (`actorId`, null = system).
+// **Receive never lowers on-hand, so there is no low-stock check here** — a depletion signal is a
+// signal about a *fall*, and nothing falls. Do not add one "for symmetry": it would fire on a
+// restock that merely left the level under the threshold, which is exactly the false alarm the
+// depletion rule exists to avoid.
 // Two reserved-surface events fire post-commit, best-effort and independent
 // (ADR-020): `inventory.stock.received` and `inventory.stock-movement.recorded`.
 @Injectable()

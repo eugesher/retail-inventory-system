@@ -95,19 +95,17 @@ function normalizeRestockLines(
   });
 }
 
-// Restock from Return physically returns a return request's `restock`-disposition
-// stock to sellable inventory at inspection time (ADR-032). Per line it puts units
-// back IN to `quantity_on_hand` (one positive `StockLevel.changeOnHand(+quantity)`
-// — reserved/allocated untouched, so `available` rises by the same amount) and
-// appends one strictly-positive `return` `StockMovement` referencing the return
-// request. This is the long-reserved `return` ledger type's FIRST producer (ADR-030
-// §2 shipped the enum; the mirror of ADR-031's `sale` from Commit Sale).
+// The mirror of Commit Sale (ADR-032). Per line it puts units back into `quantity_on_hand` and
+// appends a strictly-positive `return` movement. Reserved and allocated are untouched, so
+// `available` rises by the full amount — a returned unit is immediately sellable again.
 //
-// **Idempotent on `returnRequestId`**: a `return` movement already referencing this
-// return request means the restock already happened, so a re-delivery (the
-// cross-service retry path — retail drives this AFTER its local inspect commits, so
-// a transient RMQ failure can re-deliver) increments nothing and re-returns the
-// prior result. The probe runs BEFORE any write, against the ledger's
+// **Only `restock`-disposition lines reach here.** Goods scrapped or quarantined at inspection came
+// back to the warehouse but never to the shelf, and inventory never hears about them at all.
+//
+// **Idempotent on `returnRequestId`**: retail drives this **after** its own inspect transaction has
+// committed, so a transient RMQ failure re-delivers a request whose work is already durable. A
+// `return` movement already naming this request means the restock happened, so the replay increments
+// nothing and returns the prior result. The probe runs BEFORE any write, against the ledger's
 // `(reference_type, reference_id)` index. One Inspect → one restock RPC per return,
 // so per-request idempotency is the right grain (the Commit Sale `fulfillmentId`
 // precedent).
