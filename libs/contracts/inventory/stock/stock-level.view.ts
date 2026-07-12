@@ -1,16 +1,11 @@
 import { ApiResponseProperty } from '@nestjs/swagger';
 
-// One location's slice of a variant's availability — the per-location element of
-// `VariantStockView.locations`. It is a **class** carrying `@ApiResponseProperty`
-// (not a plain interface) so the gateway can declare it as a nested response type
-// (`@ApiResponseProperty({ type: [StockLevelView] })`) — `@nestjs/swagger` is the
-// documented lib-contracts exception (ADR-005 / ADR-017), mirroring `PriceView`.
+// One location's slice of a variant's availability.
 //
-// `available` is the derived sellable count (`quantityOnHand − quantityAllocated
-// − quantityReserved`); it is projected onto the view by the read use case, not
-// stored. `version` is the optimistic-lock token (advances on every write).
-// `updatedAt` is the row's last-write instant, or `null` for a never-persisted
-// (zeroed) level.
+// `available` is **derived, not stored**: `quantityOnHand − quantityAllocated − quantityReserved`,
+// projected onto the view by the read use case. Do not expect a column behind it, and do not
+// expect it to be reconcilable by adding a fourth counter. `updatedAt` is `null` for a level that
+// has never been persisted — a zeroed placeholder.
 export class StockLevelView {
   @ApiResponseProperty()
   public stockLocationId: string;

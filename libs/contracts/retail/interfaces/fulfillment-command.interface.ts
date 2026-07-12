@@ -1,28 +1,19 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format command payloads for the fulfillment RPCs (API Gateway → Retail,
-// served by the orders controller — a fulfillment is a sibling aggregate in the
-// orders module, ADR-031). Each extends `ICorrelationPayload` so the correlation id
-// threads through to the retail handler's inline logging (ADR-001 / ADR-011). They
-// are the single source of truth for both ends: the gateway adapter sends them and
-// the retail fulfillment use cases consume them as their `execute(payload)` input, so
-// a drift fails TypeScript on both sides (the contract test).
+// Wire-format command payloads for the fulfillment RPCs (ADR-031). One type, both ends: the
+// gateway adapter sends it and the retail use case consumes it as its `execute(payload)` input,
+// so a drift fails TypeScript on **both** sides. That is the contract test.
 //
-// **Authorization is split across the boundary (ADR-024 / ADR-028 §7).** The customer
-// is never permission-gated for its own orders — the route is bearer-protected and
-// the retail use case owner-checks `order.customerId === actorId`. The staff override
-// is computed at the gateway from `@CurrentUser().permissions` and forwarded here as a
-// boolean (`isStaffFulfill` for `order:fulfill`, `canReadAny` for `order:read`), so
-// the retail use case never re-reads the permission registry — it trusts the resolved
-// flag. `actorId` is the resolved caller (`@CurrentUser().id`).
+// **Authorization is split across the boundary (ADR-024 / ADR-028 §7), and that is why these
+// payloads look the way they do.** A customer is never permission-gated for its own order — the
+// retail use case owner-checks `order.customerId === actorId`. The *staff override* is resolved
+// at the gateway and forwarded as a plain boolean (`isStaffFulfill` for `order:fulfill`,
+// `canReadAny` for `order:read`), so retail never re-reads the permission registry. A payload
+// that grew a permission list instead would move the authorization decision across the wire,
+// which is the thing this shape exists to prevent.
 
-// `retail.fulfillment.create` — plans a shipment of one or more `OrderLine`
-// quantities (owner-checked, or a staff `order:fulfill` override via `isStaffFulfill`).
-// `stockLocationId` is optional — the use case defaults it to `default-warehouse`
-// (`INVENTORY_DEFAULT_STOCK_LOCATION`); multi-location sourcing is a later capability.
-// `lines` carry the per-`OrderLine` quantities included in this shipment; the use case
-// enforces the cross-fulfillment sum invariant (already-fulfilled + requested ≤
-// ordered) before persisting.
+// Omitting `stockLocationId` defaults it to `INVENTORY_DEFAULT_STOCK_LOCATION`. One fulfillment
+// ships from exactly one location — there is no way to express a shipment sourced from several.
 export interface IRetailFulfillmentCreatePayload extends ICorrelationPayload {
   orderId: number;
   stockLocationId?: string;
@@ -31,27 +22,21 @@ export interface IRetailFulfillmentCreatePayload extends ICorrelationPayload {
   isStaffFulfill: boolean;
 }
 
-// `retail.fulfillment.list` — lists one order's fulfillments newest-first
-// (owner-checked, or a staff `order:read` override via `canReadAny`). An order with no
-// fulfillments resolves to an empty array.
 export interface IRetailFulfillmentListPayload extends ICorrelationPayload {
   orderId: number;
   actorId: string;
   canReadAny: boolean;
 }
 
-// `retail.fulfillment.ship` — ships a `pending` fulfillment (owner-checked, or a staff
-// `order:fulfill` override via `isStaffFulfill`). The ship captures an authorized
-// payment inline (Q5 ship-triggered capture — blocked if the gateway declines),
-// advances the fulfillment → `shipped` (`trackingNumber` is required to mark it
-// shipped — the tracking-on-ship policy), the order's fulfillment axis + the shipped
-// `OrderLine` statuses, then calls `inventory.stock.commit-sale` after the local
-// commit (ADR-031). `trackingNumber` / `carrier` are the shipment metadata;
-// `idempotencyKey` is **required and deduped** (ADR-036) — the use case fingerprints
-// `{orderId, fulfillmentId, trackingNumber, carrier}` and replays the stored
-// `FulfillmentView` on a same-key/same-body hit (no re-capture, no re-issued commit-sale),
-// `422` on a different body, `400` when absent; a non-`pending` re-ship under a NEW key is
-// still a 409. `actorId` is the resolved caller.
+// **Two fields are optional in the type and mandatory in practice — the type is the weaker
+// statement here, so read this instead.**
+//
+// `trackingNumber` must be present to mark a fulfillment shipped (the tracking-on-ship policy,
+// ADR-031). `idempotencyKey` is required and deduped (ADR-036): the use case fingerprints
+// `{orderId, fulfillmentId, trackingNumber, carrier}` and, on a same-key/same-body hit, replays
+// the stored `FulfillmentView` — no second capture, no second commit-sale. A same-key/different-
+// body call is a `422`, an absent key a `400`. Re-shipping a non-`pending` fulfillment under a
+// *new* key is still a `409`: idempotency replays a request, it does not re-open a state machine.
 export interface IRetailFulfillmentShipPayload extends ICorrelationPayload {
   orderId: number;
   fulfillmentId: number;
@@ -62,11 +47,6 @@ export interface IRetailFulfillmentShipPayload extends ICorrelationPayload {
   isStaffFulfill: boolean;
 }
 
-// `retail.fulfillment.deliver` — marks a `shipped` fulfillment `delivered`
-// (owner-checked, or a staff `order:fulfill` override via `isStaffFulfill`). Once
-// every non-`cancelled` fulfillment of the order is delivered the use case advances
-// the order's lifecycle + fulfillment axes to `delivered` too (the happy-path
-// terminal, ADR-031). `actorId` is the resolved caller.
 export interface IRetailFulfillmentDeliverPayload extends ICorrelationPayload {
   orderId: number;
   fulfillmentId: number;
