@@ -1,27 +1,20 @@
 import { ApiResponseProperty } from '@nestjs/swagger';
 
-// RPC/HTTP response shape for one `domain_event` row — the append-only firehose log the
-// event store fills from the `ris.events` topic exchange
-// (docs/adr/035-event-store-firehose-topic-exchange.md). Returned by the `audit.event.query`
-// RPC and by the correlation trace (docs/adr/039-audit-and-event-store-query-surface.md).
+// One `domain_event` row — the append-only firehose log the event store fills from `ris.events`
+// (ADR-035), read back by `audit.event.query` and the correlation trace (ADR-039).
 //
-// A **class** carrying `@ApiResponseProperty` (the documented lib-contracts Swagger
-// exception, ADR-017), mirroring `NotificationDeliveryView` / `StockMovementView`. The
-// `naming-convention` lint rule reserves the bare-`interface` form for `I`-prefixed names.
+// `occurredAt` is an **ISO-8601 string, never a `Date`**. RabbitMQ carries JSON and a `Date` does
+// not survive the hop — it arrives as a string regardless, so the contract states that rather than
+// typing a lie.
 //
-// `occurredAt` is an **ISO-8601 string**, never a `Date`: RabbitMQ carries JSON, and a `Date`
-// does not survive the hop — it arrives at the gateway as a string anyway, so the contract
-// states the truth rather than lying about the type.
+// `payload` is the captured event body, returned verbatim and **not searchable**: the query
+// filters run on indexed columns only (ADR-039). This field is for reading, never for narrowing.
 //
-// `payload` is the opaque captured event body, returned verbatim. It is **not** searchable —
-// the query filters operate on indexed columns only (ADR-039); this field is for reading, not
-// for narrowing.
-//
-// `correlationId` is `string | null` to match the domain model, but a stored firehose row
-// always carries a string: the column is `NOT NULL DEFAULT ''` so that the ingest dedupe
-// UNIQUE actually collides (MySQL treats NULLs as distinct inside a UNIQUE). An event ingested
-// without a correlation id therefore surfaces here as `''` — and is unreachable by any
-// correlation filter or trace.
+// `correlationId` is typed `string | null` to match the domain model, but a stored row always has
+// a string. The column is `NOT NULL DEFAULT ''` so that the ingest dedupe UNIQUE actually collides
+// — MySQL treats `NULL`s as distinct inside a UNIQUE, which would let duplicates through. **The
+// price is that an event ingested without a correlation id surfaces as `''`, and is then reachable
+// by no correlation filter and no trace.**
 export class DomainEventView {
   @ApiResponseProperty()
   public id: number;

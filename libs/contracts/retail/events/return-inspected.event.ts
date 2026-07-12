@@ -1,27 +1,21 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.return.inspected` event, published after a return
-// request walks `received → inspected` (warehouse `inventory:receive-return` records each
-// line's condition + disposition + refund amount). Framework-free (ADR-011) — the Inspect
-// & Disposition use case maps the saved aggregate onto this interface before emitting. The
-// past-tense counterpart of the imperative `retail.return.inspect` command (ADR-008).
-// Emitted onto `notification_events` (the consumer's own queue — the
-// producer-targets-consumer-queue pattern, ADR-008/020), where the notification service
-// binds a return-status consumer for it (a best-effort post-commit emit, ADR-020).
+// `retail.return.inspected` — emitted onto `notification_events`, where the returns consumer binds
+// it (ADR-008/020). Best-effort post-commit.
 //
-// `inspectedAt` is the inspection timestamp (the model stamps no dedicated column — it is
-// the moment the transition ran). `restockedLineCount` is how many lines were dispositioned
-// `restock` (and so flowed back to sellable inventory through
-// `inventory.stock.restock-from-return`) — a downstream can tell a refund-only inspection
-// (0) from one that returned goods to the shelf. `eventVersion` is pinned to `'v1'`;
-// `occurredAt` and `inspectedAt` are ISO-8601 strings.
+// **`restockedLineCount` is the field that carries the outcome.** It counts the lines dispositioned
+// `restock` — the ones that flowed back to sellable inventory through
+// `inventory.stock.restock-from-return`. A `0` means the goods came back and were scrapped or
+// quarantined: the buyer may still be owed money, but nothing returned to the shelf. Without this
+// count a consumer cannot tell a refund-only inspection from a restocking one.
 //
-// `customerEmail` / `customerLocale` carry the buyer's notification contact, resolved
-// producer-side from the RMA's `customerId` against the shared `customer` table (a raw-SQL
-// reader, no gateway-entity import) so the returns consumer has a recipient WITHOUT a
-// per-delivery cross-service RPC (ADR-033 choice). The email is `null` for a
-// tombstoned/missing customer; `customerLocale` always ships `null` — nothing in this system
-// resolves a locale. Both optional — additive on the wire.
+// `inspectedAt` has **no dedicated column** on the model — it is simply the moment the transition
+// ran, stamped on the way out.
+//
+// `customerEmail` is carried on the event, resolved producer-side from the RMA's `customerId`
+// against the shared `customer` table so the consumer needs no per-delivery RPC (ADR-033). It is
+// `null` for a tombstoned customer, and `customerLocale` always ships `null` — nothing in this
+// system resolves a locale.
 export interface IRetailReturnInspectedEvent extends ICorrelationPayload {
   rmaId: number;
   rmaNumber: string;

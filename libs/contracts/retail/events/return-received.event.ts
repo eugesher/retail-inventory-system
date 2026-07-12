@@ -1,22 +1,18 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.return.received` event, published after a return
-// request walks `authorized → received` (warehouse `inventory:receive-return` logs the
-// goods in). Framework-free (ADR-011) — the Receive use case maps the saved aggregate
-// onto this interface before emitting. The past-tense counterpart of the imperative
-// `retail.return.receive` command (ADR-008). Emitted onto `notification_events` (the
-// consumer's own queue — the producer-targets-consumer-queue pattern, ADR-008/020), where
-// the notification service binds a return-status consumer for it (a best-effort
-// post-commit emit, ADR-020). `receivedAt` is the receive timestamp (the model stamps no
-// dedicated column — it is the moment the transition ran). `eventVersion` is pinned to
-// `'v1'`; `occurredAt` and `receivedAt` are ISO-8601 strings.
+// `retail.return.received` — emitted onto `notification_events`, where the returns consumer binds
+// it (ADR-008/020). Best-effort post-commit.
 //
-// `customerEmail` / `customerLocale` carry the buyer's notification contact, resolved
-// producer-side from the RMA's `customerId` against the shared `customer` table (a raw-SQL
-// reader, no gateway-entity import) so the returns consumer has a recipient WITHOUT a
-// per-delivery cross-service RPC (ADR-033 choice). The email is `null` for a
-// tombstoned/missing customer; `customerLocale` always ships `null` — nothing in this system
-// resolves a locale. Both optional — additive on the wire.
+// The goods are **in the building, not back on the shelf**. Nothing has been inspected, nothing
+// has re-entered sellable inventory, and no money has moved — that is `retail.return.inspected`
+// and the refund that may follow it.
+//
+// `receivedAt` has **no dedicated column** on the model; it is the moment the transition ran.
+//
+// `customerEmail` is carried on the event, resolved producer-side from the RMA's `customerId`
+// against the shared `customer` table so the consumer needs no per-delivery RPC (ADR-033). It is
+// `null` for a tombstoned customer, and `customerLocale` always ships `null` — nothing in this
+// system resolves a locale.
 export interface IRetailReturnReceivedEvent extends ICorrelationPayload {
   rmaId: number;
   rmaNumber: string;
