@@ -22,7 +22,7 @@ import { toReturnRequestView } from './return-view.factory';
 // `inventory:receive-return`, gated at the gateway) — the warehouse logging in the
 // physically-returned goods. The domain `receive()` enforces the legal transition
 // (`RETURN_INVALID_STATUS_TRANSITION` from any non-`authorized` start). No per-line
-// outcome is recorded here — that is the Inspect step (a later capability). Emits
+// outcome is recorded here — that is the Inspect step. Emits
 // `retail.return.received` best-effort post-commit (ADR-020); `receivedAt` is the moment
 // the transition ran (the model stamps no dedicated column).
 @Injectable()

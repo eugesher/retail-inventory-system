@@ -3,8 +3,9 @@ export const RETURN_CUSTOMER_CONTACT_READER = Symbol('RETURN_CUSTOMER_CONTACT_RE
 // A flat read projection of one customer's notification contact — just the `email` the
 // return events carry so the notification consumer has a recipient without a per-delivery
 // cross-service RPC (ADR-033's "carry the email on the event" choice). `email` is nullable
-// to model a future tombstoned customer (PII nulled in place) even though the column is
-// NOT NULL today; a customer id that resolves no row is the whole-result `null` below.
+// because **`customer.email` is nullable**: an erasure nulls the PII in place and leaves the row
+// as a tombstone (ADR-037), so a live customer id can genuinely resolve a null email. A customer
+// id that resolves no row at all is the whole-result `null` below.
 export interface IReturnCustomerContact {
   email: string | null;
 }

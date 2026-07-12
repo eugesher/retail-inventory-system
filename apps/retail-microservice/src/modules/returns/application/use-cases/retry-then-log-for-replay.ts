@@ -1,9 +1,9 @@
 import { PinoLogger } from 'nestjs-pino';
 
 export interface IRetryThenLogForReplayOptions {
-  // Bounded attempt budget — retries are immediate (no backoff), the realistic failure
-  // being a transient RMQ hiccup the broker recovers from; a backoff is a later
-  // refinement that would live here, in the one place the posture is defined.
+  // Retries are immediate — there is no backoff. **A retry after a timeout races the original**,
+  // because a timeout does not cancel an RPC that is still travelling; raising this budget widens
+  // that window rather than the resilience. See the note on `replayMessage`.
   maxAttempts: number;
   logger: PinoLogger;
   correlationId: string;

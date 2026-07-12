@@ -19,11 +19,11 @@ import { ReturnRequestMapper } from './return-request.mapper';
 // graph, then finalize a derived field" idiom the order repo follows). Returns domain
 // types only — no TypeORM leak past this file (ADR-017).
 //
-// `save` / `findById` accept an optional `ITransactionScope`: the later Inspect/Close
-// operations hand the same scope to the return-request, refund, and payment writes so
-// they commit as one unit of work (ADR-017 §6 / ADR-032). The `EntityManager` downcast
-// that unwraps the brand lives only in `returnRequestRepo` (the place ADR-017 §6
-// permits it).
+// `save` / `findById` accept an optional `ITransactionScope` so Inspect can re-read and write the
+// RMA inside one attempt's transaction, under the OCC retry (ADR-017 §6 / ADR-032). The scope
+// spans the RMA root and its lines and **nothing else** — returns cannot reach the orders
+// module's `Refund` / `Payment`. The `EntityManager` downcast that unwraps the brand is confined
+// to `returnRequestRepo`.
 @Injectable()
 export class ReturnRequestTypeormRepository
   extends BaseTypeormRepository<ReturnRequestEntity, ReturnRequest>

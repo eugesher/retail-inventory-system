@@ -160,10 +160,11 @@ export class CartTypeormRepository
     }
   }
 
-  // Guest-promotion seam: an authenticated shopper claims a guest cart. A direct
-  // column update (TypeORM's `@VersionColumn` advances the version on this update
-  // too, which is fine — the OCC guard it feeds is a later capability). The owning
-  // use case, with the ownership pre-checks, arrives with the cart operations.
+  // Guest-promotion seam: an authenticated shopper claims a guest cart (`ClaimCartUseCase`,
+  // which does the ownership pre-check). **The one cart write that does not go through
+  // `runWithCartWriteRetry`** — it is a single-column UPDATE, not a read-modify-write, so there
+  // is no compare-and-swap to lose. `@VersionColumn` still advances the version, which is what
+  // makes a concurrent cart mutation lose its CAS and retry against the reassigned row.
   public async reassignCustomer(cartId: string, customerId: string): Promise<void> {
     await this.cartRepository.update({ id: cartId }, { customerId });
   }

@@ -48,11 +48,9 @@ const CURRENCY_PATTERN = /^[A-Za-z]{3}$/;
 // the other aggregates' `<TId | null>` shape; in practice a live cart always
 // carries a concrete id.
 //
-// `version` is the optimistic-concurrency token: it ships and advances on every
-// mutation now, even though no concurrency guard consumes it yet — retrofitting an
-// OCC column onto a populated table later is a destructive `ALTER TABLE`, so the
-// column is cheapest up front (ADR-028 §6, the same reasoning ADR-027 used for
-// `stock_level.version`).
+// `version` is the OCC token, and **the guard is live**: `runWithCartWriteRetry` re-reads under a
+// fresh transaction when a compare-and-swap is lost, and surfaces a `409` once the budget is spent
+// (ADR-036/045). The in-memory bump here exists so the model is testable without a database.
 export class Cart extends AggregateRoot<string | null> {
   private readonly _customerId: string | null;
   private readonly _currency: string;
@@ -220,14 +218,21 @@ export class Cart extends AggregateRoot<string | null> {
     this.addDomainEvent(new CartLineRemovedEvent({ cartId: this.requireId(), lineId }));
   }
 
-  // active → converted. Called by Place Order (a later capability) once the cart's
-  // lines are snapshotted into the order. Terminal; re-placing a converted cart is
-  // an idempotency concern handled at the use-case layer, not here.
+  // active → converted. Terminal.
+  //
+  // **Nothing calls this, and Place Order must not start.** Place Order converts the cart from
+  // the `orders/` module, through `ORDER_CART_READER` — a raw `UPDATE cart SET status =
+  // 'converted' … WHERE status = 'active'`, whose `WHERE` clause is the compare-and-swap that
+  // serialises two concurrent places into one order. (It has to be raw SQL: `orders/` may not
+  // import `cart/`.) Calling this mutator and saving the aggregate would set the same status
+  // **without that CAS**, and a racing second place would then succeed. If you need to convert a
+  // cart, go through the reader.
   public markConverted(): void {
     this.transitionFromActive(CartStatusEnum.CONVERTED, 'markConverted');
   }
 
-  // active → abandoned. No producer yet — ships for the later purge capability.
+  // active → abandoned. Terminal. **Nothing calls this either, so no cart is ever abandoned** —
+  // Place Order reads and rejects the `abandoned` status, but nothing in the system produces it.
   public markAbandoned(): void {
     this.transitionFromActive(CartStatusEnum.ABANDONED, 'markAbandoned');
   }

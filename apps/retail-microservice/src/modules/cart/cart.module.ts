@@ -43,7 +43,7 @@ import { CartController, CartRpcExceptionFilter } from './presentation';
 // Add-to-Cart price snapshot can call `catalog.price.select` on `catalog_queue`;
 // `MicroserviceClientInventoryModule` so Add/Change/Remove can reserve/release
 // stock via `inventory.reservation.*` on `inventory_queue` (ADR-030); and
-// `MicroserviceClientRetailModule` so the publisher can emit the four reserved
+// `MicroserviceClientRetailModule` so the publisher can emit the reserved
 // `retail.cart.*` events onto the service's own `retail_queue`; and
 // `MicroserviceClientRisEventsModule` so the publisher can mirror those same events
 // onto the `ris.events` topic exchange for the event-store firehose (ADR-035, the
