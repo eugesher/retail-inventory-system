@@ -26,9 +26,9 @@ import { ICatalogEventsPublisherPort } from '../../application/ports';
 // `inventory.stock.low → notification_events` already uses; it is not a new
 // architectural decision and needs no topic/fanout exchange.
 //
-// `catalog.product.published` / `.archived` stay on `catalog_queue` as reserved
-// surfaces — emitting to a queue with no matching handler is the same pattern
-// `retail.order.confirmed` follows today.
+// `catalog.product.published` / `.archived` stay on `catalog_queue` as reserved surfaces:
+// emitting to a queue with no matching handler is deliberate, not a missing binding
+// (README §2 enumerates them).
 //
 // Every event is additionally **dual-published** (ADR-035): after the primary
 // emit, the same routing key + wire is mirrored onto the `ris.events` topic
