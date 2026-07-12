@@ -34,7 +34,7 @@ export enum NotificationErrorCodeEnum {
   // `NotificationDelivery` mutators, 409.
   DELIVERY_INVALID_STATUS_TRANSITION = 'NOTIFICATION_DELIVERY_INVALID_STATUS_TRANSITION',
 
-  // --- Thrown by the use cases (later capabilities) ---
+  // --- Thrown by the use cases ---
   // The template being read/edited does not exist — 404 (the Author/Activate/List
   // operations resolve a template by id or natural key).
   TEMPLATE_NOT_FOUND = 'NOTIFICATION_TEMPLATE_NOT_FOUND',

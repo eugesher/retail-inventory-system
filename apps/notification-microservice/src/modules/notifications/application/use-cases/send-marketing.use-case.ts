@@ -22,8 +22,11 @@ import { toNotificationDeliveryView } from './notification-delivery-view.factory
 // (NOT in `TRANSACTIONAL_EVENT_TYPES`), the gate weighs it against `marketingEmail`.
 //
 // Returns the resulting `NotificationDeliveryView` (sent, or the `skipped-no-consent`
-// row, or a pre-existing duplicate), or `null` when no active marketing template
-// resolves (a seed/config gap — the seeded marketing template is a later capability).
+// row, or a pre-existing duplicate), or `null` when no active marketing template resolves.
+//
+// **On a fresh database that `null` is the only outcome.** No marketing template is seeded
+// anywhere — not by a migration, not by `scripts/test-db-seed.ts` — so this succeeds, sends
+// nothing, and returns `null` until a staff member authors one and activates it.
 @Injectable()
 export class SendMarketingUseCase {
   constructor(

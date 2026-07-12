@@ -20,7 +20,7 @@ export enum PricingErrorCodeEnum {
   // TaxCategory invariants (enforced in the `TaxCategory` model).
   TAX_CATEGORY_CODE_INVALID = 'PRICING_TAX_CATEGORY_CODE_INVALID',
   TAX_CATEGORY_NAME_REQUIRED = 'PRICING_TAX_CATEGORY_NAME_REQUIRED',
-  // Repository-level rejections surfaced by the write use cases (later tasks).
+  // Repository-level rejections surfaced by the write use cases.
   // The aggregate cannot see other rows, so global `code` uniqueness, tax-category
   // existence, and variant existence are pre-checked through the repository port
   // and raised with these codes (the UNIQUE / FK constraints remain the hard

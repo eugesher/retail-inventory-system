@@ -12,6 +12,12 @@
 // `DELIVERED` and `BOUNCED` are terminal, and a delivery row is never deleted — it is the source
 // of truth for "did we already send this?"
 //
+// **But nothing produces either status today.** They are written only by
+// `notification.delivery.record-outcome`, the ESP-webhook seam — and no webhook bridge exists, no
+// gateway route fronts that RPC, and the default `NOTIFIER` reports nothing back. So a filter on
+// `delivered` or `bounced` returns an empty list **always**, not "not yet". A delivery's real
+// terminal states are `SENT`, `FAILED` and `SKIPPED_NO_CONSENT`.
+//
 // `SKIPPED_NO_CONSENT` is **terminal and set at row creation**: it is not reachable from `QUEUED`
 // at all. The Render & Dispatch consent gate (ADR-037) writes the row directly in this status
 // when the channel is unconsented, recording what *would* have been sent for the audit trail

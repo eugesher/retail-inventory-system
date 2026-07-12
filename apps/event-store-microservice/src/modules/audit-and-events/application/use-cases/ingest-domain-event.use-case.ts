@@ -17,10 +17,15 @@ import { resolveAggregateId, resolveAggregateType, resolveProducer } from './fir
 //   * Idempotent. The `domain_event` table carries a composite UNIQUE
 //     `(producer, event_type, aggregate_id, occurred_at, correlation_id)`; the repository
 //     swallows the dup as `{ inserted: false }`, so a redelivery is absorbed with no
-//     second row and no error. For that key to actually collide, an absent/empty wire
-//     `correlationId` is coalesced to `''` HERE (the column is nullable and MySQL treats
-//     NULLs as distinct in a UNIQUE index, so a NULL correlation id would slip past the
-//     dedupe on every redelivery).
+//     second row and no error.
+//
+//     **MySQL treats NULLs as distinct inside a UNIQUE**, so a null correlation id would slip
+//     past that dedupe on every redelivery. Two guards stop it, and they are independent: the
+//     column is **`NOT NULL DEFAULT ''`** (the migration made it so deliberately, rather than
+//     trusting a single line of application code), and an absent/empty wire `correlationId` is
+//     coalesced to `''` here. **Note the asymmetry with `audit_log_entry.correlation_id`, which
+//     IS nullable** — it has no dedupe key to protect, so a `WHERE correlation_id = ?` there
+//     matches no null-correlation row.
 //
 //   * Crash-safe / never-rethrow. A consumer that throws inside an `@EventPattern` makes
 //     the broker blind-redeliver in a hot loop (ADR-011 §7). So malformed input is

@@ -56,9 +56,12 @@ export interface IOpenNotificationDeliveryInput {
 // (and `FAILED → SENT` once a retry succeeds) — the retry sweeper re-attempts `failed`
 // rows. A row created via the `skipped` factory is born in the terminal
 // `SKIPPED_NO_CONSENT` status (the consent-gate short-circuit, ADR-037) and never
-// enters that walk. The row is **live-ephemeral**: it is never deleted (a
-// `RETENTION_DELIVERY_DAYS` purge is a deferred future capability), so `deletedAt`
-// stays inert.
+// enters that walk.
+//
+// **A delivery row is never deleted, and nothing bounds the table.** `deletedAt` stays inert and
+// there is no retention sweep — `notification_delivery` grows for the life of the deployment. The
+// `RETENTION_DELIVERY_DAYS` env var exists and validates (Joi, default 90), but **no code reads
+// it**, so setting it changes nothing.
 //
 // `attemptCount` is **monotonic** — only `markSent` / `markFailed` (the two
 // attempt-consuming transitions) increment it; `markDelivered` / `markBounced` record a

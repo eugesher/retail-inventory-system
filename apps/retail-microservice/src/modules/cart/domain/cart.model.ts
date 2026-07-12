@@ -218,21 +218,30 @@ export class Cart extends AggregateRoot<string | null> {
     this.addDomainEvent(new CartLineRemovedEvent({ cartId: this.requireId(), lineId }));
   }
 
-  // active → converted. Terminal.
+  // **Neither status mutator below has a caller, yet both statuses are reached.** The `Cart`
+  // aggregate does not drive its own terminal transitions: each one is performed by *another*
+  // module, in **raw SQL**, because neither module may import `cart/`.
   //
-  // **Nothing calls this, and Place Order must not start.** Place Order converts the cart from
-  // the `orders/` module, through `ORDER_CART_READER` — a raw `UPDATE cart SET status =
-  // 'converted' … WHERE status = 'active'`, whose `WHERE` clause is the compare-and-swap that
-  // serialises two concurrent places into one order. (It has to be raw SQL: `orders/` may not
-  // import `cart/`.) Calling this mutator and saving the aggregate would set the same status
-  // **without that CAS**, and a racing second place would then succeed. If you need to convert a
-  // cart, go through the reader.
+  //   converted  ← `orders/`, via `ORDER_CART_READER`:
+  //                `UPDATE cart SET status='converted' … WHERE id=? AND status='active'`
+  //   abandoned  ← the gateway's `auth/`, via `CUSTOMER_ERASURE_WRITER`:
+  //                `UPDATE cart SET status='abandoned' … WHERE customer_id=? AND status='active'`
+  //
+  // Both bump `version` in the same statement, so a concurrent cart writer loses its CAS and
+  // retries against the changed row.
+
+  // active → converted. Terminal. **Do not call this, and do not "wire it up" to Place Order.**
+  // The reader's `WHERE status = 'active'` is not a filter — it is the compare-and-swap that
+  // serialises two concurrent places into one order. Setting the status through the aggregate
+  // instead would write the same value **without that CAS**, and the racing second place would
+  // succeed.
   public markConverted(): void {
     this.transitionFromActive(CartStatusEnum.CONVERTED, 'markConverted');
   }
 
-  // active → abandoned. Terminal. **Nothing calls this either, so no cart is ever abandoned** —
-  // Place Order reads and rejects the `abandoned` status, but nothing in the system produces it.
+  // active → abandoned. Terminal. Reached only by a customer erasure (ADR-037), which abandons
+  // every active cart the erased customer owns — a cart is a disposable working set, not a record
+  // to preserve. Place Order reads the status and rejects it.
   public markAbandoned(): void {
     this.transitionFromActive(CartStatusEnum.ABANDONED, 'markAbandoned');
   }

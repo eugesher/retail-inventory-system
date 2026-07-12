@@ -14,7 +14,8 @@ import { RetryDeliveryUseCase } from './retry-delivery.use-case';
 // `lastAttemptAt + baseMs * 2^(attemptCount - 1) > now` ⇒ skip. So after the 1st failure
 // (`attemptCount === 1`) a row waits `baseMs`, after the 2nd `2 * baseMs`, etc. A small
 // base keeps the retry loop (and the e2e that exercises it) fast while still spacing
-// attempts; production tuning would raise it (a `ConfigService` knob is future work).
+// attempts. **It is a hardcoded constant, not config** — unlike every other tunable in the repo,
+// which arrives through a DI token. Changing the backoff means changing this line.
 const RETRY_BACKOFF_BASE_MS = 1_000;
 
 // One sweep processes at most this many retryable rows. `listRetryable` orders

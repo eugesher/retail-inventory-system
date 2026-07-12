@@ -27,8 +27,8 @@ export interface ICategorySubtreeOptions {
 //
 // `slug` global uniqueness is a repository-level invariant the domain cannot see
 // (ADR-025): the UNIQUE constraint in the schema is the guard, and `existsBySlug`
-// gives the (later) create use case a clean pre-check so a duplicate raises a
-// typed domain error instead of a raw driver exception.
+// gives a write use case a clean pre-check so a duplicate raises a typed domain error instead of
+// a raw driver exception.
 export interface ICategoryRepositoryPort {
   // Inserts or updates one category row; re-reads for the concrete id.
   save(category: Category): Promise<Category>;
