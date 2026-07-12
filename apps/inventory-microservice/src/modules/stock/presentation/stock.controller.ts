@@ -64,8 +64,9 @@ export class StockController {
     private readonly listStockMovements: ListStockMovementsUseCase,
   ) {}
 
-  // Read path on the new model (ADR-027): per-variant availability across the
-  // requested stock locations.
+  // Every handler below is a one-line hand-off: the use case owns the behaviour, and
+  // `InventoryRpcExceptionFilter` owns the code → HTTP status mapping. Neither is restated here —
+  // the comments record only what a reader would get wrong.
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_GET)
   public handleStockLevelGet(
     @Payload() payload: IVariantStockGetPayload,
@@ -73,7 +74,6 @@ export class StockController {
     return this.queryAvailability.execute(payload);
   }
 
-  // Lists the stock locations (optionally active-only).
   @MessagePattern(ROUTING_KEYS.INVENTORY_LOCATION_LIST)
   public handleLocationList(
     @Payload() payload: IStockLocationsListPayload,
@@ -81,10 +81,9 @@ export class StockController {
     return this.listLocations.execute(payload);
   }
 
-  // Audit read (ADR-030 §2): the paginated, filterable, newest-first timeline of
-  // one variant's `stock_movement` ledger rows. An unknown variant (or one with no
-  // movements) is an empty page, not a 404 — the public-read zero-answer
-  // convention. Uncached (an operator-driven audit query).
+  // **An unknown variant is an empty page, not a `404`.** A read that finds nothing has still
+  // answered the question. Uncached, deliberately — an operator's audit query must not be served a
+  // stale timeline.
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_LIST)
   public handleStockMovementList(
     @Payload() payload: IStockMovementListPayload,
@@ -92,28 +91,21 @@ export class StockController {
     return this.listStockMovements.execute(payload);
   }
 
-  // Receive Stock write path (ADR-027): raises on-hand by a positive quantity.
-  // A domain rejection (e.g. an inactive/unknown location) is terminated by the
-  // `InventoryRpcExceptionFilter` into a `{ statusCode, ... }` the gateway maps.
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_RECEIVE)
   public handleStockReceive(@Payload() payload: IStockReceivePayload): Promise<StockLevelView> {
     return this.receiveStock.execute(payload);
   }
 
-  // Adjust Stock write path (ADR-027): applies a signed delta with a mandatory
-  // reasonCode. A result that would go below zero is rejected as a 409 (mapped by
-  // the `InventoryRpcExceptionFilter`).
+  // The `reasonCode` is **mandatory**, unlike on every other write — an adjustment is the one
+  // operation with no business event behind it, so the reason is the only record of why.
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST)
   public handleStockAdjust(@Payload() payload: IStockAdjustPayload): Promise<StockLevelView> {
     return this.adjustStock.execute(payload);
   }
 
-  // Transfer Stock write path (ADR-030): moves on-hand between two locations of one
-  // variant atomically — two version-checked `StockLevel` writes + two paired
-  // `adjustment` movements (sharing a `transfer` reference) in one transaction. A
-  // bad quantity / same-location is a 400; an over-transfer (source below zero) is a
-  // 409 `STOCK_RESULT_NEGATIVE`; an unknown/inactive location reuses the existing
-  // location codes — all mapped by the `InventoryRpcExceptionFilter`.
+  // **A transfer is two `adjustment` movements, not a movement type of its own.** They share a
+  // `transfer` reference id, which is the only thing pairing them — nothing in the ledger says
+  // "these units went from A to B", and there is no in-transit state between the two locations.
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_TRANSFER)
   public handleStockTransfer(
     @Payload() payload: IStockTransferPayload,
@@ -121,17 +113,14 @@ export class StockController {
     return this.transferStock.execute(payload);
   }
 
-  // Reserve Stock (ADR-030): holds units for a cart against the no-oversell
-  // guard. An over-request is a 409 `OUT_OF_STOCK` (carrying `details.available`),
-  // mapped by the `InventoryRpcExceptionFilter`.
   @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_RESERVE)
   public handleReserve(@Payload() payload: IReservationReservePayload): Promise<ReservationView> {
     return this.reserveStock.execute(payload);
   }
 
-  // Release Reservation (ADR-030): returns held units to `available` and writes a
-  // `release` movement. Selector is `reservationId` (one row) or `cartId`
-  // (+ optional variantId/stockLocationId, all matching active rows).
+  // **The two selectors fail differently, and that is deliberate.** By `reservationId`, naming a
+  // hold that does not exist is a `404`; by `cartId`, matching nothing is an idempotent no-op —
+  // removing a cart line twice must not error.
   @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE)
   public handleRelease(
     @Payload() payload: IReservationReleasePayload,
@@ -139,14 +128,13 @@ export class StockController {
     return this.releaseReservation.execute(payload);
   }
 
-  // Sweep Expired Reservations (ADR-038): the on-demand twin of the timer. It runs
-  // the SAME use case `ReservationSweepScheduler` ticks — there is no second sweep
-  // implementation — so the only difference is `actorId`, which the gateway folds in
-  // from the staff principal and which lands on every `release` ledger row this
-  // invocation writes. `batchSize` is an override the use case clamps into
-  // `[1, RESERVATION_SWEEP_BATCH_SIZE]`. A sweep that exhausts its retry budget
-  // surfaces `STOCK_WRITE_CONFLICT` → `409` through the `InventoryRpcExceptionFilter`,
-  // which is the honest answer: the system is under write contention, try again.
+  // The on-demand twin of the timer, and it runs **the same use case** — there is no second sweep
+  // implementation, so an operator sweep and a scheduled one cannot drift apart. The only
+  // difference is `actorId`: a human triggered this one, and their id lands on every `release`
+  // ledger row the invocation writes.
+  //
+  // `batchSize` is an override the use case **clamps** into `[1, RESERVATION_SWEEP_BATCH_SIZE]` —
+  // the configured value is a ceiling an operator cannot raise.
   @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_SWEEP)
   public handleReservationSweep(
     @Payload() payload: IReservationSweepPayload,
@@ -154,11 +142,9 @@ export class StockController {
     return this.sweepExpiredReservations.execute(payload);
   }
 
-  // Allocate Stock (ADR-030): converts a cart's holds into an order's allocations
-  // at place-time (refresh-then-commit for a stale-but-held hold; direct-allocation
-  // fallback when no hold exists). All-lines-atomic; an over-allocation is a 409
-  // `OUT_OF_STOCK` (carrying `details.available`). Invoked by the retail place
-  // transaction pre-commit (a rejection rolls the place back).
+  // **Called from inside retail's place transaction, before it commits** — so a rejection here
+  // rolls the whole order placement back. That is the point: an order that cannot get its stock
+  // must not exist. All-lines-atomic, with a direct-allocation fallback when a line has no hold.
   @MessagePattern(ROUTING_KEYS.INVENTORY_RESERVATION_ALLOCATE)
   public handleAllocate(
     @Payload() payload: IReservationAllocatePayload,
@@ -166,11 +152,9 @@ export class StockController {
     return this.allocateStock.execute(payload);
   }
 
-  // Cancel Allocation (ADR-030): reverses an order's allocation, returning the units
-  // to `available` and writing a `release` movement per line. Idempotency is
-  // quantity-guarded — an over-cancel is a 409 `STOCK_RESULT_NEGATIVE`. Resolves
-  // `{ cancelled }` (the line count) over RMQ. No in-repo caller yet — the later
-  // order-cancel flow + the place-failure compensation invoke it.
+  // **Idempotency here is quantity-guarded, not key-guarded.** There is no idempotency key — a
+  // replayed cancel simply finds nothing left to release and an over-cancel is refused. Resolves
+  // `{ cancelled }`, the line count, not the unit count.
   @MessagePattern(ROUTING_KEYS.INVENTORY_ALLOCATION_CANCEL)
   public handleCancelAllocation(
     @Payload() payload: IAllocationCancelPayload,
@@ -178,26 +162,22 @@ export class StockController {
     return this.cancelAllocation.execute(payload);
   }
 
-  // Commit Sale (ADR-031): physically ships an order's allocated stock at
-  // fulfillment time — per line it decrements BOTH on-hand and allocated in one
-  // `StockLevel.commitSale` and appends one strictly-negative `sale` movement
-  // referencing the fulfillment. All-lines-atomic; idempotent on `fulfillmentId`
-  // (a replay decrements nothing and re-returns). An on-hand shortfall is a 409
-  // `STOCK_RESULT_NEGATIVE` (mapped by the `InventoryRpcExceptionFilter`). Driven
-  // retail→inventory over RMQ after the local ship commit (no gateway HTTP route).
+  // **Called AFTER retail's ship transaction has committed**, not inside it — the opposite of
+  // Allocate above. So a failure here cannot unship anything, and an RMQ redelivery is a normal
+  // event rather than an anomaly. That is what `fulfillmentId` is for: it makes the replay a no-op.
+  //
+  // No gateway HTTP route. Retail drives it.
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_COMMIT_SALE)
   public handleCommitSale(@Payload() payload: ICommitSalePayload): Promise<ICommitSaleResult> {
     return this.commitSale.execute(payload);
   }
 
-  // Restock from Return (ADR-032): physically returns a return request's
-  // `restock`-disposition stock to sellable inventory at inspection time — per line
-  // it increments `quantity_on_hand` in one `StockLevel.changeOnHand(+quantity)` and
-  // appends one strictly-positive `return` movement referencing the return request
-  // (the long-reserved `return` ledger type's first producer). All-lines-atomic;
-  // idempotent on `returnRequestId` (a replay increments nothing and re-returns).
-  // Driven retail→inventory over RMQ after the local inspect commit (no gateway HTTP
-  // route).
+  // The mirror of Commit Sale: called **after** retail's inspect has committed, idempotent on
+  // `returnRequestId` for the same reason. **Only `restock`-disposition lines arrive here** —
+  // scrapped and quarantined goods came back to the warehouse but never to the shelf, and inventory
+  // never hears about them.
+  //
+  // No gateway HTTP route. Retail drives it.
   @MessagePattern(ROUTING_KEYS.INVENTORY_STOCK_RESTOCK_FROM_RETURN)
   public handleRestockFromReturn(
     @Payload() payload: IRestockFromReturnPayload,
