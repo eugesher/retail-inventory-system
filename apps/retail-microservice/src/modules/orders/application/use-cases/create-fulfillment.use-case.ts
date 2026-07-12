@@ -29,33 +29,19 @@ import { toFulfillmentView } from './fulfillment-view.factory';
 // `Fulfillment` carries a slice of the ordered quantities, and an order resolves to a
 // list of them.
 //
-// **Authorization is owner-or-staff** (ADR-024 / ADR-028 §7), enforced here as the
-// single point of truth via `loadAuthorizedOrder`: allow if `isStaffFulfill` (the
-// gateway already confirmed the caller carries `order:fulfill`) **or**
-// `order.customerId === actorId` (the owning customer) — else `ORDER_ACCESS_FORBIDDEN`
-// (403); a missing order is 404. Practically Create is staff-run, but the
-// owner-or-staff shape keeps the module's one authorization model.
+// Authorization goes through `loadAuthorizedOrder` (the rule is stated there, once); the override is
+// `order:fulfill`. **In practice Create is staff-run** — the owner-or-staff shape is here to keep the
+// module on one authorization model, not because a customer is expected to plan its own shipment.
 //
-// **Preconditions** (an order must be in a fulfillable state):
-// - lifecycle `status ∈ {pending, confirmed}` — a cancelled/shipped/delivered order is
-//   rejected `ORDER_NOT_FULFILLABLE` (409);
-// - payment `paymentStatus ∈ {authorized, captured}` — an order with nothing
-//   authorized to pay for the shipment is rejected `ORDER_NOT_FULFILLABLE` (409). The
-//   payment axis lives on the `Order` header, so no separate `Payment` load is needed.
-//
-// **The cross-fulfillment quantity invariant** (the heart of this use case): the
-// aggregate cannot see its sibling fulfillments or the order's line quantities, so it
-// only enforces its own shape (≥ 1 line, each quantity > 0). The use case enforces the
-// rest: each requested `orderLineId` must belong to the order (`ORDER_LINE_NOT_FOUND`,
-// 404), and `alreadyFulfilled + requested ≤ ordered` measured against the
-// **already-fulfilled remainder** — the sum of that line's quantities across all the
-// order's existing non-`cancelled` fulfillments — else
-// `FULFILLMENT_QUANTITY_EXCEEDS_REMAINING` (409).
+// **The cross-fulfillment quantity invariant is why this use case exists.** `Fulfillment` can
+// enforce its own shape (≥ 1 line, each quantity > 0) and nothing beyond it — the aggregate
+// cannot see its sibling shipments or the order's line quantities. The two `assert*` helpers
+// below are that gap, closed here.
 //
 // **Side-effect-free on the order header.** Create yields a `pending` `Fulfillment`
-// and leaves the order/line statuses untouched. A line's `partially-shipped` status is
-// observed once units are *in flight*, which is the Ship operation's job — keeping
-// Create a single repository write with no order-header churn.
+// and leaves the order/line statuses untouched — a line turns `partially-shipped` only once
+// units are *in flight*, which is Ship's job. So Create is one repository write: no
+// transaction, no OCC retry, no order-header churn.
 @Injectable()
 export class CreateFulfillmentUseCase {
   constructor(

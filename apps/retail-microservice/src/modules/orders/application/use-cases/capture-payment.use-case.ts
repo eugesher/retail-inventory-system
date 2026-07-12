@@ -29,18 +29,17 @@ import { loadAuthorizedOrder } from './order-access';
 import { runWithOrderWriteRetry } from './order-write';
 import { toOrderView } from './order-view.factory';
 
-// Capture Payment is the explicit, second half of the authorize-then-capture policy
-// (Q5 / ADR-028 §3). Authorization happens automatically at place-time; capture
-// (taking the money) is a separate operation an operator or the owning customer
-// triggers later. Making capture explicit is what keeps other policies achievable —
-// ship-triggered auto-capture is a later fulfillment capability, not baked into the
-// place flow.
+// The explicit half of authorize-then-capture (ADR-028 §3). Authorization happens automatically at
+// place-time; **taking the money is a separate operation**, triggered by an operator or the owning
+// customer.
 //
-// **Authorization is owner-or-staff** (ADR-024 / ADR-028 §7), enforced here as the
-// single point of truth: allow if `isStaffCapture` (the gateway already confirmed the
-// caller carries `order:capture`) **or** `order.customerId === actorId` (the owning
-// customer) — else `ORDER_ACCESS_FORBIDDEN` (403). The permission code is a staff
-// override over the owner-check, not a customer gate.
+// **It is not the only path that captures.** `ShipFulfillmentUseCase` captures too, on ship, calling
+// the same `paymentGateway.capture(payment.gatewayReference)`. The two can run concurrently against
+// one authorization — see the note at the gateway call below.
+//
+// Authorization goes through `loadAuthorizedOrder` (the rule is stated there, once). The staff
+// override for this operation is `order:capture` — **a customer may capture its own order's
+// payment**, which is not obvious: taking the money is not a staff-only act here.
 //
 // **Two idempotency layers (ADR-036).** First the request-level `Idempotency-Key`:
 // `execute` fingerprints the canonical body (`bodyFingerprint`), looks the
@@ -50,11 +49,12 @@ import { toOrderView } from './order-view.factory';
 // before `capture`, which owns the whole flow including the emit). A same-key/*different*-
 // body hit is a client key-reuse bug → `422`; a missing key is a `400` backstop (the
 // gateway enforces the header at the edge). Second, the natural idempotency remains the
-// backstop: re-capturing an already-`captured` payment returns the current `captured`
-// state rather than erroring (so a new-key re-capture is still safe). `amountMinor` is
-// accepted for forward-compat, but partial capture is a later capability — the gateway
-// always captures the full authorized amount, and the emitted event reports the payment
-// row's actual amount.
+// backstop: re-capturing an already-`captured` payment returns the current `captured` state rather
+// than erroring.
+//
+// **`amountMinor` is not a partial-capture control.** The gateway always captures the full
+// authorized amount, whatever is passed; a value that differs from the order's total is logged and
+// ignored. The emitted event reports the payment row's actual amount, never the request's.
 //
 // The gateway `capture` call is **out-of-process**, so it runs outside the DB
 // transaction (the authorize-on-place rationale); only the two writes that follow —
@@ -208,10 +208,11 @@ export class CapturePaymentUseCase {
       );
     }
 
-    // `amountMinor` is accepted for forward-compat but partial capture is a later
-    // capability — the gateway captures the full authorized amount regardless, so
-    // the requested figure is only logged (the emitted event reports the payment
-    // row's actual amount, never an uncaptured request).
+    // **`amountMinor` is accepted and then ignored.** The gateway captures the full authorized
+    // amount, always; nothing in the system captures a partial one. A caller that passes a
+    // smaller figure gets the full charge and an `info` line — never a rejection, and never a
+    // partial capture. The emitted event reports the payment row's actual amount, so a client
+    // reading it back sees what was really taken.
     if (amountMinor !== undefined && amountMinor !== order.grandTotalMinor) {
       this.logger.info(
         { correlationId, orderId, requestedAmountMinor: amountMinor },
@@ -219,7 +220,15 @@ export class CapturePaymentUseCase {
       );
     }
 
-    // Out-of-process gateway call — deliberately outside the DB transaction.
+    // Out-of-process gateway call, outside the DB transaction — **and outside the lock that would
+    // make the `AUTHORIZED` check above mean anything.** That check ran on an unlocked read at
+    // :182. Between it and the transaction below, a concurrent capture — or a Ship, which also
+    // captures — can capture the same authorization. Both callers reach this line; both charge the
+    // gateway; the loser then throws at `freshPayment.capture()` and rolls back a transaction that
+    // cannot un-call the processor.
+    //
+    // **A known, unfixed defect.** The bound gateway is a fake that always approves, so it is
+    // latent. Do not write a comment anywhere claiming this path cannot double-charge.
     const result = await this.paymentGateway.capture(payment.gatewayReference, correlationId);
     if (!result.captured) {
       this.logger.warn({ correlationId, orderId }, 'Payment gateway declined capture');
@@ -229,15 +238,17 @@ export class CapturePaymentUseCase {
       );
     }
 
-    // Short follow-up transaction: advance the Payment and the order's payment axis
-    // atomically, under the bounded OCC retry (ADR-036). The gateway `capture` above
-    // ran ONCE, outside the loop — a retry never re-charges. Each attempt re-loads the
-    // payment + order INSIDE its own transaction (so a lost order CAS re-reads fresh,
-    // committed state and the domain mutators stay valid on the retry), captures the
-    // order's version at load, and version-checked-CAS-saves the order. A concurrent
-    // capture that already captured the payment surfaces `PAYMENT_INVALID_STATUS_TRANSITION`
-    // (a terminal domain 409, never retried); a lost order CAS retries then
-    // `409 VERSION_MISMATCH` at exhaustion.
+    // Short follow-up transaction: advance the Payment and the order's payment axis atomically,
+    // under the bounded OCC retry (ADR-036). Each attempt re-loads the payment and order inside its
+    // own transaction, so a lost order CAS re-reads fresh committed state and the domain mutators
+    // stay valid on the retry.
+    //
+    // **"The gateway `capture` ran once, so a retry never re-charges" is true — and it is not the
+    // hazard.** A *retry* is one caller trying again. A *concurrent* caller is a second charge that
+    // already happened, up at the gateway call, before either of them got here. When this branch
+    // raises `PAYMENT_INVALID_STATUS_TRANSITION` for "someone already captured", it is reporting
+    // correct STATE while the money has moved twice. Do not read that 409 as evidence the race was
+    // caught in time. It was caught too late by exactly one gateway round-trip.
     await runWithOrderWriteRetry(
       { logger: this.logger, maxAttempts: this.maxAttempts },
       () =>

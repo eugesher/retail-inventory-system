@@ -35,10 +35,9 @@ import { resolveCustomerEmail } from './resolve-customer-email';
 // is delivered, rolls the order itself up to `delivered` on both its lifecycle and
 // fulfillment axes.
 //
-// **Authorization is owner-or-staff** (ADR-024 / ADR-028 §7) via `loadAuthorizedOrder`:
-// allow if `isStaffFulfill` (the gateway already confirmed `order:fulfill`) **or**
-// `order.customerId === actorId`. Practically Deliver is staff-run (exposed as an admin
-// endpoint, since carrier webhooks are out of scope).
+// Authorization goes through `loadAuthorizedOrder` (the rule is stated there, once); the override is
+// `order:fulfill`. **In practice Deliver is staff-run** — there is no carrier webhook, so a human
+// marks the box arrived.
 @Injectable()
 export class MarkDeliveredUseCase {
   constructor(

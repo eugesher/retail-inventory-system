@@ -16,10 +16,10 @@ const MAX_PAGE_SIZE = 100;
 
 // List My Orders: the caller's own order history, newest-first (`placed_at DESC`),
 // paginated as an `IPage<OrderView>`. It is **own-only** by construction — the only
-// identity it carries is `customerId` (the gateway folds in `@CurrentUser().id`), and
-// the repository scopes the query to that customer. There is no staff all-orders
-// listing here (a later refinement), so unlike Get Order there is no `canReadAny`
-// override — a staff member sees only its own orders through this path too.
+// identity it carries is `customerId` (the gateway folds in `@CurrentUser().id`), and the repository
+// scopes the query to that customer. **There is no all-orders listing anywhere in the system**, so
+// unlike Get Order there is no `canReadAny` override — a staff member sees only its own orders
+// through this path too, and has no other path.
 //
 // The list projection carries the full line detail but **omits the per-order
 // `payment` row**: folding it in would be one extra query per order (an N+1 on the

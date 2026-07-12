@@ -11,11 +11,10 @@ import { PurgeExpiredIdempotencyKeysUseCase } from '../../application/use-cases'
 // a thrown sweep never crashes the scheduler loop (the notification `DeliveryRetryScheduler`
 // precedent — the schedule decorator stays in `infrastructure/`, never in the use case).
 //
-// Cadence: every ten minutes. The TTL horizon (`IDEMPOTENCY_KEY_TTL_HOURS`, default 24h) is
-// what actually bounds a row's lifetime; this interval only decides how promptly an already-
-// expired row is reclaimed, so a coarse ten-minute tick keeps the table bounded without
-// hammering the DB. The delete itself is a single bounded `DELETE … WHERE expires_at < now`
-// safe to run concurrently with live inserts.
+// **The tick does not bound a row's lifetime — `IDEMPOTENCY_KEY_TTL_HOURS` does.** All this
+// interval decides is how promptly an already-expired row is reclaimed, which is why it can
+// afford to be coarse. Tightening it buys a smaller table and nothing else; a replay window is
+// set by the TTL, never by the sweep.
 @Injectable()
 export class IdempotencyPurgeScheduler {
   constructor(

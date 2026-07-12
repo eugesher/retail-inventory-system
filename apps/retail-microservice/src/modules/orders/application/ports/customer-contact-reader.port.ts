@@ -1,10 +1,11 @@
 export const ORDER_CUSTOMER_CONTACT_READER = Symbol('ORDER_CUSTOMER_CONTACT_READER');
 
-// A flat read projection of one customer's notification contact — just the `email` the
-// order events carry so the notification consumer has a recipient without a per-delivery
-// cross-service RPC (ADR-033's "carry the email on the event" choice). `email` is nullable
-// to model a future tombstoned customer (PII nulled in place) even though the column is
-// NOT NULL today; a customer id that resolves no row is the whole-result `null` below.
+// A flat read projection of one customer's notification contact — the `email` the order events carry,
+// so the notification consumer has a recipient without a per-delivery cross-service RPC (ADR-033).
+//
+// **`email` is nullable because an erased customer's is NULL.** `customer.email` was made nullable
+// precisely so a tombstone can wipe the PII in place (ADR-037), leaving the row — and its orders —
+// intact. A `null` here means "this customer was erased", not "this customer has no email".
 export interface IOrderCustomerContact {
   email: string | null;
 }

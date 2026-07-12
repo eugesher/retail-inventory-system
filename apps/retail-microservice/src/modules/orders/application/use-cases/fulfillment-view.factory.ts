@@ -2,10 +2,9 @@ import { FulfillmentLineView, FulfillmentView } from '@retail-inventory-system/c
 
 import { Fulfillment, FulfillmentLine } from '../../domain';
 
-// Pure mapping from the fulfillment domain onto its wire view, shared by the Create
-// and List use cases (and the later Ship / Deliver / Cancel views) so the projection
-// lives in exactly one place (the `order-view.factory` / cart `cart-view.factory`
-// pattern). Framework-free — no Nest decorators.
+// The one mapping from the fulfillment domain onto its wire view — every use case that returns a
+// `FulfillmentView` comes through here, so the projection cannot drift between the operation that
+// creates a shipment and the one that ships it. Framework-free.
 //
 // A persisted fulfillment (saved or reconstituted) carries a concrete id, and a line
 // re-read from the repository carries its generated BIGINT id, so the `!` assertions

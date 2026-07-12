@@ -75,11 +75,12 @@ export class CartReaderTypeormAdapter implements IOrderCartReaderPort {
   }
 
   public async markConverted(cartId: string, scope?: ITransactionScope): Promise<boolean> {
-    // Run on the place transaction's manager when a scope is supplied (the convert
-    // commits atomically with the order + address writes); else the default manager.
-    // `version = version + 1` keeps the cart's optimistic-concurrency token advancing
-    // on this mutation for parity with the domain bump (the column ships, the guard
-    // is a later capability — ADR-028 §6).
+    // Run on the place transaction's manager when a scope is supplied, so the conversion commits
+    // atomically with the order and address writes; else the default manager.
+    //
+    // `version = version + 1` keeps the cart's OCC token moving on this mutation, for parity with
+    // the domain's own bump — a cart converted here must not look unchanged to a cart-side writer
+    // holding a stale version.
     //
     // `WHERE status = 'active'` is the compare-and-swap that serializes racing
     // places: the InnoDB row lock blocks the second UPDATE until the first place

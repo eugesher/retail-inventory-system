@@ -8,8 +8,7 @@ export const REFUND_REPOSITORY = Symbol('REFUND_REPOSITORY');
 // `typeorm` in `application/ports`). The TypeORM details live entirely in
 // `RefundTypeormRepository`.
 //
-// The contract the refund operations (Issue Refund + the refund reads, later
-// capabilities) depend on:
+// The contract the refund operations depend on:
 // - `save` upserts the row and re-reads it so the generated BIGINT id comes back
 //   concrete (the "re-read the saved graph" idiom the payment/order repos follow). It
 //   accepts an optional `scope` so Issue Refund persists the `Refund` and advances the

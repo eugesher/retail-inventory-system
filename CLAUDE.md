@@ -511,5 +511,12 @@ numbered by delivery order. Point-in-time review findings live under
 [`docs/audits/`](docs/audits/).
 
 **One architectural exception: `ARCH-LINT-EX-02`** (ADR-017 §6) — the gateway `auth` barrel is
-the sole cross-module-consumable barrel (`iam` / `customer-admin`). The `EntityManager` downcast
-lives only in `TypeormTransactionAdapter` + `StockTypeormRepository`.
+the sole cross-module-consumable barrel (`iam` / `customer-admin`).
+
+**The `EntityManager` downcast is an `infrastructure/` idiom, not a two-file exception.** Every
+repository that accepts an `ITransactionScope` casts it back to use it (11 files, `orders/`,
+`returns/`, `stock/`) — that is what an opaque scope costs. The rule ARCH-LINT-EX-01's closure
+actually bought is the one to keep: **`EntityManager` never reaches `application/`**, which the
+`application-use-case` denylist enforces. *(ADR-017 §6 names only `TypeormTransactionAdapter` +
+`StockTypeormRepository`; that was true when it was written and the idiom has since generalised. An
+accepted ADR is immutable — this needs a forward-supersession pointer, not an edit.)*
