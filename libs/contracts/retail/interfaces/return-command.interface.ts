@@ -1,30 +1,25 @@
 import { ICorrelationPayload } from '../../microservices';
 import { ReturnDispositionEnum, ReturnLineConditionEnum, ReturnReasonCategoryEnum } from '../enums';
 
-// Wire-format command payloads for the return (RMA) RPCs (API Gateway → Retail, served
-// by the returns controller — the returns bounded context is its own module, ADR-032).
-// Each extends `ICorrelationPayload` so the correlation id threads through to the retail
-// handler's inline logging (ADR-001 / ADR-011). They are the single source of truth for
-// both ends: the gateway adapter sends them and the retail return use cases consume them
-// as their `execute(payload)` input, so a drift fails TypeScript on both sides (the
-// contract test).
+// Wire-format command payloads for the return (RMA) RPCs (ADR-032). One type, both ends: the
+// gateway adapter sends it and the retail use case consumes it as its `execute(payload)` input,
+// so a drift fails TypeScript on **both** sides. That is the contract test.
 //
-// **Authorization is split across the boundary (ADR-024 / ADR-028 §7).** Open + the reads
-// are **owner-or-staff**: the route is bearer-protected, the gateway folds the
-// authenticated principal into `customerId` / `actorId` and resolves the staff override
-// from `@CurrentUser().permissions` into a boolean (`isStaff` for `order:return-authorize`
-// on Open, `isStaff` for `order:read` on the reads), and the retail use case owner-checks
-// (`order.customerId === customerId`) unless the staff flag is set — it never re-reads the
-// permission registry. The status-walk commands (authorize / reject / receive / close) are
-// **staff-gated at the gateway** with `@RequiresPermission`, so they carry no owner-check
-// flag — only `actorId` for audit/logging.
+// **Authorization is split across the boundary (ADR-024 / ADR-028 §7), and that is why these
+// payloads look the way they do.** The gateway resolves the permission and folds the *result*
+// into the payload — never the permissions themselves:
+//
+//   * `isStaff: boolean` — an owner-or-staff command. The gateway has already checked the
+//     override (`order:return-authorize` on Open, `order:read` on the reads); the retail use
+//     case owner-checks `order.customerId === customerId` unless the flag is set, and **never
+//     re-reads the permission registry**.
+//   * no `isStaff` — a staff-only command, gated at the gateway with `@RequiresPermission`.
+//     There is nothing left for retail to decide, so the payload carries only `actorId`, for
+//     the audit row.
+//
+// A payload that grew a permission list instead of a boolean would move the authorization
+// decision across the wire, which is the thing this shape exists to prevent.
 
-// `retail.return.open` — opens a return request (owner-or-staff `order:return-authorize`).
-// The use case reads the order through the raw-SQL reader, enforces the return-window +
-// returnable-quantity invariants, and (on success) finalizes an `RMA-<year>-<pad8(id)>`
-// number. `customerId` is the authenticated principal (the buyer for the owner path);
-// `isStaff` is the resolved `order:return-authorize` override. `lines` carry the
-// per-`OrderLine` quantities being returned; `notes` is an optional buyer note.
 export interface IRetailReturnOpenPayload extends ICorrelationPayload {
   orderId: number;
   customerId: string;
@@ -34,41 +29,25 @@ export interface IRetailReturnOpenPayload extends ICorrelationPayload {
   lines: { orderLineId: number; quantity: number }[];
 }
 
-// `retail.return.authorize` — walks a `requested` RMA → `authorized` (staff
-// `order:return-authorize`). Staff-gated at the gateway, so it carries no owner-check
-// flag; `actorId` is the resolved caller for audit/logging.
 export interface IRetailReturnAuthorizePayload extends ICorrelationPayload {
   rmaId: number;
   actorId: string;
 }
 
-// `retail.return.reject` — walks a `requested` RMA → `rejected` (staff
-// `order:return-authorize`). `reason` is the optional rejection reason (appended to the
-// RMA's `notes` so no schema change is needed — recorded on the `retail.return.rejected`
-// event too). `actorId` is the resolved caller.
 export interface IRetailReturnRejectPayload extends ICorrelationPayload {
   rmaId: number;
   reason?: string;
   actorId: string;
 }
 
-// `retail.return.receive` — walks an `authorized` RMA → `received` (warehouse
-// `inventory:receive-return` logs the goods in). Staff-gated; `actorId` is the resolved
-// caller.
 export interface IRetailReturnReceivePayload extends ICorrelationPayload {
   rmaId: number;
   actorId: string;
 }
 
-// `retail.return.inspect` — walks a `received` RMA → `inspected` (warehouse
-// `inventory:receive-return` records the per-line outcome). Staff-gated at the gateway, so
-// it carries no owner-check flag; `actorId` is the resolved caller (the warehouse staff who
-// inspected — it rides the restock RPC's `actorId` for the inventory audit row). `lines`
-// carries one entry per RMA line: the `condition` the goods arrived in, the `disposition`
-// (`restock`/`scrap`/`quarantine`), and the `lineRefundAmountMinor` this line earns (minor
-// units, non-negative). Every RMA line must appear — the use case requires a complete
-// inspection, so an `inspected` RMA never has a half-inspected line. Only the `restock`-
-// disposition lines re-enter sellable inventory (`inventory.stock.restock-from-return`).
+// `lines` must carry **every** line of the RMA, not just the ones being restocked: the use case
+// requires a complete inspection, so an `inspected` RMA can never hold a half-inspected line. A
+// caller that omits one is rejected. `lineRefundAmountMinor` is non-negative minor units.
 export interface IRetailReturnInspectPayload extends ICorrelationPayload {
   rmaId: number;
   actorId: string;
@@ -80,25 +59,19 @@ export interface IRetailReturnInspectPayload extends ICorrelationPayload {
   }[];
 }
 
-// `retail.return.close` — walks an `inspected` RMA → `closed` (staff
-// `order:return-authorize` settles the RMA; the refund, if any, is issued by the later
-// refund capability). Staff-gated; `actorId` is the resolved caller.
 export interface IRetailReturnClosePayload extends ICorrelationPayload {
   rmaId: number;
   actorId: string;
 }
 
-// `retail.return.get` — reads one RMA by id (owner-or-staff `order:read` override via
-// `isStaff`). `actorId` is the resolved caller (the buyer for the owner path).
 export interface IRetailReturnGetPayload extends ICorrelationPayload {
   rmaId: number;
   actorId: string;
   isStaff: boolean;
 }
 
-// `retail.return.list` — lists one order's RMAs newest-first (owner-or-staff `order:read`
-// override via `isStaff`). The owner-check is on the order's buyer, resolved from the
-// RMAs themselves. `actorId` is the resolved caller.
+// The owner-check here resolves the buyer from the RMAs themselves, not from `orderId` — a caller
+// who owns no RMA on the order sees an empty list rather than a rejection.
 export interface IRetailReturnListPayload extends ICorrelationPayload {
   orderId: number;
   actorId: string;
