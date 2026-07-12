@@ -7,21 +7,14 @@ import { MicroserviceClientTokenEnum } from '@retail-inventory-system/contracts'
 import { EXCHANGES } from '../exchanges.constants';
 import { RisEventsMirrorPublisher } from '../ris-events-mirror.publisher';
 
-// The producer-side wiring for the `ris.events` topic exchange (ADR-035).
+// The producer-side wiring for the `ris.events` topic exchange (ADR-035), and the one
+// `MicroserviceClient*Module` that is not a default-exchange client.
 //
-// Unlike the four per-service `MicroserviceClient*Module`s — each registers a
-// default-exchange client whose `emit(pattern, payload)` publishes onto a queue
-// named after `pattern` — this one configures the client for a **named topic
-// exchange**: with `exchange: 'ris.events'`, `exchangeType: 'topic'`, and
-// `wildcards: true`, `emit(routingKey, payload)` publishes to `ris.events`
-// using `routingKey` as the AMQP topic routing key. No queue is asserted on the
-// producer side; the event store binds the single `event_store_firehose_queue`
-// with the catch-all `#` (every event) and dispatches by routing key.
-//
-// The module exports both the registered `ClientsModule` (so consumers can
-// inject the `RIS_EVENTS_PUBLISHER` `ClientProxy` directly — the real audit-log
-// adapters do) and the shared `RisEventsMirrorPublisher` (the one place the
-// mirror `emit` boilerplate lives, used by the domain-event publishers).
+// That changes what `emit`'s first argument MEANS. In the sibling modules it names a queue; here,
+// with `exchangeType: 'topic'` and `wildcards: true`, it is the AMQP topic routing key and the
+// message goes to `ris.events`. No queue is asserted on the producer side at all — the event
+// store binds `event_store_firehose_queue` to the exchange with a catch-all `#` and dispatches
+// from there.
 @Module({
   imports: [
     ConfigModule,
