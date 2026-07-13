@@ -294,7 +294,7 @@ Each RPC-fronting module has `application/ports` (`*_GATEWAY_PORT`),
 | `modules/health/` | `/api/health` | `@Public()` RMQ fan-out to all five (ADR-044); the only module holding every `MicroserviceClient*Module` |
 | `modules/audit/` | `/api/audit/*` | `audit.controller.ts`; three `GET`s, all `audit:read`; DTOs carry **no** `pageSize` cap and a local `IsOnOrAfter` cross-property validator |
 | `modules/auth/` | `/api/auth/*` | the only gateway module with real `domain/` + DB rows |
-| `modules/iam/` | `/api/iam/*` | admin shell over the auth aggregates; **no `domain/`** |
+| `modules/iam/` | `/api/iam/*` | admin shell over the auth aggregates; **no `domain/`**. Owns staff creation (`POST /api/iam/staff`, `iam:staff-create` — **not** `iam:assign`; ADR-047) by injecting auth's `RegisterStaffUserUseCase` through the `auth` barrel |
 | `modules/customer-admin/` | `/api/admin/customers/*` | admin shell over `Customer`; **no `domain/`** |
 
 **`modules/auth/`** (ADR-010/024/037) — aggregates `StaffUser`, `Customer`,
@@ -502,7 +502,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `047`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `048`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

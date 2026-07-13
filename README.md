@@ -1139,6 +1139,7 @@ extracted under their own type and their own id. Reassembling one order's whole 
 | `GET` | `/iam/roles` | `iam:role-edit` |
 | `POST` | `/iam/roles` | `iam:role-edit` |
 | `PATCH` | `/iam/roles/:id` | `iam:role-edit` |
+| `POST` | `/iam/staff` | `iam:staff-create` — create a staff user with its roles |
 | `POST` | `/iam/staff/:id/roles` | `iam:assign` |
 | `DELETE` | `/iam/staff/:id/roles/:roleName` | `iam:assign` |
 | `GET` | `/admin/customers/:id/consent` | `customer:read-consent` |
@@ -1236,6 +1237,7 @@ seeded bundles live in `scripts/test-db-seed.ts`.
 | `order:return-authorize` | `admin`, `order-support` |
 | `notifications:read` | `admin` |
 | `notifications:write` | `admin` |
+| `iam:staff-create` | `admin` |
 | `iam:assign` | `admin` |
 | `iam:role-edit` | `admin` |
 | `audit:read` | `admin` |
@@ -1745,6 +1747,7 @@ Deliberate gaps, each with the seam already in place:
 | Email / webhook notifier transports | `NOTIFIER` port; `LogNotifierAdapter` is the default binding |
 | Locale resolution | producer events ship `customerLocale: null` |
 | Tax rates and jurisdictions | `TaxCategory` is a label only |
+| Staff deactivation / password reset | `StaffUser` carries a `status` and the aggregate can suspend; nothing calls it. The same shape of gap `POST /api/iam/staff` closed ([ADR-047](docs/adr/047-staff-user-creation-over-http.md)) |
 | Media upload pipeline | `MediaAsset.uri` is an opaque, already-uploaded reference |
 | Category archive / rename endpoints, cached category tree | reserved `catalogCategory*` cache builders |
 | Catalog / pricing cache-aside | reserved key builders, no `CacheModule` import |

@@ -25,7 +25,7 @@ import { CurrentUser, RequiresPermission } from '@retail-inventory-system/auth';
 import { ICurrentUser, PermissionCodeEnum } from '@retail-inventory-system/contracts';
 import { CorrelationId } from '@retail-inventory-system/observability';
 
-import { RoleAggregate } from '../../auth';
+import { RegisterStaffUserUseCase, RoleAggregate } from '../../auth';
 import {
   AssignStaffRoleUseCase,
   CreateRoleUseCase,
@@ -36,6 +36,7 @@ import {
 import {
   AssignStaffRoleRequestDto,
   CreateRoleRequestDto,
+  CreateStaffUserRequestDto,
   RoleResponseDto,
   StaffRolesResponseDto,
   UpdateRoleRequestDto,
@@ -51,6 +52,10 @@ export class IamController {
     private readonly updateRole: UpdateRoleUseCase,
     private readonly assignStaffRole: AssignStaffRoleUseCase,
     private readonly revokeStaffRole: RevokeStaffRoleUseCase,
+    // Owned by `modules/auth/` and reached through its barrel — the sanctioned cross-module
+    // seam the admin shells use (ARCH-LINT-EX-02, ADR-024). The staff aggregate stays in the
+    // module that owns it; IAM is the admin surface over it.
+    private readonly registerStaffUser: RegisterStaffUserUseCase,
   ) {}
 
   @Get('roles')
@@ -103,6 +108,38 @@ export class IamController {
       correlationId,
     });
     return this.toDto(role);
+  }
+
+  // Creating a staff user was the one thing this admin surface could not do: until now the
+  // only way to mint a principal was the seed script. `RegisterStaffUserUseCase` had been
+  // written, unit-tested and provided all along — it simply had no route (ADR-047).
+  //
+  // Gated on `iam:staff-create`, NOT `iam:assign`: minting a principal is a higher privilege
+  // than granting an existing one a role bundle, and sharing a code would make role assignment
+  // a silent user-creation escalation.
+  @Post('staff')
+  @RequiresPermission(PermissionCodeEnum.IAM_STAFF_CREATE)
+  @ApiOperation({ summary: 'Create a staff user with one or more roles' })
+  @ApiCreatedResponse({ type: StaffRolesResponseDto })
+  @ApiBadRequestResponse({ description: 'Unknown role names, or no role given' })
+  @ApiConflictResponse({ description: 'A staff user with that email already exists' })
+  public async createStaff(
+    @Body() dto: CreateStaffUserRequestDto,
+    @CurrentUser() actor: ICurrentUser,
+    @CorrelationId() correlationId: string,
+  ): Promise<StaffRolesResponseDto> {
+    const staffUser = await this.registerStaffUser.execute({
+      email: dto.email,
+      password: dto.password,
+      roleNames: dto.roleNames,
+      actorId: actor.id,
+      correlationId,
+    });
+    return {
+      id: staffUser.id,
+      email: staffUser.email,
+      roleNames: staffUser.roles.map((r) => r.name),
+    };
   }
 
   @Post('staff/:id/roles')
