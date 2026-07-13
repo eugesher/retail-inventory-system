@@ -598,6 +598,48 @@ export default typescriptEslint.config(
       'boundaries/no-ignored': 'off',
     },
   },
+  // `ClientProxy` containment (ADR-009), now ENFORCED rather than reviewed.
+  //
+  // `eslint-plugin-boundaries` cannot express this: it types elements by path, and
+  // `@nestjs/microservices` is legitimately imported all over the app layer —
+  // `@EventPattern` in consumers, `@MessagePattern` + `@Payload` in presentation,
+  // `Transport` / `MicroserviceOptions` in `main.ts`. The one symbol that must stay
+  // contained is the outbound *client*, and `importNames` is the only mechanism that can
+  // name a symbol rather than a module.
+  //
+  // `ClientProxyFactory` / `ClientsModule` are unused in `apps/` today; they are listed
+  // because they are the same escape hatch by another name. `libs/messaging` is out of
+  // scope — building the clients is its job.
+  //
+  // This block re-states the base `no-restricted-imports` `patterns`: a flat-config rule
+  // entry REPLACES rather than merges, so omitting them would silently drop the
+  // AppModule-import restriction for every file under `apps/`.
+  {
+    files: ['apps/**/*.ts'],
+    ignores: ['apps/*/src/modules/*/infrastructure/messaging/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@nestjs/microservices',
+              importNames: ['ClientProxy', 'ClientProxyFactory', 'ClientsModule'],
+              message:
+                'A transport client belongs only in infrastructure/messaging/ (ADR-009). Controllers, use cases and pipes inject the port symbol instead.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['@retail-inventory-system/apps/*'],
+              message:
+                'AppModule imports are reserved for the E2E test entry point (test/system-api.e2e-spec.ts).',
+            },
+          ],
+        },
+      ],
+    },
+  },
   {
     files: ['test/**/*.ts', 'spec/**/*.ts'],
     rules: {

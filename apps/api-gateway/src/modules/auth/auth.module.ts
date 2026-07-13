@@ -34,9 +34,9 @@ import {
   ValidateJwtSubjectUseCase,
 } from './application/use-cases';
 import { Argon2PasswordAdapter } from './infrastructure/argon2';
-import { RmqAuditLogPublisher } from './infrastructure/audit';
+import { AuditLogRabbitmqPublisher } from './infrastructure/audit';
 import { JwtTokenAdapter } from './infrastructure/jwt';
-import { RmqCustomerEventsPublisher } from './infrastructure/messaging';
+import { CustomerEventsRabbitmqPublisher } from './infrastructure/messaging';
 import {
   ConsentRecordEntity,
   ConsentRecordTypeormRepository,
@@ -98,10 +98,10 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     ]),
     authLibDynamicModule,
     // The producer-side client for the `ris.events` topic exchange — the real
-    // `RmqAuditLogPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy`
+    // `AuditLogRabbitmqPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy`
     // to emit `audit.staff.action` (ADR-035).
     MicroserviceClientRisEventsModule,
-    // The `notification_events` producer client — `RmqCustomerEventsPublisher`
+    // The `notification_events` producer client — `CustomerEventsRabbitmqPublisher`
     // injects its `NOTIFICATION_MICROSERVICE` `ClientProxy` to emit the two
     // `customer.*` privacy events onto the notification consumers' queue (ADR-037).
     MicroserviceClientNotificationModule,
@@ -123,8 +123,8 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     // The audit seam (ADR-035): the real RMQ adapter publishes `audit.staff.action`
     // onto `ris.events`. `iam` consumes `AUDIT_LOG_PUBLISHER` through this module's
     // export (there is no second binding in `iam`).
-    RmqAuditLogPublisher,
-    { provide: AUDIT_LOG_PUBLISHER, useExisting: RmqAuditLogPublisher },
+    AuditLogRabbitmqPublisher,
+    { provide: AUDIT_LOG_PUBLISHER, useExisting: AuditLogRabbitmqPublisher },
 
     RoleTypeormRepository,
     { provide: ROLE_REPOSITORY, useExisting: RoleTypeormRepository },
@@ -139,8 +139,8 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
 
     // The customer-privacy event publisher (ADR-037): emits `customer.consent.updated`
     // / `customer.erased` onto `notification_events` and mirrors onto `ris.events`.
-    RmqCustomerEventsPublisher,
-    { provide: CUSTOMER_EVENTS_PUBLISHER, useExisting: RmqCustomerEventsPublisher },
+    CustomerEventsRabbitmqPublisher,
+    { provide: CUSTOMER_EVENTS_PUBLISHER, useExisting: CustomerEventsRabbitmqPublisher },
 
     // The cross-context erasure writer (ADR-037 §3): nulls the customer + address
     // + cart PII in one transaction over the shared `retail_db` via raw SQL. It

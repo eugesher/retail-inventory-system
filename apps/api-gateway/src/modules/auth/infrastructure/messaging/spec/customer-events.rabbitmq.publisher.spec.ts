@@ -9,10 +9,10 @@ import {
 import { RisEventsMirrorPublisher, ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import { ConsentRecord } from '../../../domain';
-import { RmqCustomerEventsPublisher } from '../rmq-customer-events.publisher';
+import { CustomerEventsRabbitmqPublisher } from '../customer-events.rabbitmq.publisher';
 
-describe('RmqCustomerEventsPublisher', () => {
-  let publisher: RmqCustomerEventsPublisher;
+describe('CustomerEventsRabbitmqPublisher', () => {
+  let publisher: CustomerEventsRabbitmqPublisher;
   let notificationClient: jest.Mocked<Pick<ClientProxy, 'emit'>>;
   let risEvents: jest.Mocked<Pick<RisEventsMirrorPublisher, 'mirror'>>;
   let logger: jest.Mocked<Pick<PinoLogger, 'warn'>>;
@@ -22,7 +22,7 @@ describe('RmqCustomerEventsPublisher', () => {
     risEvents = { mirror: jest.fn().mockResolvedValue(undefined) };
     logger = { warn: jest.fn() };
 
-    publisher = new RmqCustomerEventsPublisher(
+    publisher = new CustomerEventsRabbitmqPublisher(
       notificationClient as unknown as ClientProxy,
       risEvents as unknown as RisEventsMirrorPublisher,
       logger as unknown as PinoLogger,

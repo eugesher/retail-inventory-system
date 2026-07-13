@@ -285,8 +285,16 @@ the adapters and the controllers to the use cases means it must see all four at 
 belongs to none of them ([ADR-041](docs/adr/041-nest-module-as-the-module-composition-root.md)).
 
 **Boundary rule.** `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
-`infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts`. Controllers, use cases, and
-pipes inject the port symbol instead.
+`infrastructure/messaging/`. Controllers, use cases, and pipes inject the port symbol
+instead. This is **enforced in CI**, not reviewed: `eslint-plugin-boundaries` types elements
+by path and cannot see an imported symbol, so a `no-restricted-imports` rule with
+`importNames: ['ClientProxy', …]` names the one symbol that must stay contained — while
+`@EventPattern`, `@MessagePattern` and `Transport` stay free to be imported where they belong.
+
+Adapter filenames come in two forms: `<module>-rabbitmq.{adapter,publisher}.ts` for the
+module's own transport seam (`stock-rabbitmq.publisher.ts`), and
+`<seam>.rabbitmq.{adapter,publisher}.ts` for a *named* seam, mirroring the port it implements
+(`cart-catalog.rabbitmq.adapter.ts` ↔ `cart-catalog.gateway.port.ts`).
 
 ### Architecture lint
 
