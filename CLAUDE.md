@@ -451,7 +451,7 @@ Use cases: `PlaceOrder`, `AuthorizePayment`, `CapturePayment`, `GetOrder`, `List
 `cancel-allocation-retry.ts`, the view factories.
 Infra: `persistence/`, `payment-gateway/`, `messaging/`, `audit/`, `consumers/`
 (`order-cancelled.consumer.ts`), `idempotency/` (`IdempotencyPurgeScheduler`).
-Presentation: `orders.controller.ts` + `orders-rpc-exception.filter.ts`.
+Presentation: `orders.controller.ts` + `order-rpc-exception.filter.ts`.
 
 **retail** `modules/returns/` (ADR-032) — the RMA bounded context (a separate module, not a
 sibling in `orders/`).

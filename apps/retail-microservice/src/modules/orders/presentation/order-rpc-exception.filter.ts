@@ -106,7 +106,7 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
 // (genuinely unexpected invariant breaches) are deliberately NOT caught here — they
 // have no error code and stay 500.
 @Catch(OrderDomainException)
-export class OrdersRpcExceptionFilter implements RpcExceptionFilter<OrderDomainException> {
+export class OrderRpcExceptionFilter implements RpcExceptionFilter<OrderDomainException> {
   public catch(exception: OrderDomainException): Observable<never> {
     const statusCode = ORDER_ERROR_STATUS[exception.code] ?? HttpStatus.INTERNAL_SERVER_ERROR;
 

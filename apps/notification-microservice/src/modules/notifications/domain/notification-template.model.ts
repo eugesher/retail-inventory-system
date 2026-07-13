@@ -1,7 +1,7 @@
 import { NotificationChannelEnum } from '@retail-inventory-system/contracts';
 import { AggregateRoot } from '@retail-inventory-system/ddd';
 
-import { NotificationDomainException } from './notification-domain.exception';
+import { NotificationDomainException } from './notification.exception';
 import { NotificationErrorCodeEnum } from './notification-error-code.enum';
 
 export interface INotificationTemplateProps {

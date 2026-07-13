@@ -13,7 +13,7 @@ A structural sweep of all six deployables, run after the module-layout work
 reader would expect to be uniform: layer folders, entity registration, exceptions, filters,
 file naming, DI tokens, shared helpers, bootstrap shape.
 
-Seven findings. Four are fixed; three remain open.
+Seven findings. Five are fixed; two remain open.
 
 | Code | Finding | Status |
 |------|---------|--------|
@@ -21,7 +21,7 @@ Seven findings. Four are fixed; three remain open.
 | `SYM-002` | `OCC_RETRY_ATTEMPTS` token duplicated in four modules | **fixed** (ADR-043) |
 | `SYM-003` | `MessagingModule` dead — one importer, and it injected nothing | **fixed** (ADR-043) |
 | `SYM-004` | The `ClientProxy` filename rule in the docs did not match the code | **fixed** (2026-07-12) |
-| `SYM-005` | Exception-file and RPC-filter naming drift | open |
+| `SYM-005` | Exception-file and RPC-filter naming drift | **fixed** (2026-07-12) |
 | `SYM-006` | Functional asymmetries (health surface, gateway admin shells) | open |
 | `SYM-007` | The four `runWith<X>WriteRetry` helpers are one protocol, written four times | open |
 
@@ -79,14 +79,27 @@ by path, not imported symbols, and `@nestjs/microservices` is legitimately impor
 `messaging/` (`@EventPattern` in consumers, `@MessagePattern` in presentation). Today the rule
 is upheld by code review alone.
 
-## `SYM-005` — exception-file and RPC-filter naming drift
+## `SYM-005` — exception-file and RPC-filter naming drift — **FIXED**
 
-| Artefact | Majority | Outlier |
+**Resolution (2026-07-12).** The first framing of this finding ("singular vs plural") was wrong.
+The actual convention, held by five of the seven modules, is that **all four names key off the
+context noun, not the module folder**:
+
+> `<Noun>DomainException` ↔ `<noun>.exception.ts` ↔ `<noun>-rpc-exception.filter.ts` ↔ `<Noun>RpcExceptionFilter`
+
+`modules/stock/` proves the rule rather than breaking it: its noun is *inventory*, so it throws
+`InventoryDomainException` from `inventory.exception.ts` through `InventoryRpcExceptionFilter`.
+Same for `modules/returns/` → *return*.
+
+Under that rule there were exactly two violations, and neither was about plurals:
+
+| Was | Now | Why |
 |---|---|---|
-| Domain-exception file | `<x>.exception.ts` (catalog, pricing, inventory, cart, order, return) | `notification-domain.exception.ts` |
-| RPC exception filter | singular (`cart-`, `catalog-`, `inventory-`, `notification-`, `pricing-`, `return-`) | `orders-rpc-exception.filter.ts` — the only plural |
+| `notification-domain.exception.ts` | `notification.exception.ts` | the class `NotificationDomainException` was already right; only the filename carried a stray `-domain` |
+| `orders-rpc-exception.filter.ts` / `OrdersRpcExceptionFilter` | `order-rpc-exception.filter.ts` / `OrderRpcExceptionFilter` | it was the **only filter not named after the exception it maps** (`OrderDomainException`) |
 
-Cosmetic; no behaviour depends on it. Worth folding into whichever pass touches those files next.
+The invariant now holds across all seven modules, and it is stated in `README.md` §3 — it had
+never been written down, which is how it drifted.
 
 ## `SYM-006` — functional asymmetries
 

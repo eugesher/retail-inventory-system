@@ -327,7 +327,11 @@ silently weakening a rule fails the unit suite.
 
 - **One throwable per module** — `*DomainException` + `*ErrorCodeEnum`, mapped to HTTP by
   that module's presentation `*RpcExceptionFilter`. The filters are the authoritative
-  code → status tables.
+  code → status tables. All four names key off the **context noun, not the module folder**:
+  `<Noun>DomainException` ↔ `<noun>.exception.ts` ↔ `<noun>-rpc-exception.filter.ts` ↔
+  `<Noun>RpcExceptionFilter`. Hence `modules/stock/` throws `InventoryDomainException` from
+  `inventory.exception.ts`, and `modules/orders/` throws `OrderDomainException` (singular)
+  from `order.exception.ts`.
 - **One repository port per aggregate seam** — not one god-repository per module.
 - **Cross-module reads via a raw-parameterized-SQL reader port** rather than importing the
   other module's entities (`ORDER_CART_READER`, `RETURN_ORDER_READER`, `CONSENT_READER`).

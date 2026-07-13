@@ -70,7 +70,7 @@ import {
 } from './infrastructure/persistence';
 import { FakePaymentGatewayAdapter } from './infrastructure/payment-gateway';
 import { AuditLogRabbitmqPublisher } from './infrastructure/audit';
-import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
+import { OrdersController, OrderRpcExceptionFilter } from './presentation';
 
 // The orders bounded-context module: the `Order` / `Address` / `Payment` /
 // `Fulfillment` / `Refund` repositories, the `PAYMENT_GATEWAY` seam (default
@@ -106,7 +106,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
 // `useExisting` shares each adapter
 // instance with code that injects the concrete class while use cases depend on the
 // port symbols (the `cart.module.ts` / `stock.module.ts` pattern). The
-// `OrdersRpcExceptionFilter` is registered via `APP_FILTER` so every order
+// `OrderRpcExceptionFilter` is registered via `APP_FILTER` so every order
 // `@MessagePattern` maps its `OrderDomainException` onto the wire status the gateway
 // resolves.
 //
@@ -214,7 +214,7 @@ import { OrdersController, OrdersRpcExceptionFilter } from './presentation';
     IssueRefundUseCase,
     ListRefundsForOrderUseCase,
 
-    { provide: APP_FILTER, useClass: OrdersRpcExceptionFilter },
+    { provide: APP_FILTER, useClass: OrderRpcExceptionFilter },
   ],
   exports: [ORDER_REPOSITORY, ADDRESS_REPOSITORY, PAYMENT_REPOSITORY, PAYMENT_GATEWAY],
 })

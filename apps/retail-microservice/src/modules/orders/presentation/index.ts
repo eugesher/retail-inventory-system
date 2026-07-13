@@ -1,2 +1,2 @@
 export * from './orders.controller';
-export * from './orders-rpc-exception.filter';
+export * from './order-rpc-exception.filter';
