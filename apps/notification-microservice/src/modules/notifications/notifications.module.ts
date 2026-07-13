@@ -51,10 +51,9 @@ import { FlakyLogNotifierAdapter, LogNotifierAdapter } from './infrastructure/de
 import { NotificationRabbitmqPublisher } from './infrastructure/messaging';
 import {
   ConsentReaderTypeormAdapter,
-  NotificationDeliveryEntity,
   NotificationDeliveryTypeormRepository,
-  NotificationTemplateEntity,
   NotificationTemplateTypeormRepository,
+  notificationEntities,
 } from './infrastructure/persistence';
 import { HandlebarsTemplateRendererAdapter } from './infrastructure/render';
 import { DeliveryRetryScheduler } from './infrastructure/scheduling';
@@ -68,7 +67,7 @@ import { DeliveryRetryScheduler } from './infrastructure/scheduling';
 // context through. The Handlebars engine import is confined to
 // `infrastructure/render/` (ADR-004/017, ADR-033).
 //
-// `DatabaseModule.forFeature([...])` registers the two persistence entities the
+// `DatabaseModule.forFeature(notificationEntities)` registers the two persistence entities the
 // notification microservice owns (its first DB tables, ADR-033). The two repository
 // ports (`NOTIFICATION_TEMPLATE_REPOSITORY` / `NOTIFICATION_DELIVERY_REPOSITORY`) are
 // bound to their TypeORM adapters here. `RenderAndDispatchUseCase` is the first
@@ -126,7 +125,7 @@ import { DeliveryRetryScheduler } from './infrastructure/scheduling';
 // `RETURN_WINDOW_DAYS` precedent).
 @Module({
   imports: [
-    DatabaseModule.forFeature([NotificationTemplateEntity, NotificationDeliveryEntity]),
+    DatabaseModule.forFeature(notificationEntities),
     MicroserviceClientNotificationModule,
     MicroserviceClientRisEventsModule,
     ScheduleModule.forRoot(),

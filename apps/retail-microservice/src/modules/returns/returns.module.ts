@@ -37,10 +37,9 @@ import {
 import {
   CustomerContactReaderTypeormAdapter,
   ReturnOrderReaderTypeormAdapter,
-  ReturnRequestEntity,
-  ReturnLineEntity,
   ReturnRequestTypeormRepository,
   TypeormTransactionAdapter,
+  returnEntities,
 } from './infrastructure/persistence';
 import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';
 
@@ -73,7 +72,7 @@ import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';
 // wire status the gateway resolves.
 @Module({
   imports: [
-    DatabaseModule.forFeature([ReturnRequestEntity, ReturnLineEntity]),
+    DatabaseModule.forFeature(returnEntities),
     MicroserviceClientNotificationModule,
     MicroserviceClientRetailModule,
     MicroserviceClientInventoryModule,
