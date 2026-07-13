@@ -2,16 +2,9 @@ import { ApiResponseProperty } from '@nestjs/swagger';
 
 import { CartStatusEnum } from '../enums';
 
-// RPC/HTTP response shape for a cart line. A **class** carrying
-// `@ApiResponseProperty` (not a plain interface) so the gateway can declare it
-// as a Swagger response type — `@nestjs/swagger` is the documented lib-contracts
-// exception (ADR-017), mirroring `PriceView` / `ProductView`.
-//
-// `unitPriceSnapshotMinor` and `currencySnapshot` are the price as it stood when
-// the line was added — captured at add-time and stable while sibling lines
-// mutate (ADR-028 §1). `unitPriceSnapshotMinor` is an integer count of minor
-// units (cents), never a float. `lineSubtotalMinor` is
-// `unitPriceSnapshotMinor × quantity`.
+// The price snapshot is taken when the line is ADDED and stays put while sibling lines mutate
+// (ADR-028 §1) — re-pricing a cart is not a thing that happens on its own. Every `*Minor` field
+// is an integer count of minor units, never a float.
 export class CartLineView {
   @ApiResponseProperty()
   public id: number;
@@ -32,12 +25,10 @@ export class CartLineView {
   public lineSubtotalMinor: number;
 }
 
-// RPC/HTTP response shape for a whole cart. `customerId` is the gateway customer
-// UUID (`null` for a guest cart); `currency` is the immutable CHAR(3) the cart
-// was created in; `version` is the optimistic-concurrency token (shipped now
-// though enforcement is a later concurrency-hardening capability, ADR-028 §6).
-// `subtotalMinor` is the sum of the lines' `lineSubtotalMinor` — a convenience
-// projection of `Cart.total` so the caller need not re-sum.
+// `customerId` is `null` for a guest cart. `version` is the OCC token: a caller may pin it in an
+// `If-Match` to make a lost race surface as a conflict instead of silently resolving to a
+// different outcome (ADR-036). `subtotalMinor` is a convenience projection of `Cart.total`, so
+// the caller need not re-sum the lines.
 export class CartView {
   @ApiResponseProperty()
   public id: string;
