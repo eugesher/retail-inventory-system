@@ -16,6 +16,7 @@ import {
   CART_INVENTORY_GATEWAY,
   CART_REPOSITORY,
   OCC_RETRY_ATTEMPTS,
+  RETAIL_DEFAULT_CURRENCY,
 } from './application/ports';
 import {
   AddToCartUseCase,
@@ -79,6 +80,18 @@ import { CartController, CartRpcExceptionFilter } from './presentation';
     {
       provide: OCC_RETRY_ATTEMPTS,
       useFactory: (config: ConfigService): number => config.get<number>('OCC_RETRY_ATTEMPTS') ?? 5,
+      inject: [ConfigService],
+    },
+
+    // The currency a cart opens in when the caller names none, resolved from the SAME
+    // `DEFAULT_CURRENCY` env var catalog reads (Joi: 3 chars, uppercased, default `USD`).
+    // Sharing the variable is the point — see `RETAIL_DEFAULT_CURRENCY`. The `?? 'USD'`
+    // matters only if the env is bypassed entirely (a unit boot without config), exactly
+    // as in `catalog.module.ts` and the `OCC_RETRY_ATTEMPTS` provider above.
+    {
+      provide: RETAIL_DEFAULT_CURRENCY,
+      useFactory: (config: ConfigService): string =>
+        config.get<string>('DEFAULT_CURRENCY') ?? 'USD',
       inject: [ConfigService],
     },
 
