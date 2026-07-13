@@ -292,14 +292,43 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
+  // Payment axis: `none → failed` — **the authorize was DECLINED, so no money was ever reserved and
+  // this order can never be paid for** (ISSUE-06 / ADR-052).
+  //
+  // Place commits the order, converts the cart and allocates the stock, and only *then* asks the
+  // gateway. A decline used to leave that commit standing with **nothing recording it**: an order
+  // reading `pending` / `none`, indistinguishable from a healthy one, that could never ship (Ship
+  // refuses an order with no `Payment` row) and that nothing cancelled. The stock stayed allocated
+  // forever, and the customer's retry was handed the dead order **as a success**.
+  //
+  // The member existed all along — `OrderPaymentStatusEnum.FAILED` is in the contract *and* in the
+  // `payment_status` ENUM column — and **nothing produced it.** Someone modelled the decline and
+  // never wired it.
+  //
+  // **It is only half the answer.** The other half is `cancel()`: this axis says *why* the order is
+  // dead, the lifecycle axis says *that* it is. That split is ADR-028 §2's orthogonality doing its
+  // job — a `payment-failed` member on the LIFECYCLE axis would fold payment information into the
+  // axis that exists not to carry it.
+  public markPaymentFailed(): void {
+    if (this._paymentStatus !== OrderPaymentStatusEnum.NONE) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_INVALID_PAYMENT_TRANSITION,
+        `Order.markPaymentFailed: only an unauthorized payment can fail (current: ${this._paymentStatus})`,
+      );
+    }
+    this._paymentStatus = OrderPaymentStatusEnum.FAILED;
+    this.bumpVersion();
+  }
+
   // Payment axis: `authorized → captured`. Rejects any non-`authorized` start. Bumps the OCC
   // token.
   //
-  // **`captured` is where this axis stops.** There is no `markPaymentRefunded` and no
-  // `markPaymentFailed`, and refunds have already shipped — so their absence is not a gap.
-  // A refund is recorded on the `Payment` row: `refundedAmountMinor`, and the payment's own
-  // status once it is fully refunded. The order header keeps reading `captured` forever.
-  // **Never read `order.paymentStatus` to learn whether an order was refunded.**
+  // **`captured` is where the FORWARD walk stops.** There is no `markPaymentRefunded`, and refunds
+  // have already shipped — so its absence is not a gap. A refund is recorded on the `Payment` row:
+  // `refundedAmountMinor`, and the payment's own status once it is fully refunded. The order header
+  // keeps reading `captured` forever. **Never read `order.paymentStatus` to learn whether an order
+  // was refunded.** (`failed` is not on the forward walk at all — it is the `none` branch's terminal,
+  // see `markPaymentFailed` above.)
   public markPaymentCaptured(): void {
     if (this._paymentStatus !== OrderPaymentStatusEnum.AUTHORIZED) {
       throw new OrderDomainException(
