@@ -15,7 +15,7 @@ import { RefundMapper } from './refund.mapper';
 // idiom the payment/order repos follow). Returns domain types only — no TypeORM leak
 // (ADR-017).
 //
-// `save` / `findById` / `findByPaymentId` are scope-aware so Issue Refund can persist
+// `save` / `findByPaymentId` are scope-aware so Issue Refund can persist
 // the `Refund` and re-check/advance the `Payment` in one short follow-up transaction;
 // `findByOrderId` is a default-manager read (the order-scoped history surfaces after
 // commit).
@@ -50,11 +50,6 @@ export class RefundTypeormRepository
       throw new Error(`RefundTypeormRepository.save: refund ${saved.id} vanished after commit`);
     }
     return RefundMapper.toDomain(reloaded);
-  }
-
-  public async findById(id: number, scope?: ITransactionScope): Promise<Refund | null> {
-    const entity = await this.refundRepo(scope).findOne({ where: { id } });
-    return entity ? RefundMapper.toDomain(entity) : null;
   }
 
   // An order's refunds, newest-first by `issued_at` then `id` (a pending refund has a

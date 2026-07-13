@@ -110,6 +110,11 @@ shared "protected routes" array. The two `@Public()` routes today are
 `/auth/logout`, `/auth/me`, `/order/*`, `/product/*/stock`) requires a
 valid access token.
 
+> **Amended by [ADR-050](050-the-alias-that-was-born-deprecated.md).** `POST /auth/login` no
+> longer exists — staff login is `POST /auth/staff/login`, and the `@Public()` set has since
+> grown (README §7 carries the current list). The mechanism this section is about — opt-out
+> **on the route**, never on a shared array — is unchanged; only the enumeration aged.
+
 `@Roles(RoleEnum.X, …)` layers role-based authorization on top. Existing
 routes are tagged with `@Roles(RoleEnum.CUSTOMER, RoleEnum.ADMIN)`. The
 admin role inherits customer access by being seeded with both roles — there

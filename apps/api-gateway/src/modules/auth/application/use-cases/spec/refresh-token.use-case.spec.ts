@@ -121,11 +121,11 @@ describe('RefreshTokenUseCase', () => {
     );
   });
 
-  it('rejects when the user has been soft-deleted', async () => {
+  it('rejects when the user row is gone', async () => {
     const user = await seed();
     const first = await login.execute({ email: user.email, password: 'password123' });
 
-    await users.softDelete(user.id);
+    users.remove(user.id);
 
     await expect(refresh.execute({ refreshToken: first.refreshToken })).rejects.toBeInstanceOf(
       UnauthorizedException,

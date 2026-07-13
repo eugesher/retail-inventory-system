@@ -390,14 +390,6 @@ export class FakeAddressRepository implements IAddressRepositoryPort {
     this.byId.set(address.id!, address);
     return Promise.resolve(address);
   }
-
-  public findById(id: string): Promise<Address | null> {
-    return Promise.resolve(this.byId.get(id) ?? null);
-  }
-
-  public findByOwner(): Promise<Address[]> {
-    return Promise.resolve([...this.byId.values()]);
-  }
 }
 
 // In-memory payment store that assigns BIGINT ids and resolves the single payment
@@ -591,11 +583,6 @@ export class FakeRefundRepository implements IRefundRepositoryPort {
     const stored = this.rebuild(refund, id);
     this.byId.set(id, stored);
     return Promise.resolve(this.rebuild(stored, id));
-  }
-
-  public findById(id: number): Promise<Refund | null> {
-    const refund = this.byId.get(id);
-    return Promise.resolve(refund ? this.rebuild(refund, id) : null);
   }
 
   public findByOrderId(orderId: number): Promise<Refund[]> {

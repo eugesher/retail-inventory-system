@@ -39,7 +39,12 @@ export class StockCache implements IStockCachePort {
     private readonly logger: PinoLogger,
   ) {}
 
-  public async get(payload: IStockCacheGetPayload): Promise<IStockCacheGetResult> {
+  // ADR-049: private, for the same reason `invalidatePrefixes` is (ADR-023). A public
+  // `set` writes an arbitrary value under the stock key at an arbitrary time — including
+  // from inside a transaction, with pre-commit data, which is the exact permanent staleness
+  // removing public `invalidate` was meant to make unexpressible. `getOrLoad` is the only
+  // legitimate caller of the pair, and it is right here.
+  private async get(payload: IStockCacheGetPayload): Promise<IStockCacheGetResult> {
     const { variantId, stockLocationIds, tenantId, correlationId } = payload;
     const cacheKey = CACHE_KEYS.inventoryStock(variantId, stockLocationIds, { tenantId });
 
@@ -62,7 +67,7 @@ export class StockCache implements IStockCachePort {
     }
   }
 
-  public async set(payload: IStockCacheSetPayload): Promise<void> {
+  private async set(payload: IStockCacheSetPayload): Promise<void> {
     const { variantId, stockLocationIds, tenantId, data, correlationId } = payload;
     const cacheKey = CACHE_KEYS.inventoryStock(variantId, stockLocationIds, { tenantId });
     const ttl = this.jitterTtl(this.configuredTtl());

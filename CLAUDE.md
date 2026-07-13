@@ -459,8 +459,10 @@ two modules need the same seam (`ORDER_INVENTORY_GATEWAY` vs `CART_INVENTORY_GAT
 string literals (call a `CACHE_KEYS` builder) and MUST NOT import `@nestjs/cache-manager` /
 `@keyv/redis` / `cacheable` directly (depend on `ICachePort` / `CACHE_PORT`). Write paths
 invalidate via `CACHE_KEYS.<aggregate>Prefix` + `delByPrefix`, awaited post-commit. On stock
-this is type-enforced (ADR-023): `IStockCachePort` has no public `invalidate` — route writes
-through `withInvalidation(work, resolveItems, opts)`.
+this is type-enforced (ADR-023/049): `IStockCachePort` offers **only** the two composed
+operations — `getOrLoad(payload, loader)` and `withInvalidation(work, resolveItems, opts)`.
+No `invalidate`, and no raw `get`/`set` either: a pre-commit `set` is as permanently stale as
+a pre-commit invalidate, so both are private to `StockCache`.
 
 ## Database
 
@@ -502,7 +504,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `048`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `051`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

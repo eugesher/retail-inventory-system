@@ -104,13 +104,6 @@ describe('CategoryTypeormRepository', () => {
     });
   });
 
-  describe('findById', () => {
-    it('returns null when no row matches', async () => {
-      categoryRepo.findOne.mockResolvedValue(null);
-      await expect(repository.findById(99)).resolves.toBeNull();
-    });
-  });
-
   describe('reparentSubtree', () => {
     it('issues the moved-row UPDATE then the single bulk rebase in one transaction and returns the affected count', async () => {
       // A child currently at /electronics/phones, already recomputed under /gadgets.
