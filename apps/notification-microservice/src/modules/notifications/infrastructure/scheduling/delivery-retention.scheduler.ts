@@ -7,8 +7,8 @@ import { PurgeAgedDeliveriesUseCase } from '../../application/use-cases';
 // The thin `@nestjs/schedule` driver for the delivery-retention sweep (ISSUE-08). A provider, not a
 // controller — `ScheduleModule.forRoot()` (already wired in `notifications.module.ts` for the retry
 // sweeper) discovers the `@Cron` and fires it. All purge logic lives in `PurgeAgedDeliveriesUseCase`;
-// this class only schedules it and guards the tick, so a failed sweep never kills the loop (the
-// `DeliveryRetryScheduler` precedent — the schedule decorator stays in `infrastructure/`).
+// this class only schedules it (the `DeliveryRetryScheduler` precedent — the schedule decorator stays
+// in `infrastructure/`).
 //
 // **`@Cron`, where its sibling in this same folder uses `@Interval`.** That is not an inconsistency:
 // the retry sweep wants a steady 60s heartbeat (it is chasing live failures), while retention wants a
@@ -36,7 +36,16 @@ export class DeliveryRetentionScheduler {
       await this.purge.execute();
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      // A sweep fault must not stop the scheduler — log and let tomorrow's tick try again.
+      // **This catch does not keep the loop alive — the loop was never at risk.** A `@Cron` handler is
+      // already wrapped by Nest (`ScheduleExplorer.wrapFunctionInTryCatchBlocks`), and the `cron`
+      // library catches on top of that; a rethrow would be swallowed twice and tomorrow's tick would
+      // fire anyway. (Inventory's `ReservationSweepScheduler` is the one whose catch IS load-bearing:
+      // it hands a raw `setInterval` to the registry, so a rejection there is an `unhandledRejection` —
+      // a dead process on Node ≥15.)
+      //
+      // What it buys is that the failure is **named**: Nest's wrapper logs a bare stack under a generic
+      // `Scheduler` context, so an operator learns that *a* sweep died, not *which*. On the one table
+      // that grows without bound, a retention sweep that stalls silently is how ISSUE-08 happened.
       this.logger.warn({ reason }, 'Notification delivery retention sweep failed');
     }
   }

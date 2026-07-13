@@ -39,16 +39,21 @@ interface IHarness {
 
 // Seeds a placed order (at `orderPaymentStatus`) + its single payment (at
 // `paymentStatus`), wires the use case against the in-memory fakes.
+//
+// `paymentGateway` is a parameter so a test can inject a **declining** double. `FakePaymentGateway`
+// has taken a `captureOk` flag since it was written and **no spec ever passed `false`** — which is
+// exactly why the decline branch sat at zero coverage, and it is the same shape of miss ISSUE-06
+// found one method over on `approve`.
 const makeHarness = async (
   ownerId: string = OWNER_ID,
   orderPaymentStatus: OrderPaymentStatusEnum = OrderPaymentStatusEnum.AUTHORIZED,
   paymentStatus: PaymentStatusEnum = PaymentStatusEnum.AUTHORIZED,
   store: FakeIdempotencyStore = new FakeIdempotencyStore(),
+  paymentGateway: FakePaymentGateway = new FakePaymentGateway(),
 ): Promise<IHarness> => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const orderRepository = new FakeOrderRepository();
   const paymentRepository = new FakePaymentRepository();
-  const paymentGateway = new FakePaymentGateway();
   const transactionPort = new FakeTransactionPort();
   const publisher = new SpyOrderEventsPublisher();
 
@@ -161,6 +166,103 @@ describe('CapturePaymentUseCase', () => {
     expect(h.paymentGateway.captureCount).toBe(0);
     expect(h.paymentRepository.saveCount).toBe(h.seedSaveCount);
     expect(h.publisher.captured).toHaveLength(0);
+  });
+
+  // **The declined capture (ADR-052, phase 2).** The gateway said no, so we KNOW no money moved — the
+  // one and only condition under which a claim may be released. `Payment.releaseCapture` says so in as
+  // many words ("reachable from exactly one place: the explicit `!result.captured` branch"), and until
+  // this test that branch — and therefore that method — was executed by nothing at all.
+  //
+  // What makes it worth a test rather than a reading: if the release is broken or skipped, the payment
+  // stays at `CAPTURING` **forever**. Nothing recovers it, by design — `ReportStaleCaptureClaimsUseCase`
+  // only reports a stranded claim, because releasing one it did not personally decline would risk a
+  // second charge. So a bug here does not lose a request; it manufactures the exact incident the
+  // ADR-053 register exists to chase down, and hands the customer an authorization that can never be
+  // captured.
+  it('releases the claim when the gateway declines the capture — no stranded CAPTURING row', async () => {
+    const declining = new FakePaymentGateway(true, false); // approve authorize, decline capture
+    const h = await makeHarness(
+      OWNER_ID,
+      OrderPaymentStatusEnum.AUTHORIZED,
+      PaymentStatusEnum.AUTHORIZED,
+      new FakeIdempotencyStore(),
+      declining,
+    );
+
+    await expect(h.useCase.execute(capturePayload())).rejects.toMatchObject({
+      code: OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED,
+    });
+
+    // The processor WAS reached — this is a decline, not a pre-flight refusal.
+    expect(h.paymentGateway.captureCount).toBe(1);
+
+    // **The claim is gone and the authorization is capturable again.** `AUTHORIZED`, not `CAPTURING`:
+    // the difference between "try again" and a payment no code path can ever resolve.
+    const payment = await h.paymentRepository.findByOrderId(ORDER_ID);
+    expect(payment?.status).toBe(PaymentStatusEnum.AUTHORIZED);
+
+    // Nothing moved, so nothing is announced and the order's payment axis is untouched.
+    expect(h.publisher.captured).toHaveLength(0);
+    const order = await h.orderRepository.findById(ORDER_ID);
+    expect(order?.paymentStatus).toBe(OrderPaymentStatusEnum.AUTHORIZED);
+  });
+
+  // **The race the fast path cannot see (ADR-052, `AlreadyCapturedSignal`).**
+  //
+  // There are two "already captured" paths and only one of them was tested. The *fast* one reads the
+  // payment on a snapshot and returns early — that is the sequential retry, and it is covered above.
+  // This is the other one: the snapshot said `AUTHORIZED`, and by the time the `SELECT … FOR UPDATE`
+  // was granted, the winner had **completed**. A `FOR UPDATE` read is a CURRENT read, so the lock sees
+  // `CAPTURED` where the snapshot saw `AUTHORIZED` — and the loser must return the winner's state
+  // rather than charge a second time.
+  //
+  // The setup models that faithfully with **exactly one stub**: the store genuinely holds the winner's
+  // committed `CAPTURED` state (that is what "the winner committed" means), and only the fast path's
+  // *snapshot* read is made stale. Every other read — the locked one, and the re-read after the signal —
+  // runs for real and sees current state, which is precisely the asymmetry `FOR UPDATE` buys.
+  //
+  // (The mutual exclusion itself is not provable against an in-memory double and is not attempted here;
+  // it is proved against MySQL in `test/concurrent-capture-double-charge.e2e-spec.ts`, which counts
+  // gateway calls.)
+  it('returns the winner’s state, uncharged, when the lock read finds the payment already CAPTURED', async () => {
+    // The winner has already completed: both axes committed as CAPTURED.
+    const h = await makeHarness(
+      OWNER_ID,
+      OrderPaymentStatusEnum.CAPTURED,
+      PaymentStatusEnum.CAPTURED,
+    );
+
+    // ...but THIS caller's snapshot read predates that commit, so it still sees AUTHORIZED and does not
+    // take the fast-path early return. One stub, one lie, and it is the lie a stale snapshot actually
+    // tells.
+    jest
+      .spyOn(h.paymentRepository, 'findByOrderId')
+      .mockResolvedValueOnce(
+        buildPaymentFixture(ORDER_ID, ORDER_ID, PaymentStatusEnum.AUTHORIZED, GRAND_TOTAL),
+      );
+
+    const { view } = await h.useCase.execute(capturePayload());
+
+    // **Nothing was charged.** This is the whole assertion: the loser reached the lock, saw the winner,
+    // and stopped short of the processor.
+    expect(h.paymentGateway.captureCount).toBe(0);
+    expect(view.payment?.status).toBe(PaymentStatusEnum.CAPTURED);
+    expect(view.paymentStatus).toBe(OrderPaymentStatusEnum.CAPTURED);
+    // No second transition, and no second `retail.payment.captured` — the winner already emitted it.
+    expect(h.paymentRepository.saveCount).toBe(h.seedSaveCount);
+    expect(h.publisher.captured).toHaveLength(0);
+  });
+
+  // The `!payment` guard. A placed order is authorized-on-place, so a payment-less order means the
+  // authorize never produced one — there is nothing to capture, and it must not reach the gateway.
+  it('rejects an order with no payment at all (ORDER_INVALID_PAYMENT_TRANSITION)', async () => {
+    const h = await makeHarness();
+    jest.spyOn(h.paymentRepository, 'findByOrderId').mockResolvedValueOnce(null);
+
+    await expect(h.useCase.execute(capturePayload())).rejects.toMatchObject({
+      code: OrderErrorCodeEnum.ORDER_INVALID_PAYMENT_TRANSITION,
+    });
+    expect(h.paymentGateway.captureCount).toBe(0);
   });
 
   it('rejects capturing a failed payment with PAYMENT_INVALID_STATUS_TRANSITION (409)', async () => {
