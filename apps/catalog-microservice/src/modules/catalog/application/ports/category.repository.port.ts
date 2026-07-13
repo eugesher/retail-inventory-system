@@ -32,7 +32,9 @@ export interface ICategorySubtreeOptions {
 export interface ICategoryRepositoryPort {
   // Inserts or updates one category row; re-reads for the concrete id.
   save(category: Category): Promise<Category>;
-  findById(id: number): Promise<Category | null>;
+  // No `findById` (ADR-049): a category is addressed by `slug` everywhere a caller names
+  // one, and by `path` for the subtree reads. The by-id load survives as a private detail
+  // of the adapter's `save` re-read, which is its only caller.
   findBySlug(slug: string): Promise<Category | null>;
   existsBySlug(slug: string): Promise<boolean>;
   // Flat reads for list / tree assembly. The caller assembles the tree from the

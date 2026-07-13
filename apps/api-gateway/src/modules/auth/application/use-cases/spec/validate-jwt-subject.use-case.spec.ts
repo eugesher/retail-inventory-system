@@ -90,9 +90,9 @@ describe('ValidateJwtSubjectUseCase', () => {
     await expect(useCase.validate(staffPayload)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('rejects after staff soft-delete (and no matching customer)', async () => {
+  it('rejects when the staff row is gone (and no matching customer)', async () => {
     await seedStaff();
-    await staff.softDelete('staff-1');
+    staff.remove('staff-1');
 
     await expect(useCase.validate(staffPayload)).rejects.toBeInstanceOf(UnauthorizedException);
   });

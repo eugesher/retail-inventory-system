@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DeepPartial, EntityManager, Repository } from 'typeorm';
 
-import { AddressOwnerTypeEnum } from '@retail-inventory-system/contracts';
 import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import { Address } from '../../domain';
@@ -46,19 +45,6 @@ export class AddressTypeormRepository
       throw new Error(`AddressTypeormRepository.save: address ${saved.id} vanished after commit`);
     }
     return AddressMapper.toDomain(reloaded);
-  }
-
-  public async findById(id: string): Promise<Address | null> {
-    const entity = await this.addressRepository.findOne({ where: { id } });
-    return entity ? AddressMapper.toDomain(entity) : null;
-  }
-
-  public async findByOwner(ownerType: AddressOwnerTypeEnum, ownerId: string): Promise<Address[]> {
-    const entities = await this.addressRepository.find({
-      where: { ownerType, ownerId },
-      order: { id: 'ASC' },
-    });
-    return entities.map((entity) => AddressMapper.toDomain(entity));
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is

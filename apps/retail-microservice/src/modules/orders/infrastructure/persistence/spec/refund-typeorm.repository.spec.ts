@@ -113,21 +113,6 @@ describe('RefundTypeormRepository', () => {
     });
   });
 
-  describe('findById', () => {
-    it('returns the refund when a row matches', async () => {
-      refundRepo.findOne.mockResolvedValue(refundEntity());
-
-      const result = await repository.findById(42);
-
-      expect(result?.id).toBe(42);
-    });
-
-    it('returns null when no row matches', async () => {
-      refundRepo.findOne.mockResolvedValue(null);
-      await expect(repository.findById(404)).resolves.toBeNull();
-    });
-  });
-
   describe('findByOrderId', () => {
     it('lists the order refunds newest-first by issued_at then id', async () => {
       refundRepo.find.mockResolvedValue([refundEntity()]);

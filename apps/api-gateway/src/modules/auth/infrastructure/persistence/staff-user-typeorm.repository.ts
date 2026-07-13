@@ -51,8 +51,4 @@ export class StaffUserTypeormRepository implements IStaffUserRepositoryPort {
     }
     return StaffUserMapper.toDomain(reloaded);
   }
-
-  public async softDelete(id: string): Promise<void> {
-    await this.repository.softDelete(id);
-  }
 }

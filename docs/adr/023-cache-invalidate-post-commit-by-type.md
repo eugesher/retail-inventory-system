@@ -55,6 +55,12 @@ interface IStockCachePort {
 }
 ```
 
+> **Amended by [ADR-049](049-the-port-methods-nothing-calls.md).** `get` and `set` did not
+> stay "as before" for long — they never had a caller outside the adapter's own `getOrLoad`,
+> and leaving them public left a way around the very guarantee this ADR is about: a `set` of
+> pre-commit data is as permanently stale as a pre-commit `invalidate`. They are now private
+> to `StockCache`, and the port carries only `getOrLoad` + `withInvalidation`.
+
 The helper awaits `work()` first; on resolution it derives the
 invalidation items from the work result and fires the internal prefix
 delete; on rejection it rethrows without touching the cache.

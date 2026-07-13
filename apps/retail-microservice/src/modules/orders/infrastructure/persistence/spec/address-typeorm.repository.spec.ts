@@ -79,25 +79,7 @@ describe('AddressTypeormRepository', () => {
     });
   });
 
-  describe('findByOwner', () => {
-    it('resolves all addresses for an (ownerType, ownerId) pair', async () => {
-      addressRepo.find.mockResolvedValue([addressEntity()]);
-
-      const result = await repository.findByOwner(AddressOwnerTypeEnum.ORDER, '42');
-
-      expect(result).toHaveLength(1);
-      expect(addressRepo.find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { ownerType: AddressOwnerTypeEnum.ORDER, ownerId: '42' },
-        }),
-      );
-    });
-  });
-
-  describe('findById', () => {
-    it('returns null when no row matches', async () => {
-      addressRepo.findOne.mockResolvedValue(null);
-      await expect(repository.findById('missing')).resolves.toBeNull();
-    });
-  });
+  // No read tests: the port is write-only (ADR-049). `findById` and `findByOwner` were
+  // covered here and called by no use case; `findByOwner(CUSTOMER, id)` in particular
+  // returned the customer address book the snapshot design rules out.
 });
