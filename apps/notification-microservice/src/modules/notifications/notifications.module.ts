@@ -57,9 +57,10 @@ import {
 import { HandlebarsTemplateRendererAdapter } from './infrastructure/render';
 import { DeliveryRetryScheduler } from './infrastructure/scheduling';
 
-// `NOTIFIER` is bound to `LogNotifierAdapter` today; swap to
-// `EmailNotifierAdapter` / `WebhookNotifierAdapter` is a one-line `useExisting`
-// rebind once those adapters are implemented (ADR-011 §3).
+// `NOTIFIER` is bound to `LogNotifierAdapter` today. The seam a real SMTP or webhook
+// transport arrives through is `INotifierPort` — not a scaffold class: ADR-011 shipped
+// two that threw `not implemented`, were registered in no module, and were reachable only
+// through this folder's barrel, and ADR-048 deleted them.
 //
 // `TEMPLATE_RENDERER` is bound to `HandlebarsTemplateRendererAdapter` — the seam
 // the `RenderAndDispatchUseCase` renders a template subject/body against an event
