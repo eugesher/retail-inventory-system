@@ -133,6 +133,9 @@ class RecordingDeliveryRepo implements INotificationDeliveryRepositoryPort {
   public listRetryable(): Promise<NotificationDelivery[]> {
     throw new Error('not used in render & dispatch');
   }
+  public deleteOlderThan(): Promise<number> {
+    throw new Error('not used in render & dispatch');
+  }
 }
 
 // A renderer double that does naive `{{key}}` substitution from the context, so a spec can

@@ -15,6 +15,7 @@ import {
   CONSENT_READER,
   INotifierPort,
   MAX_DELIVERY_ATTEMPTS,
+  RETENTION_DELIVERY_DAYS,
   NOTIFICATION_DELIVERY_REPOSITORY,
   NOTIFICATION_EVENTS_PUBLISHER,
   NOTIFICATION_TEMPLATE_REPOSITORY,
@@ -30,6 +31,7 @@ import {
   RecordDeliveryOutcomeUseCase,
   RenderAndDispatchUseCase,
   RetryDeliveryUseCase,
+  PurgeAgedDeliveriesUseCase,
   RetryFailedDeliveriesUseCase,
   SendMarketingUseCase,
   SetTemplateActiveUseCase,
@@ -55,7 +57,7 @@ import {
   notificationEntities,
 } from './infrastructure/persistence';
 import { HandlebarsTemplateRendererAdapter } from './infrastructure/render';
-import { DeliveryRetryScheduler } from './infrastructure/scheduling';
+import { DeliveryRetentionScheduler, DeliveryRetryScheduler } from './infrastructure/scheduling';
 
 // `NOTIFIER` is bound to `LogNotifierAdapter` today. The seam a real SMTP or webhook
 // transport arrives through is `INotifierPort` — not a scaffold class: ADR-011 shipped
@@ -158,6 +160,13 @@ import { DeliveryRetryScheduler } from './infrastructure/scheduling';
     RetryDeliveryUseCase,
     RetryFailedDeliveriesUseCase,
     DeliveryRetryScheduler,
+
+    // The retention sweep (ISSUE-08): the use case owns the bounded `DELETE`, the scheduler owns the
+    // timer. **`RETENTION_DELIVERY_DAYS` was in the shared Joi schema from the beginning and NOTHING
+    // READ IT** — an operator who set it got a clean boot and no purge, while `notification_delivery`
+    // grew for the life of the deployment. This provider is the reader that key never had.
+    PurgeAgedDeliveriesUseCase,
+    DeliveryRetentionScheduler,
     RenderAndDispatchUseCase,
     SendMarketingUseCase,
     LogNotifierAdapter,
@@ -206,6 +215,15 @@ import { DeliveryRetryScheduler } from './infrastructure/scheduling';
     // The per-delivery retry cap, resolved from `MAX_DELIVERY_ATTEMPTS` (Joi default 3) so
     // the retry use cases inject a plain number rather than reading env (the retail
     // `RETURN_WINDOW_DAYS` value-provider precedent, ADR-033).
+    // The retention horizon in days, resolved from `RETENTION_DELIVERY_DAYS` (Joi default 90) so the
+    // purge use case injects a plain number rather than reading env (ADR-017; the
+    // `MAX_DELIVERY_ATTEMPTS` precedent).
+    {
+      provide: RETENTION_DELIVERY_DAYS,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('RETENTION_DELIVERY_DAYS') ?? 90,
+      inject: [ConfigService],
+    },
     {
       provide: MAX_DELIVERY_ATTEMPTS,
       useFactory: (config: ConfigService): number =>

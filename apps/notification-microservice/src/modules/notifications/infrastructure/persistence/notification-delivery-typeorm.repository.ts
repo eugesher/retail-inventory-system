@@ -156,4 +156,34 @@ export class NotificationDeliveryTypeormRepository
 
     return entities.map((entity) => NotificationDeliveryMapper.toDomain(entity));
   }
+
+  // The retention sweep's HARD delete (ISSUE-08) — the only statement in this repository that removes
+  // a row, and the only reason `notification_delivery` is no longer unbounded.
+  //
+  // **`DELETE`, not `softDelete`.** `BaseTypeormRepository` offers the latter and it is the wrong verb
+  // here: the row IS the dedupe anchor (`delivery_dedupe_key`), so a soft-deleted row the dedupe query
+  // no longer sees means the same notification is sent twice. `deletedAt` on this table is inert by
+  // design, and this sweep does not change that — it removes the row entirely or leaves it alone.
+  //
+  // **Bounded, and re-driven rather than looped.** `LIMIT` keeps one sweep from taking a table-sized
+  // lock on the hot path of every order; the scheduler runs again on its next tick and takes the next
+  // batch. A first purge after a long backlog therefore drains over several ticks, on purpose.
+  //
+  // `created_at` is the horizon column, not `last_attempt_at`: retention is about how old the RECORD
+  // is, not when it was last touched, and a delivery that failed and was retried for a week is still
+  // ninety days old at ninety days.
+  // **Parameterized raw SQL, and not by preference.** TypeORM's `DeleteQueryBuilder` has no `.limit()`
+  // and `repository.delete()` takes no bound at all — so an ORM-shaped version of this would be an
+  // *unbounded* `DELETE` on the busiest table in the schema. The bound is the point; the ORM is not.
+  public async deleteOlderThan(horizon: Date, limit: number): Promise<number> {
+    // `Repository.query` is typed `Promise<any>`, so the driver's answer is asserted once — here —
+    // and never leaves this method as `any`. `mysql2` answers a DELETE with an `OkPacket` carrying
+    // `affectedRows`.
+    const result: unknown = await this.deliveryRepository.query(
+      'DELETE FROM notification_delivery WHERE created_at < ? LIMIT ?;',
+      [horizon, limit],
+    );
+    const { affectedRows } = result as { affectedRows?: number };
+    return affectedRows ?? 0;
+  }
 }
