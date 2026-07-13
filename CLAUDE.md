@@ -94,7 +94,8 @@ Non-obvious facts, each worth a debugging cycle.
 - `new Date('2026-06-01T00:00:00')` (no `Z`, no `±hh:mm`) resolves in the **Node host's local
   zone**; `new Date('2026-06-01')` resolves as UTC. `timezone: 'Z'` does not reach this — it is
   `Date` parsing, not driver serialization. `@IsISO8601()` accepts the zone-less form, so pin a
-  `from`/`to` bound to UTC before parsing (both `parseInstant` copies, the gateway's `IsOnOrAfter`).
+  `from`/`to` bound to UTC before parsing (the event store's `parseInstant`, the gateway's
+  `IsOnOrAfter`).
 - Append-only tables (`stock_movement`, `domain_event`, `audit_log_entry`,
   `idempotency_key`) implement their repository port **directly**, never through
   `BaseTypeormRepository`.
@@ -254,7 +255,7 @@ Category and media operations emit **no** events.
 | `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
 | `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
 
-All three on the context-root `audit-query.controller.ts` (3 `@MessagePattern`), reached
+All three on `audit-query.controller.ts` (3 `@MessagePattern`), reached
 through `MicroserviceClientEventStoreModule` (`EVENT_STORE_MICROSERVICE`) — from the gateway's
 `modules/audit/` behind `GET /api/audit/{events,entries,trace/:correlationId}`.
 `audit.staff.action` is the one `audit.` **event**: it rides `ris.events` into the firehose
@@ -268,10 +269,10 @@ queue and never reaches this controller (ADR-039).
 | retail `OrderCancelledConsumer` (`orders/infrastructure/consumers/`) | `retail.order.cancelled` on `retail_queue` | `IssueRefundUseCase` (auto-refund) |
 | notification — six dispatch consumers | `inventory.stock.low`, `retail.order.placed`, `retail.order.cancelled`, `retail.fulfillment.shipped`/`.delivered`, the four `retail.return.*`, `retail.refund.issued` | `RenderAndDispatchUseCase` |
 | notification `ConsentEventsConsumer` | `customer.consent.updated` / `customer.erased` | `CONSENT_CACHE` write-through / evict |
-| event-store `FirehoseConsumer` (`modules/firehose.consumer.ts`) | `@EventPattern('#')` | `audit.staff.action` → `IngestAuditLogUseCase`; everything else → `IngestDomainEventUseCase` |
+| event-store `FirehoseConsumer` | `@EventPattern('#')` | `audit.staff.action` → `IngestAuditLogUseCase`; everything else → `IngestDomainEventUseCase` |
 
-`FirehoseConsumer` and `AuditQueryController` sit at the **context root** (see Service
-Structure → event-store), not in either sibling module.
+`FirehoseConsumer` and `AuditQueryController` are ordinary `presentation/` members of the
+single `audit-and-events` module (ADR-042).
 
 A routing key that is published but absent from that table is a **reserved surface**: no
 business consumer, still captured by the firehose. [`README.md`
@@ -489,27 +490,27 @@ Presentation: `health.controller.ts`, `notifications.controller.ts`,
 `notification-rpc-exception.filter.ts`.
 Seeds: `scripts/seeds/notification-template.sql`, `scripts/seeds/consent-record.sql`.
 
-**event-store** `modules/audit-and-events.module.ts` (ADR-034/035/039) — RMQ-only, no HTTP,
+**event-store** `modules/audit-and-events/` (ADR-034/035/039/042) — RMQ-only, no HTTP,
 **its own** DB `ris_eventstore` via
 `DatabaseModule.forRootWithUrl([DomainEventEntity, AuditLogEntryEntity], 'EVENTSTORE_DATABASE_URL')`.
-One bounded context (`audit-and-events`) split into two sibling modules: `domain-events/`
-(→ `domain_event`) and `audit-log/` (→ `audit_log_entry`).
+**One** bounded context = **one** module (ADR-042); the two append-only logs (`domain_event`,
+`audit_log_entry`) are two aggregates in it, one repository port each.
 Domain: `DomainEvent` and `AuditLogEntry` are **frozen value objects**, not `AggregateRoot`s;
 an invariant violation throws a plain `Error`. `AuditActorType` is domain-local, not a
 `libs/contracts` enum.
-Ports: `DOMAIN_EVENT_REPOSITORY` (`append` + `query`), `AUDIT_LOG_REPOSITORY` (`append` +
-`query` + `listByCorrelationId`), `TRACE_DOMAIN_EVENT_READER` (audit-log-owned raw-SQL reader
-over the sibling module's `domain_event` — the trace may not inject the sibling's repository).
+Ports: `DOMAIN_EVENT_REPOSITORY` and `AUDIT_LOG_REPOSITORY`, mirror surfaces — `append` +
+`query` + `listByCorrelationId` (the unpaginated ascending trace read) each.
 **`append` is the only mutating verb on either log**; both repositories are the sole
 `@InjectRepository` sites. `application/ports` may not import `lib-common`, so each declares
 its own `{ page, size }` request shape.
 Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEventsUseCase`,
-`QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts`
-(heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
-Context-root controllers (`modules/*.ts`, the `context-root` element type — each injects use
-cases from both siblings): `firehose.consumer.ts` and `audit-query.controller.ts`.
-`main.ts` is the repo's only hybrid boot (see Landmines). **No `presentation/` layer**, and no
-`*DomainException` / `*RpcExceptionFilter` pair, on purpose (ADR-039).
+`QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase` (injects **both** repositories),
+plus `firehose-extractors.ts` (heuristic `producer` / `aggregateType` / `aggregateId`) and the
+two view factories.
+Infra: `persistence/` (2 entities/mappers/repos + the shared `parse-instant.ts`).
+Presentation: `firehose.consumer.ts`, `audit-query.controller.ts`. No `*DomainException` /
+`*RpcExceptionFilter` pair, on purpose (ADR-039).
+`main.ts` is the repo's only hybrid boot (see Landmines).
 Migrations: `1782521938896-CreateDomainEventTable`, `1782521942829-CreateAuditLogEntryTable`
 (eventstore pipeline).
 
@@ -602,7 +603,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `042`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `043`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

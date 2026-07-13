@@ -66,14 +66,6 @@ const boundariesElements = [
     mode: 'file',
     capture: ['app', 'module'],
   },
-  // Bounded-context root (ADR-039/ADR-041) — a file directly under `modules/`
-  // that composes sibling modules. Only the event store has one.
-  {
-    type: 'context-root',
-    pattern: 'apps/*/src/modules/*.ts',
-    mode: 'file',
-    capture: ['app'],
-  },
   // App-level bootstrap (composition root). Lives outside any single module.
   {
     type: 'app-bootstrap',
@@ -245,22 +237,6 @@ const dependencyRules = [
       lib('lib-observability'),
     ],
   },
-  // Bounded-context root — composes sibling modules through their barrels and
-  // nothing else. Its lib set is `presentation`'s, because the two files that
-  // sit here are controllers (ADR-039). Deliberately no `sameApp` reach into a
-  // module's layers: a context root that needs an internal is a design smell.
-  {
-    from: { type: 'context-root' },
-    allow: [
-      sameApp('nest-module'),
-      sameApp('context-root'),
-      sameApp('app-shared'),
-      lib('lib-auth'),
-      lib('lib-contracts'),
-      lib('lib-messaging'),
-      lib('lib-observability'),
-    ],
-  },
   // App bootstrap (composition root) — anything inside its app + any lib.
   {
     from: { type: 'app-bootstrap' },
@@ -272,7 +248,6 @@ const dependencyRules = [
       sameApp('infrastructure'),
       sameApp('presentation'),
       sameApp('nest-module'),
-      sameApp('context-root'),
       sameApp('shared-module-barrel'),
       sameApp('app-shared'),
       sameApp('app-bootstrap'),

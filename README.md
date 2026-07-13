@@ -227,7 +227,7 @@ apps/
   inventory-microservice/     # modules/stock/
   retail-microservice/        # modules/cart/ + modules/orders/ + modules/returns/
   notification-microservice/  # modules/notifications/
-  event-store-microservice/   # modules/audit-and-events (domain-events/ + audit-log/)
+  event-store-microservice/   # modules/audit-and-events/
 libs/
   auth/           # AuthModule.forRootAsync, guards, @Public/@Roles/@RequiresPermission/@CurrentUser
   cache/          # ICachePort + RedisCacheAdapter + @Cacheable + CACHE_KEYS registry
@@ -658,7 +658,7 @@ field `public readonly`, `Object.freeze`d in the constructor, `create` / `recons
 factories, no mutators, no domain events. An invariant violation throws a plain `Error` —
 it can only be an internal caller bug, because the ingest validates first.
 
-One context-root `FirehoseConsumer` reads the concrete routing key off
+One `FirehoseConsumer` reads the concrete routing key off
 `context.getMessage().fields.routingKey` and dispatches: `audit.staff.action` →
 `IngestAuditLogUseCase`, everything else → `IngestDomainEventUseCase`. It **warn-swallows**
 and never rethrows. It sits beside the aggregator module rather than inside either sibling
@@ -679,7 +679,7 @@ use case, so every caller inherits the cap. An unknown id or an inverted `from`/
 yields an empty result, never an error: the event store has no domain-exception type, and
 therefore no RPC exception filter.
 
-They are served by the context-root `AuditQueryController` on a **second queue**,
+They are served by the `AuditQueryController` on a **second queue**,
 `event_store_query_queue`, bound to the default exchange — command traffic never rides the
 `ris.events` topic exchange:
 

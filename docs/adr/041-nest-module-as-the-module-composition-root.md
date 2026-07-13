@@ -1,9 +1,17 @@
 # ADR-041: The Nest module file as a first-class composition root
 
 - **Date**: 2026-07-11
-- **Status**: Accepted
+- **Status**: Accepted — the `context-root` element type is **retired** by [ADR-042](042-one-bounded-context-one-module.md)
 
 ---
+
+> **Amendment (ADR-042, same day).** §2 below mints a third element type, `context-root`
+> (`apps/*/src/modules/*.ts`), to type the three event-store files that sat outside every module.
+> ADR-042 removes the reason they sat there — the event store's context is now one module and
+> those files are ordinary members of it — so `context-root` has no members left and is deleted
+> from `eslint.config.mjs`. Everything else here stands: the `nest-module` and
+> `shared-module-barrel` types, the uniform `modules/<m>/<m>.module.ts` placement, and
+> `boundaries/no-unknown-files`.
 
 ## Context
 
