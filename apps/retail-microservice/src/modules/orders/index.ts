@@ -1,2 +1,2 @@
 export { orderEntities } from './infrastructure/persistence';
-export * from './infrastructure/orders.module';
+export * from './orders.module';

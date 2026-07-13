@@ -1,2 +1,2 @@
 export * from './infrastructure/persistence';
-export * from './infrastructure/notifications.module';
+export * from './notifications.module';

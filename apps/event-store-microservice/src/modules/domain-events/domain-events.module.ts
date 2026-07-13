@@ -2,9 +2,9 @@ import { Module } from '@nestjs/common';
 
 import { DatabaseModule } from '@retail-inventory-system/database';
 
-import { IngestDomainEventUseCase, QueryDomainEventsUseCase } from '../application/use-cases';
-import { DOMAIN_EVENT_REPOSITORY } from '../application/ports';
-import { DomainEventEntity, DomainEventTypeormRepository } from './persistence';
+import { IngestDomainEventUseCase, QueryDomainEventsUseCase } from './application/use-cases';
+import { DOMAIN_EVENT_REPOSITORY } from './application/ports';
+import { DomainEventEntity, DomainEventTypeormRepository } from './infrastructure/persistence';
 
 // The `domain-events` module of the event store's `audit-and-events` context — the
 // sink for the `#` event firehose (every business event published in the system,

@@ -19,7 +19,7 @@ import {
   RETURN_REQUEST_REPOSITORY,
   RETURN_WINDOW_DAYS,
   TRANSACTION_PORT,
-} from '../application/ports';
+} from './application/ports';
 import {
   AuthorizeReturnUseCase,
   CloseReturnUseCase,
@@ -29,8 +29,11 @@ import {
   OpenReturnRequestUseCase,
   ReceiveReturnUseCase,
   RejectReturnUseCase,
-} from '../application/use-cases';
-import { InventoryRestockRabbitmqAdapter, ReturnRabbitmqPublisher } from './messaging';
+} from './application/use-cases';
+import {
+  InventoryRestockRabbitmqAdapter,
+  ReturnRabbitmqPublisher,
+} from './infrastructure/messaging';
 import {
   CustomerContactReaderTypeormAdapter,
   ReturnOrderReaderTypeormAdapter,
@@ -38,8 +41,8 @@ import {
   ReturnLineEntity,
   ReturnRequestTypeormRepository,
   TypeormTransactionAdapter,
-} from './persistence';
-import { ReturnsController, ReturnRpcExceptionFilter } from '../presentation';
+} from './infrastructure/persistence';
+import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';
 
 // The returns bounded-context module — now the **live RMA lifecycle** (ADR-032), no longer
 // providers-only. It owns the `ReturnRequest` aggregate (root + `ReturnLine` children),

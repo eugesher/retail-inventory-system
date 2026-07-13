@@ -44,6 +44,36 @@ const boundariesElements = [
     mode: 'file',
     capture: ['app', 'module'],
   },
+  // The one sanctioned cross-module barrel (ADR-024, ADR-041, ADR-017 §6).
+  // `auth` owns StaffUser / Customer / Role / Permission / ConsentRecord; the
+  // `iam` and `customer-admin` admin shells reuse its repositories and use
+  // cases rather than re-registering adapters over the same tables. MUST stay
+  // ahead of `nest-module` — the plugin takes the first matching pattern.
+  {
+    type: 'shared-module-barrel',
+    pattern: 'apps/*/src/modules/auth/index.ts',
+    mode: 'file',
+    capture: ['app'],
+  },
+  // Module composition root (ADR-041). `<m>.module.ts` assembles the four
+  // layers below it, and the module-root `index.ts` barrel is the only way in
+  // from outside — so both sit here rather than inside any one layer. The
+  // pattern matches direct children of a module folder only; the layer
+  // patterns above already claim everything nested deeper.
+  {
+    type: 'nest-module',
+    pattern: 'apps/*/src/modules/*/*.ts',
+    mode: 'file',
+    capture: ['app', 'module'],
+  },
+  // Bounded-context root (ADR-039/ADR-041) — a file directly under `modules/`
+  // that composes sibling modules. Only the event store has one.
+  {
+    type: 'context-root',
+    pattern: 'apps/*/src/modules/*.ts',
+    mode: 'file',
+    capture: ['app'],
+  },
   // App-level bootstrap (composition root). Lives outside any single module.
   {
     type: 'app-bootstrap',
@@ -125,6 +155,7 @@ const dependencyRules = [
       sameModule('application-dto'),
       sameModule('application-use-case'),
       sameApp('app-shared'),
+      sameApp('shared-module-barrel'),
       lib('lib-ddd'),
       lib('lib-common'),
       lib('lib-contracts'),
@@ -180,6 +211,50 @@ const dependencyRules = [
       sameModule('application-dto'),
       sameModule('presentation'),
       sameApp('app-shared'),
+      sameApp('shared-module-barrel'),
+      lib('lib-auth'),
+      lib('lib-contracts'),
+      lib('lib-messaging'),
+      lib('lib-observability'),
+    ],
+  },
+  // Nest module (module composition root, ADR-041) — the one file allowed to
+  // see every layer of its own module at once, because wiring them is its job.
+  // It may compose the `auth` module (`iam` / `customer-admin` import
+  // `AuthModule`); composing any *other* sibling is not allowed, so a new
+  // cross-module edge is a deliberate config change, not an accident.
+  {
+    from: { type: 'nest-module' },
+    allow: [
+      sameModule('domain'),
+      sameModule('application-port'),
+      sameModule('application-use-case'),
+      sameModule('application-dto'),
+      sameModule('infrastructure'),
+      sameModule('presentation'),
+      sameApp('shared-module-barrel'),
+      sameApp('app-shared'),
+      lib('lib-auth'),
+      lib('lib-cache'),
+      lib('lib-common'),
+      lib('lib-config'),
+      lib('lib-contracts'),
+      lib('lib-database'),
+      lib('lib-ddd'),
+      lib('lib-messaging'),
+      lib('lib-observability'),
+    ],
+  },
+  // Bounded-context root — composes sibling modules through their barrels and
+  // nothing else. Its lib set is `presentation`'s, because the two files that
+  // sit here are controllers (ADR-039). Deliberately no `sameApp` reach into a
+  // module's layers: a context root that needs an internal is a design smell.
+  {
+    from: { type: 'context-root' },
+    allow: [
+      sameApp('nest-module'),
+      sameApp('context-root'),
+      sameApp('app-shared'),
       lib('lib-auth'),
       lib('lib-contracts'),
       lib('lib-messaging'),
@@ -196,6 +271,9 @@ const dependencyRules = [
       sameApp('application-dto'),
       sameApp('infrastructure'),
       sameApp('presentation'),
+      sameApp('nest-module'),
+      sameApp('context-root'),
+      sameApp('shared-module-barrel'),
       sameApp('app-shared'),
       sameApp('app-bootstrap'),
       lib('lib-auth'),
