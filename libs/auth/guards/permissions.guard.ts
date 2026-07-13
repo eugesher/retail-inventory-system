@@ -1,8 +1,8 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
-import { enforceRequiredClaim } from './claim-guard.util';
-import { REQUIRES_PERMISSION_KEY } from './requires-permission.decorator';
+import { enforceRequiredClaim } from '../guards/claim-guard.util';
+import { REQUIRES_PERMISSION_KEY } from '../decorators/requires-permission.decorator';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {

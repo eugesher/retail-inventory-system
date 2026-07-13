@@ -1,7 +1,7 @@
 # ADR-008: RabbitMQ wiring via `libs/messaging` and dotted routing keys
 
 - **Date**: 2026-05-10
-- **Status**: Accepted (client-module table extended by [ADR-011](011-notifier-port-and-adapters.md); `MessagingModule` removed by [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md))
+- **Status**: Accepted (client-module table extended by [ADR-011](011-notifier-port-and-adapters.md); `MessagingModule` removed by [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md); `RabbitmqClientFactory` removed by [ADR-046](046-libs-layout-and-dead-export-removal.md))
 
 ---
 
@@ -36,7 +36,7 @@ routing-key naming convention.
 | `MicroserviceClientConfiguration` | Async factory producing `RmqOptions` from `ConfigService`. Same shape as before — relocated, not rewritten. |
 | `MicroserviceClientRetailModule`, `MicroserviceClientInventoryModule` | Pre-wired Nest modules registering the retail/inventory clients under their `MicroserviceClientTokenEnum` tokens. |
 | ~~`MessagingModule`~~ | Convenience aggregator over the retail + inventory clients. **Deleted by [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md)**: with six services it bundled an arbitrary pair, and its only importer (the event store, a pure consumer) injected nothing from it. Import the per-service `MicroserviceClient*Module` you need. |
-| `RabbitmqClientFactory.create(configService, queue)` | Returns a one-off `ClientProxy` for a given queue. Use this in tests and bootstrap scripts that need a proxy without registering a Nest provider. |
+| ~~`RabbitmqClientFactory.create(configService, queue)`~~ | A one-off `ClientProxy` for callers that want one without a Nest provider. **Deleted by [ADR-046](046-libs-layout-and-dead-export-removal.md)**: no test, script or app ever called it. |
 | `ROUTING_KEYS` | Frozen `as const` object mirroring `MicroserviceMessagePatternEnum`. Idiomatic constants object for new callers; `MicroserviceMessagePatternEnum` remains for backwards compatibility. |
 | `EXCHANGES` | Frozen `as const` object: `{ RETAIL: 'retail', INVENTORY: 'inventory', NOTIFICATION: 'notification' }`. RabbitMQ today uses one queue per service without explicit exchanges; the constants land here so future migration to topic-exchange routing has a home. |
 

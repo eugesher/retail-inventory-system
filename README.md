@@ -236,8 +236,8 @@ libs/
   contracts/      # cross-service message + DTO contracts (plain TypeScript)
   database/       # BaseEntity, BaseTypeormRepository, TypeormTransactionAdapter, DatabaseModule
   ddd/            # Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort, ITransactionPort
-  messaging/      # per-service client modules, RabbitmqClientFactory, RisEventsMirrorPublisher, ROUTING_KEYS
-  observability/  # Pino config, CorrelationMiddleware, OTel tracer.ts, MetricsModule
+  messaging/      # clients/, RisEventsMirrorPublisher, sendPreservingRpcError, ROUTING_KEYS, EXCHANGES
+  observability/  # Pino config, correlation/, OTel tracer.ts (deep-import path)
 docs/adr/            # architecture decision records — the durable rationale
 docs/implementation/ # per-capability walkthroughs, numbered by delivery order
 migrations/          # retail_db migrations + migrations/eventstore/
@@ -256,7 +256,7 @@ Imported via path aliases as `@retail-inventory-system/<name>`.
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |
 | `common` | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token). |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`. |
-| `messaging` | Per-service client modules + `MicroserviceClientRisEventsModule`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS`, `EXCHANGES`. |
+| `messaging` | `clients/` (per-service client modules + `MicroserviceClientRisEventsModule`), `RisEventsMirrorPublisher`, `sendPreservingRpcError` (the cross-service `send` that preserves the upstream `{ code, details }`), `ROUTING_KEYS`, `EXCHANGES`. |
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel-spanned), global `CacheModule`, `@Cacheable()`, `CACHE_KEYS`. |
 | `observability` | `LoggerModuleConfig` (Pino + trace correlation), `CorrelationMiddleware`, `@CorrelationId()`, OTel `tracer.ts` side-effect bootstrap. |
 | `auth` | `AuthModule.forRootAsync()`, `JwtStrategy`, the three guards, `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`. |

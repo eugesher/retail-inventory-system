@@ -78,9 +78,9 @@ Non-obvious facts, each worth a debugging cycle.
 
 **Persistence**
 
-- MySQL treats `NULL`s as distinct inside a UNIQUE. `IngestDomainEventUseCase` coalesces
-  an empty `correlationId` to `''`, so `domain_event.correlation_id` is `NOT NULL DEFAULT ''` —
-  an event ingested without one is reachable by **no** `correlationId` filter and by no trace.
+- MySQL treats `NULL`s as distinct inside a UNIQUE. `domain_event.correlation_id` is `NOT NULL DEFAULT ''`
+  (`IngestDomainEventUseCase` coalesces an empty one to `''`) — an event ingested without one is
+  reachable by **no** `correlationId` filter and by no trace.
   `audit_log_entry.correlation_id` is nullable, and a `WHERE correlation_id = ?` never
   matches a null row either.
 - `audit_log_entry.action` holds the `IAuditLogEvent.name` string (`StaffUserRolesAssigned`,
@@ -495,8 +495,7 @@ Presentation: `health.controller.ts`, `notifications.controller.ts`,
 Seeds: `scripts/seeds/notification-template.sql`, `scripts/seeds/consent-record.sql`.
 
 **event-store** `modules/audit-and-events/` (ADR-034/035/039/042) — RMQ-only, no HTTP,
-**its own** DB `ris_eventstore` via
-`DatabaseModule.forRootWithUrl([DomainEventEntity, AuditLogEntryEntity], 'EVENTSTORE_DATABASE_URL')`.
+**its own** DB `ris_eventstore` via `DatabaseModule.forRootWithUrl` (`EVENTSTORE_DATABASE_URL`).
 **One** bounded context = **one** module (ADR-042); the two append-only logs (`domain_event`,
 `audit_log_entry`) are two aggregates in it, one repository port each.
 Domain: `DomainEvent` and `AuditLogEntry` are **frozen value objects**, not `AggregateRoot`s;
@@ -522,14 +521,14 @@ Imported via the path aliases in `tsconfig.json` as `@retail-inventory-system/<n
 
 | Library | Contents |
 | --- | --- |
-| `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `audit/` (the event-store read surface: `DomainEventView` / `AuditLogEntryView` + the two query payloads + the correlation-trace payload/result — ADR-039), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception. Every `*View` is a **class** with `@ApiResponseProperty`, never an `interface`. |
-| `auth` | `AuthModule.forRootAsync({ imports, providers, exports })` (Passport + JwtModule + `JwtStrategy` + the three guards, all global), `AUTH_USER_VALIDATOR`, `@Public` / `@Roles` / `@RequiresPermission` / `@CurrentUser`, runtime `RoleEnum` re-export. |
+| `contracts` | `microservices/` (queue / pattern / client-token / app-name enums, `ICorrelationPayload`), `auth/` (`RoleEnum`, `PermissionCodeEnum`, `ICurrentUser`, `IJwt{Access,Refresh}Payload`, `IAuditLogPublisher` + `AUDIT_LOG_PUBLISHER`, `IAuditStaffActionEvent`, `ConsentRecordView`, the two `customer.*` events), `audit/` (the event-store read surface: `DomainEventView` / `AuditLogEntryView` + the two query payloads + the correlation-trace payload/result — ADR-039), `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TS; class-validator / Swagger decorators are the documented DTO exception. Every `*View` is a **class**, never an `interface`. |
+| `auth` | `AuthModule.forRootAsync({ imports, providers, exports })` (Passport + JwtModule + `JwtStrategy`), `AUTH_USER_VALIDATOR`, runtime `RoleEnum`; `guards/`: the three global guards + `enforceRequiredClaim` (their shared claim check); `decorators/`: `@Public` / `@Roles` / `@RequiresPermission` / `@CurrentUser`. |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `TypeormTransactionAdapter` (the sole `ITransactionPort` impl, ADR-043), `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(entities)` / `.forRootWithUrl(entities, urlEnvVar)`. Apps call `forRoot` at `AppModule` level; per-module registration prefers `forFeature` (auth uses inline `TypeOrmModule.forFeature` — ADR-019). |
-| `messaging` | `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore}Module` + `MicroserviceClientRisEventsModule` (`RIS_EVENTS_PUBLISHER`), `MicroserviceClientConfiguration`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION` + the three `AUDIT_*_QUERY` RPCs), `EXCHANGES`. |
+| `messaging` | `clients/`: `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore,RisEvents}Module` (`RIS_EVENTS_PUBLISHER`) + `MicroserviceClientConfiguration`. Root: `RisEventsMirrorPublisher`, `sendPreservingRpcError` (`rpc-passthrough.ts` — the `send` that keeps the upstream `{ code, details }`), `ROUTING_KEYS` (incl. `AUDIT_STAFF_ACTION` + the three `AUDIT_*_QUERY` RPCs), `EXCHANGES`. |
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel spans), `CacheModule` (`@Global()`, register once at root), `@Cacheable()`, the `CACHE_KEYS` registry, `CacheHelper`. |
-| `observability` | `LoggerModuleConfig` (Pino + redaction + the `logMethod` hook injecting `traceId`/`spanId`), `CorrelationMiddleware`, `CorrelationId`, `CORRELATION_ID_HEADER`, `tracer.ts`, `TraceContextInterceptor` / `MetricsModule` (placeholders). |
+| `observability` | `LoggerModuleConfig` (Pino + redaction + `traceId`/`spanId` injection); `correlation/`: `CorrelationMiddleware`, `CorrelationId`, `CORRELATION_ID_HEADER`. `tracer.ts` + `testing/` are deep-import paths (tsconfig aliases) — do not move them. |
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject<TProps>`, `DomainEvent<TAggregateId>`, `IRepositoryPort`, and the shared transaction seam `ITransactionPort` / `ITransactionScope` / `TRANSACTION_PORT` (ADR-043). **No `@nestjs/*`, no TypeORM.** |
-| `common` | `Result<T, E>`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (under `idempotency/`); under `concurrency/`: `OCC_RETRY_ATTEMPTS` + `runWithOccRetry` — the **one** OCC retry protocol, which the four `runWith<X>WriteRetry` helpers now bind to (ADR-043/045). Node `crypto` only. |
+| `common` | `Result<T, E>`, `DomainException`, `IPage` / `IPageRequest` + `clampPageWindow` (under `pagination/`), `Maybe` / `Nullable`, `bodyFingerprint` (under `idempotency/`); under `concurrency/`: `OCC_RETRY_ATTEMPTS` + `runWithOccRetry` — the **one** OCC retry protocol, which the four `runWith<X>WriteRetry` helpers now bind to (ADR-043/045). Node `crypto` only. |
 | `config` | `configModuleConfig` (the Joi env schema). No Nest-binding helpers. |
 
 **Cache keys** live in `libs/cache/cache-keys.ts`. `INVENTORY_STOCK_KEY_VERSION` is `v3`;
@@ -605,12 +604,12 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `046`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `047`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under
 [`docs/audits/`](docs/audits/).
 
 **One architectural exception: `ARCH-LINT-EX-02`** (ADR-017 §6) — the gateway `auth` barrel is
-the sole cross-module-consumable barrel (`iam` / `customer-admin`). The `EntityManager`
-downcast lives only in `TypeormTransactionAdapter` and `StockTypeormRepository` (ADR-019).
+the sole cross-module-consumable barrel (`iam` / `customer-admin`). The `EntityManager` downcast
+lives only in `TypeormTransactionAdapter` + `StockTypeormRepository`.

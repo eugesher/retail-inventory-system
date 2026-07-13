@@ -7,18 +7,18 @@ import {
   MicroserviceQueueEnum,
 } from '@retail-inventory-system/contracts';
 
-import { MicroserviceClientConfiguration } from './microservice-client.configuration';
+import { MicroserviceClientConfiguration } from '../clients/microservice-client.configuration';
 
 @Module({
   imports: [
     ConfigModule,
     ClientsModule.registerAsync([
       new MicroserviceClientConfiguration(
-        MicroserviceClientTokenEnum.NOTIFICATION_MICROSERVICE,
-        MicroserviceQueueEnum.NOTIFICATION_EVENTS,
+        MicroserviceClientTokenEnum.RETAIL_MICROSERVICE,
+        MicroserviceQueueEnum.RETAIL_QUEUE,
       ),
     ]),
   ],
   exports: [ClientsModule],
 })
-export class MicroserviceClientNotificationModule {}
+export class MicroserviceClientRetailModule {}

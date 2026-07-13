@@ -7,7 +7,7 @@ import {
   MicroserviceQueueEnum,
 } from '@retail-inventory-system/contracts';
 
-import { MicroserviceClientConfiguration } from './microservice-client.configuration';
+import { MicroserviceClientConfiguration } from '../clients/microservice-client.configuration';
 
 // The request-side client for the event store's `audit.*` query RPCs (ADR-039).
 //
