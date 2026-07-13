@@ -30,6 +30,10 @@ export const configModuleConfig = {
 
     RABBITMQ_URL: Joi.string().uri({ scheme: 'amqp' }).required(),
 
+    // Per-service timeout for the `GET /api/health` liveness fan-out (ADR-044). Bounds ONE
+    // probe, not the fan-out — the five run concurrently.
+    HEALTH_PROBE_TIMEOUT_MS: Joi.number().integer().min(100).default(2000),
+
     REDIS_URL: Joi.string().uri({ scheme: 'redis' }).required(),
 
     CACHE_TTL_MS_DEFAULT: Joi.number().integer().positive().default(60000),

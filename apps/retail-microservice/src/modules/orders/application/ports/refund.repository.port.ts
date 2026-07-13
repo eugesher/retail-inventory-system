@@ -1,5 +1,5 @@
 import { Refund } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const REFUND_REPOSITORY = Symbol('REFUND_REPOSITORY');
 

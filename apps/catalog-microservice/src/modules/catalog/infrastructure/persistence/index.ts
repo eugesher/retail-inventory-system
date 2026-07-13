@@ -1,11 +1,12 @@
-import { TypeOrmModuleOptions } from '@nestjs/typeorm';
-
 import { CategoryEntity } from './category.entity';
 import { MediaAssetEntity } from './media-asset.entity';
 import { ProductEntity } from './product.entity';
 import { ProductVariantEntity } from './product-variant.entity';
 
-export const catalogEntities: TypeOrmModuleOptions['entities'] = [
+// The module's entity list: `DatabaseModule.forRoot(...)` in `app.module.ts`, and
+// `forFeature(...)` in the module file. UNANNOTATED on purpose — see the note on
+// `DatabaseModule.forRoot` for why the parameter type must not be used here.
+export const catalogEntities = [
   ProductEntity,
   ProductVariantEntity,
   CategoryEntity,

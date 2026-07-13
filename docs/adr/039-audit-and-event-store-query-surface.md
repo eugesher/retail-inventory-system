@@ -1,9 +1,18 @@
 # ADR-039: The audit-and-event-store query surface
 
 - **Date**: 2026-07-10
-- **Status**: Accepted
+- **Status**: Accepted — **structure amended** by [ADR-042](042-one-bounded-context-one-module.md)
 
 ---
+
+> **Amendment (ADR-042, 2026-07-11).** Everything this ADR decides about the *query surface* —
+> the three `audit.*` RPCs, the dedicated `event_store_query_queue`, the page cap, the
+> newest-first / ascending split, the "no `LIKE`, no JSON-path" filter rule, the absence of a
+> `*RpcExceptionFilter` — stands unchanged. Two structural claims do not: `AuditQueryController`
+> and `FirehoseConsumer` no longer sit at a bespoke **context root**, and the correlation trace
+> no longer reads `domain_event` through the raw-SQL `TRACE_DOMAIN_EVENT_READER` port. With the
+> context collapsed to one module, both controllers are ordinary `presentation/` members and the
+> trace injects both repository ports directly.
 
 ## Context
 

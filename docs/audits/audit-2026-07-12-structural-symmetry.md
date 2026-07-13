@@ -1,0 +1,204 @@
+---
+date: 2026-07-12
+status: closed
+---
+
+# Audit Report — 2026-07-12 — Structural symmetry across the six services
+
+## Summary
+
+A structural sweep of all six deployables, run after the module-layout work
+([ADR-041](../adr/041-nest-module-as-the-module-composition-root.md),
+[ADR-042](../adr/042-one-bounded-context-one-module.md)), comparing every module on the axes a
+reader would expect to be uniform: layer folders, entity registration, exceptions, filters,
+file naming, DI tokens, shared helpers, bootstrap shape.
+
+Seven findings. **All seven are fixed.**
+
+| Code | Finding | Status |
+|------|---------|--------|
+| `SYM-001` | Transaction seam duplicated in three modules | **fixed** (ADR-043) |
+| `SYM-002` | `OCC_RETRY_ATTEMPTS` token duplicated in four modules | **fixed** (ADR-043) |
+| `SYM-003` | `MessagingModule` dead — one importer, and it injected nothing | **fixed** (ADR-043) |
+| `SYM-004` | The `ClientProxy` filename rule in the docs did not match the code | **fixed** (2026-07-12) |
+| `SYM-005` | Exception-file and RPC-filter naming drift | **fixed** (2026-07-12) |
+| `SYM-006` | Functional asymmetries (health surface, gateway admin shells) | **fixed** (ADR-044) |
+| `SYM-007` | The four `runWith<X>WriteRetry` helpers are one protocol, written four times | **fixed** (ADR-045) |
+
+### What SYM-001 and SYM-002 had in common
+
+Two of them (`SYM-001`, `SYM-002`) were the *same* defect: a thing that is not module-specific,
+copied into every module that needs it, because cross-module isolation leaves no legal way to
+share it and nobody lifted it into a lib. This is the diagnosis ADR-042 made inside the event
+store, one level up: **when an isolation rule forces you to duplicate code in order to obey it,
+what is usually misplaced is the code, not the rule.** `SYM-007` is the same shape again, but it
+needs a design decision rather than a move — see below.
+
+---
+
+## `SYM-004` — the `ClientProxy` filename rule did not match the code — **FIXED**
+
+**Resolution (2026-07-12).** The containment rule is now **enforced in CI** rather than reviewed: a
+`no-restricted-imports` entry scoped to `apps/**` (ignoring `infrastructure/messaging/**`) with
+`importNames: ['ClientProxy', 'ClientProxyFactory', 'ClientsModule']`. `eslint-plugin-boundaries`
+cannot express this — it types elements by path, and `@nestjs/microservices` is legitimately
+imported outside `messaging/` for `@EventPattern` / `@MessagePattern` / `Transport`. `importNames`
+names the one symbol that must stay contained. Zero violations existed, so the rule went in green.
+
+The filename half of the old rule was **wrong, not the code**: the dot form is correct and mirrors
+the port it implements. The docs now state both forms. The three `rmq-*` outliers — a *third*
+scheme — were renamed to the established ones (`customer-events.rabbitmq.publisher.ts`,
+`audit-log.rabbitmq.publisher.ts` ×2; classes `Rmq<X>Publisher` → `<X>RabbitmqPublisher`), so two
+conventions remain instead of three.
+
+### Original finding
+
+[`README.md` §3](../../README.md#3-repository-layout) states:
+
+> `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
+> `infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts`.
+
+**The containment half is true**: all 21 files that import `ClientProxy` live in
+`infrastructure/messaging/`. **The filename half is not**: 7 of the 21 do not match the glob.
+
+- **Six** cross-service adapters use a **dot**, not a hyphen, before `rabbitmq`:
+  `cart-catalog.rabbitmq.adapter.ts`, `cart-inventory.rabbitmq.adapter.ts`,
+  `order-catalog.rabbitmq.adapter.ts`, `order-commit-sale.rabbitmq.adapter.ts`,
+  `order-inventory.rabbitmq.adapter.ts`, `inventory-restock.rabbitmq.adapter.ts`.
+  These are internally coherent and their **ports use the same dot**
+  (`cart-catalog.gateway.port.ts`) — the dot separates a two-word seam name from the
+  `rabbitmq.adapter` suffix, avoiding `cart-catalog-rabbitmq.adapter.ts`. So there are really
+  *two* conventions, and the docs describe one.
+- **One** uses a prefix: `rmq-customer-events.publisher.ts` (gateway `auth`). Its sibling
+  `rmq-audit-log.publisher.ts` exists twice (gateway `auth`, retail `orders`) and lives under
+  `infrastructure/audit/` rather than `messaging/` — those two hold no `ClientProxy`, so they
+  are outside the rule, but they are the same naming outlier.
+
+The rule as written is also **unenforceable**: `eslint-plugin-boundaries` matches element types
+by path, not imported symbols, and `@nestjs/microservices` is legitimately imported outside
+`messaging/` (`@EventPattern` in consumers, `@MessagePattern` in presentation). Today the rule
+is upheld by code review alone.
+
+## `SYM-005` — exception-file and RPC-filter naming drift — **FIXED**
+
+**Resolution (2026-07-12).** The first framing of this finding ("singular vs plural") was wrong.
+The actual convention, held by five of the seven modules, is that **all four names key off the
+context noun, not the module folder**:
+
+> `<Noun>DomainException` ↔ `<noun>.exception.ts` ↔ `<noun>-rpc-exception.filter.ts` ↔ `<Noun>RpcExceptionFilter`
+
+`modules/stock/` proves the rule rather than breaking it: its noun is *inventory*, so it throws
+`InventoryDomainException` from `inventory.exception.ts` through `InventoryRpcExceptionFilter`.
+Same for `modules/returns/` → *return*.
+
+Under that rule there were exactly two violations, and neither was about plurals:
+
+| Was | Now | Why |
+|---|---|---|
+| `notification-domain.exception.ts` | `notification.exception.ts` | the class `NotificationDomainException` was already right; only the filename carried a stray `-domain` |
+| `orders-rpc-exception.filter.ts` / `OrdersRpcExceptionFilter` | `order-rpc-exception.filter.ts` / `OrderRpcExceptionFilter` | it was the **only filter not named after the exception it maps** (`OrderDomainException`) |
+
+The invariant now holds across all seven modules, and it is stated in `README.md` §3 — it had
+never been written down, which is how it drifted.
+
+## `SYM-006` — functional asymmetries — **FIXED**
+
+**Resolution (2026-07-12, [ADR-044](../adr/044-system-health-fan-out.md)).** The health half of
+this finding was **stated backwards**, and correcting it changed the fix.
+
+Not "five services are missing a health check" — `notification.health.ping` had **no caller at
+all**: no gateway route, no e2e, no `http/` collection, and `docker-compose`'s `healthcheck`
+blocks cover RabbitMQ / MySQL / Redis only (the services are not in compose). The system had one
+**dead RPC** and no liveness surface. Adding a ping to the other five would have produced *six*
+dead RPCs: a probe's value is entirely in its consumer. So the fix built the consumer —
+`@Public() GET /api/health` on the gateway, fanning out to all five over the real broker — and
+the dead ping became a live capability. See ADR-044 for the design (liveness not readiness,
+`degraded` not 503, concurrent probes, a never-rejecting adapter).
+
+The other two items are **not** defects and are recorded as accepted:
+
+- **Gateway admin shells.** Deliberate (ADR-024): `iam` and `customer-admin` are shells over the
+  `auth` aggregates and reach them through the sanctioned `shared-module-barrel` seam
+  (`ARCH-LINT-EX-02`). Giving them their own ports would reverse that decision — the same
+  alternative ADR-041 already rejected.
+- **`app.module.ts` import order.** Aligned to `Config → Logger → Database → Cache` across all
+  six. Cosmetic; `CacheModule` is `@Global()`.
+
+### Original finding
+- **Gateway admin shells.** `modules/iam/` has `application/use-cases/` but no
+  `application/ports/` and no `infrastructure/`; `modules/customer-admin/` has only
+  `presentation/`. They are the only modules in the repo without an application-port layer.
+  Deliberate (ADR-024: they are shells over the `auth` aggregates, and consume auth's
+  repositories through the sanctioned `shared-module-barrel` seam), but they do fall outside the
+  hexagon the other sixteen modules keep.
+- **`app.module.ts` import order.** notification puts `CacheModule` before `DatabaseModule`,
+  inventory after. `CacheModule` is `@Global()`, so this is cosmetic.
+
+## `SYM-007` — the four `runWith<X>WriteRetry` helpers are one protocol, written four times — **FIXED**
+
+**Resolution (2026-07-12, [ADR-045](../adr/045-one-occ-retry-protocol.md)).** Reading this as a
+*duplication* problem was the trap. The shared `for`/`try`/`catch` is **eight lines**; the rest of
+each 80–180 line file is comments and module-specific logging and exception construction. The
+naive generalisation would have made the code **longer while enforcing nothing**.
+
+It is an **invariant** problem: what is duplicated is a *rule* — ADR-036's levels, its
+only-a-lost-CAS-retries policy, its bounded budget — and in all four copies that rule was
+unenforced and untested. So the core (`runWithOccRetry`, `libs/common/concurrency/`) owns the
+loop, the levels and both message texts; the module owns its conflict type, its trace fields and
+its terminal exception. `onExhausted` is typed `never`, making "you must throw" a compile error.
+The protocol now has a unit test — it never had one.
+
+The code got **longer** (445 → 482 lines), and ADR-045 says so in its Consequences. The win is
+the invariant.
+
+### Original finding
+
+`cart-write.ts` (99 lines), `order-write.ts` (83), `return-write.ts` (80), and
+`stock-mutation.ts` (183, which also carries `applyOnHandChange`) each define a
+`<X>WriteConflictError` and a `runWith<X>WriteRetry`. [ADR-036](../adr/036-idempotency-key-store-and-enforced-occ.md)
+treats the per-module helper as a convention, so each copy reads as intentional rather than as drift.
+
+Unlike `SYM-001` / `SYM-002` these are **not byte-identical** — so this is not a move, it is a
+generalisation, and it needs its own ADR.
+
+**The loops are structurally identical.** Each is: `for attempt in 1..maxAttempts` → run the
+work → if the error is not this module's conflict type, rethrow → if the budget is exhausted,
+log `warn` and throw the module's `*DomainException` with `{ currentVersion }` → otherwise log
+`info` and loop. Same order, same branches, same log levels (ADR-036 pins OCC retries at `info`),
+same unreachable-tail guard.
+
+**They vary in exactly three places:**
+
+1. **The conflict type** caught — `OrderWriteConflictError` / `ReturnWriteConflictError` /
+   `CartWriteConflictError` / `StockWriteConflictError`. All four carry `currentVersion`; they
+   differ only in the id they also carry (`orderId`, `rmaId`, `cartId`, …).
+2. **The exception thrown on exhaustion** — `OrderDomainException(ORDER_VERSION_MISMATCH, …)`
+   vs `ReturnDomainException(RETURN_VERSION_MISMATCH, …)`, etc.
+3. **The log wording and the id key** in the log context.
+
+### Sketch of the generalisation
+
+A shared `OccWriteConflictError` base in `libs/common/concurrency/` carrying `currentVersion` +
+an `entityId`; each module's conflict error extends it. A generic
+`runWithOccRetry<T>(deps, attempt, { onExhausted })` catches the base and delegates the terminal
+throw to the module, which is the only part that must stay module-owned (its `*DomainException`
+and error code are its own). The application-use-case layer may import `lib-common`, so the
+placement is legal — the same check that decided `SYM-002`.
+
+### The trade-off to weigh in the ADR
+
+- **For.** ~340 lines collapse to one loop. The retry protocol — the thing ADR-036 actually
+  specifies — becomes provably the same everywhere instead of four hand-copied approximations of
+  it, and a fifth aggregate is free. The `info` / `warn` levels and the exhaustion contract stop
+  being four independent chances to drift.
+- **Against.** The module's terminal exception becomes a callback, which is one indirection more
+  than a reader of `order-write.ts` faces today. The hand-written log wording ("Order write
+  conflict — retrying with a fresh read") becomes parameterised and blander. And
+  `stock-mutation.ts` only *partly* folds in: `applyOnHandChange` and the stock-specific
+  invariants stay where they are, so inventory ends up with a smaller local file plus a lib
+  import rather than a clean deletion.
+- **Prior art in this repo.** The project already accepts a duplicate when the alternative is a
+  broken boundary (`retry-then-log-for-replay.ts`, copied into `returns` because it may not
+  import `orders`). That precedent does **not** apply here: nothing in the retry loop is
+  module-specific, and lifting it breaks no boundary — the same reasoning that settled
+  `SYM-001`.

@@ -62,6 +62,20 @@ const ELEMENTS = [
     mode: 'file',
     capture: ['app', 'module'],
   },
+  // ADR-041. `shared-module-barrel` MUST precede `nest-module` — the plugin
+  // takes the first matching pattern, and `auth/index.ts` matches both.
+  {
+    type: 'shared-module-barrel',
+    pattern: 'apps/*/src/modules/auth/index.ts',
+    mode: 'file',
+    capture: ['app'],
+  },
+  {
+    type: 'nest-module',
+    pattern: 'apps/*/src/modules/*/*.ts',
+    mode: 'file',
+    capture: ['app', 'module'],
+  },
   { type: 'lib-contracts', pattern: 'libs/contracts/**', mode: 'file' },
   { type: 'lib-ddd', pattern: 'libs/ddd/**', mode: 'file' },
   { type: 'lib-common', pattern: 'libs/common/**', mode: 'file' },
@@ -80,6 +94,9 @@ const sameModule = (type: string): object => ({
     },
   },
 });
+const sameApp = (type: string): object => ({
+  to: { type, captured: { app: '{{from.captured.app}}' } },
+});
 const lib = (type: string): object => ({ to: { type } });
 
 const DEPENDENCY_RULES = [
@@ -95,6 +112,7 @@ const DEPENDENCY_RULES = [
     allow: [
       sameModule('domain'),
       sameModule('application-port'),
+      sameApp('shared-module-barrel'),
       lib('lib-ddd'),
       lib('lib-common'),
       lib('lib-contracts'),
@@ -109,6 +127,7 @@ const DEPENDENCY_RULES = [
     allow: [
       sameModule('application-use-case'),
       sameModule('application-port'),
+      sameApp('shared-module-barrel'),
       lib('lib-contracts'),
       lib('lib-messaging'),
     ],
@@ -123,6 +142,30 @@ const DEPENDENCY_RULES = [
       lib('lib-messaging'),
       lib('lib-contracts'),
     ],
+  },
+  // ADR-041 — the module composition root sees every layer of its own module
+  // and the `auth` barrel, but never a sibling module's internals or barrel.
+  {
+    from: { type: 'nest-module' },
+    allow: [
+      sameModule('domain'),
+      sameModule('application-port'),
+      sameModule('application-use-case'),
+      sameModule('infrastructure'),
+      sameModule('presentation'),
+      sameApp('shared-module-barrel'),
+      lib('lib-cache'),
+      lib('lib-database'),
+      lib('lib-messaging'),
+      lib('lib-contracts'),
+    ],
+  },
+  // ADR-043 — the database lib may reach the domain kernel (`TypeormTransactionAdapter`
+  // implements `ITransactionPort`). The reverse has no allow rule and stays disallowed by
+  // the `default: 'disallow'` polarity, which the fixtures below pin.
+  {
+    from: { type: 'lib-database' },
+    allow: [lib('lib-database'), lib('lib-common'), lib('lib-contracts'), lib('lib-ddd')],
   },
   // External denylists per source layer.
   {
@@ -188,6 +231,7 @@ function buildLinter(): { linter: Linter; config: Linter.Config[] } {
           'error',
           { default: 'disallow', checkAllOrigins: true, rules: DEPENDENCY_RULES },
         ] as Linter.RuleEntry,
+        'boundaries/no-unknown-files': 'error' as Linter.RuleEntry,
       },
     },
   ];
@@ -750,33 +794,24 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
-  // The event-store microservice (the sixth deployable, ADR-034/035) follows the
-  // canonical per-module hexagonal layout — its context modules live under
-  // `infrastructure/`, so the generic `apps/*/src/modules/*/...` element patterns classify
-  // its layers automatically with no `eslint.config.mjs` change. These fixtures repeat the
-  // bumpers there, pointed at the real event-store paths, and add the sibling-module
-  // isolation between its two append-only contexts (`domain-events` ↔ `audit-log`). Note:
-  // the event store has no `presentation/` layer — its firehose dispatcher is a
-  // context-root `@Controller()` (FirehoseConsumer), an unmatched element outside the
-  // per-module taxonomy (like the bounded-context aggregator module itself), so it carries
-  // no presentation bumper. The append-only repository shape is locked by the separate
-  // structural assertion that follows this block.
+  // The event-store microservice (the sixth deployable, ADR-034/035) is ONE module —
+  // `modules/audit-and-events/` — holding both append-only logs as two aggregates
+  // (ADR-042), so the generic `apps/*/src/modules/*/...` element patterns classify its layers
+  // with no `eslint.config.mjs` special case. These fixtures repeat the per-layer bumpers
+  // there, pointed at the real event-store paths. The append-only repository shape is locked
+  // by the separate structural assertion that follows this block.
   describe('boundaries/dependencies — event-store microservice', () => {
+    const M = 'apps/event-store-microservice/src/modules/audit-and-events';
+
     it('domain (DomainEvent, AuditLogEntry frozen value objects) may not import @nestjs/common', () => {
       const code = `import { Injectable } from '@nestjs/common';\nexport const x = Injectable;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/domain-events/domain/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/domain/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
     it('domain may not import typeorm', () => {
       const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/audit-log/domain/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/domain/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
@@ -784,19 +819,13 @@ describe('boundaries rules (ADR-017)', () => {
       // The ingest use cases reach the append-only logs via the repository ports
       // (DOMAIN_EVENT_REPOSITORY / AUDIT_LOG_REPOSITORY) — never via EntityManager.
       const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/domain-events/application/use-cases/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/application/use-cases/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
     it('application use-case may not import @nestjs/typeorm', () => {
       const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/audit-log/application/use-cases/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/application/use-cases/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
@@ -804,27 +833,26 @@ describe('boundaries rules (ADR-017)', () => {
       // IDomainEventRepositoryPort / IAuditLogRepositoryPort return the DomainEvent /
       // AuditLogEntry value objects only — no TypeORM Repository leak across the seam.
       const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/domain-events/application/ports/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/application/ports/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
-    it('domain-events domain may not import the audit-log module domain (cross-module)', () => {
-      // Resolves to a real audit-log file, so the boundaries resolver types the target as
-      // the audit-log `domain`. `sameModule('domain')` requires the same app *and* module,
-      // so a domain-events → audit-log domain edge is cross-module and disallowed — locking
-      // in the isolation between the event store's two append-only contexts. The only link
-      // is the context-root FirehoseConsumer, which injects each module's ingest use case
-      // via DI (a port), never a cross-module domain import.
-      // 2 levels up: domain → domain-events, then audit-log/domain/...
-      const code = `import { AuditLogEntry } from '../../audit-log/domain/audit-log-entry.model';\nexport type Y = AuditLogEntry;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/domain-events/domain/__fixture__.ts',
-      );
+    it('presentation (FirehoseConsumer, AuditQueryController) may not import typeorm', () => {
+      // The event store gained a `presentation/` layer with ADR-042: both controllers inject
+      // use cases of this module, so neither needs a home outside the hexagon any more.
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(code, `${M}/presentation/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('the trace use case may inject BOTH repository ports — they are one module (ADR-042)', () => {
+      // The read that motivated ADR-042. Under the old two-module split this edge was
+      // cross-module and illegal, which is what forced a raw-SQL reader port over the
+      // sibling's table. Both logs now live here, so the port import is an ordinary
+      // `sameModule` edge.
+      const code = `import { AUDIT_LOG_REPOSITORY, DOMAIN_EVENT_REPOSITORY } from '../ports';\nexport const x = [AUDIT_LOG_REPOSITORY, DOMAIN_EVENT_REPOSITORY];\n`;
+      const messages = lint(code, `${M}/application/use-cases/__fixture__.ts`);
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
     });
   });
 
@@ -838,8 +866,8 @@ describe('boundaries rules (ADR-017)', () => {
   // `append`, via TypeORM `insert`.
   describe('event-store repositories are append-only (structural)', () => {
     const repoFiles = [
-      'apps/event-store-microservice/src/modules/domain-events/infrastructure/persistence/domain-event-typeorm.repository.ts',
-      'apps/event-store-microservice/src/modules/audit-log/infrastructure/persistence/audit-log-entry-typeorm.repository.ts',
+      'apps/event-store-microservice/src/modules/audit-and-events/infrastructure/persistence/domain-event-typeorm.repository.ts',
+      'apps/event-store-microservice/src/modules/audit-and-events/infrastructure/persistence/audit-log-entry-typeorm.repository.ts',
     ];
 
     it.each(repoFiles)(
@@ -868,6 +896,99 @@ describe('boundaries rules (ADR-017)', () => {
         expect(source).not.toMatch(/\b(save|update|delete|softDelete|remove)\s*\(/);
       },
     );
+  });
+
+  // ADR-041. Before this taxonomy existed, `modules/<m>/<m>.module.ts` and the module-root
+  // `index.ts` barrel matched no element pattern, so `boundaries/dependencies` skipped them
+  // entirely — cross-module isolation held for a deep path (`../orders/application/ports`)
+  // but not for the barrel (`../orders`). These fixtures pin the closed hole: the sole
+  // cross-module seam is the `auth` barrel (ADR-024), and everything else stays shut.
+  describe('boundaries/dependencies — module composition root (ADR-041)', () => {
+    it('nest-module may not reach a sibling module through a deep path', () => {
+      const code = `import { ORDER_REPOSITORY } from '../orders/application/ports';\nexport const x = ORDER_REPOSITORY;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/__fixture__.module.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('nest-module may not reach a sibling module through its barrel', () => {
+      const code = `import { orderEntities } from '../orders';\nexport const x = orderEntities;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/__fixture__.module.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('a use case may not reach a sibling module through its barrel', () => {
+      const code = `import { orderEntities } from '../../../orders';\nexport const x = orderEntities;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('nest-module may wire its own module’s use cases', () => {
+      const code = `import { ReserveStockUseCase } from './application/use-cases';\nexport const x = ReserveStockUseCase;\n`;
+      const messages = lint(
+        code,
+        'apps/inventory-microservice/src/modules/stock/__fixture__.module.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    it('the gateway auth barrel is the one sanctioned cross-module seam (ADR-024)', () => {
+      const code = `import { ROLE_REPOSITORY } from '../../../auth';\nexport const x = ROLE_REPOSITORY;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/iam/application/use-cases/__fixture__.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    // `no-unknown-files` only became enforceable once the composition roots and barrels were
+    // typed. It is the bumper against the drift returning: a file that belongs to no element
+    // is a file no other rule can govern.
+    it('a file matching no element pattern is rejected outright', () => {
+      const code = `export const orphan = 1;\n`;
+      const messages = lint(code, 'apps/api-gateway/src/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/no-unknown-files');
+    });
+
+    it('the module composition root itself matches an element pattern', () => {
+      const code = `export const x = 1;\n`;
+      const messages = lint(code, 'apps/retail-microservice/src/modules/cart/cart.module.ts');
+      expect(ruleIds(messages)).not.toContain('boundaries/no-unknown-files');
+    });
+  });
+
+  // ADR-043. The transaction seam is the one thing `libs/database` knows about the domain
+  // kernel. The edge is one-way by construction, and these two fixtures are what keep it so —
+  // widen `lib-ddd`'s allow list and the second one fails.
+  describe('boundaries/dependencies — the transaction seam (ADR-043)', () => {
+    it('lib-database MAY import lib-ddd (the adapter implements ITransactionPort)', () => {
+      const code = `import { ITransactionPort } from '@retail-inventory-system/ddd';\nexport type X = ITransactionPort;\n`;
+      const messages = lint(code, 'libs/database/__fixture__.ts');
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    it('lib-ddd may NOT import lib-database — the reverse edge stays shut', () => {
+      const code = `import { BaseEntity } from '@retail-inventory-system/database';\nexport const x = BaseEntity;\n`;
+      const messages = lint(code, 'libs/ddd/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('an application use case may reach the seam through lib-ddd, not lib-database', () => {
+      const code = `import { TRANSACTION_PORT } from '@retail-inventory-system/ddd';\nexport const x = TRANSACTION_PORT;\n`;
+      const messages = lint(
+        code,
+        'apps/inventory-microservice/src/modules/stock/application/use-cases/__fixture__.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
   });
 
   describe('positive cases — allowed edges do not flag', () => {

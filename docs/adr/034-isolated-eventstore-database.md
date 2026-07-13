@@ -1,9 +1,15 @@
 # ADR-034: An isolated `ris_eventstore` database for the event store
 
 - **Date**: 2026-06-26
-- **Status**: Accepted
+- **Status**: Accepted — **amended on one point** by [ADR-042](042-one-bounded-context-one-module.md)
 
 ---
+
+> **Amendment (ADR-042, 2026-07-11).** This ADR splits the `audit-and-events` context into two
+> sibling modules, `domain-events/` and `audit-log/`. ADR-042 collapses that split: the context
+> is **one module** with the two logs as two aggregates, one repository port each. The database
+> decision here — the isolated `ris_eventstore` schema, its own connection and migration
+> pipeline — is unchanged, as are both tables.
 
 ## Context
 

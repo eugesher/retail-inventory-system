@@ -1,1 +1,1 @@
-export * from './rmq-audit-log.publisher';
+export * from './audit-log.rabbitmq.publisher';

@@ -20,13 +20,16 @@ import { notificationEntities, NotificationsModule } from '../modules/notificati
 // Dispatch consent-gate reads per customer-facing dispatch to avoid a per-delivery DB
 // hit (the gateway/inventory `CacheModule`-at-root precedent). It reuses the shared
 // `REDIS_URL` env the compose block already sets.
+import { HealthController } from './health.controller';
+
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.NOTIFICATION_MICROSERVICE)),
-    CacheModule,
     DatabaseModule.forRoot(notificationEntities),
+    CacheModule,
     NotificationsModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

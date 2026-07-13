@@ -1,5 +1,5 @@
 import { Payment } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
 

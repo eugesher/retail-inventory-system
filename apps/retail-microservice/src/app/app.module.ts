@@ -21,6 +21,8 @@ import { ReturnsModule, returnEntities } from '../modules/returns';
 // `DatabaseModule.forRoot` opens the one MySQL connection the context's modules
 // share — `cartEntities` + `orderEntities` + `returnEntities` are concrete entity
 // arrays, merged into one list.
+import { HealthController } from './health.controller';
+
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),
@@ -30,5 +32,6 @@ import { ReturnsModule, returnEntities } from '../modules/returns';
     OrdersModule,
     ReturnsModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

@@ -1,5 +1,5 @@
 import { Reservation } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const RESERVATION_REPOSITORY = Symbol('RESERVATION_REPOSITORY');
 

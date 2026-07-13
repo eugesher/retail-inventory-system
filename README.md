@@ -216,6 +216,67 @@ outbox, so the firehose may see an event twice. `domain_event` absorbs the redel
 composite UNIQUE (the idempotent-consumer pattern); `audit_log_entry` intentionally keeps
 every occurrence.
 
+### RPC surface
+
+Every synchronous call between services is an RMQ request-response on the callee's queue, keyed
+`<service>.<aggregate>.<action>`. The gateway fronts most of these over HTTP (§6); the ones that
+have **no HTTP route** are called by another *service*, never by a client.
+
+**Retail** (`retail_queue`)
+
+| Routing key | Use case | Controller |
+| --- | --- | --- |
+| `retail.cart.create` / `.get` / `.add-line` / `.change-line-quantity` / `.remove-line` / `.claim` | `CreateCart` / `GetCart` / `AddToCart` / `ChangeCartLineQuantity` / `RemoveFromCart` / `ClaimCart` | `cart.controller.ts` |
+| `retail.cart.place` | `PlaceOrderUseCase` | `orders.controller.ts` |
+| `retail.payment.capture` | `CapturePaymentUseCase` | ″ |
+| `retail.order.get` / `.list` / `.cancel` / `.cancel-line` | `GetOrder` / `ListMyOrders` / `CancelOrder` / `CancelLine` | ″ |
+| `retail.fulfillment.create` / `.list` / `.ship` / `.deliver` | `CreateFulfillment` / `ListFulfillments` / `ShipFulfillment` / `MarkDelivered` | ″ |
+| `retail.refund.issue` / `.list` | `IssueRefund` / `ListRefundsForOrder` | ″ |
+| `retail.return.open` / `.authorize` / `.reject` / `.receive` / `.inspect` / `.close` / `.get` / `.list` | `OpenReturnRequest` / `AuthorizeReturn` / `RejectReturn` / `ReceiveReturn` / `InspectAndDisposition` / `CloseReturn` / `GetReturn` / `ListReturnsForOrder` | `returns.controller.ts` |
+
+**Inventory** (`inventory_queue`) — all on `stock.controller.ts`
+
+| Routing key | Use case | Gateway route? |
+| --- | --- | --- |
+| `inventory.stock-level.get` / `.receive` / `.adjust` / `.transfer` | `QueryAvailability` / `ReceiveStock` / `AdjustStock` / `TransferStock` | yes |
+| `inventory.location.list` | `ListLocations` | yes |
+| `inventory.stock-movement.list` | `ListStockMovements` | yes |
+| `inventory.reservation.reserve` / `.release` / `.sweep` / `.allocate` | `ReserveStock` / `ReleaseReservation` / `SweepExpiredReservations` / `AllocateStock` | **no** — retail drives them |
+| `inventory.allocation.cancel` | `CancelAllocation` | **no** |
+| `inventory.stock.commit-sale` | `CommitSale` | **no** |
+| `inventory.stock.restock-from-return` | `RestockFromReturn` | **no** |
+
+**Catalog** (`catalog_queue`) — the colocated `pricing` module shares this queue
+
+| Routing key | Controller |
+| --- | --- |
+| `catalog.product.register` / `.publish` / `.archive` / `.list` / `.get`, `catalog.variant.create` / `.get` | `catalog.controller.ts` |
+| `catalog.category.create` / `.reparent` / `.list` / `.get-tree` / `.list-products`, `catalog.product.reclassify` | `category.controller.ts` |
+| `catalog.media.attach` / `.reorder` / `.detach` / `.list` | `media.controller.ts` |
+| `catalog.price.set` / `.list` / `.select`, `catalog.tax-category.create` / `.list`, `catalog.variant.set-tax-category` | `pricing.controller.ts` |
+
+Category and media operations emit **no** events.
+
+**Notification** (`notification_events`) — all on `notifications.controller.ts`
+
+`notification.template.author` / `.set-active` / `.list`; `notification.delivery.list` / `.get` /
+`.record-outcome` / `.retry`; `notification.marketing.send`. `record-outcome` is **RPC-only** by
+design — no gateway route.
+
+**Event store** (`event_store_query_queue`) — all on `audit-query.controller.ts`
+
+| Routing key | Use case |
+| --- | --- |
+| `audit.event.query` | `QueryDomainEventsUseCase` |
+| `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
+| `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
+
+Reached from the gateway's `modules/audit/` behind `GET /api/audit/{events,entries,trace/:id}`.
+`audit.staff.action` is the one `audit.` **event**, not an RPC: it rides `ris.events` into the
+firehose queue and never reaches this controller.
+
+**Health** — one `<svc>.health.ping` per deployable, on its existing queue. See §6.
+
 ---
 
 ## 3. Repository layout
@@ -227,17 +288,17 @@ apps/
   inventory-microservice/     # modules/stock/
   retail-microservice/        # modules/cart/ + modules/orders/ + modules/returns/
   notification-microservice/  # modules/notifications/
-  event-store-microservice/   # modules/audit-and-events (domain-events/ + audit-log/)
+  event-store-microservice/   # modules/audit-and-events/
 libs/
   auth/           # AuthModule.forRootAsync, guards, @Public/@Roles/@RequiresPermission/@CurrentUser
   cache/          # ICachePort + RedisCacheAdapter + @Cacheable + CACHE_KEYS registry
   common/         # framework-free: Result, DomainException, pagination, bodyFingerprint
   config/         # configModuleConfig (Joi env schema)
   contracts/      # cross-service message + DTO contracts (plain TypeScript)
-  database/       # BaseEntity, BaseTypeormRepository, SnakeNamingStrategy, DatabaseModule
-  ddd/            # Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort
-  messaging/      # MessagingModule, RabbitmqClientFactory, RisEventsMirrorPublisher, ROUTING_KEYS
-  observability/  # Pino config, CorrelationMiddleware, OTel tracer.ts, MetricsModule
+  database/       # BaseEntity, BaseTypeormRepository, TypeormTransactionAdapter, DatabaseModule
+  ddd/            # Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort, ITransactionPort
+  messaging/      # clients/, RisEventsMirrorPublisher, sendPreservingRpcError, ROUTING_KEYS, EXCHANGES
+  observability/  # Pino config, correlation/, OTel tracer.ts (deep-import path)
 docs/adr/            # architecture decision records — the durable rationale
 docs/implementation/ # per-capability walkthroughs, numbered by delivery order
 migrations/          # retail_db migrations + migrations/eventstore/
@@ -254,12 +315,12 @@ Imported via path aliases as `@retail-inventory-system/<name>`.
 | --- | --- |
 | `contracts` | Wire contracts — `microservices/`, `auth/`, `audit/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs. |
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |
-| `common` | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (canonical-JSON + SHA-256 request digest). |
+| `common` | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token). |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`. |
-| `messaging` | `MessagingModule`, per-service client modules + `MicroserviceClientRisEventsModule`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS`, `EXCHANGES`. |
+| `messaging` | `clients/` — `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore,RisEvents}Module`, the per-queue `ClientProxy` providers a module imports. Plus `RisEventsMirrorPublisher`, `sendPreservingRpcError` (the cross-service `send` that preserves the upstream `{ code, details }`), `ROUTING_KEYS`, `EXCHANGES`. |
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel-spanned), global `CacheModule`, `@Cacheable()`, `CACHE_KEYS`. |
-| `observability` | `LoggerModuleConfig` (Pino + trace correlation), `CorrelationMiddleware`, `@CorrelationId()`, OTel `tracer.ts` side-effect bootstrap. |
-| `auth` | `AuthModule.forRootAsync()`, `JwtStrategy`, the three guards, `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`. |
+| `observability` | `LoggerModuleConfig` (Pino + trace correlation); `correlation/` — `CorrelationMiddleware`, `@CorrelationId()`, `CORRELATION_ID_HEADER`. OTel `tracer.ts` side-effect bootstrap (deep-import path). |
+| `auth` | `AuthModule.forRootAsync()`, `JwtStrategy`; `guards/` — the three global guards + `enforceRequiredClaim` (their shared claim check); `decorators/` — `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`. |
 | `config` | `configModuleConfig` — the Joi env schema. |
 
 ### The per-module hexagon
@@ -269,6 +330,8 @@ the canonical template ([ADR-011](docs/adr/011-notifier-port-and-adapters.md)).
 
 ```
 modules/notifications/
+├── notifications.module.ts  # the composition root — wires all four layers below (ADR-041)
+├── index.ts                 # the module's public barrel — the only way in from outside
 ├── domain/            # aggregates, value objects, error codes — framework-free
 ├── application/
 │   ├── ports/         # interfaces + DI symbols (NOTIFIER, TEMPLATE_RENDERER, CONSENT_CACHE…)
@@ -278,9 +341,21 @@ modules/notifications/
 └── presentation/      # @MessagePattern handlers + the RPC exception filter
 ```
 
+The `@Module` file sits **beside** the hexagon, never inside a layer of it: binding the ports to
+the adapters and the controllers to the use cases means it must see all four at once, so it
+belongs to none of them ([ADR-041](docs/adr/041-nest-module-as-the-module-composition-root.md)).
+
 **Boundary rule.** `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
-`infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts`. Controllers, use cases, and
-pipes inject the port symbol instead.
+`infrastructure/messaging/`. Controllers, use cases, and pipes inject the port symbol
+instead. This is **enforced in CI**, not reviewed: `eslint-plugin-boundaries` types elements
+by path and cannot see an imported symbol, so a `no-restricted-imports` rule with
+`importNames: ['ClientProxy', …]` names the one symbol that must stay contained — while
+`@EventPattern`, `@MessagePattern` and `Transport` stay free to be imported where they belong.
+
+Adapter filenames come in two forms: `<module>-rabbitmq.{adapter,publisher}.ts` for the
+module's own transport seam (`stock-rabbitmq.publisher.ts`), and
+`<seam>.rabbitmq.{adapter,publisher}.ts` for a *named* seam, mirroring the port it implements
+(`cart-catalog.rabbitmq.adapter.ts` ↔ `cart-catalog.gateway.port.ts`).
 
 ### Architecture lint
 
@@ -296,7 +371,14 @@ The layering plus cross-service and cross-module isolation are enforced by
 - `application/ports/` may import only `domain` types and `libs/contracts`.
 - `infrastructure/` is the only layer allowed to touch concrete adapters.
 - `presentation/` may import `application` + `libs/{auth,contracts,messaging,observability}`.
-- Cross-service (`apps/X` → `apps/Y`) and cross-module imports are rejected outright.
+- `<m>.module.ts` and the module-root `index.ts` are the `nest-module` element: they see every
+  layer of their **own** module and nothing of a sibling's.
+- Every file under `apps/` and `libs/` must claim an element type (`boundaries/no-unknown-files`).
+  A file the taxonomy cannot place is a file no other rule can govern.
+- Cross-service (`apps/X` → `apps/Y`) and cross-module imports are rejected outright — through a
+  module's barrel just as much as through a deep path. The **one** exception is the gateway
+  `auth` barrel, which the `iam` and `customer-admin` admin shells consume by design (ADR-024;
+  encoded as the `shared-module-barrel` element type, ADR-017 §6).
 
 Each rule has a fixture in [`spec/architecture-lint.spec.ts`](spec/architecture-lint.spec.ts)
 that intentionally violates it and asserts the expected `boundaries/*` ruleId fires — so
@@ -306,7 +388,11 @@ silently weakening a rule fails the unit suite.
 
 - **One throwable per module** — `*DomainException` + `*ErrorCodeEnum`, mapped to HTTP by
   that module's presentation `*RpcExceptionFilter`. The filters are the authoritative
-  code → status tables.
+  code → status tables. All four names key off the **context noun, not the module folder**:
+  `<Noun>DomainException` ↔ `<noun>.exception.ts` ↔ `<noun>-rpc-exception.filter.ts` ↔
+  `<Noun>RpcExceptionFilter`. Hence `modules/stock/` throws `InventoryDomainException` from
+  `inventory.exception.ts`, and `modules/orders/` throws `OrderDomainException` (singular)
+  from `order.exception.ts`.
 - **One repository port per aggregate seam** — not one god-repository per module.
 - **Cross-module reads via a raw-parameterized-SQL reader port** rather than importing the
   other module's entities (`ORDER_CART_READER`, `RETURN_ORDER_READER`, `CONSENT_READER`).
@@ -645,7 +731,7 @@ field `public readonly`, `Object.freeze`d in the constructor, `create` / `recons
 factories, no mutators, no domain events. An invariant violation throws a plain `Error` —
 it can only be an internal caller bug, because the ingest validates first.
 
-One context-root `FirehoseConsumer` reads the concrete routing key off
+One `FirehoseConsumer` reads the concrete routing key off
 `context.getMessage().fields.routingKey` and dispatches: `audit.staff.action` →
 `IngestAuditLogUseCase`, everything else → `IngestDomainEventUseCase`. It **warn-swallows**
 and never rethrows. It sits beside the aggregator module rather than inside either sibling
@@ -666,7 +752,7 @@ use case, so every caller inherits the cap. An unknown id or an inverted `from`/
 yields an empty result, never an error: the event store has no domain-exception type, and
 therefore no RPC exception filter.
 
-They are served by the context-root `AuditQueryController` on a **second queue**,
+They are served by the `AuditQueryController` on a **second queue**,
 `event_store_query_queue`, bound to the default exchange — command traffic never rides the
 `ris.events` topic exchange:
 
@@ -819,6 +905,43 @@ authentication + inherent ownership.
 
 All routes are prefixed `/api`. Every route is **protected by default**; `@Public()` is the
 explicit opt-out. Interactive reference: `http://localhost:3000/api/reference`.
+
+### Health
+
+| Method | Route | Auth |
+| --- | --- | --- |
+| `GET` | `/api/health` | `@Public()` |
+
+The system's liveness report ([ADR-044](docs/adr/044-system-health-fan-out.md)). The gateway
+probes all five RMQ deployables **concurrently over the real broker**, so a failing probe means
+business traffic would fail too — and a climbing `latencyMs` is an early warning long before
+timeouts start.
+
+```jsonc
+{
+  "status": "degraded",                            // 'ok' only if ALL five are ok
+  "services": {
+    "catalog":      { "status": "ok", "latencyMs": 4 },
+    "inventory":    { "status": "ok", "latencyMs": 3 },
+    "retail":       { "status": "ok", "latencyMs": 5 },
+    "notification": { "status": "timeout" },       // down, wedged, or no consumer
+    "event-store":  { "status": "ok", "latencyMs": 2 }
+  }
+}
+```
+
+Two things it deliberately is **not**:
+
+- **It is not a readiness probe.** Each service's handler does no I/O — it proves a Nest app is
+  consuming the queue, nothing more. A service with a dead database still answers `ok`. Putting a
+  DB round-trip in a health handler loads the hot path on every poll and lets one slow database
+  report five services sick.
+- **It never returns 503.** `degraded` comes back as **200**. This is a report *about the
+  system*, not the gateway's own liveness — a 503 would make the gateway look dead when it is the
+  one component provably alive. Monitors read `status`, not the HTTP code.
+
+`HEALTH_PROBE_TIMEOUT_MS` (default `2000`) bounds **one** probe; the fan-out is concurrent, so
+one dead service costs one timeout, not five.
 
 ### Auth — staff
 

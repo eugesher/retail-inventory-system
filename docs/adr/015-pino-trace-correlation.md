@@ -92,6 +92,8 @@ at all. Keeping both decouples those cases without forcing a redesign.
 
 ### No HTTP response header for `traceparent` today
 
+> **Amendment ([ADR-046](046-libs-layout-and-dead-export-removal.md), 2026-07-12).** `TraceContextInterceptor` and `MetricsModule` are **deleted** — nothing ever imported either, which was the whole justification for shipping them empty.
+
 `TraceContextInterceptor` is shipped as a placeholder. The auto-
 instrumentation already injects the W3C `traceparent` header on
 outbound HTTP responses for the routes it patches. Adding our own

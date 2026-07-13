@@ -1,11 +1,12 @@
-import { TypeOrmModuleOptions } from '@nestjs/typeorm';
-
 import { ReservationEntity } from './reservation.entity';
 import { StockLevelEntity } from './stock-level.entity';
 import { StockLocationEntity } from './stock-location.entity';
 import { StockMovementEntity } from './stock-movement.entity';
 
-export const stockEntities: TypeOrmModuleOptions['entities'] = [
+// The module's entity list: `DatabaseModule.forRoot(...)` in `app.module.ts`, and
+// `forFeature(...)` in the module file. UNANNOTATED on purpose — see the note on
+// `DatabaseModule.forRoot` for why the parameter type must not be used here.
+export const stockEntities = [
   StockLocationEntity,
   StockLevelEntity,
   ReservationEntity,
@@ -20,4 +21,3 @@ export * from './stock-movement.mapper';
 export * from './stock-typeorm.repository';
 export * from './reservation-typeorm.repository';
 export * from './stock-movement-typeorm.repository';
-export * from './typeorm-transaction.adapter';
