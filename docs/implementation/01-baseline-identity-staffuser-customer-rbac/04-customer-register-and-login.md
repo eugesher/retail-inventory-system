@@ -32,6 +32,13 @@ from the canonical path. `AuthController` keeps `refresh`/`logout`/`me`
 at `/auth/*`; those routes are subject-kind agnostic and the staff/
 customer prefixes do not duplicate them.
 
+> **Superseded by [ADR-050](../../adr/050-the-alias-that-was-born-deprecated.md).**
+> `/api/auth/login` is gone, and `StaffLoginController` is now a plain
+> `@Controller('auth/staff')`. The row above is what shipped; it is also the
+> whole of the alias's history — it was introduced *here*, in the same commit
+> as the canonical path it claimed to be the legacy form of, so "kept one
+> release" described a migration no client ever had to make.
+
 ## 2. Payload symmetry
 
 The customer access JWT reuses the existing `IJwtAccessPayload` shape

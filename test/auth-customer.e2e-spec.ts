@@ -236,17 +236,20 @@ describe('Customer auth flow (e2e)', () => {
     });
   });
 
-  describe('Staff login deprecated alias + canonical path', () => {
-    it('POST /api/auth/login (deprecated alias) still returns 200 for an admin', async () => {
-      const { status, body } = await supertest(apiGatewayApp.getHttpServer())
+  describe('Staff login path', () => {
+    // The inverse of the test that stood here until ADR-050: it asserted the
+    // `/auth/login` alias "still returns 200". Removing the route without pinning its
+    // absence would leave the deletion unguarded — a stray `@Controller(['auth', ...])`
+    // would silently resurrect it.
+    it('POST /api/auth/login (the removed alias) is gone', async () => {
+      const { status } = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/login')
         .send({ email: 'admin@example.com', password: 'admin1234' });
 
-      expect(status).toBe(HttpStatus.OK);
-      expect(body.accessToken).toEqual(expect.any(String));
+      expect(status).toBe(HttpStatus.NOT_FOUND);
     });
 
-    it('POST /api/auth/staff/login (new canonical) returns 200 for an admin', async () => {
+    it('POST /api/auth/staff/login returns 200 for an admin', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/staff/login')
         .send({ email: 'admin@example.com', password: 'admin1234' });

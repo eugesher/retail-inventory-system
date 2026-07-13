@@ -151,7 +151,9 @@ The endpoint:
 
 - Lives at `POST /auth/customer/register`, annotated `@Public()`.
 - Returns a customer-tier access + refresh token pair on success (the
-  same shape `/auth/login` returns).
+  same shape staff login returns — `/auth/staff/login`, since
+  [ADR-050](050-the-alias-that-was-born-deprecated.md) removed the
+  `/auth/login` alias this line originally named).
 - Creates a `Customer` aggregate, not a `StaffUser` — there is no path
   from public register to a staff role.
 
