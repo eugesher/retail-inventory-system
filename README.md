@@ -216,6 +216,67 @@ outbox, so the firehose may see an event twice. `domain_event` absorbs the redel
 composite UNIQUE (the idempotent-consumer pattern); `audit_log_entry` intentionally keeps
 every occurrence.
 
+### RPC surface
+
+Every synchronous call between services is an RMQ request-response on the callee's queue, keyed
+`<service>.<aggregate>.<action>`. The gateway fronts most of these over HTTP (§6); the ones that
+have **no HTTP route** are called by another *service*, never by a client.
+
+**Retail** (`retail_queue`)
+
+| Routing key | Use case | Controller |
+| --- | --- | --- |
+| `retail.cart.create` / `.get` / `.add-line` / `.change-line-quantity` / `.remove-line` / `.claim` | `CreateCart` / `GetCart` / `AddToCart` / `ChangeCartLineQuantity` / `RemoveFromCart` / `ClaimCart` | `cart.controller.ts` |
+| `retail.cart.place` | `PlaceOrderUseCase` | `orders.controller.ts` |
+| `retail.payment.capture` | `CapturePaymentUseCase` | ″ |
+| `retail.order.get` / `.list` / `.cancel` / `.cancel-line` | `GetOrder` / `ListMyOrders` / `CancelOrder` / `CancelLine` | ″ |
+| `retail.fulfillment.create` / `.list` / `.ship` / `.deliver` | `CreateFulfillment` / `ListFulfillments` / `ShipFulfillment` / `MarkDelivered` | ″ |
+| `retail.refund.issue` / `.list` | `IssueRefund` / `ListRefundsForOrder` | ″ |
+| `retail.return.open` / `.authorize` / `.reject` / `.receive` / `.inspect` / `.close` / `.get` / `.list` | `OpenReturnRequest` / `AuthorizeReturn` / `RejectReturn` / `ReceiveReturn` / `InspectAndDisposition` / `CloseReturn` / `GetReturn` / `ListReturnsForOrder` | `returns.controller.ts` |
+
+**Inventory** (`inventory_queue`) — all on `stock.controller.ts`
+
+| Routing key | Use case | Gateway route? |
+| --- | --- | --- |
+| `inventory.stock-level.get` / `.receive` / `.adjust` / `.transfer` | `QueryAvailability` / `ReceiveStock` / `AdjustStock` / `TransferStock` | yes |
+| `inventory.location.list` | `ListLocations` | yes |
+| `inventory.stock-movement.list` | `ListStockMovements` | yes |
+| `inventory.reservation.reserve` / `.release` / `.sweep` / `.allocate` | `ReserveStock` / `ReleaseReservation` / `SweepExpiredReservations` / `AllocateStock` | **no** — retail drives them |
+| `inventory.allocation.cancel` | `CancelAllocation` | **no** |
+| `inventory.stock.commit-sale` | `CommitSale` | **no** |
+| `inventory.stock.restock-from-return` | `RestockFromReturn` | **no** |
+
+**Catalog** (`catalog_queue`) — the colocated `pricing` module shares this queue
+
+| Routing key | Controller |
+| --- | --- |
+| `catalog.product.register` / `.publish` / `.archive` / `.list` / `.get`, `catalog.variant.create` / `.get` | `catalog.controller.ts` |
+| `catalog.category.create` / `.reparent` / `.list` / `.get-tree` / `.list-products`, `catalog.product.reclassify` | `category.controller.ts` |
+| `catalog.media.attach` / `.reorder` / `.detach` / `.list` | `media.controller.ts` |
+| `catalog.price.set` / `.list` / `.select`, `catalog.tax-category.create` / `.list`, `catalog.variant.set-tax-category` | `pricing.controller.ts` |
+
+Category and media operations emit **no** events.
+
+**Notification** (`notification_events`) — all on `notifications.controller.ts`
+
+`notification.template.author` / `.set-active` / `.list`; `notification.delivery.list` / `.get` /
+`.record-outcome` / `.retry`; `notification.marketing.send`. `record-outcome` is **RPC-only** by
+design — no gateway route.
+
+**Event store** (`event_store_query_queue`) — all on `audit-query.controller.ts`
+
+| Routing key | Use case |
+| --- | --- |
+| `audit.event.query` | `QueryDomainEventsUseCase` |
+| `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
+| `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
+
+Reached from the gateway's `modules/audit/` behind `GET /api/audit/{events,entries,trace/:id}`.
+`audit.staff.action` is the one `audit.` **event**, not an RPC: it rides `ris.events` into the
+firehose queue and never reaches this controller.
+
+**Health** — one `<svc>.health.ping` per deployable, on its existing queue. See §6.
+
 ---
 
 ## 3. Repository layout
@@ -256,10 +317,10 @@ Imported via path aliases as `@retail-inventory-system/<name>`.
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |
 | `common` | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token). |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`. |
-| `messaging` | `clients/` (per-service client modules + `MicroserviceClientRisEventsModule`), `RisEventsMirrorPublisher`, `sendPreservingRpcError` (the cross-service `send` that preserves the upstream `{ code, details }`), `ROUTING_KEYS`, `EXCHANGES`. |
+| `messaging` | `clients/` — `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore,RisEvents}Module`, the per-queue `ClientProxy` providers a module imports. Plus `RisEventsMirrorPublisher`, `sendPreservingRpcError` (the cross-service `send` that preserves the upstream `{ code, details }`), `ROUTING_KEYS`, `EXCHANGES`. |
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel-spanned), global `CacheModule`, `@Cacheable()`, `CACHE_KEYS`. |
-| `observability` | `LoggerModuleConfig` (Pino + trace correlation), `CorrelationMiddleware`, `@CorrelationId()`, OTel `tracer.ts` side-effect bootstrap. |
-| `auth` | `AuthModule.forRootAsync()`, `JwtStrategy`, the three guards, `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`. |
+| `observability` | `LoggerModuleConfig` (Pino + trace correlation); `correlation/` — `CorrelationMiddleware`, `@CorrelationId()`, `CORRELATION_ID_HEADER`. OTel `tracer.ts` side-effect bootstrap (deep-import path). |
+| `auth` | `AuthModule.forRootAsync()`, `JwtStrategy`; `guards/` — the three global guards + `enforceRequiredClaim` (their shared claim check); `decorators/` — `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`. |
 | `config` | `configModuleConfig` — the Joi env schema. |
 
 ### The per-module hexagon
