@@ -135,12 +135,12 @@ Non-obvious facts, each worth a debugging cycle.
   `RETURN_WINDOW_DAYS`,
   `IDEMPOTENCY_KEY_TTL_HOURS`, `CAPTURE_CLAIM_STALE_MINUTES`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
   `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`, `RETAIL_DEFAULT_CURRENCY`,
-  `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
+  `CATALOG_GATEWAY_DEFAULT_CURRENCY`, `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only).
-  `CATALOG_DEFAULT_CURRENCY` and `RETAIL_DEFAULT_CURRENCY` **deliberately read the one
-  `DEFAULT_CURRENCY` var**: a catalog quoting EUR and a cart opening in USD bakes the wrong
-  unit into an immutable `Order.currency`. A third reader still mints its own literal —
-  `PriceQueryDto.currency = 'USD'` defaults the price-read endpoints at the gateway edge.
+  Those **three** currency tokens all read the one `DEFAULT_CURRENCY` var, deliberately: a catalog
+  quoting EUR, a cart opening in USD and a price read scoped to a third would each be wrong in a
+  different direction — and `Order.currency` is immutable, so the wrong unit is baked in forever.
+  **No currency default is a literal anywhere.**
   `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects, so
   `ReservationSweepScheduler` registers its timer via `SchedulerRegistry.addInterval` in
   `onModuleInit` — and **must** `deleteInterval` in `onModuleDestroy`, or a leaked timer hangs

@@ -59,9 +59,26 @@ export interface ISetPriceCommand {
   priority?: number;
 }
 
+// What the RPC carries: a **resolved** currency scope. `currency` is required, and stays required —
+// `IPriceQuery`'s own comment states the rule (*"the currency scope is required on the wire —
+// defaulting it is a gateway-DTO concern, not a contract one"*), and this fix keeps it.
 export interface IPriceQueryCommand {
   variantId: number;
   currency: string;
+  asOf?: string;
+}
+
+// What arrives from the edge: the caller may omit the currency, and the gateway use case resolves it
+// from `CATALOG_GATEWAY_DEFAULT_CURRENCY` before dispatching (ISSUE-11).
+//
+// **The two types differ by exactly one `?`, and that is the whole point.** The DTO used to default
+// `currency` to a literal `'USD'`, which made the distinction invisible: every request looked
+// resolved, and on a non-USD shop every one of them was resolved *wrongly*. Splitting the shapes puts
+// the resolution somewhere it can read the configuration — and makes the compiler refuse a path that
+// forgets to.
+export interface IPriceQueryRequest {
+  variantId: number;
+  currency?: string;
   asOf?: string;
 }
 
