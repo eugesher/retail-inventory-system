@@ -1,6 +1,6 @@
 import { CartStatusEnum } from '@retail-inventory-system/contracts';
 
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const ORDER_CART_READER = Symbol('ORDER_CART_READER');
 

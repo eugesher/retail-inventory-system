@@ -1,5 +1,5 @@
 import { StockLevel, StockLocation } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const STOCK_REPOSITORY = Symbol('STOCK_REPOSITORY');
 
