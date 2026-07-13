@@ -48,12 +48,11 @@ export class LoggerModuleConfig implements Params {
 
     const baseOptions: Options = {
       msgPrefix: `[${appName}] `,
-      // When the e2e capture is active, force `debug` regardless of
-      // `LOG_LEVEL`. CI deliberately sets `LOG_LEVEL=warn` to keep
-      // pipeline logs lean, but that would drop the very `debug`-level
-      // records (e.g. `cacheHit: true` from `StockCache.get`) the e2e
-      // suite asserts against. Honoring the env var here is a real CI
-      // regression — see CI failure on RIS-40 follow-up.
+      // When the e2e capture is active, force `debug` regardless of `LOG_LEVEL`. CI sets
+      // `LOG_LEVEL=warn` to keep pipeline logs lean, and a suite that ASSERTS on log records
+      // cannot run at a level that drops them: `test/concurrent-sweep-release.e2e-spec.ts`
+      // matches the OCC retry trace, an `info` line (ADR-036). Honoring the env var here fails
+      // its positive assertions and passes its negative ones vacuously.
       level: e2eDestination
         ? 'debug'
         : (process.env.LOG_LEVEL ?? (isProduction ? 'info' : 'debug')),
