@@ -34,7 +34,6 @@ import {
   SendMarketingUseCase,
   SetTemplateActiveUseCase,
 } from './application/use-cases';
-import { HealthController } from './presentation/health.controller';
 import { NotificationRpcExceptionFilter } from './presentation/notification-rpc-exception.filter';
 import { NotificationsController } from './presentation/notifications.controller';
 import { ConsentCache } from './infrastructure/cache';
@@ -131,7 +130,6 @@ import { DeliveryRetryScheduler } from './infrastructure/scheduling';
     ScheduleModule.forRoot(),
   ],
   controllers: [
-    HealthController,
     NotificationsController,
     ConsentEventsConsumer,
     InventoryEventsConsumer,

@@ -24,6 +24,8 @@ import { auditAndEventsEntities, AuditAndEventsModule } from '../modules/audit-a
 // module (ADR-042): it binds both repository ports via `DatabaseModule.forFeature` and
 // registers the `FirehoseConsumer` that binds the `event_store_firehose_queue` (`#`) to
 // `ris.events` and ingests the whole firehose.
+import { HealthController } from './health.controller';
+
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),
@@ -31,5 +33,6 @@ import { auditAndEventsEntities, AuditAndEventsModule } from '../modules/audit-a
     DatabaseModule.forRootWithUrl(auditAndEventsEntities, 'EVENTSTORE_DATABASE_URL'),
     AuditAndEventsModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

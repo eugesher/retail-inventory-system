@@ -845,6 +845,43 @@ authentication + inherent ownership.
 All routes are prefixed `/api`. Every route is **protected by default**; `@Public()` is the
 explicit opt-out. Interactive reference: `http://localhost:3000/api/reference`.
 
+### Health
+
+| Method | Route | Auth |
+| --- | --- | --- |
+| `GET` | `/api/health` | `@Public()` |
+
+The system's liveness report ([ADR-044](docs/adr/044-system-health-fan-out.md)). The gateway
+probes all five RMQ deployables **concurrently over the real broker**, so a failing probe means
+business traffic would fail too — and a climbing `latencyMs` is an early warning long before
+timeouts start.
+
+```jsonc
+{
+  "status": "degraded",                            // 'ok' only if ALL five are ok
+  "services": {
+    "catalog":      { "status": "ok", "latencyMs": 4 },
+    "inventory":    { "status": "ok", "latencyMs": 3 },
+    "retail":       { "status": "ok", "latencyMs": 5 },
+    "notification": { "status": "timeout" },       // down, wedged, or no consumer
+    "event-store":  { "status": "ok", "latencyMs": 2 }
+  }
+}
+```
+
+Two things it deliberately is **not**:
+
+- **It is not a readiness probe.** Each service's handler does no I/O — it proves a Nest app is
+  consuming the queue, nothing more. A service with a dead database still answers `ok`. Putting a
+  DB round-trip in a health handler loads the hot path on every poll and lets one slow database
+  report five services sick.
+- **It never returns 503.** `degraded` comes back as **200**. This is a report *about the
+  system*, not the gateway's own liveness — a 503 would make the gateway look dead when it is the
+  one component provably alive. Monitors read `status`, not the HTTP code.
+
+`HEALTH_PROBE_TIMEOUT_MS` (default `2000`) bounds **one** probe; the fan-out is concurrent, so
+one dead service costs one timeout, not five.
+
 ### Auth — staff
 
 | Method | Route | Auth |

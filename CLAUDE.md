@@ -79,9 +79,8 @@ Non-obvious facts, each worth a debugging cycle.
 **Persistence**
 
 - MySQL treats `NULL`s as distinct inside a UNIQUE. `IngestDomainEventUseCase` coalesces
-  an empty `correlationId` to `''`, otherwise the `domain_event` dedupe UNIQUE never bites.
-  Consequence: `domain_event.correlation_id` is `NOT NULL DEFAULT ''`, so an event ingested
-  without one is reachable by **no** `correlationId` filter and by no trace.
+  an empty `correlationId` to `''`, so `domain_event.correlation_id` is `NOT NULL DEFAULT ''` —
+  an event ingested without one is reachable by **no** `correlationId` filter and by no trace.
   `audit_log_entry.correlation_id` is nullable, and a `WHERE correlation_id = ?` never
   matches a null row either.
 - `audit_log_entry.action` holds the `IAuditLogEvent.name` string (`StaffUserRolesAssigned`,
@@ -128,7 +127,7 @@ Non-obvious facts, each worth a debugging cycle.
   `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS`,
   `RETURN_WINDOW_DAYS`,
   `IDEMPOTENCY_KEY_TTL_HOURS`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
-  `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`. The sole exception is
+  `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`, `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only, read off `process.env` inside a `useFactory`).
   `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects, so
   `ReservationSweepScheduler` registers its timer via `SchedulerRegistry.addInterval` in
@@ -264,6 +263,13 @@ through `MicroserviceClientEventStoreModule` (`EVENT_STORE_MICROSERVICE`) — fr
 `audit.staff.action` is the one `audit.` **event**: it rides `ris.events` into the firehose
 queue and never reaches this controller (ADR-039).
 
+### Health (ADR-044)
+
+`{catalog,inventory,retail,notification}.health.ping` + `audit.health.ping` (event store, on
+`event_store_query_queue`). Each a `@MessagePattern` on `apps/<svc>/src/app/health.controller.ts`
+— **not** in a module: liveness belongs to the deployable. **No I/O** in the handler (liveness,
+not readiness). `/api/health` is the only caller.
+
 ### Event consumers
 
 | Consumer | Pattern | Dispatches to |
@@ -321,8 +327,7 @@ catalog ADR-004/018/025; pricing ADR-026.
 
 Each RPC-fronting module has `application/ports` (`*_GATEWAY_PORT`),
 `application/use-cases`, `infrastructure/messaging`, and
-`presentation`. Gateway use cases resolve the staff override from
-`@CurrentUser().permissions` and fold `@CurrentUser().id` into the command (ADR-028).
+`presentation`. Gateway use cases fold `@CurrentUser()` into the command (ADR-028).
 
 | Module | Routes | Notes |
 | --- | --- | --- |
@@ -332,7 +337,8 @@ Each RPC-fronting module has `application/ports` (`*_GATEWAY_PORT`),
 | `modules/orders/` | `/api/orders` | `orders.controller.ts` + sibling `refunds.controller.ts` |
 | `modules/returns/` | `/api/returns/*`, `/api/orders/:orderId/returns` | `returns.controller.ts` (empty-prefix `@Controller()`) |
 | `modules/notifications/` | `/api/notifications` | `notifications.controller.ts`; all staff-only |
-| `modules/audit/` | `/api/audit/*` | `audit.controller.ts`; three `GET`s, all `audit:read`; DTOs carry **no** `pageSize` cap (the event store's `clampPageWindow` owns it) and a local `IsOnOrAfter` cross-property validator |
+| `modules/health/` | `/api/health` | `@Public()` RMQ fan-out to all five (ADR-044); the only module holding every `MicroserviceClient*Module` |
+| `modules/audit/` | `/api/audit/*` | `audit.controller.ts`; three `GET`s, all `audit:read`; DTOs carry **no** `pageSize` cap and a local `IsOnOrAfter` cross-property validator |
 | `modules/auth/` | `/api/auth/*` | the only gateway module with real `domain/` + DB rows |
 | `modules/iam/` | `/api/iam/*` | admin shell over the auth aggregates; **no `domain/`** |
 | `modules/customer-admin/` | `/api/admin/customers/*` | admin shell over `Customer`; **no `domain/`** |
@@ -366,7 +372,7 @@ route admits: [`README.md` §7](README.md#7-authentication-and-authorization).
 
 **catalog** `modules/catalog/` (ADR-004/025/029)
 Aggregates: `Product` (owns `ProductVariant`), `Category` (materialized `path`),
-polymorphic `MediaAsset` (`(ownerType, ownerId)`, **no FK** on `owner_id`).
+polymorphic `MediaAsset` (**no FK** on `owner_id`).
 `CatalogDomainException` + `CatalogErrorCodeEnum`. Events: `VariantCreated`,
 `ProductPublished`, `ProductArchived`.
 Ports: `CATALOG_REPOSITORY`, `CATEGORY_REPOSITORY`, `MEDIA_ASSET_REPOSITORY` (a port per
@@ -394,19 +400,17 @@ Both catalog modules share one connection:
 Aggregates: `StockLevel` (per-location running totals; `available` a pure getter; `version`),
 `StockLocation` (caller-assigned string PK), `Reservation` (TTL hold; app-generated
 `CHAR(36)` UUID; all-statuses UNIQUE `(cartId, variantId, stockLocationId)`), plus the
-immutable `StockMovement` ledger record (frozen, fixed sign per type, no mutators).
-`InventoryDomainException` (carries optional `details`) + `InventoryErrorCodeEnum`.
+immutable `StockMovement` ledger record (fixed sign per type, no mutators).
+`InventoryDomainException` (optional `details`) + `InventoryErrorCodeEnum`.
 Events: `Stock{Received,Adjusted,Low}Event`, `StockLevelInitializedEvent`,
 `Stock{Reserved,Released,Allocated,Committed,Returned}Event`.
 Ports: `STOCK_REPOSITORY`, `RESERVATION_REPOSITORY`, `STOCK_MOVEMENT_REPOSITORY`
 (`append` / `listByVariant` / `existsByReference` — no `save`/`update`/`delete`),
 `STOCK_CACHE`, `STOCK_EVENTS_PUBLISHER`, `TRANSACTION_PORT`,
 `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
-`RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS` (the scheduler's,
-not the use case's), `OCC_RETRY_ATTEMPTS`.
-`SweepExpiredReservationsUseCase` (ADR-038) has one implementation and two callers:
-`ReservationSweepScheduler` and the `inventory.reservation.sweep` `@MessagePattern`. It returns
-the wire contract `IReservationSweepResult`, never a local interface.
+`RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS`, `OCC_RETRY_ATTEMPTS`.
+`SweepExpiredReservationsUseCase` (ADR-038) has two callers: `ReservationSweepScheduler` and
+the `inventory.reservation.sweep` `@MessagePattern`.
 Shared application helpers: `use-cases/stock-mutation.ts` (`runWithStockWriteRetry`,
 `applyOnHandChange`), `reservation-mutation.ts`, `low-stock.emitter.ts`,
 `movement-recorded.emitter.ts`, `stock-released.emitter.ts` (Release + the TTL sweep share it),
@@ -480,11 +484,10 @@ Ports: `NOTIFIER` (`LogNotifierAdapter` by default; `FlakyLogNotifierAdapter` wh
 `CONSENT_CACHE_TTL_SECONDS`.
 Use cases: `AuthorTemplate`, `SetTemplateActive`, `ListTemplates`, `ListDeliveries`,
 `GetDelivery`, `RecordDeliveryOutcome`, `RetryDelivery`, `RetryFailedDeliveries`,
-`SendMarketing`, and **`RenderAndDispatchUseCase`** — the single persist-then-send pipeline
-every consumer calls; plus `transactional-event-types.ts`, `transport-subject.ts` and the
-view factories.
-Infra: `persistence/`, `consumers/` (seven; `dispatch-customer-email.ts` is the shared
-missing-recipient skip), `delivery/` (`log` / `email` / `webhook` notifier adapters),
+`SendMarketing`, **`RenderAndDispatchUseCase`**, plus `transactional-event-types.ts`,
+`transport-subject.ts` and the view factories.
+Infra: `persistence/`, `consumers/` (seven; + `dispatch-customer-email.ts`),
+`delivery/` (`log` / `email` / `webhook` notifier adapters),
 `render/`, `cache/consent.cache.ts`, `messaging/notification-rabbitmq.publisher.ts`,
 `scheduling/delivery-retry.scheduler.ts`.
 `app.module.ts` wires `CacheModule` + `DatabaseModule.forRoot(notificationEntities)`.
@@ -506,8 +509,7 @@ Ports: `DOMAIN_EVENT_REPOSITORY` and `AUDIT_LOG_REPOSITORY`, mirror surfaces —
 `@InjectRepository` sites. `application/ports` may not import `lib-common`, hence its local
 `{ page, size }` shapes.
 Use cases: `IngestDomainEventUseCase`, `IngestAuditLogUseCase`, `QueryDomainEventsUseCase`,
-`QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts`
-(heuristic `producer` / `aggregateType` / `aggregateId`) and the two view factories.
+`QueryAuditLogEntriesUseCase`, `TraceByCorrelationUseCase`, plus `firehose-extractors.ts` and the two view factories.
 Infra: `persistence/` (2 entities/mappers/repos + the shared `parse-instant.ts`).
 Presentation: `firehose.consumer.ts`, `audit-query.controller.ts`. No `*DomainException` /
 `*RpcExceptionFilter` pair (ADR-039).
@@ -604,7 +606,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `044`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `045`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

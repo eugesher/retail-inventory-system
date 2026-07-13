@@ -288,7 +288,13 @@ export const ROUTING_KEYS = {
   // fake).
   RETAIL_REFUND_ISSUED: 'retail.refund.issued',
   RETAIL_REFUND_FAILED: 'retail.refund.failed',
+  // Liveness probes, one per RMQ deployable (ADR-044). The gateway fans these out
+  // behind `GET /api/health`; each rides the service's existing RPC queue.
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
+  CATALOG_HEALTH_PING: 'catalog.health.ping',
+  INVENTORY_HEALTH_PING: 'inventory.health.ping',
+  RETAIL_HEALTH_PING: 'retail.health.ping',
+  AUDIT_HEALTH_PING: 'audit.health.ping',
   // Notification template authoring RPCs (Gateway → Notification, on
   // `notification_events`) — the notification service's first non-health
   // `@MessagePattern` surface (ADR-033). `author` is create-or-edit (append a new
