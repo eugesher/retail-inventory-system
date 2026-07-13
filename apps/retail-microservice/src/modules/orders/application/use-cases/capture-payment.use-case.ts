@@ -29,6 +29,21 @@ import { loadAuthorizedOrder } from './order-access';
 import { runWithOrderWriteRetry } from './order-write';
 import { toOrderView } from './order-view.factory';
 
+// Internal control signal, thrown from INSIDE the claim transaction when the locked re-read finds the
+// payment already `CAPTURED` — a concurrent capture won and finished while this one was still reading
+// snapshots. It unwinds the claim transaction (nothing is written) and is translated into the same
+// idempotent "already captured, here is the current state" response the unlocked fast-path returns.
+//
+// It is deliberately not an `OrderDomainException`: nothing is wrong, and it must never reach the
+// caller as a 409. And it cannot be replaced by the unlocked check alone — that check is a snapshot
+// read, which is exactly what this whole use case stopped trusting (ADR-052).
+class AlreadyCapturedSignal extends Error {
+  constructor() {
+    super('Payment was captured by a concurrent caller while this capture was claiming it');
+    this.name = 'AlreadyCapturedSignal';
+  }
+}
+
 // The explicit half of authorize-then-capture (ADR-028 §3). Authorization happens automatically at
 // place-time; **taking the money is a separate operation**, triggered by an operator or the owning
 // customer.
@@ -52,9 +67,11 @@ import { toOrderView } from './order-view.factory';
 // backstop: re-capturing an already-`captured` payment returns the current `captured` state rather
 // than erroring.
 //
-// **`amountMinor` is not a partial-capture control.** The gateway always captures the full
-// authorized amount, whatever is passed; a value that differs from the order's total is logged and
-// ignored. The emitted event reports the payment row's actual amount, never the request's.
+// **`amountMinor` is not a partial-capture control, and it is now REJECTED rather than ignored**
+// (ISSUE-09). The gateway captures the full authorized amount, always — its `capture()` takes no
+// amount — so a value that differs from the order's grand total is a `422`
+// (`PARTIAL_CAPTURE_UNSUPPORTED`), never a silent full charge. The emitted event reports the payment
+// row's actual amount, never the request's.
 //
 // The gateway `capture` call is **out-of-process**, so it runs outside the DB
 // transaction (the authorize-on-place rationale); only the two writes that follow —
@@ -208,47 +225,112 @@ export class CapturePaymentUseCase {
       );
     }
 
-    // **`amountMinor` is accepted and then ignored.** The gateway captures the full authorized
-    // amount, always; nothing in the system captures a partial one. A caller that passes a
-    // smaller figure gets the full charge and an `info` line — never a rejection, and never a
-    // partial capture. The emitted event reports the payment row's actual amount, so a client
-    // reading it back sees what was really taken.
-    if (amountMinor !== undefined && amountMinor !== order.grandTotalMinor) {
-      this.logger.info(
-        { correlationId, orderId, requestedAmountMinor: amountMinor },
-        'Partial capture is not supported yet — capturing the full authorized amount',
+    // **A capture amount that is not the grand total is REJECTED, not ignored** (ISSUE-09).
+    // `IPaymentGatewayPort.capture(gatewayReference)` takes no amount — the full authorized figure
+    // is the only thing that can move — so an `amountMinor` of 1000 against a 29997 order used to be
+    // logged and then charged in full, with a `200` that contradicted nothing. The client had to
+    // diff the response against its own request to discover it had been charged thirty times over.
+    //
+    // The idempotency fingerprint does not save them either: it hashes the body, so a "retry with a
+    // smaller amount" is a DIFFERENT key and gets charged in full a second time, past the replay
+    // guard.
+    //
+    // **`typeof amountMinor !== 'number'`, not `=== undefined`.** `@IsOptional()` skips its
+    // validators for `null` as well as `undefined`, and `whitelist` does not strip a decorated
+    // `null` — so `{"amountMinor": null}` arrives here as `null`, and an `=== undefined` test would
+    // read it as absent (the documented `SweepExpiredReservationsUseCase.resolveLimit` trap).
+    if (typeof amountMinor === 'number' && amountMinor !== order.grandTotalMinor) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PARTIAL_CAPTURE_UNSUPPORTED,
+        `Partial capture is not supported: amountMinor ${amountMinor} must equal the order's ` +
+          `grand total ${order.grandTotalMinor} (or be omitted)`,
       );
     }
 
-    // Out-of-process gateway call, outside the DB transaction — **and outside the lock that would
-    // make the `AUTHORIZED` check above mean anything.** That check ran on an unlocked read at
-    // :182. Between it and the transaction below, a concurrent capture — or a Ship, which also
-    // captures — can capture the same authorization. Both callers reach this line; both charge the
-    // gateway; the loser then throws at `freshPayment.capture()` and rolls back a transaction that
-    // cannot un-call the processor.
+    // **PHASE 1 — claim the authorization, under the lock, and COMMIT (ADR-052).**
     //
-    // **A known, unfixed defect.** The bound gateway is a fake that always approves, so it is
-    // latent. Do not write a comment anywhere claiming this path cannot double-charge.
+    // Everything above ran on snapshot reads and is only a fast fail. *This* is the guard. The
+    // `SELECT … FOR UPDATE` is a CURRENT read: a concurrent capture — or a Ship, which captures too —
+    // blocks here, and when it wakes it sees `CAPTURING` instead of `AUTHORIZED` and is rejected
+    // **before it reaches the processor**. The claim is committed before the gateway call precisely
+    // so it survives this process dying mid-charge.
+    //
+    // Before this existed, both callers passed an unlocked `AUTHORIZED` check, both charged, and the
+    // loser threw `PAYMENT_INVALID_STATUS_TRANSITION` and rolled back — reporting correct STATE while
+    // the money had moved twice. **A rollback cannot un-call a payment gateway.**
+    //
+    // No OCC retry wraps this: `beginCapture()` failing means somebody else holds the claim, which is
+    // a terminal 409, not a lost race worth re-running.
+    try {
+      await this.transactionPort.runInTransaction(async (scope) => {
+        const claimed = await this.paymentRepository.findByOrderIdForUpdate(orderId, scope);
+        if (!claimed) {
+          throw new OrderDomainException(
+            OrderErrorCodeEnum.ORDER_INVALID_PAYMENT_TRANSITION,
+            `Order ${orderId} has no payment to capture`,
+          );
+        }
+        // Re-assert under the lock what the fast path asserted on a snapshot: a concurrent capture may
+        // have finished in between, and then this call is an idempotent no-op, not a second charge.
+        if (claimed.status === PaymentStatusEnum.CAPTURED) {
+          throw new AlreadyCapturedSignal();
+        }
+        // Any other non-`AUTHORIZED` state — including a `CAPTURING` claim held by the racer — is
+        // rejected here by the domain, with no money moved.
+        claimed.beginCapture();
+        await this.paymentRepository.save(claimed, scope);
+      });
+    } catch (error) {
+      if (!(error instanceof AlreadyCapturedSignal)) {
+        throw error;
+      }
+      // The winner's state, re-read. Same answer the unlocked fast path gives, reached the safe way.
+      const [winnerOrder, winnerPayment] = await Promise.all([
+        this.orderRepository.findById(orderId),
+        this.paymentRepository.findByOrderId(orderId),
+      ]);
+      if (!winnerOrder || !winnerPayment) {
+        throw new Error(`CapturePaymentUseCase: order ${orderId} vanished during capture`);
+      }
+      this.logger.info(
+        { correlationId, orderId, paymentId: winnerPayment.id },
+        'Payment was captured by a concurrent caller — returning current state (idempotent, nothing charged)',
+      );
+      return toOrderView(winnerOrder, winnerPayment);
+    }
+
+    // **PHASE 2 — the irreversible call.** Out of process, outside any transaction, holding no lock:
+    // a DB row lock must not be held across the public internet. What protects us is not a lock but
+    // the committed `CAPTURING` claim, which is visible to every other caller and to an operator.
     const result = await this.paymentGateway.capture(payment.gatewayReference, correlationId);
     if (!result.captured) {
-      this.logger.warn({ correlationId, orderId }, 'Payment gateway declined capture');
+      // The gateway said no, so **we know** no money moved — the one condition under which a claim may
+      // be released. Release it in its own transaction so the authorization stays capturable, then
+      // surface the decline.
+      await this.transactionPort.runInTransaction(async (scope) => {
+        const declined = await this.paymentRepository.findByOrderIdForUpdate(orderId, scope);
+        declined?.releaseCapture();
+        if (declined) {
+          await this.paymentRepository.save(declined, scope);
+        }
+      });
+      this.logger.warn(
+        { correlationId, orderId },
+        'Payment gateway declined capture — claim released, payment is authorized again',
+      );
       throw new OrderDomainException(
         OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED,
         `Payment capture was declined for order ${orderId}`,
       );
     }
 
-    // Short follow-up transaction: advance the Payment and the order's payment axis atomically,
-    // under the bounded OCC retry (ADR-036). Each attempt re-loads the payment and order inside its
-    // own transaction, so a lost order CAS re-reads fresh committed state and the domain mutators
-    // stay valid on the retry.
+    // **PHASE 3 — record that the money moved.** Advance the Payment `CAPTURING → CAPTURED` and the
+    // order's payment axis atomically, under the bounded OCC retry (ADR-036). Each attempt re-loads
+    // both inside its own transaction, so a lost order CAS re-reads fresh committed state.
     //
-    // **"The gateway `capture` ran once, so a retry never re-charges" is true — and it is not the
-    // hazard.** A *retry* is one caller trying again. A *concurrent* caller is a second charge that
-    // already happened, up at the gateway call, before either of them got here. When this branch
-    // raises `PAYMENT_INVALID_STATUS_TRANSITION` for "someone already captured", it is reporting
-    // correct STATE while the money has moved twice. Do not read that 409 as evidence the race was
-    // caught in time. It was caught too late by exactly one gateway round-trip.
+    // The gateway call ran ONCE, above, outside this loop — a retry never re-charges. That was always
+    // true; what is new is that a *concurrent caller* cannot re-charge either, because it never got
+    // past phase 1.
     await runWithOrderWriteRetry(
       { logger: this.logger, maxAttempts: this.maxAttempts },
       () =>
@@ -260,7 +342,7 @@ export class CapturePaymentUseCase {
               `Order ${orderId} has no payment to capture`,
             );
           }
-          freshPayment.capture(result.capturedAt);
+          freshPayment.completeCapture(result.capturedAt);
           await this.paymentRepository.save(freshPayment, scope);
 
           const fresh = await this.orderRepository.findById(orderId, scope);

@@ -81,6 +81,14 @@ export const configModuleConfig = {
     // fails boot (the `RESERVATION_TTL_MINUTES` precedent).
     OCC_RETRY_ATTEMPTS: Joi.number().integer().min(1).default(5),
 
+    // How old a `capturing` payment must be before it is REPORTED as stranded (ADR-052). A capture
+    // claim is committed before the gateway call and resolved a round-trip later, so anything still
+    // `capturing` after this long belongs to a request that died mid-charge — and nobody knows
+    // whether the money moved. **It is a reporting horizon, not a TTL**: nothing expires and nothing
+    // is released, because releasing a claim whose charge landed is how you charge twice. Defaulted,
+    // so a missing var never fails boot (the `RESERVATION_TTL_MINUTES` precedent).
+    CAPTURE_CLAIM_STALE_MINUTES: Joi.number().integer().positive().default(15),
+
     // Ops mailbox for system-only notifications with no customer recipient
     // (e.g. the inventory low-stock alert). Defaulted so a missing var never fails boot.
     OPS_NOTIFICATIONS_EMAIL: Joi.string().email().default('ops@example.com'),

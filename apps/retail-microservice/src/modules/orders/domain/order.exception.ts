@@ -75,6 +75,13 @@ export enum OrderErrorCodeEnum {
   // fake, but modeled, symmetric to `ORDER_PAYMENT_NOT_APPROVED`) — the payment stays
   // `authorized`.
   ORDER_PAYMENT_NOT_CAPTURED = 'ORDER_PAYMENT_NOT_CAPTURED',
+  // The capture request named an `amountMinor` that is not the order's grand total.
+  // **Partial capture does not exist here** — `IPaymentGatewayPort.capture(gatewayReference)`
+  // takes no amount, so the full authorized figure is the only thing that can move. The field
+  // used to be accepted and silently ignored: a client asking for 10.00 was charged 299.97 and
+  // got a `200` that did not contradict it (ISSUE-09). Now it is rejected (422) rather than
+  // honoured-in-name. The field survives so a real partial capture has somewhere to land.
+  PARTIAL_CAPTURE_UNSUPPORTED = 'PARTIAL_CAPTURE_UNSUPPORTED',
 
   // --- Request-level idempotency (ADR-036) ---
   // Place Order was invoked with no `Idempotency-Key`. The header is required on the

@@ -69,6 +69,9 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_LINE_NO_PRICE]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED]: HttpStatus.CONFLICT,
   [OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED]: HttpStatus.CONFLICT,
+  // 422, not 400: the body is well-formed and the value is a valid integer — it is the
+  // OPERATION that is unsupported. A `400` would tell the integrator to fix their JSON.
+  [OrderErrorCodeEnum.PARTIAL_CAPTURE_UNSUPPORTED]: HttpStatus.UNPROCESSABLE_ENTITY,
 
   // Request-level idempotency (ADR-036). A missing required `Idempotency-Key` is a
   // malformed request → 400 (the retail-side backstop for the gateway edge check); a

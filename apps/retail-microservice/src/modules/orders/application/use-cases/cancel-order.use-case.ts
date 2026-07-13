@@ -167,10 +167,26 @@ export class CancelOrderUseCase {
           }
 
           // Re-load the payment within this attempt's transaction so its mutators
-          // (`flagForRefund` / `void`) stay valid on a retry.
-          const payment = await this.paymentRepository.findByOrderId(orderId, scope);
+          // (`flagForRefund` / `void`) stay valid on a retry. **`FOR UPDATE`, not a snapshot read**
+          // — this must observe a capture claim taken by a concurrent Ship or Capture, and a
+          // REPEATABLE READ snapshot would not (ADR-052).
+          const payment = await this.paymentRepository.findByOrderIdForUpdate(orderId, scope);
           let flagged = false;
           if (payment) {
+            // **A capture is in flight: REFUSE.** This is the branch that makes the claim worth
+            // having. `CAPTURING` means a caller has committed its claim and may already have charged
+            // the gateway — the call is out of process and there is no way to ask whether it landed.
+            // Voiding here would void an authorization whose money is gone (the old behaviour: the
+            // customer charged, the order cancelled, the row reading `VOIDED`, and **nothing in the
+            // system aware there was anything to reconcile**). Flagging for refund would be a guess in
+            // the other direction. So the cancel loses the race, cleanly, and the caller may retry
+            // once the capture resolves — seconds later, or after an operator clears a stale claim.
+            if (payment.status === PaymentStatusEnum.CAPTURING) {
+              throw new OrderDomainException(
+                OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE,
+                `Order ${orderId} has a payment capture in flight and cannot be cancelled; retry once it settles`,
+              );
+            }
             if (payment.status === PaymentStatusEnum.CAPTURED) {
               payment.flagForRefund();
               flagged = true;
