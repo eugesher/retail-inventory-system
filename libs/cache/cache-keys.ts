@@ -248,29 +248,10 @@ export const CACHE_KEYS = {
   inventoryStockLegacyPrefix: (id: number): string => `ris:inventory:stock:${id}:`,
 
   // -- Pre-ADR-016 legacy convention ----------------------------------------
-  // Retained so the SCAN-based invalidate path can wipe entries written
-  // under the original `stock:<productId>:*` prefix during the ADR-016
-  // transition window. New writes always use the `inventoryStock*`
-  // builders above.
+  // INVALIDATE-ONLY, and a prefix is all that takes: `StockCache` feeds this to
+  // `delByPrefix`, which SCAN+UNLINKs whatever is still sitting under the original
+  // `stock:<productId>:*` shape. There is deliberately **no full-key builder** to match —
+  // nothing writes this shape any more, so a complete key has no caller (ADR-046). Do not
+  // add one back for symmetry.
   productStockPrefix: (productId: number): string => `stock:${productId}:`,
-
-  productStock: (productId: number, storageIds?: string[]): string => {
-    const prefix = CACHE_KEYS.productStockPrefix(productId);
-    const storageKey =
-      storageIds && storageIds.length > 0
-        ? [...storageIds].sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0)).join(',')
-        : '*';
-    return `${prefix}${storageKey}`;
-  },
 } as const;
-
-// Backwards-compat alias surface. Prefer `CACHE_KEYS` builders for new code.
-export class CacheHelper {
-  public static keyPrefixes = {
-    productStock: CACHE_KEYS.productStockPrefix,
-  };
-
-  public static keys = {
-    productStock: CACHE_KEYS.productStock,
-  };
-}
