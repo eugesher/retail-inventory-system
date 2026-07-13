@@ -2,17 +2,34 @@
 // intentionally violates one rule, and the spec asserts ESLint reports the expected
 // `boundaries/*` ruleId for it.
 //
-// **Read this before you trust it: the suite does NOT lint against `eslint.config.mjs`.** It builds
-// its own `Linter` from the `ELEMENTS` / `DEPENDENCY_RULES` copies below (see `buildLinter`). So it
-// pins **the plugin's behaviour given this taxonomy** — the v6 `DependencySelector` shape, the
-// `{{from.captured.module}}` templating, the first-match ordering — which is real protection against
-// a plugin upgrade changing semantics under us.
+// **It lints against the REAL `eslint.config.mjs` — the one CI runs.** `beforeAll` asks the ESLint
+// binary, through `--print-config`, *"what configuration do you actually apply to this source file?"*
+// and the fixtures are then linted with the answer: the resolved `boundaries/elements`, the resolved
+// `boundaries/dependencies` rules, and the resolved severities. **Weaken a rule in the production
+// config and these tests go red** — demonstrated both ways round when this was fixed:
 //
-// **It is not protection against the production rules being weakened.** Turn
-// `boundaries/no-unknown-files` off in `eslint.config.mjs` and every test here still passes. If you
-// change that file, you must mirror it here by hand; forget, and the two drift in silence while this
-// suite stays green — defending a config nobody runs.
+//   'boundaries/no-unknown-files': 'error' → 'off'      →  1 test red
+//   drop 'typeorm' from the domain denylist             →  5 tests red
+//
+// **It used to do the opposite, and that is why this comment is long.** The suite built its `Linter`
+// from its own hand-mirrored copies of the taxonomy, so it proved only *"the plugin, given THIS
+// taxonomy, reports these ruleIds"* — and nothing at all about the config CI runs. Setting
+// `'boundaries/no-unknown-files': 'off'` in `eslint.config.mjs` left **all 74 tests green**, and
+// `yarn lint` green with it. `CLAUDE.md` calls `yarn lint` *"the source of truth for where a file
+// belongs"* and says *"never weaken a `boundaries/*` rule"* — and the thing everyone believed was
+// the backstop for that instruction was **a false green light** (ISSUE-10). At 1029 lines and 74
+// passing tests, nobody re-derives it.
+//
+// **There is no second copy of the taxonomy any more.** Not a mirrored one, not a shared one —
+// `eslint.config.mjs` is the single source, and this file reads it through the ESLint API rather
+// than restating it. Drift is not *detected*; it is **impossible**.
+//
+// What the fixtures still buy, and it is real: they pin **the plugin's own behaviour** — the v6
+// `DependencySelector` shape, the `{{from.captured.module}}` templating, the first-match element
+// ordering — against a plugin upgrade changing semantics under us. They are the independent
+// expectation. That is why they are hand-written and stay hand-written.
 
+import { execFileSync } from 'child_process';
 import { Linter } from 'eslint';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -37,181 +54,59 @@ type Plugin = NonNullable<Linter.Config['plugins']>[string];
 
 const ROOT = path.resolve(__dirname, '..');
 
-// Element-type taxonomy and rules — a HAND-MIRRORED copy of `eslint.config.mjs`. Nothing enforces
-// that the two agree: this is the duplication that makes the suite unable to catch a weakened
-// production rule (see the header). Keep it mirrored, and know that forgetting costs you the check.
-const ELEMENTS = [
-  {
-    type: 'domain',
-    pattern: 'apps/*/src/modules/*/domain/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  {
-    type: 'application-use-case',
-    pattern: 'apps/*/src/modules/*/application/use-cases/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  {
-    type: 'application-port',
-    pattern: 'apps/*/src/modules/*/application/ports/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  {
-    type: 'presentation',
-    pattern: 'apps/*/src/modules/*/presentation/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  {
-    type: 'infrastructure',
-    pattern: 'apps/*/src/modules/*/infrastructure/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  // ADR-041. `shared-module-barrel` MUST precede `nest-module` — the plugin
-  // takes the first matching pattern, and `auth/index.ts` matches both.
-  {
-    type: 'shared-module-barrel',
-    pattern: 'apps/*/src/modules/auth/index.ts',
-    mode: 'file',
-    capture: ['app'],
-  },
-  {
-    type: 'nest-module',
-    pattern: 'apps/*/src/modules/*/*.ts',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  { type: 'lib-contracts', pattern: 'libs/contracts/**', mode: 'file' },
-  { type: 'lib-ddd', pattern: 'libs/ddd/**', mode: 'file' },
-  { type: 'lib-common', pattern: 'libs/common/**', mode: 'file' },
-  { type: 'lib-messaging', pattern: 'libs/messaging/**', mode: 'file' },
-  { type: 'lib-cache', pattern: 'libs/cache/**', mode: 'file' },
-  { type: 'lib-database', pattern: 'libs/database/**', mode: 'file' },
-];
+// **The taxonomy is NOT restated here.** It is read from the production config at run time — see
+// `beforeAll`. What lives in this file is the thing the production config cannot supply: an
+// independent expectation of what its rules ought to reject.
 
-// v6 DependencySelector helpers — mirror eslint.config.mjs.
-const sameModule = (type: string): object => ({
-  to: {
-    type,
-    captured: {
-      app: '{{from.captured.app}}',
-      module: '{{from.captured.module}}',
-    },
-  },
-});
-const sameApp = (type: string): object => ({
-  to: { type, captured: { app: '{{from.captured.app}}' } },
-});
-const lib = (type: string): object => ({ to: { type } });
+// The file whose RESOLVED configuration is the one under test. It has to be a real source file the
+// boundaries block actually applies to — ESLint resolves a config per path, and a path that matched
+// nothing would hand back an empty rule set and quietly turn every assertion below into a tautology.
+const PROBE_FILE =
+  'apps/api-gateway/src/modules/cart/application/use-cases/create-cart.use-case.ts';
 
-const DEPENDENCY_RULES = [
-  // Blanket allow for any external / node-core target.
-  { from: { type: '*' }, allow: { to: { origin: ['external', 'core'] } } },
-  // Internal allow rules per layer.
-  {
-    from: { type: 'domain' },
-    allow: [sameModule('domain'), lib('lib-ddd'), lib('lib-common'), lib('lib-contracts')],
-  },
-  {
-    from: { type: 'application-use-case' },
-    allow: [
-      sameModule('domain'),
-      sameModule('application-port'),
-      sameApp('shared-module-barrel'),
-      lib('lib-ddd'),
-      lib('lib-common'),
-      lib('lib-contracts'),
-    ],
-  },
-  {
-    from: { type: 'application-port' },
-    allow: [sameModule('domain'), lib('lib-ddd'), lib('lib-contracts')],
-  },
-  {
-    from: { type: 'presentation' },
-    allow: [
-      sameModule('application-use-case'),
-      sameModule('application-port'),
-      sameApp('shared-module-barrel'),
-      lib('lib-contracts'),
-      lib('lib-messaging'),
-    ],
-  },
-  {
-    from: { type: 'infrastructure' },
-    allow: [
-      sameModule('domain'),
-      sameModule('application-port'),
-      sameModule('infrastructure'),
-      lib('lib-cache'),
-      lib('lib-messaging'),
-      lib('lib-contracts'),
-    ],
-  },
-  // ADR-041 — the module composition root sees every layer of its own module
-  // and the `auth` barrel, but never a sibling module's internals or barrel.
-  {
-    from: { type: 'nest-module' },
-    allow: [
-      sameModule('domain'),
-      sameModule('application-port'),
-      sameModule('application-use-case'),
-      sameModule('infrastructure'),
-      sameModule('presentation'),
-      sameApp('shared-module-barrel'),
-      lib('lib-cache'),
-      lib('lib-database'),
-      lib('lib-messaging'),
-      lib('lib-contracts'),
-    ],
-  },
-  // ADR-043 — the database lib may reach the domain kernel (`TypeormTransactionAdapter`
-  // implements `ITransactionPort`). The reverse has no allow rule and stays disallowed by
-  // the `default: 'disallow'` polarity, which the fixtures below pin.
-  {
-    from: { type: 'lib-database' },
-    allow: [lib('lib-database'), lib('lib-common'), lib('lib-contracts'), lib('lib-ddd')],
-  },
-  // External denylists per source layer.
-  {
-    from: { type: 'domain' },
-    disallow: {
-      dependency: {
-        module: ['@nestjs/*', 'typeorm', '@keyv/redis', 'amqplib', 'axios', 'nestjs-pino'],
-      },
-    },
-  },
-  {
-    from: { type: 'application-use-case' },
-    disallow: {
-      dependency: {
-        module: ['@keyv/redis', 'amqplib', '@nestjs/cache-manager', '@nestjs/typeorm', 'typeorm'],
-      },
-    },
-  },
-  {
-    from: { type: 'application-port' },
-    disallow: {
-      dependency: { module: ['@nestjs/common', 'typeorm', '@keyv/redis', 'amqplib'] },
-    },
-  },
-  {
-    from: { type: 'presentation' },
-    disallow: { dependency: { module: ['typeorm', '@keyv/redis', '@nestjs/typeorm'] } },
-  },
-  {
-    from: { type: 'lib-contracts' },
-    disallow: { dependency: { module: ['@nestjs/common', '@nestjs/typeorm', 'typeorm'] } },
-  },
-  {
-    from: { type: 'lib-ddd' },
-    disallow: { dependency: { module: ['@nestjs/*', 'typeorm', '@keyv/redis', 'amqplib'] } },
-  },
-];
+// Populated in `beforeAll` from `eslint.config.mjs`, via ESLint's own resolver — so it carries every
+// merged config block, every override and every severity exactly as CI sees them.
+let resolved: Linter.Config;
+
+// Ask ESLint what it ACTUALLY applies to `PROBE_FILE`. This is the whole fix: not a second copy of
+// the taxonomy kept in step by discipline, and not a shared module both sides import — **the resolved
+// production configuration itself**, merged from every matching block in `eslint.config.mjs`, with
+// every override and every severity already folded in.
+//
+// It matters that this is the *resolved* config and not the source of one config object. A rule can
+// be weakened three ways — change the severity, weaken a `disallow`, or add a later block that
+// overrides an earlier one — and only the resolved answer catches all three. A shared-taxonomy module
+// would have caught the first two and missed the third, which is the one that looks most like a
+// harmless refactor.
+//
+// **It runs ESLint as a CHILD PROCESS, and that is not a detour — it is the only way.** The in-process
+// `ESLint#calculateConfigForFile` does exactly this job and **cannot be used from here**:
+// `eslint.config.mjs` is ESM, ESLint loads it with a dynamic `import()`, and **Jest's VM sandbox
+// rejects that outright** — *"A dynamic import callback was invoked without
+// --experimental-vm-modules"*. A real Node process has no such restriction, and `eslint
+// --print-config` is the CLI surface of the very same resolver.
+//
+// So the spec asks the **same ESLint binary CI runs**, on the same config file, and parses its answer.
+// It costs one process spawn, once, in `beforeAll`.
+beforeAll(() => {
+  const json = execFileSync('npx', ['eslint', '--print-config', PROBE_FILE], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  resolved = JSON.parse(json) as Linter.Config;
+
+  // **Fail loudly if the probe resolved to nothing.** A `PROBE_FILE` that matched no config block
+  // would hand back an empty rule set, every fixture below would report no violation, and the suite
+  // would go green while guarding nothing — which is precisely the failure mode this whole task
+  // exists to remove. Do not let it come back through the side door.
+  if (resolved.settings?.['boundaries/elements'] === undefined) {
+    throw new Error(
+      `PROBE_FILE (${PROBE_FILE}) resolved to a config with no boundaries/elements — the suite would ` +
+        'prove nothing. Point it at a source file the boundaries block actually applies to.',
+    );
+  }
+}, 120_000);
 
 function buildLinter(): { linter: Linter; config: Linter.Config[] } {
   const linter = new Linter({ configType: 'flat' });
@@ -226,21 +121,14 @@ function buildLinter(): { linter: Linter; config: Linter.Config[] } {
         // The plugin types its rules loosely; the cast is hermetic to the test.
         boundaries: boundariesPlugin as unknown as Plugin,
       },
-      settings: {
-        'boundaries/elements': ELEMENTS,
-        'boundaries/include': ['apps/**/*.ts', 'libs/**/*.ts'],
-        'boundaries/ignore': ['**/spec/**', '**/*.spec.ts'],
-        'import/resolver': {
-          typescript: { project: path.join(ROOT, 'tsconfig.json') },
-          node: true,
-        },
-      },
+      // Straight from the production config — `boundaries/elements` (in its ORDER, which is
+      // load-bearing: the plugin takes the FIRST matching pattern), `include`, `ignore`.
+      settings: resolved.settings,
       rules: {
-        'boundaries/dependencies': [
-          'error',
-          { default: 'disallow', checkAllOrigins: true, rules: DEPENDENCY_RULES },
+        'boundaries/dependencies': resolved.rules?.['boundaries/dependencies'] as Linter.RuleEntry,
+        'boundaries/no-unknown-files': resolved.rules?.[
+          'boundaries/no-unknown-files'
         ] as Linter.RuleEntry,
-        'boundaries/no-unknown-files': 'error' as Linter.RuleEntry,
       },
     },
   ];
@@ -256,6 +144,49 @@ function lint(code: string, relPath: string): Linter.LintMessage[] {
 function ruleIds(messages: Linter.LintMessage[]): string[] {
   return messages.map((m) => m.ruleId ?? '');
 }
+
+// Direct assertions on the RESOLVED production config. The fixtures below prove *"this taxonomy
+// rejects this import"*; these prove *"the production config still carries that taxonomy, at that
+// severity, in that order."* They catch what a fixture structurally cannot:
+//
+//   * a severity dropped to `warn` — every fixture still reports its ruleId, so every fixture stays
+//     green, and CI stops failing. **A warning is not a guard.**
+//   * the element ORDER reshuffled — `boundaries` takes the FIRST matching pattern, so `nest-module`
+//     (`modules/*/*.ts`) drifting ahead of `shared-module-barrel` (`modules/auth/index.ts`) silently
+//     retypes the gateway `auth` barrel and quietly kills `ARCH-LINT-EX-02`. An `Object.entries`
+//     round-trip or a tidy-up sort would do it, and nothing else in this file would notice.
+describe('the production config itself (eslint.config.mjs, as ESLint resolves it)', () => {
+  const severityOf = (entry: unknown): unknown =>
+    Array.isArray(entry) ? (entry as unknown[])[0] : entry;
+
+  // 2 = error. A `warn` here would let every violation through CI while this suite stayed green.
+  it('enforces boundaries/no-unknown-files at ERROR, not warn', () => {
+    expect(severityOf(resolved.rules?.['boundaries/no-unknown-files'])).toBe(2);
+  });
+
+  it('enforces boundaries/dependencies at ERROR, and denies by default', () => {
+    const entry = resolved.rules?.['boundaries/dependencies'] as [number, { default: string }];
+    expect(severityOf(entry)).toBe(2);
+    // `default: 'allow'` would invert the entire model — everything permitted unless named — and not
+    // one fixture below would change its answer, because each names its own violation.
+    expect(entry[1].default).toBe('disallow');
+  });
+
+  it('keeps shared-module-barrel AHEAD of nest-module — first match wins (ARCH-LINT-EX-02)', () => {
+    const types = (resolved.settings?.['boundaries/elements'] as { type: string }[]).map(
+      (e) => e.type,
+    );
+    const barrel = types.indexOf('shared-module-barrel');
+    const nestModule = types.indexOf('nest-module');
+
+    expect(barrel).toBeGreaterThanOrEqual(0);
+    expect(nestModule).toBeGreaterThanOrEqual(0);
+    // Both patterns match `modules/auth/index.ts`. Whichever comes first wins, and the gateway `auth`
+    // barrel — the repo's ONE sanctioned cross-module-consumable barrel — depends on it being this
+    // one.
+    expect(barrel).toBeLessThan(nestModule);
+  });
+});
 
 describe('boundaries rules (ADR-017)', () => {
   describe('boundaries/dependencies — external denylists', () => {
