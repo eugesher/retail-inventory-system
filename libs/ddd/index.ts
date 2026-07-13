@@ -2,4 +2,5 @@ export * from './aggregate-root.base';
 export * from './domain-event.base';
 export * from './entity.base';
 export * from './repository.port';
+export * from './transaction.port';
 export * from './value-object.base';

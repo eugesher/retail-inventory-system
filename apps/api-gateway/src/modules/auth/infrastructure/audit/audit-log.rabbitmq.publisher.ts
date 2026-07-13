@@ -18,7 +18,7 @@ import { ROUTING_KEYS, RisEventsMirrorPublisher } from '@retail-inventory-system
 // warn-logs + swallows its own rejection — so a broker hiccup never blocks the mutation
 // that already committed (login, role assignment, …). Call sites are unchanged.
 @Injectable()
-export class RmqAuditLogPublisher implements IAuditLogPublisher {
+export class AuditLogRabbitmqPublisher implements IAuditLogPublisher {
   constructor(private readonly risEvents: RisEventsMirrorPublisher) {}
 
   public async publish(event: IAuditLogEvent): Promise<void> {

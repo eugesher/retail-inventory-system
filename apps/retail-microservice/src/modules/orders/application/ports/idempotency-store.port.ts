@@ -1,4 +1,4 @@
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 // The request-level idempotency store for the retail write surface — the backing
 // store the money- and stock-moving HTTP writes (place order, capture payment, ship

@@ -1,5 +1,7 @@
 import { PinoLogger } from 'nestjs-pino';
 
+import { runWithOccRetry } from '@retail-inventory-system/common';
+
 import { OrderDomainException, OrderErrorCodeEnum } from '../../domain';
 import { OrderWriteConflictError } from './order-write-conflict.error';
 
@@ -41,43 +43,26 @@ export async function runWithOrderWriteRetry<T>(
   attempt: () => Promise<T>,
   context: IOrderWriteRetryContext = {},
 ): Promise<T> {
-  const { logger, maxAttempts } = deps;
   const { orderId, correlationId } = context;
 
-  for (let attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
-    try {
-      return await attempt();
-    } catch (error) {
-      if (!(error instanceof OrderWriteConflictError)) {
-        throw error;
-      }
-      if (attemptNo >= maxAttempts) {
-        logger.warn(
-          { correlationId, orderId: orderId ?? error.orderId, attempts: attemptNo, maxAttempts },
-          'Order write conflict exhausted retry budget',
-        );
-        throw new OrderDomainException(
-          OrderErrorCodeEnum.ORDER_VERSION_MISMATCH,
-          `Order ${orderId ?? error.orderId} write lost the optimistic race after ${attemptNo} attempts`,
-          { currentVersion: error.currentVersion },
-        );
-      }
-      // OCC retries log at `info` (ADR-036): a lost compare-and-swap is a normal,
-      // expected outcome under contention, and the concurrency tests assert this
-      // trace fires with the attempt count + the version the winner left behind.
-      logger.info(
-        {
-          correlationId,
-          orderId: orderId ?? error.orderId,
-          attempt: attemptNo,
-          maxAttempts,
-          currentVersion: error.currentVersion,
-        },
-        'Order write conflict — retrying with a fresh read',
+  return runWithOccRetry(attempt, {
+    subject: 'Order',
+    logger: deps.logger,
+    maxAttempts: deps.maxAttempts,
+    isConflict: (error): error is OrderWriteConflictError =>
+      error instanceof OrderWriteConflictError,
+    retryContext: (conflict) => ({
+      correlationId,
+      orderId: orderId ?? conflict.orderId,
+      currentVersion: conflict.currentVersion,
+    }),
+    exhaustedContext: (conflict) => ({ correlationId, orderId: orderId ?? conflict.orderId }),
+    onExhausted: (conflict, attempts) => {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_VERSION_MISMATCH,
+        `Order ${orderId ?? conflict.orderId} write lost the optimistic race after ${attempts} attempts`,
+        { currentVersion: conflict.currentVersion },
       );
-    }
-  }
-
-  // Unreachable: the final attempt either returns or throws inside the loop.
-  throw new Error('runWithOrderWriteRetry: optimistic retry loop exited unexpectedly');
+    },
+  });
 }

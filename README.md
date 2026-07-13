@@ -234,9 +234,9 @@ libs/
   common/         # framework-free: Result, DomainException, pagination, bodyFingerprint
   config/         # configModuleConfig (Joi env schema)
   contracts/      # cross-service message + DTO contracts (plain TypeScript)
-  database/       # BaseEntity, BaseTypeormRepository, SnakeNamingStrategy, DatabaseModule
-  ddd/            # Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort
-  messaging/      # MessagingModule, RabbitmqClientFactory, RisEventsMirrorPublisher, ROUTING_KEYS
+  database/       # BaseEntity, BaseTypeormRepository, TypeormTransactionAdapter, DatabaseModule
+  ddd/            # Entity, AggregateRoot, ValueObject, DomainEvent, IRepositoryPort, ITransactionPort
+  messaging/      # per-service client modules, RabbitmqClientFactory, RisEventsMirrorPublisher, ROUTING_KEYS
   observability/  # Pino config, CorrelationMiddleware, OTel tracer.ts, MetricsModule
 docs/adr/            # architecture decision records — the durable rationale
 docs/implementation/ # per-capability walkthroughs, numbered by delivery order
@@ -254,9 +254,9 @@ Imported via path aliases as `@retail-inventory-system/<name>`.
 | --- | --- |
 | `contracts` | Wire contracts — `microservices/`, `auth/`, `audit/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs. |
 | `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |
-| `common` | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (canonical-JSON + SHA-256 request digest). |
+| `common` | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token). |
 | `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`. |
-| `messaging` | `MessagingModule`, per-service client modules + `MicroserviceClientRisEventsModule`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS`, `EXCHANGES`. |
+| `messaging` | Per-service client modules + `MicroserviceClientRisEventsModule`, `RabbitmqClientFactory`, `RisEventsMirrorPublisher`, `ROUTING_KEYS`, `EXCHANGES`. |
 | `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel-spanned), global `CacheModule`, `@Cacheable()`, `CACHE_KEYS`. |
 | `observability` | `LoggerModuleConfig` (Pino + trace correlation), `CorrelationMiddleware`, `@CorrelationId()`, OTel `tracer.ts` side-effect bootstrap. |
 | `auth` | `AuthModule.forRootAsync()`, `JwtStrategy`, the three guards, `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`. |
@@ -285,8 +285,16 @@ the adapters and the controllers to the use cases means it must see all four at 
 belongs to none of them ([ADR-041](docs/adr/041-nest-module-as-the-module-composition-root.md)).
 
 **Boundary rule.** `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
-`infrastructure/messaging/*-rabbitmq.{adapter,publisher}.ts`. Controllers, use cases, and
-pipes inject the port symbol instead.
+`infrastructure/messaging/`. Controllers, use cases, and pipes inject the port symbol
+instead. This is **enforced in CI**, not reviewed: `eslint-plugin-boundaries` types elements
+by path and cannot see an imported symbol, so a `no-restricted-imports` rule with
+`importNames: ['ClientProxy', …]` names the one symbol that must stay contained — while
+`@EventPattern`, `@MessagePattern` and `Transport` stay free to be imported where they belong.
+
+Adapter filenames come in two forms: `<module>-rabbitmq.{adapter,publisher}.ts` for the
+module's own transport seam (`stock-rabbitmq.publisher.ts`), and
+`<seam>.rabbitmq.{adapter,publisher}.ts` for a *named* seam, mirroring the port it implements
+(`cart-catalog.rabbitmq.adapter.ts` ↔ `cart-catalog.gateway.port.ts`).
 
 ### Architecture lint
 
@@ -319,7 +327,11 @@ silently weakening a rule fails the unit suite.
 
 - **One throwable per module** — `*DomainException` + `*ErrorCodeEnum`, mapped to HTTP by
   that module's presentation `*RpcExceptionFilter`. The filters are the authoritative
-  code → status tables.
+  code → status tables. All four names key off the **context noun, not the module folder**:
+  `<Noun>DomainException` ↔ `<noun>.exception.ts` ↔ `<noun>-rpc-exception.filter.ts` ↔
+  `<Noun>RpcExceptionFilter`. Hence `modules/stock/` throws `InventoryDomainException` from
+  `inventory.exception.ts`, and `modules/orders/` throws `OrderDomainException` (singular)
+  from `order.exception.ts`.
 - **One repository port per aggregate seam** — not one god-repository per module.
 - **Cross-module reads via a raw-parameterized-SQL reader port** rather than importing the
   other module's entities (`ORDER_CART_READER`, `RETURN_ORDER_READER`, `CONSENT_READER`).
@@ -832,6 +844,43 @@ authentication + inherent ownership.
 
 All routes are prefixed `/api`. Every route is **protected by default**; `@Public()` is the
 explicit opt-out. Interactive reference: `http://localhost:3000/api/reference`.
+
+### Health
+
+| Method | Route | Auth |
+| --- | --- | --- |
+| `GET` | `/api/health` | `@Public()` |
+
+The system's liveness report ([ADR-044](docs/adr/044-system-health-fan-out.md)). The gateway
+probes all five RMQ deployables **concurrently over the real broker**, so a failing probe means
+business traffic would fail too — and a climbing `latencyMs` is an early warning long before
+timeouts start.
+
+```jsonc
+{
+  "status": "degraded",                            // 'ok' only if ALL five are ok
+  "services": {
+    "catalog":      { "status": "ok", "latencyMs": 4 },
+    "inventory":    { "status": "ok", "latencyMs": 3 },
+    "retail":       { "status": "ok", "latencyMs": 5 },
+    "notification": { "status": "timeout" },       // down, wedged, or no consumer
+    "event-store":  { "status": "ok", "latencyMs": 2 }
+  }
+}
+```
+
+Two things it deliberately is **not**:
+
+- **It is not a readiness probe.** Each service's handler does no I/O — it proves a Nest app is
+  consuming the queue, nothing more. A service with a dead database still answers `ok`. Putting a
+  DB round-trip in a health handler loads the hot path on every poll and lets one slow database
+  report five services sick.
+- **It never returns 503.** `degraded` comes back as **200**. This is a report *about the
+  system*, not the gateway's own liveness — a 503 would make the gateway look dead when it is the
+  one component provably alive. Monitors read `status`, not the HTTP code.
+
+`HEALTH_PROBE_TIMEOUT_MS` (default `2000`) bounds **one** probe; the fan-out is concurrent, so
+one dead service costs one timeout, not five.
 
 ### Auth — staff
 

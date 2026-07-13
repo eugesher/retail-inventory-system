@@ -1,3 +1,4 @@
+export * from './concurrency';
 export * from './exceptions';
 export * from './idempotency';
 export * from './pagination';

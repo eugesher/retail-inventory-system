@@ -1,7 +1,7 @@
 import { AddressOwnerTypeEnum } from '@retail-inventory-system/contracts';
 
 import { Address } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const ADDRESS_REPOSITORY = Symbol('ADDRESS_REPOSITORY');
 

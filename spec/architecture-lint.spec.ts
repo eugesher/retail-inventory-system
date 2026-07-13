@@ -160,6 +160,13 @@ const DEPENDENCY_RULES = [
       lib('lib-contracts'),
     ],
   },
+  // ADR-043 — the database lib may reach the domain kernel (`TypeormTransactionAdapter`
+  // implements `ITransactionPort`). The reverse has no allow rule and stays disallowed by
+  // the `default: 'disallow'` polarity, which the fixtures below pin.
+  {
+    from: { type: 'lib-database' },
+    allow: [lib('lib-database'), lib('lib-common'), lib('lib-contracts'), lib('lib-ddd')],
+  },
   // External denylists per source layer.
   {
     from: { type: 'domain' },
@@ -955,6 +962,32 @@ describe('boundaries rules (ADR-017)', () => {
       const code = `export const x = 1;\n`;
       const messages = lint(code, 'apps/retail-microservice/src/modules/cart/cart.module.ts');
       expect(ruleIds(messages)).not.toContain('boundaries/no-unknown-files');
+    });
+  });
+
+  // ADR-043. The transaction seam is the one thing `libs/database` knows about the domain
+  // kernel. The edge is one-way by construction, and these two fixtures are what keep it so —
+  // widen `lib-ddd`'s allow list and the second one fails.
+  describe('boundaries/dependencies — the transaction seam (ADR-043)', () => {
+    it('lib-database MAY import lib-ddd (the adapter implements ITransactionPort)', () => {
+      const code = `import { ITransactionPort } from '@retail-inventory-system/ddd';\nexport type X = ITransactionPort;\n`;
+      const messages = lint(code, 'libs/database/__fixture__.ts');
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    it('lib-ddd may NOT import lib-database — the reverse edge stays shut', () => {
+      const code = `import { BaseEntity } from '@retail-inventory-system/database';\nexport const x = BaseEntity;\n`;
+      const messages = lint(code, 'libs/ddd/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('an application use case may reach the seam through lib-ddd, not lib-database', () => {
+      const code = `import { TRANSACTION_PORT } from '@retail-inventory-system/ddd';\nexport const x = TRANSACTION_PORT;\n`;
+      const messages = lint(
+        code,
+        'apps/inventory-microservice/src/modules/stock/application/use-cases/__fixture__.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
     });
   });
 

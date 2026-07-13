@@ -1,6 +1,6 @@
 import { EntityManager } from 'typeorm';
 
-import { ITransactionScope } from '../../../application/ports';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 import { TypeormTransactionAdapter } from '../typeorm-transaction.adapter';
 
 describe('TypeormTransactionAdapter', () => {

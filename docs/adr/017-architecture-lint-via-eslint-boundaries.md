@@ -45,7 +45,6 @@ Defined in `eslint.config.mjs` as `boundariesElements`:
 | `presentation`          | `apps/*/src/modules/*/presentation/**`               | `app`, `module`   |
 | `shared-module-barrel`  | `apps/*/src/modules/auth/index.ts` ([ADR-041](041-nest-module-as-the-module-composition-root.md)) | `app` |
 | `nest-module`           | `apps/*/src/modules/*/*.ts` (ADR-041 — the `@Module` file **and** the module-root barrel) | `app`, `module` |
-| `context-root`          | `apps/*/src/modules/*.ts` (ADR-041 — the ADR-039 event-store files) | `app` |
 | `app-bootstrap`         | `apps/*/src/main.ts`, `apps/*/src/app/**`            | `app`             |
 | `app-shared`            | `apps/*/src/common/**`                               | `app`             |
 | `lib-shim`              | `libs/{inventory,retail}/**`, the `libs/common/{cache,config,correlation,modules}/**` subfolders, `libs/config/{cache-module,logger-module}.config.ts` | —                 |
@@ -64,11 +63,11 @@ The shim entry must come before the broad `libs/common/**` entry — the plugin 
 - **`infrastructure`** → anything inside its own module + any shared lib (this is where adapters live).
 - **`presentation`** → own-module `application-*`, `presentation`, and `app-shared`; plus `lib-auth`, `lib-contracts`, `lib-messaging` (for `ROUTING_KEYS`), `lib-observability` (for `@CorrelationId`).
 - **`nest-module`** ([ADR-041](041-nest-module-as-the-module-composition-root.md)) → every layer of its **own** module + every shared lib + the `auth` barrel. It may not reach a sibling module, by deep path *or* through the sibling's barrel — the composition root wires its own hexagon, it does not couple to a neighbour's.
-- **`context-root`** (ADR-041) → sibling module **barrels** and nothing deeper, on `presentation`'s lib set (the two files that sit here are controllers, ADR-039).
 - **`app-bootstrap`** → anything within its own app + every shared lib.
 - **`app-shared`** → own-app `app-shared`, plus `lib-contracts` and `lib-common`.
 - **`lib-ddd`** → `lib-ddd` only.
 - **`lib-contracts`** → `lib-contracts` only.
+- **`lib-database`** → `lib-database`, `lib-common`, `lib-contracts`, and — since [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md) — `lib-ddd`, because `TypeormTransactionAdapter` implements the kernel's `ITransactionPort`. Infrastructure depending on a domain contract is dependency inversion; the reverse edge stays shut (`lib-ddd` allows only `lib-ddd`).
 - Other libs allow a narrow neighbourhood (`lib-common` may reach `lib-contracts`/`lib-cache`/`lib-config`/`lib-observability`; etc.). The shim element forwards to anything its re-exports need, since shims will disappear in a later cleanup pass.
 
 Cross-service and cross-module isolation are encoded by the `{{from.captured.app}}` / `{{from.captured.module}}` template-matched `captured` selectors on each `sameModule(...)` / `sameApp(...)` helper output: a `presentation` file in `apps/inventory-microservice/src/modules/stock/` cannot reach a `domain` file in `apps/retail-microservice/src/modules/orders/` because their `app` captures differ.
@@ -78,7 +77,7 @@ Cross-service and cross-module isolation are encoded by the `{{from.captured.app
 Only layers with documented denylists carry external rules. Each entry pins to a `from: { type: 'X' }` source and lists modules under `disallow: { dependency: { module: [...] } }`. Highlights:
 
 - **`domain`** denies `@nestjs/*`, `typeorm`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `axios`, `nestjs-pino`, `pino`, `pino-http`.
-- **`application-use-case`** denies `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `@nestjs/cache-manager`, `@nestjs/typeorm`, `typeorm`, `axios`. The transaction seam is the application-layer `ITransactionPort` (`apps/inventory-microservice/src/modules/stock/application/ports/transaction.port.ts`); use cases acquire an opaque `ITransactionScope` from it and pass that scope into repository port methods — they never reach for `EntityManager` directly. Closing the previous `ARCH-LINT-EX-01` exception is what unlocked the tighter denylist; see §6.
+- **`application-use-case`** denies `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `@nestjs/cache-manager`, `@nestjs/typeorm`, `typeorm`, `axios`. The transaction seam is `ITransactionPort` (`libs/ddd/transaction.port.ts` since [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md); it was a per-module copy before); use cases acquire an opaque `ITransactionScope` from it and pass that scope into repository port methods — they never reach for `EntityManager` directly. Closing the previous `ARCH-LINT-EX-01` exception is what unlocked the tighter denylist; see §6.
 - **`application-port`** denies all of `@nestjs/{common,core,microservices,typeorm,cache-manager}`, `typeorm`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `amqplib`, `amqp-connection-manager`, `axios`, `nestjs-pino`.
 - **`application-dto`** denies `@nestjs/*`, `typeorm`, `@keyv/redis`, `cacheable`, `redis`, `amqplib`, `axios`.
 - **`presentation`** denies `typeorm`, `@keyv/redis`, `cacheable`, `cache-manager`, `redis`, `@nestjs/typeorm`, `amqplib`, `amqp-connection-manager`. Nest controller/swagger/microservices imports stay allowed — that's the entire job of this layer.
@@ -103,7 +102,7 @@ The previous `ARCH-LINT-EX-01` exception is closed. It covered two files in the 
 - `apps/inventory-microservice/src/modules/stock/application/ports/stock.repository.port.ts` — `import { EntityManager } from 'typeorm'` for the transaction-scope arg on port methods.
 - `apps/inventory-microservice/src/modules/stock/application/use-cases/reserve-stock-for-order.use-case.ts` — `import { InjectEntityManager } from '@nestjs/typeorm'` to grab the same `EntityManager`.
 
-The fix introduces an `ITransactionPort` abstraction (`apps/inventory-microservice/src/modules/stock/application/ports/transaction.port.ts`) with a `runInTransaction((scope: ITransactionScope) => Promise<T>) => Promise<T>` method and an opaque `ITransactionScope` marker type. Repository port methods now accept `ITransactionScope` instead of `EntityManager`. The downcast back to `EntityManager` lives only in the two infrastructure-layer adapters: `TypeormTransactionAdapter` (`apps/inventory-microservice/src/modules/stock/infrastructure/persistence/typeorm-transaction.adapter.ts`) hands the manager to the work callback under the opaque scope type; `StockTypeormRepository` casts it back when it needs the manager for query construction. With both leaks removed, the `application-use-case` denylist tightens to forbid both `@nestjs/typeorm` and bare `typeorm`, and `application-port` no longer carries an inline ESLint disable.
+The fix introduces an `ITransactionPort` abstraction (module-local at the time; lifted to `libs/ddd/transaction.port.ts` by [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md), which also collapsed the three identical copies into one) with a `runInTransaction((scope: ITransactionScope) => Promise<T>) => Promise<T>` method and an opaque `ITransactionScope` marker type. Repository port methods now accept `ITransactionScope` instead of `EntityManager`. The downcast back to `EntityManager` lives only in the two infrastructure-layer adapters: `TypeormTransactionAdapter` (`libs/database/typeorm-transaction.adapter.ts` since ADR-043 — until then, three copies of it) hands the manager to the work callback under the opaque scope type; `StockTypeormRepository` casts it back when it needs the manager for query construction. With both leaks removed, the `application-use-case` denylist tightens to forbid both `@nestjs/typeorm` and bare `typeorm`, and `application-port` no longer carries an inline ESLint disable.
 
 ### 7. Regression test
 
@@ -112,7 +111,8 @@ The fix introduces an `ITransactionPort` abstraction (`apps/inventory-microservi
 - the per-layer external denylists (domain, use-case, port, presentation, lib-contracts, lib-ddd);
 - the per-layer element-type denials (domain ↛ infrastructure, port ↛ infrastructure, presentation ↛ infrastructure, presentation ↛ lib-database);
 - the cross-service rule (use-case ↛ another app's domain);
-- the composition-root rules ([ADR-041](041-nest-module-as-the-module-composition-root.md)): `nest-module` ↛ a sibling module by deep path *or* barrel; `application-use-case` ↛ a sibling module's barrel; and the positive `nest-module` → own use-cases, `iam` use-case → the `auth` barrel, `context-root` → a sibling barrel;
+- the composition-root rules ([ADR-041](041-nest-module-as-the-module-composition-root.md)): `nest-module` ↛ a sibling module by deep path *or* barrel; `application-use-case` ↛ a sibling module's barrel; and the positive `nest-module` → own use-cases, `iam` use-case → the `auth` barrel;
+- the transaction seam ([ADR-043](043-lifting-forced-duplicates-into-shared-libs.md)): `lib-database` → `lib-ddd` passes, `lib-ddd` → `lib-database` fails, and a use case reaches the seam through `lib-ddd`;
 - positive cases (domain → lib-ddd, infrastructure → lib-cache) to guard against an over-broad rule swallowing legitimate edges.
 
 The fixture file paths are virtual — `Linter.verify(code, config, { filename })` accepts a synthetic path and the boundaries plugin matches it against the element patterns the same way it matches real files. The cross-element tests aim their imports at real production files (so the plugin's module resolver can map the import back to an element-typed target).

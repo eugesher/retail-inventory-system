@@ -1,1 +1,1 @@
-export * from './rmq-customer-events.publisher';
+export * from './customer-events.rabbitmq.publisher';

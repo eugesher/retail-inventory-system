@@ -36,12 +36,12 @@ import {
 // mirror is ordered **after** the primary emit so a mirror hiccup can never shadow the
 // publish that feeds the real consumers.
 @Injectable()
-export class RmqCustomerEventsPublisher implements ICustomerEventsPublisherPort {
+export class CustomerEventsRabbitmqPublisher implements ICustomerEventsPublisherPort {
   constructor(
     @Inject(MicroserviceClientTokenEnum.NOTIFICATION_MICROSERVICE)
     private readonly notificationClient: ClientProxy,
     private readonly risEvents: RisEventsMirrorPublisher,
-    @InjectPinoLogger(RmqCustomerEventsPublisher.name)
+    @InjectPinoLogger(CustomerEventsRabbitmqPublisher.name)
     private readonly logger: PinoLogger,
   ) {}
 

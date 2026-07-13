@@ -10,6 +10,8 @@ import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 import { catalogEntities, CatalogModule } from '../modules/catalog';
 import { PricingModule, pricingEntities } from '../modules/pricing';
 
+import { HealthController } from './health.controller';
+
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),
@@ -22,5 +24,6 @@ import { PricingModule, pricingEntities } from '../modules/pricing';
     CatalogModule,
     PricingModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

@@ -5,7 +5,6 @@ import { LoggerModule } from 'nestjs-pino';
 import { configModuleConfig } from '@retail-inventory-system/config';
 import { AppNameEnum } from '@retail-inventory-system/contracts';
 import { DatabaseModule } from '@retail-inventory-system/database';
-import { MessagingModule } from '@retail-inventory-system/messaging';
 import { LoggerModuleConfig } from '@retail-inventory-system/observability';
 
 import { auditAndEventsEntities, AuditAndEventsModule } from '../modules/audit-and-events';
@@ -25,13 +24,15 @@ import { auditAndEventsEntities, AuditAndEventsModule } from '../modules/audit-a
 // module (ADR-042): it binds both repository ports via `DatabaseModule.forFeature` and
 // registers the `FirehoseConsumer` that binds the `event_store_firehose_queue` (`#`) to
 // `ris.events` and ingests the whole firehose.
+import { HealthController } from './health.controller';
+
 @Module({
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.EVENT_STORE_MICROSERVICE)),
     DatabaseModule.forRootWithUrl(auditAndEventsEntities, 'EVENTSTORE_DATABASE_URL'),
-    MessagingModule,
     AuditAndEventsModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

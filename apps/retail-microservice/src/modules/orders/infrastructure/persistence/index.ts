@@ -48,4 +48,3 @@ export * from './payment.mapper';
 export * from './payment-typeorm.repository';
 export * from './refund.mapper';
 export * from './refund-typeorm.repository';
-export * from './typeorm-transaction.adapter';
