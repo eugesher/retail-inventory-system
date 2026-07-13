@@ -1,5 +1,7 @@
 import { PinoLogger } from 'nestjs-pino';
 
+import { runWithOccRetry } from '@retail-inventory-system/common';
+
 import { ReturnDomainException, ReturnErrorCodeEnum } from '../../domain';
 import { ReturnWriteConflictError } from './return-write-conflict.error';
 
@@ -39,42 +41,26 @@ export async function runWithReturnWriteRetry<T>(
   attempt: () => Promise<T>,
   context: IReturnWriteRetryContext = {},
 ): Promise<T> {
-  const { logger, maxAttempts } = deps;
   const { rmaId, correlationId } = context;
 
-  for (let attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
-    try {
-      return await attempt();
-    } catch (error) {
-      if (!(error instanceof ReturnWriteConflictError)) {
-        throw error;
-      }
-      if (attemptNo >= maxAttempts) {
-        logger.warn(
-          { correlationId, rmaId: rmaId ?? error.rmaId, attempts: attemptNo, maxAttempts },
-          'Return request write conflict exhausted retry budget',
-        );
-        throw new ReturnDomainException(
-          ReturnErrorCodeEnum.RETURN_VERSION_MISMATCH,
-          `Return request ${rmaId ?? error.rmaId} write lost the optimistic race after ${attemptNo} attempts`,
-          { currentVersion: error.currentVersion },
-        );
-      }
-      // OCC retries log at `info` (ADR-036): a lost compare-and-swap is a normal,
-      // expected outcome under contention.
-      logger.info(
-        {
-          correlationId,
-          rmaId: rmaId ?? error.rmaId,
-          attempt: attemptNo,
-          maxAttempts,
-          currentVersion: error.currentVersion,
-        },
-        'Return request write conflict — retrying with a fresh read',
+  return runWithOccRetry(attempt, {
+    subject: 'Return request',
+    logger: deps.logger,
+    maxAttempts: deps.maxAttempts,
+    isConflict: (error): error is ReturnWriteConflictError =>
+      error instanceof ReturnWriteConflictError,
+    retryContext: (conflict) => ({
+      correlationId,
+      rmaId: rmaId ?? conflict.rmaId,
+      currentVersion: conflict.currentVersion,
+    }),
+    exhaustedContext: (conflict) => ({ correlationId, rmaId: rmaId ?? conflict.rmaId }),
+    onExhausted: (conflict, attempts) => {
+      throw new ReturnDomainException(
+        ReturnErrorCodeEnum.RETURN_VERSION_MISMATCH,
+        `Return request ${rmaId ?? conflict.rmaId} write lost the optimistic race after ${attempts} attempts`,
+        { currentVersion: conflict.currentVersion },
       );
-    }
-  }
-
-  // Unreachable: the final attempt either returns or throws inside the loop.
-  throw new Error('runWithReturnWriteRetry: optimistic retry loop exited unexpectedly');
+    },
+  });
 }

@@ -1,5 +1,7 @@
 import { PinoLogger } from 'nestjs-pino';
 
+import { runWithOccRetry } from '@retail-inventory-system/common';
+
 import { Cart, CartDomainException, CartErrorCodeEnum } from '../../domain';
 import { CartWriteConflictError } from './cart-write-conflict.error';
 
@@ -43,57 +45,35 @@ export function assertCartVersion(cart: Cart, expectedVersion: number | undefine
   }
 }
 
-// The reusable bounded optimistic write protocol for the cart mutators (ADR-036),
-// mirroring inventory's `runWithStockWriteRetry`. It runs `attempt()`; a
-// `CartWriteConflictError` (a lost compare-and-swap on the cart root version,
-// translated by `CartTypeormRepository.save`) is retried up to the injected
-// `deps.maxAttempts` budget, re-reading the now-current cart inside the attempt.
-// Every other error — a domain rejection (`CART_LINE_NOT_FOUND`, a stale
-// `If-Match` via `assertCartVersion`, an `INVENTORY_OUT_OF_STOCK` reserve) or
-// anything unexpected — propagates immediately and is never retried. Exhaustion
-// surfaces a `409 VERSION_MISMATCH` carrying the row's current version.
+// The cart's binding of the shared OCC retry protocol (ADR-036/045). The loop, the log levels
+// and both message texts live in `runWithOccRetry`; what stays here is what only the cart knows
+// — its conflict type (a lost CAS on the cart root version, translated by
+// `CartTypeormRepository.save`), the fields on its trace, and the `409 CART_VERSION_MISMATCH`
+// it raises when the budget runs out.
 export async function runWithCartWriteRetry<T>(
   deps: ICartWriteRetryDeps,
   attempt: () => Promise<T>,
   context: ICartWriteRetryContext = {},
 ): Promise<T> {
-  const { logger, maxAttempts } = deps;
   const { cartId, correlationId } = context;
 
-  for (let attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
-    try {
-      return await attempt();
-    } catch (error) {
-      if (!(error instanceof CartWriteConflictError)) {
-        throw error;
-      }
-      if (attemptNo >= maxAttempts) {
-        logger.warn(
-          { correlationId, cartId, attempts: attemptNo, maxAttempts },
-          'Cart write conflict exhausted retry budget',
-        );
-        throw new CartDomainException(
-          CartErrorCodeEnum.CART_VERSION_MISMATCH,
-          `Cart ${cartId ?? error.cartId} write lost the optimistic race after ${attemptNo} attempts`,
-          { currentVersion: error.currentVersion },
-        );
-      }
-      // OCC retries log at `info` (ADR-036): a lost compare-and-swap is a normal,
-      // expected outcome under contention, and the concurrency tests assert this
-      // trace fires with the attempt count + the version the winner left behind.
-      logger.info(
-        {
-          correlationId,
-          cartId,
-          attempt: attemptNo,
-          maxAttempts,
-          currentVersion: error.currentVersion,
-        },
-        'Cart write conflict — retrying with a fresh read',
+  return runWithOccRetry(attempt, {
+    subject: 'Cart',
+    logger: deps.logger,
+    maxAttempts: deps.maxAttempts,
+    isConflict: (error): error is CartWriteConflictError => error instanceof CartWriteConflictError,
+    retryContext: (conflict) => ({
+      correlationId,
+      cartId,
+      currentVersion: conflict.currentVersion,
+    }),
+    exhaustedContext: () => ({ correlationId, cartId }),
+    onExhausted: (conflict, attempts) => {
+      throw new CartDomainException(
+        CartErrorCodeEnum.CART_VERSION_MISMATCH,
+        `Cart ${cartId ?? conflict.cartId} write lost the optimistic race after ${attempts} attempts`,
+        { currentVersion: conflict.currentVersion },
       );
-    }
-  }
-
-  // Unreachable: the final attempt either returns or throws inside the loop.
-  throw new Error('runWithCartWriteRetry: optimistic retry loop exited unexpectedly');
+    },
+  });
 }
