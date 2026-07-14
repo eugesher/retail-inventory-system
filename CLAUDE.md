@@ -512,7 +512,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `051`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `055`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under
@@ -521,10 +521,15 @@ numbered by delivery order. Point-in-time review findings live under
 **One architectural exception: `ARCH-LINT-EX-02`** (ADR-017 §6) — the gateway `auth` barrel is
 the sole cross-module-consumable barrel (`iam` / `customer-admin`).
 
-**The `EntityManager` downcast is an `infrastructure/` idiom, not a two-file exception.** Every
-repository that accepts an `ITransactionScope` casts it back to use it (11 files, `orders/`,
-`returns/`, `stock/`) — that is what an opaque scope costs. The rule ARCH-LINT-EX-01's closure
-actually bought is the one to keep: **`EntityManager` never reaches `application/`**, which the
-`application-use-case` denylist enforces. *(ADR-017 §6 names only `TypeormTransactionAdapter` +
-`StockTypeormRepository`; that was true when it was written and the idiom has since generalised. An
-accepted ADR is immutable — this needs a forward-supersession pointer, not an edit.)*
+**The `EntityManager` downcast is an `infrastructure/` idiom, not a two-file exception** (ADR-054).
+The cast has **two directions and only one is confined**: *constructing* a scope happens in exactly
+one file (the `unique symbol` brand enforces it), while *consuming* one happens in **every repository
+that accepts a scope** — 14 sites, 11 files, and counting. That is the arithmetic of an opaque handle,
+not drift. The rule ARCH-LINT-EX-01's closure actually bought is the one to keep: **`EntityManager`
+never reaches `application/`**, which the `application-use-case` / `application-port` denylists enforce
+and `spec/architecture-lint.spec.ts` guards.
+
+**An obligation queued behind a condition must be registered in `spec/transition-windows.spec.ts`**
+with an owner and a `reviewBy` date — the test goes red on that date (ADR-053). A *reserved surface*
+(an unused `CACHE_KEYS` builder, an unused `EXCHANGES` member) is **not** a window: nobody owes
+anything. The question is whether a future event is supposed to make somebody act.

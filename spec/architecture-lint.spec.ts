@@ -15,9 +15,9 @@
 // from its own hand-mirrored copies of the taxonomy, so it proved only *"the plugin, given THIS
 // taxonomy, reports these ruleIds"* — and nothing at all about the config CI runs. Setting
 // `'boundaries/no-unknown-files': 'off'` in `eslint.config.mjs` left **all 74 tests green**, and
-// `yarn lint` green with it. `CLAUDE.md` calls `yarn lint` *"the source of truth for where a file
-// belongs"* and says *"never weaken a `boundaries/*` rule"* — and the thing everyone believed was
-// the backstop for that instruction was **a false green light** (ISSUE-10). At 1029 lines and 74
+// `yarn lint` green with it. ADR-017 makes `yarn lint` the authority on where a file belongs, and
+// forbids weakening a `boundaries/*` rule to make code pass — and the thing everyone believed was
+// the backstop for that rule was **a false green light** (ISSUE-10). At 1029 lines and 74
 // passing tests, nobody re-derives it.
 //
 // **There is no second copy of the taxonomy any more.** Not a mirrored one, not a shared one —
