@@ -1,16 +1,13 @@
 import { ApiResponseProperty } from '@nestjs/swagger';
 
-// The wire/response shape of one customer's channel-consent record. A **class**
-// carrying `@ApiResponseProperty` (the documented lib-contracts Swagger
-// exception, ADR-017), matching the `*View` convention (`OrderView`,
-// `NotificationDeliveryView`) so a later consent Read endpoint can document it.
+// One customer's channel consent, 1:1 with the `Customer`.
 //
-// A `ConsentRecord` is 1:1 with a Customer, keyed on the customer's CHAR(36)
-// UUID. `transactionalEmail` defaults true (order-confirmation-style mail is
-// operationally required); the two marketing flags default false (opt-in — the
-// GDPR posture). `dataRetentionPolicy` is a free-form policy label
-// (`default-7-years`). `updatedAt` is the ISO-8601 timestamp of the last write,
-// or null for a customer with no stored row (which resolves to the defaults).
+// **The defaults are asymmetric on purpose (ADR-037).** `transactionalEmail` defaults **true** —
+// an order confirmation is operationally required, not marketing. Both marketing flags default
+// **false**: consent is opt-in.
+//
+// `updatedAt` is `null` for a customer with no stored row, which resolves to exactly those
+// defaults — so a `null` here means "never chose", not "chose nothing".
 export class ConsentRecordView {
   @ApiResponseProperty()
   public customerId: string;

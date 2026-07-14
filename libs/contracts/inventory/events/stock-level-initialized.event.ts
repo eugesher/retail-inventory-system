@@ -1,17 +1,10 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `inventory.stock-level.initialized` event, published
-// by the inventory microservice when its catalog-events consumer creates the
-// first `stock_level` row for a newly seen variant (zeroed, at the default
-// warehouse). Framework-free — a `DomainEvent` subclass is never serialized
-// across services (ADR-011); the use case maps the in-process
-// `StockLevelInitializedEvent` to this interface before emitting.
+// `inventory.stock-level.initialized` — a **reserved surface** (README §2). Not dead code.
 //
-// A reserved surface today: it is emitted onto `inventory_queue` (the inventory
-// service's own queue) with no cross-service consumer bound yet — the same
-// reserved-surface pattern the `catalog.*` events follow. `eventVersion` is
-// pinned to `'v1'`; a breaking payload change ships as `'v2'`. `occurredAt` is an
-// ISO-8601 string.
+// Raised by the catalog-events consumer when a variant is seen for the first time: it creates a
+// **zeroed** `stock_level` row at the default warehouse. The row's existence therefore says
+// nothing about availability — a consumer must not read this as "stock arrived".
 export interface IInventoryStockLevelInitializedEvent extends ICorrelationPayload {
   variantId: number;
   stockLocationId: string;

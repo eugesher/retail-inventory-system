@@ -1,15 +1,12 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `catalog.variant.created` event, published by the
-// catalog microservice after a variant is persisted. Framework-free — any
-// future consumer (a later inventory capability that initialises a zero stock
-// level for the new variant) depends on this interface only.
+// `catalog.variant.created` — **the one catalog event with a real consumer.** Inventory's
+// `CatalogEventsConsumer` binds it and auto-initialises a zeroed `stock_level` row for the new
+// variant.
 //
-// `eventVersion` is pinned to `'v1'`: a breaking change to the payload shape
-// ships as `'v2'` so consumers can branch on the version rather than guess from
-// the field set. `occurredAt` is an ISO-8601 string — a `DomainEvent` subclass
-// is never serialized across services (ADR-011 / ADR-025); the use case maps
-// the in-process event to this interface after persistence assigns `variantId`.
+// It is therefore emitted onto **`inventory_queue`**, not `catalog_queue`: an event goes to the
+// queue of whoever consumes it (ADR-008/020). The catalog service's own client carries only the
+// two reserved-surface `product.*` events.
 export interface ICatalogVariantCreatedEvent extends ICorrelationPayload {
   productId: number;
   variantId: number;

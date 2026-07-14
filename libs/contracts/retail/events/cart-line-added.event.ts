@@ -1,15 +1,11 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.cart.line-added` event, published when a
-// variant is added to a cart (or its quantity incremented on an existing line —
-// the add-line operation increments rather than duplicating, ADR-028 §1).
-// Framework-free — a `DomainEvent` subclass is never serialized across services
-// (ADR-011); the cart use case maps the in-process `CartLineAddedEvent` to this
-// interface before emitting.
+// `retail.cart.line-added` — a **reserved surface** (README §2). Not dead code.
 //
-// A reserved surface today (no cross-service consumer bound). `variantId` is the
-// opaque catalog variant key; `quantity` is the quantity added. `eventVersion`
-// is pinned to `'v1'`; `occurredAt` is an ISO-8601 string.
+// It also fires when an **existing** line's quantity is incremented: adding a variant already in
+// the cart increments rather than duplicating (ADR-028 §1), so a consumer must not read this as
+// "a new line appeared". `quantity` is the amount added, not the resulting total. `occurredAt` is
+// ISO-8601.
 export interface IRetailCartLineAddedEvent extends ICorrelationPayload {
   cartId: string;
   variantId: number;

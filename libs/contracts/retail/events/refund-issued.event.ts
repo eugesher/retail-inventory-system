@@ -17,8 +17,8 @@ import { ICorrelationPayload } from '../../microservices';
 // `customer` table (a raw-SQL reader, no gateway-entity import) — giving the
 // refund-confirmation consumer a recipient WITHOUT a per-delivery cross-service RPC (ADR-033
 // choice), in place of the older `order:<orderId>` derived recipient. The email is `null` for
-// a tombstoned/missing customer; `customerLocale` is a placeholder shipped `null` today
-// (locale deferred). Both optional — additive on the wire.
+// a tombstoned/missing customer; `customerLocale` always ships `null` — nothing in this system
+// resolves a locale. Both optional — additive on the wire.
 export interface IRetailRefundIssuedEvent extends ICorrelationPayload {
   refundId: number;
   orderId: number;
