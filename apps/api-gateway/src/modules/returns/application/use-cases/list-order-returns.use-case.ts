@@ -14,9 +14,10 @@ import { IReturnsGatewayPort, RETURNS_GATEWAY_PORT } from '../ports';
 // (that would block the owning customer — ADR-024); this use case resolves the staff
 // override `isStaff` from `@CurrentUser().permissions` (true iff the caller holds
 // `order:read`) and folds `@CurrentUser().id` into `actorId`. The retail use case is the
-// single enforcement point: a staff caller sees all of the order's RMAs, a non-staff
-// caller only its own (filtered, not 403 — the own-only-list posture, so an unknown order
-// resolves to an empty array rather than leaking existence).
+// single enforcement point: staff see all of the order's RMAs, the buying customer sees the
+// order's, and **anyone else gets a 403** (`RETURN_ACCESS_FORBIDDEN`) — the same refusal
+// `/orders/:id/refunds` and `/orders/:id/fulfillments` give (ADR-051). A missing order is a
+// 404. It used to hand a non-owner an empty list; that disagreed with every sibling.
 @Injectable()
 export class ListOrderReturnsUseCase {
   constructor(
