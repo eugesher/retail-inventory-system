@@ -1693,8 +1693,18 @@ ADRs: [002](docs/adr/002-redis-cache-aside-product-stock.md),
 
 **Five** timers run inside three different services (retail and notification own two each). Each one
 only decides how *promptly* an already-due row is handled — none of them is load-bearing for
-correctness, and each wraps its tick in a `try` / `catch` that warn-logs and returns, so a fault never
-stops the loop.
+correctness. Each also wraps its tick in a `try` / `catch` that warn-logs and returns, but **that catch
+is not what keeps the loop alive, in four of the five**: a handler registered by a `@Cron` / `@Interval`
+decorator is already wrapped by Nest (`ScheduleExplorer.wrapFunctionInTryCatchBlocks`), so a rethrow
+would be caught there and the timer would fire again. What the local catch buys is that the failure is
+**named** — Nest's wrapper logs a bare stack under a generic `Scheduler` context, and an operator
+learns that *a* sweep died, not *which*.
+
+The exception is inventory's `ReservationSweepScheduler`, and it is the exception because it bypasses
+the decorator: it hands a raw `setInterval(() => void this.sweep(), ms)` to `SchedulerRegistry`, which
+Nest does **not** wrap. **There, and only there, a rejection is an `unhandledRejection` — a dead
+process on Node ≥15 — so the catch is genuinely load-bearing**, and its spec is the only one that
+asserts on it.
 
 | Job | Registering file | Cadence | What a missed tick costs |
 | --- | --- | --- | --- |
