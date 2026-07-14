@@ -1,22 +1,15 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `customer.consent.updated` event, published by the
-// api-gateway `auth` module after a customer's channel-consent record is written
-// (the Record Consent flow). Framework-free — a domain object is never serialized
-// across services (ADR-011); the consent publisher maps the persisted
-// `ConsentRecord` onto this interface before emitting.
+// `customer.consent.updated` — emitted onto `notification_events`, where the consent-cache consumer
+// binds it (ADR-008/020), and mirrored onto `ris.events` for the firehose.
 //
-// It is emitted onto `notification_events` (the producer-targets-consumer-queue
-// pattern, ADR-008/020) so the notification service's consent cache can refresh
-// itself from the event WITHOUT a per-refresh cross-service RPC — the payload
-// therefore carries the **full** consent snapshot, not just the customer id. The
-// same routing key + payload is additionally mirrored onto the `ris.events` topic
-// exchange (ADR-035) so the event-store firehose captures it. Both destinations
-// are best-effort post-commit.
+// **The payload carries the FULL consent snapshot, not just the customer id, and that is the
+// point.** The notification service's consent cache refreshes itself write-through from this
+// event; if the payload carried only an id, every consent change would cost a cross-service RPC on
+// the notification hot path. Adding a field here is cheap; making the consumer ask for one is not.
 //
-// `updatedAt` is the ISO-8601 timestamp of the write (the DB-stamped
-// `consent_record.updated_at`). `eventVersion` is pinned to `'v1'`; a breaking
-// change ships `'v2'`. `occurredAt` is an ISO-8601 string (the emit instant).
+// `updatedAt` is the DB-stamped `consent_record.updated_at`, not the emit instant — that is
+// `occurredAt`.
 export interface ICustomerConsentUpdatedEvent extends ICorrelationPayload {
   customerId: string;
   transactionalEmail: boolean;

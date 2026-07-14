@@ -1,29 +1,21 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// The reasons a hold is released. `cart-removed` (a line removed from a cart) is
-// the default; `expired` is recorded when a hold is released because its TTL
-// elapsed; `order-cancelled` is the order-cancel flow's; `manual` an ops
-// endpoint's. Shared by the release payload, the `inventory.stock.released` wire
-// event, and the domain `StockReleasedEvent`, so the union lives in exactly one
-// place.
+// One union, shared by the release payload, the `inventory.stock.released` wire event and the
+// domain event — so a release's reason cannot mean one thing on the wire and another in the log.
 export type ReservationReleaseReason = 'cart-removed' | 'expired' | 'order-cancelled' | 'manual';
 
-// RPC payload for `inventory.reservation.release` (Gateway / Retail → Inventory).
-// Release returns held units to `available` and writes a `release` movement
-// (ADR-030 §4). It carries **exactly one selector family** — the use case rejects
-// both-present / neither-present with `RESERVATION_SELECTOR_INVALID` (400):
+// **Exactly one selector family, never both and never neither** — the use case rejects a payload
+// that mixes them with `RESERVATION_SELECTOR_INVALID` (400). The two families answer to different
+// failure philosophies, and picking the wrong one silently changes what "nothing matched" means:
 //
-//   * Selector A — `reservationId`: targets exactly one row; an unknown id is a
-//     `RESERVATION_NOT_FOUND` (404) and a non-active row a `RESERVATION_INVALID_STATE`
-//     (409) — the precise ops/cleanup path hears "already released", never a silent
-//     no-op.
-//   * Selector B — `cartId` (+ optional `variantId` + optional `stockLocationId`):
-//     targets ALL matching *active* rows; an empty match is an idempotent no-op
-//     (remove-after-remove must not error).
+//   * **`reservationId`** targets one row and is **loud**: an unknown id is a `404`, and a
+//     non-active row a `409`. The precise ops/cleanup path is told "already released" rather than
+//     succeeding at nothing.
+//   * **`cartId`** (optionally narrowed by `variantId` / `stockLocationId`) targets **all** matching
+//     *active* rows and is **quiet**: an empty match is an idempotent no-op, because removing a
+//     line twice must not error.
 //
-// `reason` defaults to `cart-removed`. `actorId` is the ops caller (null/absent =
-// system). Extends `ICorrelationPayload` (the gateway always threads the id on this
-// command path); this interface doubles as the `ReleaseReservationUseCase` input.
+// `reason` defaults to `cart-removed`; an absent `actorId` means the system acted.
 export interface IReservationReleasePayload extends ICorrelationPayload {
   reservationId?: string;
   cartId?: string;
