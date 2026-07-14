@@ -64,11 +64,10 @@ interface ICommitOutcome {
 // strictly-negative `sale` movement. `available` does not move — both counters subtract from it, so
 // they cancel: shipping stock that was already promised neither frees nor consumes availability.
 //
-// **Idempotent on `fulfillmentId`.** Retail drives this **after** its own ship transaction has
-// committed, so a transient RMQ failure re-delivers a request whose work is already durable. The
-// probe — a lookup on the ledger's `(reference_type, reference_id)` index — runs **before any
-// write**: a `sale` movement already naming this fulfillment means the commit happened, so the
-// replay decrements nothing and returns the prior result.
+// **Idempotent on `fulfillmentId` against a SEQUENTIAL replay** — see the probe below for the
+// qualifier, which is load-bearing. Retail drives this *after* its own ship transaction has
+// committed, so a transient RMQ failure re-delivers a request whose work is already durable, and a
+// redelivery that arrives once the first call has finished decrements nothing.
 //
 // **All-lines-atomic.** Every line is computed in memory, where a drift or a `STOCK_RESULT_NEGATIVE`
 // throws, before a single persist. A rejection on any line rolls the whole transaction back — there
@@ -106,10 +105,16 @@ export class CommitSaleUseCase {
 
     const lines = normalizeReservationLines(payload.lines, 'Commit sale');
 
-    // Idempotency-first (ADR-031): if a `sale` movement already references this
-    // fulfillment the commit already happened — re-return the request's lines
-    // WITHOUT decrementing again. Skipping the whole `withInvalidation` is correct:
-    // nothing changed, so there is nothing to invalidate.
+    // Idempotency-first (ADR-031): a `sale` movement already referencing this fulfillment means the
+    // commit happened, so re-return the lines without decrementing. Skipping `withInvalidation`
+    // entirely is right — nothing changed, so there is nothing to invalidate.
+    //
+    // **This probe is SEQUENTIAL-only, and the distinction matters.** It runs outside the
+    // transaction, and `IDX_STOCK_MOVEMENT_REFERENCE` is a plain index, not a UNIQUE — so nothing
+    // stops two *concurrent* deliveries of the same `fulfillmentId` from both reading "not yet
+    // committed" and both decrementing. A redelivery that arrives *after* the first call finished is
+    // safe; two in flight at once are not. Do not describe this as idempotent without that
+    // qualifier.
     const alreadyCommitted = await this.movementRepository.existsByReference(
       FULFILLMENT_REFERENCE_TYPE,
       fulfillmentId,

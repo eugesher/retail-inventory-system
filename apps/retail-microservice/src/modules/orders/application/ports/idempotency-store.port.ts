@@ -113,12 +113,18 @@ export interface IIdempotencyStorePort {
   // run concurrently with live inserts because it can only touch already-expired rows.
   deleteExpired(now: Date): Promise<number>;
 
-  // Reserve `(scope, key)` for execution via an atomic INSERT of a PENDING row (ADR-036
-  // concurrency hardening). This is the concurrency-safe front door the refund flow uses
-  // INSTEAD of `find`: a truly concurrent second submit loses the composite-PK INSERT and
-  // is turned away with `in-progress` BEFORE it runs any side effect, so the gateway
-  // refund is never called twice. `expires_at` is computed from the injected TTL, exactly
-  // as `save` does. See `IIdempotencyReservation` for the four outcomes.
+  // **The concurrency-safe front door — and `find`/`save` above is the weak one.**
+  //
+  // `reserve` claims `(scope, key)` with an **atomic INSERT of a `pending` row**. A truly concurrent
+  // second submit loses the composite-PK insert and is turned away `in-progress` **before it runs
+  // any side effect**, so an out-of-process call cannot happen twice. `find`-then-`save` cannot make
+  // that promise: it checks, then acts, and the window between is exactly as wide as the work.
+  //
+  // **Only the refund flow uses this.** Place, Ship and Capture use `find`/`save`, and each of them
+  // makes an irreversible call inside that window. Anything new that charges a gateway, decrements
+  // stock, or otherwise cannot be undone should start here, not there.
+  //
+  // See `IIdempotencyReservation` for the four outcomes.
   reserve(
     input: IIdempotencyReserveInput,
     scope?: ITransactionScope,

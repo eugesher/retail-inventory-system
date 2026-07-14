@@ -72,43 +72,32 @@ import { FakePaymentGatewayAdapter } from './infrastructure/payment-gateway';
 import { AuditLogRabbitmqPublisher } from './infrastructure/audit';
 import { OrdersController, OrderRpcExceptionFilter } from './presentation';
 
-// The orders bounded-context module: the `Order` / `Address` / `Payment` /
-// `Fulfillment` / `Refund` repositories, the `PAYMENT_GATEWAY` seam (default
-// `FakePaymentGatewayAdapter`, ADR-028 §4), the `AUDIT_LOG_PUBLISHER` seam (the real
-// `AuditLogRabbitmqPublisher` onto `ris.events`, the always-audit money-movement rule,
-// ADR-032/035), the
-// transactional unit-of-work (`TRANSACTION_PORT`), the outbound seams (catalog snapshot
-// reads, the inventory allocate/cancel + commit-sale seams, and the
-// order/payment/fulfillment/refund event emits), the Place Order + Authorize Payment +
-// Capture Payment + Get Order + List My Orders + Create Fulfillment + List Fulfillments +
-// Ship Fulfillment + Mark Delivered + Cancel Order + Cancel Line + Issue Refund +
-// List Refunds use cases, and the `retail.cart.place` / `retail.order.get` /
-// `retail.order.list` / `retail.payment.capture` / `retail.fulfillment.create` /
-// `retail.fulfillment.list` / `retail.fulfillment.ship` / `retail.fulfillment.deliver` /
-// `retail.order.cancel` / `retail.order.cancel-line` / `retail.refund.issue` /
-// `retail.refund.list` RPC controller. It also registers the `OrderCancelledConsumer`
-// (`@EventPattern retail.order.cancelled`) — the auto-refund-from-cancel subscriber that
-// listens to retail's **own** cancel event on `retail_queue` and, when
-// `paymentFlaggedForRefund=true`, issues a full refund inline via `IssueRefundUseCase`
-// (ADR-032).
+// The orders bounded-context module — five sibling aggregates (`Order`, `Address`, `Payment`,
+// `Fulfillment`, `Refund`) behind one composition root. The `providers` array below is the
+// inventory of what it wires; the routing keys its controller serves are in README §2. What
+// follows is only what neither of those will tell you.
 //
-// Five messaging clients are imported: `MicroserviceClientCatalogModule` so Place
-// Order can snapshot from `catalog.variant.get` / `catalog.price.select` on
-// `catalog_queue`; `MicroserviceClientInventoryModule` so Place Order can allocate
-// (and compensate-cancel) the cart's stock holds via `inventory.reservation.allocate`
-// / `inventory.allocation.cancel` and Ship Fulfillment can decrement physical stock
-// via `inventory.stock.commit-sale` on `inventory_queue` (ADR-030 §4 / ADR-031);
-// `MicroserviceClientNotificationModule` so `retail.order.placed` lands on
-// `notification_events` (the consumer's queue); `MicroserviceClientRetailModule`
-// so the reserved `retail.payment.authorized` event lands on the service's own
-// `retail_queue`; and `MicroserviceClientRisEventsModule` so `AuditLogRabbitmqPublisher`
-// can emit `audit.staff.action` onto the `ris.events` topic exchange (ADR-035).
-// `useExisting` shares each adapter
-// instance with code that injects the concrete class while use cases depend on the
-// port symbols (the `cart.module.ts` / `stock.module.ts` pattern). The
-// `OrderRpcExceptionFilter` is registered via `APP_FILTER` so every order
-// `@MessagePattern` maps its `OrderDomainException` onto the wire status the gateway
-// resolves.
+// **Why each messaging client is here** (the surprising ones first):
+//
+// - `MicroserviceClientRetailModule` — orders publishes back onto its **own** `retail_queue`.
+//   That is not a curiosity: `retail.order.cancelled` rides it into `OrderCancelledConsumer`
+//   (registered as a controller below), which is how a cancelled order auto-refunds. The other
+//   keys it carries bind no consumer at all — reserved surfaces, still caught by the firehose.
+// - `MicroserviceClientNotificationModule` — the producer targets the **consumer's** queue
+//   (ADR-008/020), so an event the notification service consumes is emitted onto
+//   `notification_events`, never onto retail's own. `retail.order.cancelled` goes to **both**.
+// - `MicroserviceClientCatalogModule` — Place Order's snapshot reads (`catalog.variant.get` /
+//   `catalog.price.select`).
+// - `MicroserviceClientInventoryModule` — Place Order allocates and compensate-cancels the
+//   cart's holds; Ship decrements physical stock via `inventory.stock.commit-sale`
+//   (ADR-030 §4 / ADR-031).
+// - `MicroserviceClientRisEventsModule` — the `ris.events` topic exchange, so
+//   `AuditLogRabbitmqPublisher` can emit `audit.staff.action` (ADR-035).
+//
+// `useExisting` shares each adapter instance between code that injects the concrete class and
+// use cases that depend on the port symbol (the `cart.module.ts` / `stock.module.ts` pattern).
+// `OrderRpcExceptionFilter` goes on via `APP_FILTER`, so every order `@MessagePattern` maps its
+// `OrderDomainException` onto the wire status the gateway resolves.
 //
 // The orders module reaches the **cart** tables only through `CartReaderTypeormAdapter`
 // (raw parameterized SQL — the cart is a sibling module behind the boundaries-lint
@@ -144,16 +133,17 @@ import { OrdersController, OrderRpcExceptionFilter } from './presentation';
     RefundTypeormRepository,
     { provide: REFUND_REPOSITORY, useExisting: RefundTypeormRepository },
 
-    // The request-level idempotency store (ADR-036) — the stored-response dedup
-    // substrate for the money-/stock-moving HTTP writes. Direct-implement repository
-    // (the append-only `domain_event` precedent), bound to the `IDEMPOTENCY_STORE`
-    // port. `PlaceOrderUseCase` consumes it (find → replay/422 → run → save); the
-    // remaining money moves (capture / ship / refund) adopt the same pattern.
+    // The request-level idempotency store (ADR-036) — the stored-response dedup substrate for
+    // the money-/stock-moving writes. A direct-implement repository (the append-only
+    // `domain_event` precedent), bound to `IDEMPOTENCY_STORE`. **The four callers do not use it
+    // the same way:** Place, Capture and Ship take the `find → run → save` path, which checks
+    // and then acts; only Issue Refund takes `reserve → run → finalize`, which claims the key
+    // atomically *before* any side effect. `idempotency-store.port.ts` explains why the refund
+    // is the one that had to.
     IdempotencyStoreTypeormRepository,
     { provide: IDEMPOTENCY_STORE, useExisting: IdempotencyStoreTypeormRepository },
-    // The TTL purge: a use case that deletes rows past `expires_at` (via
-    // `IDEMPOTENCY_STORE.deleteExpired`) and the `@nestjs/schedule` driver that fires it
-    // every ten minutes, keeping the store bounded to its retention window (ADR-036).
+    // The TTL purge that keeps the store bounded to its retention window: the use case owns the
+    // delete, the scheduler owns the timer (ADR-036).
     PurgeExpiredIdempotencyKeysUseCase,
     IdempotencyPurgeScheduler,
     // The retention horizon (hours) the store reads to compute `expires_at`, resolved

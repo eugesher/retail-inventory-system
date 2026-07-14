@@ -52,11 +52,10 @@ export interface IPaymentRefundResult {
   refundedAt: Date;
 }
 
-// The payment-gateway seam (ADR-028 §4, the `NotifierPort` default-adapter pattern
-// of ADR-011). The Place Order, Capture, and Issue Refund use cases depend only on
-// this interface; the bound default is `FakePaymentGatewayAdapter` (always-approves,
-// deterministic fake tokens, no external calls). Swapping in a real gateway (Stripe /
-// PayPal / etc. — an excluded capability) is a single provider rebinding in
+// The payment-gateway seam (ADR-028 §4). **The bound adapter is a fake that always approves**,
+// mints deterministic tokens and makes no external call — so every decline path in this module is
+// unreachable in practice, and a test that expects one will wait forever. Swapping in a real
+// gateway (Stripe / PayPal — an excluded capability) is a single provider rebinding in
 // `orders.module.ts` plus a new HTTP-doing adapter under
 // `infrastructure/payment-gateway/`, with **no use-case change** — a real processor
 // authorizes, captures, **and refunds** through the one seam, so `refund` joins the

@@ -45,11 +45,9 @@ export class PaymentEntity extends BaseEntity {
   @Column({ type: 'timestamp', nullable: true })
   public capturedAt: Date | null;
 
-  // Set by Cancel Order on a captured payment to mark a refund is owed (a later
-  // capability consumes it). The boolean default is declared explicitly even though
-  // SnakeNamingStrategy maps `flaggedForRefund` → `flagged_for_refund`
-  // (docs/adr/028-cart-order-payment-and-address-chain.md §6 — the column ships
-  // ahead of its writer).
+  // Set by Cancel Order when it cancels an order whose payment was already captured, and cleared by
+  // a full refund. **It is a claim, not a settlement** — a flagged payment still holds the
+  // customer's money until Issue Refund actually gives it back.
   @Column({ name: 'flagged_for_refund', type: 'boolean', default: false })
   public flaggedForRefund: boolean;
 

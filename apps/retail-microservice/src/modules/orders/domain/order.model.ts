@@ -55,21 +55,21 @@ const CURRENCY_PATTERN = /^[A-Za-z]{3}$/;
 // the cart is marked `converted`; no later cart edit can corrupt this snapshot
 // (ADR-028 §1).
 //
-// It carries **three orthogonal status axes** (ADR-028 §2) — `status`,
-// `paymentStatus`, `fulfillmentStatus` — that evolve independently; a combination
-// like `paymentStatus = captured` + `fulfillmentStatus = unfulfilled` is valid by
-// construction. This foundation never transitions the lifecycle/fulfillment axes
-// (they start `pending`/`unfulfilled` and stay there); only the payment axis has
-// mutators here.
+// It carries **three orthogonal status axes** (ADR-028 §2) — `status`, `paymentStatus`,
+// `fulfillmentStatus` — and they evolve **independently**. `paymentStatus = captured` alongside
+// `fulfillmentStatus = unfulfilled` is not a broken state; it is a paid order that has not shipped.
+// **None of the three can be derived from another**, which is the whole reason there are three.
+//
+// All three have mutators here: `markPaymentAuthorized` / `markPaymentCaptured` (payment),
+// `advanceFulfillment` / `markDelivered` (fulfillment), `cancel` (lifecycle).
 //
 // The id is the auto-increment BIGINT assigned by persistence (`null` until then),
 // unlike the cart's in-app UUID. `orderNumber` is the human-facing label finalized
 // by the repository from the generated id (see `OrderTypeormRepository`).
 //
-// `version` is the optimistic-concurrency token: it ships and advances on every
-// mutation now, even though no concurrency guard consumes it yet — retrofitting an
-// OCC column onto a populated table later is a destructive `ALTER TABLE`, so the
-// column is cheapest up front (ADR-028 §6).
+// `version` is the OCC token, and **the guard is live**: `runWithOrderWriteRetry` re-reads under a
+// fresh transaction when a compare-and-swap is lost, and surfaces a `409` once the budget is spent
+// (ADR-036/045). The in-memory bump here exists so the model is testable without a database.
 export class Order extends AggregateRoot<number | null> {
   private readonly _orderNumber: string;
   private readonly _customerId: string | null;
@@ -170,11 +170,12 @@ export class Order extends AggregateRoot<number | null> {
   // `UNFULFILLED` at `version 0`. The lines arrive already snapshotted (the caller
   // builds them from the cart at place-time) — the factory fetches nothing.
   //
-  // `id` is null until persistence assigns the BIGINT; `orderNumber` is the
-  // provisional label the repository finalizes from the generated id on first save.
-  // Records no domain event here — the `retail.order.placed` event is emitted by
-  // the place use case after persistence assigns the id (a later capability), never
-  // serialized from the domain across services (ADR-011).
+  // `id` is null until persistence assigns the BIGINT, and `orderNumber` is a **provisional label**
+  // the repository finalizes from that id on first save — so the number an in-memory `Order` carries
+  // is not the number the buyer will see.
+  //
+  // Records no domain event: `retail.order.placed` is emitted by the place use case *after* the id
+  // exists, because the event carries it.
   public static place(input: IPlaceOrderInput): Order {
     const subtotalMinor = input.lines.reduce((sum, line) => sum + line.lineTotalMinor, 0);
     return new Order({
@@ -291,9 +292,14 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // Payment axis: `authorized → captured`. Driven by the explicit capture
-  // capability; rejects any non-`authorized` start. Bumps the OCC token. (Refund /
-  // fail land with later capabilities — deliberately absent here.)
+  // Payment axis: `authorized → captured`. Rejects any non-`authorized` start. Bumps the OCC
+  // token.
+  //
+  // **`captured` is where this axis stops.** There is no `markPaymentRefunded` and no
+  // `markPaymentFailed`, and refunds have already shipped — so their absence is not a gap.
+  // A refund is recorded on the `Payment` row: `refundedAmountMinor`, and the payment's own
+  // status once it is fully refunded. The order header keeps reading `captured` forever.
+  // **Never read `order.paymentStatus` to learn whether an order was refunded.**
   public markPaymentCaptured(): void {
     if (this._paymentStatus !== OrderPaymentStatusEnum.AUTHORIZED) {
       throw new OrderDomainException(

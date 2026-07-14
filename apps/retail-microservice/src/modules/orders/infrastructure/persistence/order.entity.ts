@@ -87,10 +87,9 @@ export class OrderEntity extends BaseEntity {
   @Column({ type: 'timestamp', nullable: true })
   public placedAt: Date | null;
 
-  // Optimistic-concurrency token. TypeORM owns the persisted value via
-  // `@VersionColumn` (incremented on each managed save); the guard it enables is a
-  // later concurrency-hardening capability. Shipping the column now keeps that
-  // retrofit non-destructive (ADR-028 §6).
+  // The OCC token. TypeORM increments the persisted value on every managed save; the guard it
+  // enables is **live** — `runWithOrderWriteRetry` re-reads and retries a lost compare-and-swap and
+  // surfaces a `409` at exhaustion (ADR-036/045).
   @VersionColumn()
   public version: number;
 

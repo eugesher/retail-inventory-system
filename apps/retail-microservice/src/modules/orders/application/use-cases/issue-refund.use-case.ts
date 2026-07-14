@@ -121,10 +121,11 @@ export class IssueRefundUseCase {
   public async execute(payload: IRetailRefundIssuePayload): Promise<IIdempotentResult<RefundView>> {
     const { idempotencyKey, correlationId, orderId, paymentId } = payload;
 
-    // Defensive backstop for the gateway's required-header edge check. Both callers supply
-    // a key: the manual endpoint forwards the client header, and the auto-refund-from-cancel
-    // consumer synthesizes a deterministic one — so this fires only for a raw gateway-bypass
-    // caller (ADR-036).
+    // **Every legitimate caller supplies a key** — the HTTP path forwards the client's header, and
+    // the auto-refund consumer, which has no header to forward, **synthesizes a deterministic one**
+    // from the order and payment ids. So this branch fires only for something talking to the bus
+    // directly, and refusing it is the point: an un-keyed refund is a refund nobody can replay
+    // safely (ADR-036).
     if (!idempotencyKey) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REQUIRED,

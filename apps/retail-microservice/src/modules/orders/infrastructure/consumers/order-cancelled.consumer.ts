@@ -22,18 +22,15 @@ import { IssueRefundUseCase } from '../../application/use-cases';
 // deployable. A thin infrastructure adapter (ADR-011 §4): it decides *whether* and *how
 // much* to refund, then delegates the *how* to the use case.
 //
-// **Idempotency without a job table** (ADR-020 at-least-once delivery): the consumer relies
-// on the **refundable-amount guard**, not a processed-message store. Once `Payment.refund()`
-// has fully refunded the capture, `refundedAmountMinor === amountMinor` and the payment is
-// `refunded` with the flag cleared; a redelivery then computes `refundable === 0` and
-// no-ops here. The idempotency falls straight out of the payment-row accounting — no new
-// state is needed. Two further layers back it up: `IssueRefundUseCase`'s own already-issued
-// short-circuit, and the request-level idempotency store keyed on the **deterministic**
-// `order-cancelled:<orderId>:<paymentId>` key this consumer passes (ADR-036) — so a
-// *sequential* redelivery collapses to an exact replay, and a *concurrent* redelivery
-// (the reserve-first refund flow) is turned away with `IN_PROGRESS` rather than
-// double-refunding. Both outcomes are swallowed as best-effort below; the flag stays the
-// durable retry anchor.
+// **Idempotency without a job table** (ADR-020 at-least-once delivery): there is no
+// processed-message store — the **refundable-amount guard** *is* the idempotency, and it falls
+// straight out of the payment-row accounting. Once the capture is fully refunded,
+// `refundedAmountMinor === amountMinor`, so a redelivery computes `refundable === 0` and no-ops
+// before any gateway call. Two further layers back that up: `IssueRefundUseCase`'s own
+// already-issued short-circuit, and the request-level store (ADR-036), which replays a
+// *sequential* redelivery and turns a *concurrent* one away with
+// `ORDER_IDEMPOTENCY_KEY_IN_PROGRESS` — a **throw**, which the best-effort catch below
+// swallows. The flag stays the durable retry anchor.
 //
 // **Best-effort** (the flag is the durable retry anchor): a downstream failure is
 // warn-logged and swallowed so the handler never throws. The cancel has already committed,

@@ -4,9 +4,8 @@ import { EntityManager } from 'typeorm';
 
 import { IOrderCustomerContact, IOrderCustomerContactReaderPort } from '../../application/ports';
 
-// The mysql2 row shape for the single customer read. `email` is selected straight (no
-// snake_case → camelCase aliasing needed for a one-column projection); the column is
-// VARCHAR, so it surfaces as a string (or null on a future tombstone).
+// The mysql2 row shape for the single customer read. **`email` is `null` for an erased customer** —
+// the column was made nullable so a tombstone can wipe the PII in place and leave the row (ADR-037).
 interface ICustomerContactRow {
   email: string | null;
 }

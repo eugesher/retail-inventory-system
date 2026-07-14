@@ -13,18 +13,21 @@ export interface IRetryThenLogForReplayOptions {
   // Identifying fields logged on every retry warn and on the final poison-record error
   // (the full payload an operator needs to replay the operation).
   context: Record<string, unknown>;
-  // The terminal error message — the post-commit posture differs per caller, so each
-  // spells out what awaiting-replay means (the restock replay is idempotent on
-  // `returnRequestId`).
+  // What awaiting-replay costs, in the caller's own words. A failed restock leaves the returned goods
+  // **un-credited** — conservative: stock is understated, never oversold.
   replayMessage: string;
 }
 
-// Runs a post-commit cross-service `operation`, retrying up to `maxAttempts`. On a
-// persistent failure it logs the full `context` at `error` (a poison record for operator
-// replay) and returns **WITHOUT throwing**: the local transaction has already committed
-// and must not be rolled back (the post-commit eventual-consistency posture, ADR-031/032).
-// A failed restock leaves the goods un-credited until a manual replay runs it — it never
-// corrupts the counters (the restock is idempotent on `returnRequestId` inventory-side).
+// The one post-commit retry posture for this module's cross-service calls.
+//
+// On a persistent failure it logs the whole `context` at `error` — a poison record an operator can
+// replay from — and **returns WITHOUT throwing**. The local write is already durable and must not be
+// unwound (ADR-032).
+//
+// **The restock is idempotent against a SEQUENTIAL replay only.** Inventory's probe on
+// `returnRequestId` reads outside its transaction and no UNIQUE backs it, so a retry that fires while
+// the original is still in flight — which is what a timeout produces — can credit the same return
+// twice. Raising `maxAttempts` widens that window, not the resilience.
 //
 // This is a deliberate local copy of the orders module's `retry-then-log-for-replay`
 // helper: the returns bounded context cannot import the orders module (the boundaries

@@ -45,12 +45,14 @@ const COUNTRY_PATTERN = /^[A-Z]{2}$/;
 // (caller-assigned, like the cart id), or reloaded on `reconstitute`.
 //
 // At place-time an order's billing and shipping addresses are **snapshot copies**
-// written as immutable `ownerType = order` rows — copies of whatever the buyer
-// supplied, never references into a (future) customer address book. The polymorphic
-// `(ownerType, ownerId)` shape accepts the reusable `ownerType = customer`
-// address-book entry from day one without a schema change, but this chain only
-// produces `order` rows. An address is immutable once written (no setters); the
-// inherited `deletedAt` stays inert.
+// written as immutable `ownerType = order` rows — copies of whatever the buyer supplied,
+// never references into an address book.
+//
+// **`AddressOwnerTypeEnum.CUSTOMER` has no producer.** `forOrder` is the only factory and it
+// hardcodes `ORDER`; nothing in the tree writes a `customer` row. The enum member and the
+// polymorphic column exist — the address book does not. Do not read a `customer` address as
+// reachable state, and do not write a query that expects one. An address is immutable once
+// written (no setters); the inherited `deletedAt` stays inert.
 export class Address extends AggregateRoot<string | null> {
   public readonly ownerType: AddressOwnerTypeEnum;
   public readonly ownerId: string;
@@ -114,9 +116,8 @@ export class Address extends AggregateRoot<string | null> {
   }
 
   // The place-time snapshot factory: writes an immutable `ownerType = order` row
-  // owned by `orderId`, generating the CHAR(36) UUID in-app. (The `customer` owner
-  // type is reserved for the later address-book capability and has no factory
-  // here.)
+  // owned by `orderId`, generating the CHAR(36) UUID in-app. **The only factory** — there is
+  // none for the `customer` owner type (see the class comment).
   public static forOrder(input: IAddressForOrderInput): Address {
     return new Address({
       id: randomUUID(),

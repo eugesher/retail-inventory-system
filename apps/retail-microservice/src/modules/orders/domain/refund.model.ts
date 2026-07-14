@@ -48,15 +48,16 @@ export interface IOpenRefundInput {
 // while `pending`. `amountMinor` is an integer count of minor units (cents), never a
 // float, and is **strictly positive** (a zero/negative refund is meaningless — unlike
 // `Payment.amountMinor`, which allows 0 for a free order). The id is the auto-increment
-// BIGINT assigned by persistence (`null` until then). The aggregate records **no**
-// domain events — the Issue Refund use case emits `retail.refund.issued` / `.failed`
-// after persistence (a later capability).
+// BIGINT assigned by persistence (`null` until then). The aggregate records **no** domain events —
+// Issue Refund emits `retail.refund.issued` / `.failed` after the row is persisted.
 //
-// The **amount ≤ `Payment.amountMinor − Payment.refundedAmountMinor`** ceiling (a
-// refund can't exceed what is left to refund) is **NOT** enforced here — the model
-// cannot see `Payment`. The Issue Refund use case enforces it
-// (`REFUND_EXCEEDS_REFUNDABLE`, a later capability). The model enforces only its own
-// shape: a positive amount, a non-empty reason, and legal status transitions.
+// **The over-refund ceiling is NOT enforced here.** `amount ≤ Payment.amountMinor −
+// Payment.refundedAmountMinor` is invisible to this model — it cannot see `Payment` — so a `Refund`
+// on its own will happily open for more than is left. **Issue Refund is the only thing standing
+// between a caller and a double refund** (`REFUND_EXCEEDS_REFUNDABLE`). Do not construct a `Refund`
+// outside it and assume the amount was checked.
+//
+// The model enforces only its own shape: a positive amount, a non-empty reason, legal transitions.
 export class Refund extends AggregateRoot<number | null> {
   private readonly _orderId: number;
   private readonly _paymentId: number;
