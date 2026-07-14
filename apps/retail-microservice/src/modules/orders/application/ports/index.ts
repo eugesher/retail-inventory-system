@@ -13,6 +13,7 @@ export * from './order-commit-sale.gateway.port';
 export * from './order-inventory.gateway.port';
 export * from './order-events.publisher.port';
 export * from './payment-gateway.port';
+export * from './capture-claim-stale.token';
 export * from './payment.repository.port';
 export * from './refund.repository.port';
 // The transaction seam is shared, not module-local (ADR-043). Re-exported here so the

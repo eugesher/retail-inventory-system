@@ -343,14 +343,25 @@ export class ShipFulfillmentUseCase {
           const shipped = await this.fulfillmentRepository.save(fresh, scope);
 
           if (capture.capturedAt) {
-            // The gateway captured once (before the loop). Applying the capture to the
-            // in-memory `payment` is guarded so a retry (which reuses this object) does
-            // not double-mutate an already-captured payment; the version-less payment row
-            // is re-saved so the winning attempt persists the captured status.
-            if (payment.status === PaymentStatusEnum.AUTHORIZED) {
-              payment.capture(capture.capturedAt);
+            // PHASE 3 of the capture claim (ADR-052): `CAPTURING → CAPTURED`, committed together with
+            // the fulfillment reaching `SHIPPED`.
+            //
+            // **Re-read inside the transaction — do NOT reuse the `payment` object from before the
+            // claim.** That object was loaded on a snapshot read, still says `AUTHORIZED`, and saving
+            // it would write a stale row over the committed claim. The re-read is also what makes a
+            // retry of this transaction safe: a second attempt finds the payment already `CAPTURED`
+            // and skips, rather than calling `completeCapture` on a row that is no longer claimed.
+            const freshPayment = await this.paymentRepository.findByOrderId(orderId, scope);
+            if (!freshPayment) {
+              throw new OrderDomainException(
+                OrderErrorCodeEnum.ORDER_INVALID_PAYMENT_TRANSITION,
+                `Order ${orderId} has no payment to complete the capture on`,
+              );
             }
-            await this.paymentRepository.save(payment, scope);
+            if (freshPayment.status === PaymentStatusEnum.CAPTURING) {
+              freshPayment.completeCapture(capture.capturedAt);
+              await this.paymentRepository.save(freshPayment, scope);
+            }
           }
 
           const freshOrder = await this.orderRepository.findById(orderId, scope);
@@ -413,10 +424,20 @@ export class ShipFulfillmentUseCase {
     return toFulfillmentView(shippedFulfillment);
   }
 
-  // Ship-triggered capture (Q5). An `authorized` payment is captured out-of-process
-  // (outside the tx); a decline blocks the ship. An already-`captured` payment skips
-  // the gateway (an explicit capture happened earlier). Any other state cannot be
-  // captured.
+  // Ship-triggered capture (Q5), on the **claim-then-charge** protocol (ADR-052). An already-
+  // `captured` payment skips the gateway entirely (an explicit capture happened earlier); an
+  // `authorized` one is claimed under a lock, then charged.
+  //
+  // **This is the second of the two paths that call `paymentGateway.capture()`, and it used to race
+  // the first.** Both checked `AUTHORIZED` on an unlocked read and then charged; a ship and an
+  // explicit capture could both pass, both charge one authorization, and the loser would roll back a
+  // transaction that cannot un-call a processor. Now the loser blocks on the payment row, wakes to
+  // `CAPTURING`, and `beginCapture()` rejects it with a 409 — **before the gateway is touched**.
+  //
+  // The claim also protects the *fulfillment*, which is why ship needs no claim status of its own: a
+  // concurrent Cancel cannot void or refund a `CAPTURING` payment, so it cannot cancel this
+  // fulfillment out from under the charge. The `pending` check the caller made therefore stays true
+  // across the gateway round-trip, which was exactly what it could not do before.
   private async captureIfNeeded(
     payment: Payment,
     orderId: number,
@@ -429,26 +450,48 @@ export class ShipFulfillmentUseCase {
       );
       return { capturedAt: null };
     }
-    if (payment.status !== PaymentStatusEnum.AUTHORIZED) {
-      throw new OrderDomainException(
-        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
-        `Payment for order ${orderId} cannot be captured from status ${payment.status}`,
-      );
-    }
 
-    const result = await this.paymentGateway.capture(payment.gatewayReference, correlationId);
+    // PHASE 1 — claim, under the lock, committed. `beginCapture()` is the domain's rejection of every
+    // non-`AUTHORIZED` state, including a `CAPTURING` claim already held by a racing capture.
+    const claimedPayment = await this.transactionPort.runInTransaction<Payment>(async (scope) => {
+      const locked = await this.paymentRepository.findByOrderIdForUpdate(orderId, scope);
+      if (!locked) {
+        throw new OrderDomainException(
+          OrderErrorCodeEnum.ORDER_INVALID_PAYMENT_TRANSITION,
+          `Order ${orderId} has no payment to capture on ship`,
+        );
+      }
+      locked.beginCapture();
+      return this.paymentRepository.save(locked, scope);
+    });
+
+    // PHASE 2 — the irreversible call, holding no lock. The committed claim, not a lock, is what
+    // makes it safe; a DB row lock must not be held across a payment processor's latency.
+    const result = await this.paymentGateway.capture(
+      claimedPayment.gatewayReference,
+      correlationId,
+    );
     if (!result.captured) {
-      // Block-ship-until-payment-succeeds: nothing was written, so the ship simply
-      // aborts and an operator retries once the payment problem is resolved.
+      // The gateway said no, so we KNOW no money moved — the only condition under which a claim may
+      // be released. Release it, then block the ship (ADR-031: block-ship-until-payment-succeeds).
+      await this.transactionPort.runInTransaction(async (scope) => {
+        const declined = await this.paymentRepository.findByOrderIdForUpdate(orderId, scope);
+        if (declined) {
+          declined.releaseCapture();
+          await this.paymentRepository.save(declined, scope);
+        }
+      });
       this.logger.warn(
         { correlationId, orderId },
-        'Payment gateway declined capture — blocking the ship',
+        'Payment gateway declined capture — claim released, blocking the ship',
       );
       throw new OrderDomainException(
         OrderErrorCodeEnum.ORDER_PAYMENT_NOT_CAPTURED,
         `Payment capture was declined for order ${orderId}; the ship is blocked until payment succeeds`,
       );
     }
+    // The claim is still open. Phase 3 — `completeCapture` — runs inside the ship's own transaction,
+    // so the payment reaching `CAPTURED` and the fulfillment reaching `SHIPPED` commit together.
     return { capturedAt: result.capturedAt };
   }
 

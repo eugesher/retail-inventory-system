@@ -16,6 +16,7 @@ import {
 import {
   ADDRESS_REPOSITORY,
   FULFILLMENT_REPOSITORY,
+  CAPTURE_CLAIM_STALE_MINUTES,
   IDEMPOTENCY_KEY_TTL_HOURS,
   IDEMPOTENCY_STORE,
   OCC_RETRY_ATTEMPTS,
@@ -45,6 +46,7 @@ import {
   MarkDeliveredUseCase,
   PlaceOrderUseCase,
   PurgeExpiredIdempotencyKeysUseCase,
+  ReportStaleCaptureClaimsUseCase,
   ShipFulfillmentUseCase,
 } from './application/use-cases';
 import { OrderCancelledConsumer } from './infrastructure/consumers';
@@ -52,6 +54,7 @@ import {
   IdempotencyPurgeScheduler,
   IdempotencyStoreTypeormRepository,
 } from './infrastructure/idempotency';
+import { StaleCaptureClaimScheduler } from './infrastructure/scheduling';
 import {
   OrderCatalogRabbitmqAdapter,
   OrderCommitSaleRabbitmqAdapter,
@@ -113,8 +116,9 @@ import { OrdersController, OrderRpcExceptionFilter } from './presentation';
     // `AuditLogRabbitmqPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy` to
     // emit `audit.staff.action` for the always-audit refund money movements (ADR-035).
     MicroserviceClientRisEventsModule,
-    // Discovers the `@Cron` on `IdempotencyPurgeScheduler` so the TTL sweep fires on its
-    // timer (ADR-036). Registered here — the only retail module with a scheduled job —
+    // Discovers the `@Cron` on `IdempotencyPurgeScheduler` (the TTL sweep, ADR-036) and on
+    // `StaleCaptureClaimScheduler` (the stranded-capture-claim report, ADR-052) so both fire on
+    // their timers. Registered here — the only retail module with scheduled jobs —
     // the notification `NotificationsModule` precedent (a global module, wired once in the
     // module that owns the scheduler, not the app root).
     ScheduleModule.forRoot(),
@@ -146,6 +150,22 @@ import { OrdersController, OrderRpcExceptionFilter } from './presentation';
     // delete, the scheduler owns the timer (ADR-036).
     PurgeExpiredIdempotencyKeysUseCase,
     IdempotencyPurgeScheduler,
+
+    // The stranded-capture-claim report (ADR-052). A `capturing` payment that outlives a gateway
+    // round-trip is a request that died mid-charge, and nobody knows whether the money moved — so the
+    // use case REPORTS it for an operator and resolves nothing. Naming it `Report…` rather than
+    // `Sweep…` is deliberate: the reservation sweeper releases holds, where a wrong guess costs
+    // availability; this guards money, where a wrong guess charges a customer twice.
+    ReportStaleCaptureClaimsUseCase,
+    StaleCaptureClaimScheduler,
+    // The reporting horizon (minutes), resolved from `CAPTURE_CLAIM_STALE_MINUTES` (Joi default 15)
+    // so the use case injects a plain number rather than reading env (ADR-017).
+    {
+      provide: CAPTURE_CLAIM_STALE_MINUTES,
+      useFactory: (config: ConfigService): number =>
+        config.get<number>('CAPTURE_CLAIM_STALE_MINUTES') ?? 15,
+      inject: [ConfigService],
+    },
     // The retention horizon (hours) the store reads to compute `expires_at`, resolved
     // from `IDEMPOTENCY_KEY_TTL_HOURS` (Joi default 24) so the adapter injects a plain
     // number rather than reading env (ADR-017; the inventory `RESERVATION_TTL_MINUTES`
