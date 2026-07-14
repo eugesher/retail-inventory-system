@@ -8,8 +8,8 @@ import { IStockRepositoryPort, ITransactionScope } from '../ports';
 
 const MS_PER_MINUTE = 60_000;
 
-// A request line normalized at the edge — the optional location resolved to the
-// default. Shared by the all-lines-atomic order-side use cases (Allocate / Cancel).
+// A request line with its optional location already resolved to the default. Every all-lines-atomic
+// operation normalizes at the edge, so the write path below never sees an unresolved location.
 export interface INormalizedReservationLine {
   variantId: number;
   stockLocationId: string;
@@ -29,8 +29,8 @@ export function levelKey(variantId: number, stockLocationId: string): string {
   return `${variantId}:${stockLocationId}`;
 }
 
-// The TTL expiry instant for a reservation (`now + ttlMinutes`), shared by Reserve
-// (mint / refresh) and Allocate (refresh-then-commit of a wall-clock-stale hold).
+// The TTL instant, computed in one place so a hold minted by Reserve and a hold refreshed by
+// Allocate cannot disagree about when it lapses.
 export function reservationExpiresAt(now: Date, ttlMinutes: number): Date {
   return new Date(now.getTime() + ttlMinutes * MS_PER_MINUTE);
 }
