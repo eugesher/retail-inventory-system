@@ -161,11 +161,10 @@ Non-obvious facts, each worth a debugging cycle.
   `boundaries/*` rule to make code pass.
 - `boundaries` takes the **first** matching element pattern, so order in `boundariesElements`
   is load-bearing: `shared-module-barrel` (`modules/auth/index.ts`) must stay ahead of
-  `nest-module` (`modules/*/*.ts`), which matches it too. Mirror any change into
-  `spec/architecture-lint.spec.ts`, which **inlines its own copy** of the taxonomy — and note
-  that **nothing checks the mirror**. That spec lints against its own copy, never against
-  `eslint.config.mjs`, so weakening a production rule leaves all 74 of its tests green. It guards
-  the plugin's behaviour, not your config.
+  `nest-module` (`modules/*/*.ts`), which matches it too. **There is nothing to mirror** —
+  `spec/architecture-lint.spec.ts` reads the resolved production config
+  (`eslint --print-config`), so weakening a rule, downgrading its severity or reshuffling the
+  element order turns the suite red. Weaken nothing to make code pass; you will be told.
 - `test:infra:reload` runs **both** migration pipelines; `yarn migration:run` alone leaves
   `ris_eventstore` empty.
 
