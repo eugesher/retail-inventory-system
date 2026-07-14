@@ -7,8 +7,8 @@ import { ReportStaleCaptureClaimsUseCase } from '../../application/use-cases';
 // The thin `@nestjs/schedule` driver for the stranded-capture-claim report (ADR-052). A provider, not
 // a controller — `ScheduleModule.forRoot()` (already wired in `orders.module.ts` for the idempotency
 // purge) discovers the `@Cron` and fires it. All logic lives in `ReportStaleCaptureClaimsUseCase`;
-// this class only schedules it and guards the tick, so a failed report never kills the loop
-// (the `IdempotencyPurgeScheduler` precedent — the schedule decorator stays in `infrastructure/`).
+// this class only schedules it (the `IdempotencyPurgeScheduler` precedent — the schedule decorator
+// stays in `infrastructure/`).
 //
 // **It reports; it does not sweep.** A stranded `CAPTURING` row is a capture that died mid-flight, and
 // nothing here knows whether the money moved — the gateway has no "did it?" query. Releasing the claim
@@ -34,7 +34,16 @@ export class StaleCaptureClaimScheduler {
       await this.report.execute();
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      // A failed report must not stop the scheduler — log and let the next tick try again.
+      // **This catch does not keep the loop alive — the loop was never at risk.** A `@Cron` handler is
+      // already wrapped by Nest (`ScheduleExplorer.wrapFunctionInTryCatchBlocks`), and the `cron`
+      // library catches on top of that; a rethrow would be swallowed twice and the schedule would tick
+      // on. (Inventory's `ReservationSweepScheduler` is the one whose catch IS load-bearing: it hands a
+      // raw `setInterval` to the registry, so a rejection there is an `unhandledRejection` — a dead
+      // process on Node ≥15.)
+      //
+      // What it buys is that the failure is **named**: Nest's wrapper logs a bare stack under a generic
+      // `Scheduler` context, so an operator learns that *a* sweep died, not *which*. `warn`, not `error`
+      // — a lock timeout on a report is churn; the `error` lines that matter come from the use case.
       this.logger.warn({ reason }, 'Stale capture claim report failed');
     }
   }
