@@ -51,12 +51,10 @@ export interface IOpenReturnRequestInput {
 // terminal. The id is the auto-increment BIGINT assigned by persistence (`null` until
 // then, the `Order` / `Fulfillment` precedent), and `rmaNumber` is the human-facing
 // `RMA-<year>-<pad8(id)>` finalized from that id post-persist (`null` until then — the
-// `order_number` "re-read then finalize a derived field" idiom). `version` is the
-// per-RMA optimistic-concurrency token: it ships and advances on every mutation now
-// (the concurrency the cross-cutting consistency rule names), even though enforcement
-// is a later hardening — retrofitting an OCC column onto a populated table is a
-// destructive `ALTER`, so the column is cheapest up front (the ADR-028 §6 / ADR-027
-// reasoning).
+// `order_number` "re-read then finalize a derived field" idiom). `version` is the per-RMA OCC
+// token, and **the guard is live**: every RMA lifecycle write goes through
+// `runWithReturnWriteRetry`, which re-reads under a fresh transaction on a lost compare-and-swap
+// and surfaces a `409` once the budget is spent (ADR-036/045).
 //
 // **The aggregate enforces only its own shape** — ≥ 1 line, each line's quantity > 0,
 // and the legal status transitions. The cross-line **returnable-quantity invariant**

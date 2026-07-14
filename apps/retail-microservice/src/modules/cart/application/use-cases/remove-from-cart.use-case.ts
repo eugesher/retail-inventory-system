@@ -21,8 +21,8 @@ import { assertCartVersion, runWithCartWriteRetry } from './cart-write';
 // the save transaction. After a successful save the use case releases the line's
 // stock hold against the inventory reservation surface (ADR-030) — **best-effort**
 // (try/warn/swallow): the cart write is the primary outcome, so a failed release
-// (which merely over-holds stock until the manual release endpoint or a later TTL
-// sweep frees it) never fails the remove. After save the use case also emits the
+// (which merely over-holds stock until the reservation's TTL lapses and the inventory sweeper
+// releases it — ADR-038) never fails the remove. After save the use case also emits the
 // reserved `retail.cart.line-removed` wire event (best-effort post-commit).
 @Injectable()
 export class RemoveFromCartUseCase {

@@ -8,9 +8,8 @@ import { ReturnLine, ReturnRequest } from '../../domain';
 //
 // A persisted return request (saved or reconstituted) carries a concrete id, and a line
 // re-read from the repository carries its generated BIGINT id, so the `!` assertions are
-// safe here (the same non-null assertion the order/fulfillment factories make). The three
-// `Date` columns are serialized to ISO-8601 strings (null until the matching transition
-// stamps them).
+// safe here (the same non-null assertion the order/fulfillment factories make). Each `Date` column
+// is serialized to an ISO-8601 string, and stays null until the transition that stamps it runs.
 
 export const toReturnLineView = (line: ReturnLine): ReturnLineView => ({
   id: line.id!,

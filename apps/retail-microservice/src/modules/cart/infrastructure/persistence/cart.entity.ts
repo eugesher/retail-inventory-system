@@ -39,11 +39,10 @@ export class CartEntity extends CartBaseEntity {
   @Column({ type: 'timestamp', nullable: true })
   public expiresAt: Date | null;
 
-  // Optimistic-concurrency token. TypeORM owns the persisted value via
-  // `@VersionColumn` (incremented on each managed save); the guard it enables is
-  // a later concurrency-hardening capability. Shipping the column now keeps that
-  // retrofit non-destructive — no future `ALTER TABLE` on a populated table
-  // (ADR-028 §6, the same reasoning ADR-027 used for `stock_level.version`).
+  // Optimistic-concurrency token. TypeORM owns the persisted value via `@VersionColumn`
+  // (incremented on each managed save), and the guard is live: every cart write goes through
+  // `runWithCartWriteRetry`, which loses a compare-and-swap, re-reads, and surfaces a `409` at
+  // exhaustion (ADR-036/045).
   @VersionColumn()
   public version: number;
 
