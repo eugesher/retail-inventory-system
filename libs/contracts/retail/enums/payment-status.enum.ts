@@ -6,12 +6,13 @@
 // earliest state is `AUTHORIZED` — there is no `none` here. Encoding the
 // distinction as two enums keeps the type system, not a comment, the guard.
 //
-// A wire contract: it surfaces on `PaymentView` and is mapped to the
-// `payment.status` ENUM column. `AUTHORIZED` means funds are reserved (the
-// authorize-on-place capability); `CAPTURED` means the money was taken (the
-// explicit capture capability). `VOIDED` / `REFUNDED` / `FAILED` ship in the enum
-// for the later cancel/refund/decline capabilities but have no producer in this
-// chain — the only mutation today walks `AUTHORIZED → CAPTURED`.
+// `AUTHORIZED` means funds are reserved; `CAPTURED` means they were taken. `VOIDED` is set when a
+// cancel voids an un-captured authorization, and `REFUNDED` when a refund covers the captured
+// amount in full — both are live.
+//
+// **`FAILED` is the one member nothing produces.** The bound payment gateway is a fake that always
+// succeeds, so no code path can reach it. Do not read its presence as evidence that a decline is
+// handled somewhere.
 export enum PaymentStatusEnum {
   AUTHORIZED = 'authorized',
   CAPTURED = 'captured',

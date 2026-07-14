@@ -49,8 +49,8 @@ export class AuditLogEntryView {
   @ApiResponseProperty()
   public occurredAt: string;
 
-  // Always null today — no call site threads the request IP through (a documented gap,
-  // ADR-035).
+  // **Structurally always `null`** — the wire mapper hardcodes it, because no call site captures a
+  // request IP. Filtering the audit trail by IP returns nothing.
   @ApiResponseProperty()
   public ipAddress: string | null;
 

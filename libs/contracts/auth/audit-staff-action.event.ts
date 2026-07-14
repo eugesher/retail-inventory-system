@@ -1,67 +1,53 @@
 import { ICorrelationPayload } from '../microservices';
 import { IAuditLogEvent } from './audit-log-publisher.port';
 
-// The wire contract for the cross-cutting staff-action audit stream (ADR-035).
-//
-// Emitted onto the `ris.events` topic exchange under the `audit.staff.action`
-// routing key by the real `AUDIT_LOG_PUBLISHER` adapters (api-gateway `auth` and
-// retail `orders`) and consumed only by the event store's audit-log ingest, which
-// persists it to `audit_log_entry`. It is the on-the-wire projection of the
-// in-process `IAuditLogEvent` (see `audit-log-publisher.port.ts`): a stable,
-// transport-shaped record decoupled from the richer domain event so the event
-// store never imports a producer's internal types.
-//
-// Field mapping the adapters apply (`IAuditLogEvent` → this shape):
-//   action     ← event.name                                   (the stable event-name string)
-//   actorType  ← event.actorKind === 'staff' ? 'staff-user' : 'system'
-//   entityType ← event.targetKind                             (nullable)
-//   entityId   ← event.targetId                               (nullable)
-//   before     ← event.payload.before ?? null
-//   after      ← event.payload.after  ?? (event.payload ?? null)
-//   occurredAt ← (event.occurredAt ?? new Date()).toISOString()
-//   ipAddress  ← null                                         (no IP captured at call sites today)
+// The wire shape of the `audit.staff.action` stream (ADR-035) — the on-the-wire projection of the
+// in-process `IAuditLogEvent`, kept separate so the event store never imports a producer's
+// internal types. `toAuditStaffActionEvent` below is the mapping; it is not restated here.
 export interface IAuditStaffActionEvent extends ICorrelationPayload {
-  // The acting subject's id, or null for pre-auth / system-origin events.
   actorId: string | null;
 
-  // `staff-user` for a staff actor; `system` for everything else (customer,
-  // anonymous, or an unattributed background mutation such as the
-  // auto-refund-from-cancel path). The audit log keeps these two origin classes
-  // distinct because actor ids are not globally unique across id spaces.
+  // **Only a staff actor gets `staff-user`.** A customer's action, an anonymous one, and an
+  // unattributed background mutation (the auto-refund-from-cancel path) all land as `system` —
+  // the two values are origin *classes*, not a staff/not-staff flag, and `system` is where three
+  // very different things collapse together. Reading the log as "who did it" needs `actorId` too,
+  // which is not unique across the staff and customer id spaces.
   actorType: 'staff-user' | 'system';
 
-  // The stable event-name string (`IAuditLogEvent.name`) — e.g.
-  // 'StaffUserRolesAssigned', 'RefundIssued'. The audit log's primary classifier.
+  // The audit log's primary classifier, and what an `?action=` filter matches. It is
+  // `IAuditLogEvent.name` — `StaffUserRolesAssigned`, `RefundIssued` — and **never** a
+  // `PermissionCodeEnum` value.
   action: string;
 
-  // The mutated resource's kind/id when the event targets one specific resource;
-  // both null for events that mutate nothing specific (e.g. 'LoginFailed').
   entityType: string | null;
   entityId: string | null;
 
-  // The before/after state snapshots when the call site supplies them; otherwise
-  // `after` carries the whole structured payload and `before` is null.
+  // **`after` is not reliably an "after state".** When the call site supplies explicit
+  // `before`/`after` keys they win; otherwise the *whole* payload becomes `after` and `before` is
+  // null. A consumer diffing the two will diff a state against a nothing.
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
 
-  // ISO-8601 instant the action occurred.
   occurredAt: string;
 
-  // The originating client IP — always null today (no call site captures it; a
-  // documented gap to close when audit endpoints thread the request IP through).
+  // **Structurally always `null`** — the mapper hardcodes it, because no call site captures a
+  // request IP. Querying the audit log by IP returns nothing, and will keep doing so until a call
+  // site threads one through.
   ipAddress: string | null;
 
-  // Pins the wire shape so the ingest can branch on a schema bump without guessing.
   eventVersion: 'v1';
 }
 
-// Maps the in-process `IAuditLogEvent` onto the `IAuditStaffActionEvent` wire shape
-// (the field table documented above). Pure and transport-free so BOTH real
-// `AUDIT_LOG_PUBLISHER` adapters (api-gateway `auth`, retail `orders`) share this one
-// mapping instead of each carrying a byte-identical private `toWire` copy that must be
-// kept in lockstep. `before`/`after`: explicit payload keys win; otherwise the whole
-// payload becomes `after` and `before` is null. `ipAddress` is always null (no call site
-// captures it today); `occurredAt` defaults to now when the event omits it.
+// The one mapping, shared by both `AUDIT_LOG_PUBLISHER` adapters rather than copied into each
+// (ADR-043). Pure and transport-free, so it lives in `contracts` beside the shape it produces.
+//
+// **A missing `correlationId` becomes `''`, not `null`** — forced by the wire type, since
+// `ICorrelationPayload.correlationId` is a non-nullable `string` while `IAuditLogEvent`'s is
+// nullable. The `audit_log_entry` column would happily take a `null`; it never sees one.
+//
+// Either way the row is unfindable: an audit event raised outside a request context matches **no**
+// correlation filter and appears in **no** trace. It is not lost — it is invisible to the one key
+// anyone would search on.
 export function toAuditStaffActionEvent(event: IAuditLogEvent): IAuditStaffActionEvent {
   const before = (event.payload.before as Record<string, unknown> | undefined) ?? null;
   const after =

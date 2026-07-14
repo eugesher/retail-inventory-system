@@ -34,13 +34,12 @@ export class ProductView {
   @ApiResponseProperty()
   public archivedAt?: string;
 
-  // Populated ONLY by the publish operation, and only when a recommended
-  // (non-blocking) precondition is unmet — today, the "≥1 active media asset"
-  // recommendation (`CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA`). Like
-  // `publishedAt`/`archivedAt`, absent unless the producing transition sets it.
-  // Absent means `undefined`, NEVER an empty `[]` — a present-but-empty array
-  // would falsely read as "warnings were checked and there were none" on a
-  // register/archive response that never ran the publish probe (ADR-029 §7).
+  // Populated ONLY by publish, and only when a recommended (non-blocking) precondition is unmet —
+  // the sole one being "≥1 active media asset" (`CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA`).
+  //
+  // **Absent means `undefined`, NEVER an empty `[]`.** A present-but-empty array would read as
+  // "we checked and there were none" on a register or archive response that never ran the publish
+  // probe at all (ADR-029 §7). The two are different answers and the type must not blur them.
   @ApiResponseProperty()
   public warnings?: PublishWarningView[];
 }

@@ -2,16 +2,13 @@ import { ApiResponseProperty } from '@nestjs/swagger';
 
 import { AddressOwnerTypeEnum } from '../enums';
 
-// RPC/HTTP response shape for an address. A **class** carrying `@ApiResponseProperty`
-// (the documented lib-contracts Swagger exception, ADR-017), mirroring the order
-// and cart views.
+// `ownerType` + `ownerId` are a polymorphic discriminator (ADR-028 §5). The type admits `customer`
+// as well as `order`, but **nothing writes a `customer`-owned address** — there is no address book
+// in this system, and every row you will see is an `order` one.
 //
-// `ownerType` + `ownerId` are the polymorphic discriminator (ADR-028 §5): an
-// address belongs either to a `customer` (a future address-book entry) or to an
-// `order` (a place-time snapshot). For an order address `ownerId` is the order's
-// id; the row is an **immutable copy**, not a reference into a customer address
-// book. `country` is a 2-char upper-case ISO code; `line2` and `phone` are
-// optional. `id` is the address's CHAR(36) UUID.
+// An order's address is an **immutable copy** taken at place-time, not a reference into anything.
+// Editing a customer's details later cannot rewrite where a past order shipped, which is the whole
+// point of copying it. `country` is a 2-char upper-case ISO code.
 export class AddressView {
   @ApiResponseProperty()
   public id: string;
