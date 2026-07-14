@@ -20,11 +20,14 @@ const DEFAULT_BOUNCE_REASON = 'Delivery bounced';
 // `bounced` (a bounce notice). These are the two attempt-free, terminal receipt
 // transitions on the `NotificationDelivery` aggregate (ADR-033).
 //
-// The webhook ingestion itself — the HTTP endpoint, ESP signature verification, and
-// provider-payload → outcome mapping — is **out of scope this capability**. This use case
-// is reachable only via the `notification.delivery.record-outcome` RPC as the internal
-// sketch a future webhook bridge would call; it is deliberately NOT exposed at the
-// gateway. Real ESP integration is future work.
+// **Nothing calls this.** The webhook bridge it was shaped for — an HTTP endpoint, ESP signature
+// verification, provider-payload → outcome mapping — does not exist anywhere, and
+// `notification.delivery.record-outcome` is the one RPC on this controller with **no gateway
+// route**. The `NOTIFIER` is `LogNotifierAdapter`, which reports nothing back.
+//
+// This use case is the **sole producer** of `DELIVERED` and `BOUNCED`. So in practice no delivery
+// in this system ever reaches either: they are reachable only by publishing that routing key onto
+// `notification_events` by hand. Treat both statuses as unpopulated when reasoning about a query.
 //
 // State rules (enforced by the domain mutators, surfaced as typed codes):
 // - unknown `deliveryId` → `DELIVERY_NOT_FOUND` (404);

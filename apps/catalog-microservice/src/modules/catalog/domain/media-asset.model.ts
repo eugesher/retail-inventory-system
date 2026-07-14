@@ -37,11 +37,10 @@ export interface ICreateMediaAssetInput {
 // tables) — owner existence is the use case's job, not a DB constraint (ADR-029
 // §4).
 //
-// `uri` is an OPAQUE, already-uploaded reference (`https://…` / `s3://…`): the
-// aggregate validates only that it is non-empty — there is NO scheme allow-list,
-// no extension parsing. Upload pipelines, signed URLs, and CDN rewriting are a
-// future capability; today the catalog just stores the string a prior upload
-// produced.
+// `uri` is an OPAQUE reference (`https://…` / `s3://…`) and the aggregate validates only that it
+// is non-empty — no scheme allow-list, no extension parsing. **Nothing in the system uploads
+// anything.** There is no upload pipeline, no signed-URL issuer and no CDN rewriter, here or
+// elsewhere; a `uri` is whatever string the caller sent, stored verbatim and handed back verbatim.
 //
 // The `number | null` id mirrors `Product` / `Category`: null before persistence
 // assigns one, concrete after `reconstitute`.

@@ -56,8 +56,9 @@ export class AddressInputDto {
   public phone?: string;
 }
 
-// Request body for `POST /api/cart/:cartId/place`. The `Idempotency-Key` is read
-// from the header, not the body (accepted + forwarded, not enforced — Q10). The
+// Request body for `POST /api/cart/:cartId/place`. The `Idempotency-Key` is read from the header,
+// not the body — and it is **required and enforced** (ADR-036): same key + same body replays the
+// stored order, a different body is 422, a missing key is 400. The
 // `customerId` is never sent by the caller — the controller folds in
 // `@CurrentUser().id` and the retail use case re-asserts ownership. `@ValidateNested`
 // + `@Type` make class-validator recurse into the two address bundles.

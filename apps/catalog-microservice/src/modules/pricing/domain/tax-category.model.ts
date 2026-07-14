@@ -14,10 +14,11 @@ export interface ITaxCategoryProps {
 }
 
 // A `TaxCategory` is a classification label only — a stable code plus a human
-// name. It carries NO rate, jurisdiction, or conversion logic; computing tax is
-// a separate future capability (ADR-026). A variant points at one tax category
-// through the nullable `product_variant.tax_category_id` FK (the attach use case
-// lands later); the link is opaque from here.
+// name. **It carries no rate and no jurisdiction, and the system computes no tax anywhere**
+// (ADR-026): the label is the whole feature, so do not read a `TaxCategory` as something that
+// prices anything. A variant points at one through the nullable
+// `product_variant.tax_category_id` FK (`AttachTaxCategoryToVariantUseCase`); the link is
+// opaque from here.
 //
 // Global `code` uniqueness is a REPOSITORY-level invariant (a UNIQUE constraint
 // + a use-case pre-check), not enforced in the model — the model cannot see

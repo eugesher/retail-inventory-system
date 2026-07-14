@@ -9,8 +9,7 @@ import { NotificationDomainException, NotificationErrorCodeEnum } from '../domai
 // `CatalogRpcExceptionFilter` / `OrderRpcExceptionFilter` precedent, ADR-025). The
 // mapping is a *total* `Record` keyed on the enum, so it is exhaustive at compile
 // time: a new `NotificationErrorCodeEnum` member fails the build until it is given a
-// status. Every code is mapped now even though the template authoring operations
-// throw only a subset — the delivery codes are reached by later capabilities.
+// status.
 const NOTIFICATION_ERROR_STATUS: Record<NotificationErrorCodeEnum, HttpStatus> = {
   // Malformed input invariants → 400. Normally caught by the gateway request DTOs
   // first; this is the backstop for the directly-reachable RMQ path.
