@@ -28,16 +28,15 @@ export interface IStockMovementListQuery {
 // port's type surface, not merely by convention — an UPDATE or DELETE is not
 // expressible against this seam. Domain types only — no `typeorm` leak (ADR-017).
 export interface IStockMovementRepositoryPort {
-  // INSERT a new movement and re-read it so the DB-assigned BIGINT `id` (and the
-  // stored `occurred_at`) come back concrete. Scope-aware so a movement is written
-  // in the SAME unit of work as the `StockLevel` counter change that caused it
-  // (Release / Allocate / Cancel-Allocation today; Receive / Adjust / Transfer in
-  // later capabilities): a rolled-back counter change leaves no orphan movement row.
+  // INSERT and re-read, so the DB-assigned `id` and stored `occurred_at` come back concrete.
+  //
+  // **`scope` is what keeps the ledger honest.** Every write path passes one, so the movement lands
+  // in the SAME unit of work as the counter change that caused it — a rolled-back change can leave
+  // no orphan row explaining a change that never happened.
   append(movement: StockMovement, scope?: ITransactionScope): Promise<StockMovement>;
-  // Newest-first (`occurred_at DESC, id DESC`) page of one variant's movements,
-  // optionally narrowed by type and an inclusive `occurred_at` window. Backs the
-  // audit read RPC + HTTP endpoint (a later capability); the method ships now so
-  // the seam is complete.
+
+  // Newest-first page of one variant's movements, optionally narrowed by type and an inclusive
+  // `occurred_at` window.
   listByVariant(query: IStockMovementListQuery): Promise<IStockMovementPage>;
   // Reference-based existence probe — the idempotency lookup for the Commit Sale
   // RPC (ADR-031): a `sale` movement already referencing a fulfillment means the

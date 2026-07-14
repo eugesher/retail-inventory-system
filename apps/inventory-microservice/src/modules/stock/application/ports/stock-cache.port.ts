@@ -5,8 +5,9 @@ export const STOCK_CACHE = Symbol('STOCK_CACHE');
 export interface IStockCacheGetPayload {
   variantId: number;
   stockLocationIds?: string[];
-  // ADR-022 opt-in tenant segment; absent today. CACHE-009 tracks the latent
-  // multi-tenant migration this surface unblocks.
+  // The ADR-022 tenant segment. **Opt-in, and nothing supplies it** — a key with no `tenantId`
+  // omits the segment entirely rather than defaulting it, so single-tenant keys carry no
+  // tenant-shaped lie. The parameter exists so a multi-tenant read path would not have to re-key.
   tenantId?: string;
   correlationId?: string;
 }

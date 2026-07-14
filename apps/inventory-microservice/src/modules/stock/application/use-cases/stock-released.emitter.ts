@@ -15,16 +15,18 @@ export interface IReleasedReservationRow {
   movement: StockMovement;
 }
 
-// The shared post-commit announce for a hold whose quantity has been returned to
-// `available`, hoisted out of `ReleaseReservationUseCase` and
-// `SweepExpiredReservationsUseCase` so they share one best-effort emit policy — the
-// `emitMovementRecorded` / `maybeEmitLowStock` precedent. Only `reason` differs between the
-// two callers (`cart-removed` / `order-cancelled` / `manual` versus `expired`), and it is
-// already the parameter that carries that difference onto both the event and the ledger row.
+// The shared post-commit announce for a hold whose quantity has gone back to `available`. `reason`
+// is the only thing that varies between the paths that use it, and it is already a parameter — so
+// the emit policy itself stays in one place.
 //
-// Emitted PER RESERVATION ROW, never coalesced per `(variantId, stockLocationId)`: coalescing
-// would have to sum quantities and null `cartId` / `reservationId`, which is the whole
-// correlation value the event carries (ADR-038).
+// **Not every `StockReleasedEvent` comes through here.** `CancelAllocationUseCase` builds its own,
+// because an order cancel releases *allocations*, not holds: it has no reservation row and no cart
+// to name, so it cannot supply an `IReleasedReservationRow`. Do not assume this helper is the only
+// producer of the event.
+//
+// **Emitted PER RESERVATION ROW, never coalesced** per `(variantId, stockLocationId)`. Coalescing
+// would mean summing quantities and nulling `cartId` / `reservationId` — which is the entire
+// correlation value the event exists to carry (ADR-038).
 //
 // Both emits are best-effort and post-commit (ADR-020): the counter and the ledger row are
 // already durable, so a broker hiccup is warn-logged, never raised — failing the caller would

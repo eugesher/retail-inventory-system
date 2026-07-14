@@ -1,24 +1,15 @@
-// An immutable row of the inventory audit ledger: a record of WHY a counter
-// changed (ADR-030 §2). It is an **audit trail, NOT the balance authority** —
-// ADR-027's `StockLevel` running totals remain the source of truth, and the sum of
-// movement rows is deliberately NOT expected to reconstruct on-hand (an
-// `allocation` and its cancelling `release` are BOTH negative by the per-type sign
-// rule below, so they do not net to zero).
+// One immutable row of the inventory audit ledger — a record of **why** a counter changed
+// (ADR-030 §2).
 //
-// Framework-free per ADR-004, and a fully **immutable** record in the `OrderLine`
-// style: every field is `public readonly` and the constructed instance is
-// `Object.freeze`-d, so append-only starts in the type system — there is no
-// mutator that could ever change a recorded movement.
+// **It is an audit trail, NOT the balance authority.** `StockLevel`'s running totals are the source
+// of truth, and summing movement rows is deliberately **not** expected to reconstruct on-hand: an
+// `allocation` and the `release` that cancels it are **both negative** under the sign rule below,
+// so they do not net to zero. Anyone who tries to reconcile the ledger against the counters will
+// find a discrepancy and will be looking at a feature.
 //
-// `variantId` is an OPAQUE cross-service link to the catalog `product_variant`
-// (the only coupling is the FK in persistence; the inventory domain MUST NOT
-// import the catalog `ProductVariant` — ADR-004 / ADR-017 / ADR-027). `referenceId`
-// is polymorphic and carries NO FK at all (the `MediaAsset` / retail `address`
-// precedent, ADR-029).
-//
-// `StockMovementTypeEnum` is imported from `libs/contracts` because it is a WIRE
-// enum (it rides the view, the audit query payload, and the future
-// recorded-event); the domain may import `libs/{ddd,common,contracts}` (ADR-017).
+// The record is **immutable at runtime, not just in the types**: every field is `readonly` and the
+// instance is `Object.freeze`-d, so a recorded movement can be appended and listed and nothing
+// else. `referenceId` is polymorphic and carries **no FK at all** — do not join on it.
 
 import { StockMovementTypeEnum } from '@retail-inventory-system/contracts';
 
@@ -52,9 +43,10 @@ export interface IRecordStockMovementProps {
   occurredAt?: Date;
 }
 
-// The movement types whose sign is fixed by the kind of change they record. The
-// remaining type, `adjustment`, is the operator's signed delta and may be either
-// sign (still non-zero).
+// **The sign is fixed by the TYPE, and it is not the direction `available` moved.** A `release`
+// raises `available` and is nonetheless recorded negative — which is exactly why the ledger does
+// not reconcile against the counters (see the note at the top of this file). `adjustment` is the
+// only type that may take either sign, and it may never be zero.
 const POSITIVE_TYPES: ReadonlySet<StockMovementTypeEnum> = new Set([
   StockMovementTypeEnum.RECEIPT,
   StockMovementTypeEnum.RETURN,
@@ -78,11 +70,9 @@ export class StockMovement {
   public readonly occurredAt: Date;
 
   private constructor(props: IStockMovementProps) {
-    // The sign-per-type invariant (ADR-030 §2). Movements are constructed by use
-    // cases from already-validated counter changes, never from user input, so an
-    // illegal sign is an INTERNAL bug — a plain `Error`, deliberately NOT a typed
-    // `InventoryDomainException` the filter would surface as a client 4xx (the
-    // `StockLevel.requireNonNegativeInt` precedent).
+    // A movement is built by a use case from a counter change that has *already* been validated —
+    // never from user input. So a wrong sign here is an internal bug, and it is a plain `Error`
+    // rather than a typed exception the filter would hand a caller as a 4xx.
     StockMovement.requireSignForType(props.type, props.quantity);
 
     this.id = props.id;
@@ -96,16 +86,12 @@ export class StockMovement {
     this.actorId = props.actorId;
     this.occurredAt = props.occurredAt;
 
-    // `readonly` is a compile-time-only guard; freezing makes the immutability
-    // real at runtime — any write throws in strict mode. This is the runtime half
-    // of "append-only starts in the type system": a recorded movement can never be
-    // mutated, only appended and listed (the `OrderLine` precedent).
+    // `readonly` is compile-time only. Freezing makes it real: a write throws at runtime rather
+    // than being caught by whoever happens to be type-checking.
     Object.freeze(this);
   }
 
-  // The write path: a fresh movement with `id: null` (the BIGINT is DB-assigned on
-  // append), `occurredAt` defaulting to now, and the nullable reference / reason /
-  // actor fields defaulting to null when omitted.
+  // The write path. `id` is `null` until the DB assigns it on append.
   public static record(props: IRecordStockMovementProps): StockMovement {
     return new StockMovement({
       id: null,
@@ -121,9 +107,9 @@ export class StockMovement {
     });
   }
 
-  // The load path: rebuilds a persisted movement from storage. The sign invariant
-  // is re-asserted (a corrupted stored sign is rejected on read, the same defensive
-  // posture `OrderLine` takes with its derived total).
+  // The load path — and it **re-asserts the sign invariant on read**, not only on write. A row
+  // whose stored sign contradicts its type is rejected coming out of the database, because a
+  // corrupted ledger is worse than a missing one.
   public static reconstitute(props: IStockMovementProps): StockMovement {
     return new StockMovement(props);
   }
