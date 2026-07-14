@@ -64,8 +64,10 @@ import {
 // `notifications:read` gates the delivery audit reads. Customer tokens carry no
 // `permissions` claim, so a code-gated route is staff-only without any extra guard.
 //
-// The `notification.delivery.record-outcome` RPC (the ESP-webhook seam) has **no
-// route here** — real webhook ingestion is future work, so it stays RMQ-only.
+// The `notification.delivery.record-outcome` RPC (the ESP-webhook seam) has **no route here**, and
+// no webhook bridge exists anywhere to call it. It is the sole producer of the `delivered` and
+// `bounced` statuses, so **nothing ever reaches them** — a delivery filter on either returns an
+// empty list always, not "not yet".
 @ApiTags('Notifications')
 @Controller('notifications')
 export class NotificationsController {

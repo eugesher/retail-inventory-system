@@ -12,9 +12,9 @@ import {
 
 // The default `PAYMENT_GATEWAY` binding (ADR-028 §4; the `LogNotifierAdapter`
 // default-adapter precedent of ADR-011). A real payment processor (Stripe / PayPal /
-// etc.) is an **excluded capability** — this in-process stand-in lets the Place Order
-// and Capture use cases (later capabilities) exercise the full authorize → capture
-// flow behind `IPaymentGatewayPort` without an external dependency.
+// etc.) is an **excluded capability** — this in-process stand-in implements the whole
+// `IPaymentGatewayPort` (authorize → capture → refund), so every money move in the module runs
+// its real code path with no external dependency.
 //
 // It **always approves**: `authorize` returns `approved: true` with a fresh
 // `fake_<uuid>` reference and the caller's `method` (defaulting to `fake-card`);

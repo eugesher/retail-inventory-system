@@ -87,7 +87,10 @@ export const configModuleConfig = {
     // Max attempts before a notification delivery is abandoned and
     // `notifications.delivery.failed` is emitted.
     MAX_DELIVERY_ATTEMPTS: Joi.number().integer().positive().default(3),
-    // Retention window (days) for delivery rows; the purge worker is a future capability.
+    // **DEAD KEY — nothing reads this.** It is validated and defaulted here, so it passes boot in
+    // every service, but no DI token, use case or scheduler consumes it and no delivery-retention
+    // purge exists. `notification_delivery` grows without bound; setting this changes nothing.
+    // Either wire a purge (the `IdempotencyPurgeScheduler` shape) or delete the key.
     RETENTION_DELIVERY_DAYS: Joi.number().integer().positive().default(90),
     // TTL (seconds) for a cached notification consent snapshot (ADR-037). The consent
     // cache is kept fresh by the customer.consent.updated / customer.erased consumer, so

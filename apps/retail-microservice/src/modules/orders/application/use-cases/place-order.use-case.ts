@@ -56,9 +56,15 @@ const PROVISIONAL_ORDER_NUMBER = 'PENDING';
 // `ownerType=order` copies (ADR-028 §5), allocates the cart's stock holds into the
 // order **inside the place transaction, after the cart-conversion CAS** (ADR-030 —
 // reserved → allocated, or a direct allocation fallback), authorizes payment inline
-// via the `PAYMENT_GATEWAY` (authorize-on-place, Q5) — allocate precedes payment, so
-// money is never authorized for stock that could not be allocated — and emits
-// `retail.order.placed` + `retail.payment.authorized` post-commit.
+// via the `PAYMENT_GATEWAY` (authorize-on-place), and emits `retail.order.placed` +
+// `retail.payment.authorized` post-commit.
+//
+// **Allocate precedes payment, so money is never authorized for stock that could not be
+// allocated. The inverse does NOT hold.** The authorize runs *after* the place transaction has
+// committed, and nothing compensates a decline: the order row, the `converted` cart and the stock
+// allocation all survive it. The result is an order that can never ship (Ship refuses an order with
+// no payment) and stock allocated against it indefinitely. A known, unfixed gap — the bound gateway
+// always approves, so it is latent. **Do not read the guarantee above as symmetric.**
 //
 // **The snapshot is the contract with the buyer.** A later catalog/price/name change
 // must never rewrite a placed order, so the line freezes the catalog values at
@@ -219,8 +225,13 @@ export class PlaceOrderUseCase {
       );
     }
     if (cart.status === CartStatusEnum.CONVERTED) {
-      // Repeat-place idempotency: the cart already converted, so return the order it
-      // converted into (plus its payment) instead of placing a second one.
+      // Repeat-place idempotency: the cart already converted, so return the order it converted into
+      // rather than minting a second one.
+      //
+      // **`converted` does NOT mean "paid".** The CAS that sets it runs inside the place
+      // transaction, and the authorization runs after that transaction commits — so a cart can be
+      // converted against an order whose payment was declined. This branch will hand that order
+      // back as a success, with `payment: undefined`. See the note in this file's header.
       return this.resolveExistingOrder(cartId, correlationId);
     }
     if (cart.status === CartStatusEnum.ABANDONED) {
@@ -312,9 +323,9 @@ export class PlaceOrderUseCase {
           lines: allocationLines,
           correlationId,
         });
-        // The allocation committed inventory-side. From here only the place tx's
-        // own commit can still fail; if it does, the orphaned allocation is
-        // compensated below.
+        // The allocation committed inventory-side. From here **inside this callback** only the
+        // commit can still fail, and the `catch` below compensates that. **The authorize, which
+        // runs after this transaction returns, can also fail — and nothing compensates that one.**
         allocated = true;
         allocatedOrderId = orderId;
         return persisted;
@@ -379,6 +390,10 @@ export class PlaceOrderUseCase {
   }
 
   // The repeat-place path: a converted cart resolves to the order it converted into.
+  // **This returns whatever order the cart converted into, paid or not.** `payment` is `null` when
+  // the authorize declined after the place committed — and the resulting `OrderView` still reads as
+  // a successful placement. It is the honest answer to "what did this cart become", and the wrong
+  // answer to "did my order go through".
   private async resolveExistingOrder(cartId: string, correlationId: string): Promise<OrderView> {
     const existing = await this.orderRepository.findBySourceCartId(cartId);
     if (!existing) {

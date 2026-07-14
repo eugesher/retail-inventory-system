@@ -57,11 +57,20 @@ export class CustomerErasureWriterAdapter implements ICustomerErasureWriterPort 
         ['customer', customer.id],
       );
 
-      // 3. Abandon the customer's active carts (Q1) — a `Cart` is a disposable
-      //    working set, not a record to preserve. The FK is left intact (not nulled)
-      //    so the tombstone customer row still resolves. `version = version + 1`
-      //    keeps the cart's optimistic-concurrency token advancing on the mutation,
-      //    the `CartReaderTypeormAdapter.markConverted` precedent (ADR-028 §6).
+      // 3. Abandon the customer's active carts — a `Cart` is a disposable working set, not a
+      //    record to preserve. The FK is left intact (not nulled) so the tombstone customer row
+      //    still resolves.
+      //
+      //    **This is the only thing in the system that abandons a cart.** `Cart.markAbandoned()`
+      //    exists on the aggregate and has no caller; the status is reached here, in raw SQL,
+      //    because the gateway may not import the retail `cart/` module (the
+      //    `CartReaderTypeormAdapter.markConverted` precedent, which converts a cart the same way
+      //    and for the same reason).
+      //
+      //    `version = version + 1` is not bookkeeping: the cart's OCC guard is live
+      //    (`runWithCartWriteRetry`), so bumping the token here is what makes a concurrent cart
+      //    write lose its compare-and-swap and re-read the now-abandoned row instead of
+      //    resurrecting it.
       await manager.query(
         `UPDATE cart
             SET status = 'abandoned', version = version + 1, updated_at = CURRENT_TIMESTAMP

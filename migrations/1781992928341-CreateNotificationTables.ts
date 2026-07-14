@@ -9,8 +9,11 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // Both keep `BaseEntity`'s numeric PK widened to BIGINT UNSIGNED (`synchronize` is off,
 // so this migration is the source of truth) plus `created_at` / `updated_at` /
 // `deleted_at`. `deleted_at` stays INERT on both: a template is soft-deleted via the
-// `active` flag, a delivery is live-ephemeral (a `RETENTION_DELIVERY_DAYS` purge is a
-// deferred future capability) — neither is ever soft-deleted.
+// `active` flag, and a delivery is never deleted at all — neither is ever soft-deleted.
+//
+// This migration was written expecting a `RETENTION_DELIVERY_DAYS` purge to follow it. **It never
+// arrived.** The env var exists and validates, but no code reads it and no purge was ever built,
+// so `notification_delivery` is unbounded — it keeps every row for the life of the deployment.
 //
 // `notification_template.version` is the BUSINESS version (a plain INT that climbs on
 // every edit — old rows retained for audit/rollback), part of the natural key, NOT an

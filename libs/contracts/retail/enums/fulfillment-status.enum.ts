@@ -1,23 +1,19 @@
-// A `Fulfillment`'s own lifecycle axis — a **fourth** status axis alongside the
-// three orthogonal order axes (`order.status` / `order.payment_status` /
-// `order.fulfillment_status`, ADR-028 §2). A `Fulfillment` is a per-shipment,
-// per-location record (an order with split shipments has several), so its status
-// lives on the shipment row, while the order's own `fulfillment_status` is the
-// roll-up across all of its fulfillments (ADR-031).
+// **A fourth status axis, and it is not `order.fulfillment_status`.** This one lives on the
+// shipment row — an order with split shipments has several `Fulfillment`s, each with its own
+// status — while the order header's `fulfillment_status` is the **roll-up** across all of them
+// (ADR-028 §2 / ADR-031). Reading one where you meant the other is the mistake this file exists
+// to prevent.
 //
-// It is a wire contract (not an internal domain enum like the catalog
-// `ProductStatusEnum`) because it surfaces on `FulfillmentView` and is mapped to
-// the `fulfillment.status` ENUM column, so it lives in `libs/contracts` where both
-// the retail microservice and the gateway read it (the `OrderStatusEnum` precedent,
-// ADR-005).
+// The machine — enforced by the `Fulfillment` aggregate, which lives in another service:
 //
-// `PENDING` is the just-created state (the shipment is planned but not yet shipped);
-// `SHIPPED` is reached by the ship operation (which stamps `shippedAt`/tracking and
-// captures payment); `DELIVERED` by the deliver operation; `CANCELLED` is the
-// terminal cancellation of a still-`PENDING` shipment (a `SHIPPED`/`DELIVERED`
-// fulfillment is never cancellable — that is what protects Cancel Order's
-// precondition). Cancellation is a status transition, never a row delete —
-// `fulfillment` is append-only.
+//   PENDING    the shipment is planned; nothing has left the warehouse
+//   SHIPPED    the ship operation stamps tracking AND captures payment
+//   DELIVERED  the deliver operation
+//   CANCELLED  terminal, and reachable ONLY from `PENDING`
+//
+// **A `SHIPPED` or `DELIVERED` fulfillment can never be cancelled**, and that is precisely what
+// protects Cancel Order: an order with goods already gone cannot be unwound. Cancellation is a
+// status transition, never a row delete — `fulfillment` is append-only.
 export enum FulfillmentStatusEnum {
   PENDING = 'pending',
   SHIPPED = 'shipped',

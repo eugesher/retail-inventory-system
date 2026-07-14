@@ -1,11 +1,20 @@
-// Per-location running totals for one variant at one location. Framework-free
-// per ADR-004. This supersedes the append-only `product_stock` ledger: instead
-// of summing signed deltas on every read, the three quantities are kept as
-// maintained totals (ADR-027).
+// Per-location running totals for one variant: three maintained counters rather than a ledger
+// summed on every read (ADR-027). `variantId` is an **opaque** link to the catalog — inventory
+// never imports a catalog type, and the only coupling is an FK in persistence (ADR-025).
 //
-// `variantId` is an OPAQUE cross-service link to the catalog `product_variant`
-// — the inventory domain MUST NOT import the catalog `ProductVariant`; the only
-// coupling is the FK in persistence (ADR-004 / ADR-017 / ADR-025).
+// **Two kinds of failure, and the distinction is the design.** Every mutator below picks one, and
+// which one it picks says what the condition *means*:
+//
+//   * a typed `InventoryDomainException` → a state a caller can legitimately reach. The
+//     presentation filter maps it to a **409**, and `OUT_OF_STOCK` carries the live `available` in
+//     structured `details` so a client branches on the number, not on message text.
+//   * a plain `Error` → **counter drift**: a state reachable only through an internal bug. It
+//     surfaces as a 500, on purpose. Making it typed would dress a broken invariant up as a
+//     business outcome and let a caller retry into it.
+//
+// Every mutation bumps `version`, and each is exactly ONE bump — so the version-checked write
+// persists it in a single `UPDATE`. `domain/spec/stock-level.model.spec.ts` pins all of it: the
+// boundaries, the version bumps, and which failure each over-ask produces.
 
 import { InventoryDomainException, InventoryErrorCodeEnum } from './inventory.exception';
 
@@ -71,27 +80,25 @@ export class StockLevel {
     return this._version;
   }
 
-  // Sellable count: what is physically on hand minus what is already promised
-  // (allocated to picks) and held (reserved against carts/orders).
+  // Sellable count — derived, never stored. On hand, minus what is promised to picks, minus what
+  // is held against carts.
+  //
+  // **It can go NEGATIVE, and nothing guards that.** `changeOnHand` only refuses to drive
+  // *on-hand* below zero; it does not refuse to drive on-hand below what is already committed. Ship
+  // a negative Adjust at a location with live allocations and `available` goes under. Do not treat
+  // a non-negative `available` as an invariant — the spec pins the negative case deliberately.
   public get available(): number {
     return this._quantityOnHand - this._quantityAllocated - this._quantityReserved;
   }
 
-  // On-hand mutation (Receive / Adjust). Every mutation bumps `version` so the
-  // optimistic-concurrency token advances observably; the no-oversell invariant
-  // the column guards is enforced by the reserve/release mutators below, all
-  // running inside the same bounded version-checked write protocol (ADR-030 §3).
+  // Receive / Adjust. The guard is on **on-hand**, not on `available`: driving on-hand below zero
+  // is refused, driving `available` below zero is not (see the getter above).
   public changeOnHand(delta: number): void {
     if (!Number.isInteger(delta)) {
       throw new Error(`StockLevel.changeOnHand: delta must be an integer, got ${delta}`);
     }
     const next = this._quantityOnHand + delta;
     if (next < 0) {
-      // The one domain rejection on the write path that surfaces to an HTTP
-      // caller — a signed Adjust that would drive on-hand below zero. Thrown as
-      // a typed `InventoryDomainException` so the presentation filter maps it to
-      // a 409 (the gateway's `throwRpcError` keys on the `statusCode`). The
-      // message keeps the word "negative" so it stays self-describing in logs.
       throw new InventoryDomainException(
         InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
         `StockLevel.changeOnHand: resulting quantityOnHand would be negative (${next})`,
@@ -101,14 +108,8 @@ export class StockLevel {
     this._version += 1;
   }
 
-  // Holds `quantity` more units against carts/orders (ADR-030). **This is the
-  // no-oversell guard**: a request for more than `available` is the one
-  // reserve-side domain rejection that reaches an HTTP caller, thrown as a typed
-  // `OUT_OF_STOCK` carrying the live `available` in structured `details` so a
-  // client branches on the number, not the message text. A non-positive quantity
-  // is an internal caller bug (the use case validates the request first and only
-  // ever passes a positive delta here), so it is a plain `Error`, not a typed
-  // exception the filter would surface as a 4xx. Bumps `version`.
+  // **The no-oversell guard** (ADR-030). Reserving exactly `available` is legal; one more is
+  // `OUT_OF_STOCK`.
   public reserve(quantity: number): void {
     StockLevel.requirePositiveDelta(quantity, 'reserve');
     if (quantity > this.available) {
@@ -123,11 +124,9 @@ export class StockLevel {
     this._version += 1;
   }
 
-  // Returns `quantity` held units to `available` (the Release / re-reserve-down
-  // paths). Releasing more than is reserved is a counter drift — an invariant
-  // breach, not user input — so it is a plain `Error` (surfaces as a 500, never
-  // reachable through this capability's flows because the held quantity always
-  // comes from the reservation row that occupied the counter). Bumps `version`.
+  // Returns held units to `available`. Over-releasing is **drift, not input**: the quantity always
+  // comes from the reservation row that occupied the counter, so exceeding it means the two have
+  // diverged. Plain `Error`.
   public releaseReserved(quantity: number): void {
     StockLevel.requirePositiveDelta(quantity, 'releaseReserved');
     if (quantity > this._quantityReserved) {
@@ -139,14 +138,9 @@ export class StockLevel {
     this._version += 1;
   }
 
-  // Converts a held unit into a picked one at order placement (the common
-  // Allocate path, ADR-030 §4): a pure transfer from the reserved pool to the
-  // allocated pool — `available` is unchanged because both counters subtract from
-  // it. The held quantity always came from the reservation row that occupied the
-  // counter, so releasing more than is reserved here is a counter drift (an
-  // invariant breach surfacing as a 500), not user input — hence a plain `Error`.
-  // Counts as ONE mutation (a single `version` bump), so the optimistic write
-  // persists it with one version-checked UPDATE. Bumps `version`.
+  // Turns a hold into a pick at order placement (ADR-030 §4). **A pure transfer: `available` does
+  // not move**, because both counters subtract from it. Over-asking is drift, as in
+  // `releaseReserved`.
   public allocateFromReserved(quantity: number): void {
     StockLevel.requirePositiveDelta(quantity, 'allocateFromReserved');
     if (quantity > this._quantityReserved) {
@@ -159,13 +153,9 @@ export class StockLevel {
     this._version += 1;
   }
 
-  // Allocates `quantity` straight from `available` with no prior hold (the Allocate
-  // fallback path, ADR-030 §4 — and the larger leg of a quantity-drift re-balance).
-  // **This is a no-oversell guard**: an ask beyond `available` is a user-reachable
-  // 409 `OUT_OF_STOCK` carrying the live `available` in structured `details` (the
-  // `reserve` precedent), so a place that out-runs stock fails cleanly rather than
-  // overselling. A non-positive quantity is an internal caller bug (the use case
-  // validates first), so it stays a plain `Error`. Bumps `version`.
+  // Allocates straight from `available` with **no prior hold** — the fallback when an order line
+  // never reserved, or when a stale hold had to be re-balanced. **The second no-oversell guard**: a
+  // place that out-runs stock fails with `OUT_OF_STOCK` rather than overselling.
   public allocateDirect(quantity: number): void {
     StockLevel.requirePositiveDelta(quantity, 'allocateDirect');
     if (quantity > this.available) {
@@ -180,11 +170,11 @@ export class StockLevel {
     this._version += 1;
   }
 
-  // Returns `quantity` allocated units to `available` (the Cancel-Allocation path,
-  // ADR-030 §4). Unlike `allocateFromReserved`'s drift case, an over-release here
-  // **is** user-reachable — a Cancel RPC may carry a wrong quantity — so it is a
-  // typed `STOCK_RESULT_NEGATIVE` (409) the filter maps, never a 500. Bumps
-  // `version`.
+  // Returns allocated units to `available` (Cancel Allocation, ADR-030 §4).
+  //
+  // **This is the one over-release that is NOT drift.** A Cancel RPC arrives from outside and may
+  // carry a wrong quantity, so exceeding what is allocated is a caller error, not a broken
+  // invariant — hence a typed `409`, where the reserved-side siblings raise a plain `Error`.
   public releaseAllocated(quantity: number): void {
     StockLevel.requirePositiveDelta(quantity, 'releaseAllocated');
     if (quantity > this._quantityAllocated) {
@@ -198,29 +188,23 @@ export class StockLevel {
     this._version += 1;
   }
 
-  // Ships allocated stock at fulfillment time: the units physically leave on-hand
-  // AND clear from the allocated pool (they are no longer merely promised — they are
-  // gone). Decrements BOTH counters in ONE mutation (a single `version` bump) so the
-  // optimistic write persists it with one version-checked UPDATE.
+  // **The one mutation on which stock physically leaves.** It decrements on-hand *and* allocated
+  // together, in a single `version` bump.
   //
-  // `available = onHand − allocated − reserved` is UNCHANGED by a commit-sale (both
-  // decremented counters subtract from it) — exactly right: shipping promised stock
-  // neither frees nor consumes availability. `quantityReserved` is never touched.
+  // **`available` is UNCHANGED by a commit-sale** — both decremented counters subtract from it, so
+  // they cancel. That is exactly right: shipping stock that was already promised neither frees nor
+  // consumes availability. `quantityReserved` is never touched.
   public commitSale(quantity: number): void {
     StockLevel.requirePositiveDelta(quantity, 'commitSale');
-    // Over-committing more than is allocated is a counter drift — the fulfillment
-    // lines were built from the order's own allocation, so this can only happen on an
-    // internal bug, not user input. A plain `Error` (surfaces as a 500), the
-    // `allocateFromReserved` drift precedent.
+    // Drift: the fulfillment lines were built from this order's own allocation, so shipping more
+    // than is allocated can only be an internal bug.
     if (quantity > this._quantityAllocated) {
       throw new Error(
         `StockLevel.commitSale: cannot ship ${quantity}; only ${this._quantityAllocated} allocated`,
       );
     }
-    // If physical on-hand fell below the allocated amount (a prior negative Adjust),
-    // shipping would drive on-hand negative. Unlike the allocated drift above, that is
-    // an operator-reachable condition, so it is the typed `STOCK_RESULT_NEGATIVE` (409)
-    // the presentation filter maps — never a 500.
+    // Not drift: a prior negative Adjust can leave physical on-hand below what is allocated, and an
+    // operator can reach that. Shipping then would drive on-hand negative — a typed 409, not a 500.
     if (quantity > this._quantityOnHand) {
       throw new InventoryDomainException(
         InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
@@ -239,8 +223,7 @@ export class StockLevel {
     }
   }
 
-  // Zeroed level for a freshly seen `(variantId, stockLocationId)` pair — used
-  // by the auto-init consumer and lazy-init paths in later capabilities.
+  // A zeroed level at version 0, for a `(variantId, stockLocationId)` pair nothing has stocked yet.
   public static initialAt(variantId: number, stockLocationId: string): StockLevel {
     return new StockLevel({
       id: null,

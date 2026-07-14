@@ -1,20 +1,15 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `notifications.delivery.failed` event, emitted by the
-// notification microservice when a `NotificationDelivery` exhausts its
-// `MAX_DELIVERY_ATTEMPTS` budget and remains `failed` after a (manual or scheduled)
-// retry. Framework-free — a domain object is never serialized across services
-// (ADR-011); the retry use case maps the failed delivery onto this interface before
-// emitting.
+// `notifications.delivery.failed` — a **reserved surface** (README §2). Not dead code: it is the
+// seam an ops-alert or dead-letter consumer binds.
 //
-// It rides the notification service's own `notification_events` queue as a **reserved
-// surface** (no consumer today, ADR-033) — the downstream-alerting seam a future ops
-// alert / dead-letter capability will bind. The payload is a thin header: `deliveryId`
-// resolves the full audit row, `eventReferenceType` / `eventReferenceId` link it back to
-// the originating business event (`order` / `return-request` / `stock-low` /
-// `fulfillment` / `refund` + its id), and `failureReason` carries the last NOTIFIER
-// rejection so an alert can be triaged without a second read. `eventVersion` is pinned to
-// `'v1'`; a breaking change ships `'v2'`. `occurredAt` is an ISO-8601 string.
+// **It fires only at the end of the road** — when a delivery has exhausted `MAX_DELIVERY_ATTEMPTS`
+// and stays `failed`. An individual failed attempt raises nothing, so a consumer counting these
+// is counting abandoned notifications, not failures.
+//
+// `eventReferenceType` / `eventReferenceId` link back to the originating business event (`order`,
+// `return-request`, `stock-low`, `fulfillment`, `refund`), and `failureReason` carries the last
+// `NOTIFIER` rejection — enough to triage without a second read.
 export interface INotificationDeliveryFailedEvent extends ICorrelationPayload {
   deliveryId: number;
   eventReferenceType: string;

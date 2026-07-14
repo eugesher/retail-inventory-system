@@ -13,13 +13,13 @@ import { BaseEntity } from '@retail-inventory-system/database';
 // `StockLocationEntity` use.
 const AddressBaseEntity: abstract new () => Omit<BaseEntity, 'id'> = BaseEntity;
 
-// The polymorphic address row (ADR-028 §5). `(owner_type, owner_id)` is the
-// discriminator — an address belongs to a `customer` (a future address-book entry)
-// or to an `order` (a place-time snapshot). This chain writes only `order` rows.
-// `owner_id` is VARCHAR(36) so it holds either a customer's CHAR(36) UUID or an
-// order's (short, stringified) numeric id. The composite `(owner_type, owner_id)`
-// index lives in the migration. SnakeNamingStrategy maps `recipientName` →
-// `recipient_name`, `postalCode` → `postal_code`, etc. (ADR-019).
+// The polymorphic address row (ADR-028 §5). `(owner_type, owner_id)` is the discriminator, and it
+// admits `customer` as well as `order` — but **nothing writes a `customer`-owned address.** There is
+// no address book in this system; every row you will find is an `order` snapshot, taken at
+// place-time and immutable thereafter.
+//
+// `owner_id` is VARCHAR(36) because it must hold either a customer's CHAR(36) UUID or an order's
+// stringified numeric id. **It carries no FK** — a polymorphic column cannot.
 @Entity('address')
 export class AddressEntity extends AddressBaseEntity {
   @PrimaryColumn({ type: 'char', length: 36 })

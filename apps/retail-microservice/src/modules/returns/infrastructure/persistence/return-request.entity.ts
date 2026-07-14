@@ -59,10 +59,10 @@ export class ReturnRequestEntity extends BaseEntity {
   @Column({ type: 'timestamp', nullable: true })
   public closedAt: Date | null;
 
-  // Optimistic-concurrency token. TypeORM owns the persisted value via
-  // `@VersionColumn` (incremented on each managed save); the guard it enables is a
-  // later concurrency-hardening capability. Shipping the column now keeps that
-  // retrofit non-destructive (the `order.version` / `fulfillment.version` precedent).
+  // Optimistic-concurrency token. TypeORM owns the persisted value via `@VersionColumn`
+  // (incremented on each managed save), and the guard is live: every RMA lifecycle write goes
+  // through `runWithReturnWriteRetry`, which loses a compare-and-swap, re-reads, and surfaces a
+  // `409` at exhaustion (ADR-036/045).
   @VersionColumn()
   public version: number;
 

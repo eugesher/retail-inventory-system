@@ -9,12 +9,13 @@ import {
 
 import { MicroserviceClientConfiguration } from '../clients/microservice-client.configuration';
 
-// Registers a `ClientProxy` bound to `catalog_queue` under the
-// `CATALOG_MICROSERVICE` token. The catalog microservice itself imports this
-// module to publish its own events (`catalog.variant.created`) back onto
-// `catalog_queue` — the events ride the same queue the service listens on; no
-// consumer exists yet (a later inventory capability binds one), exactly the
-// reserved-surface pattern `retail.order.confirmed` follows today.
+// Registers a `ClientProxy` bound to `catalog_queue` under the `CATALOG_MICROSERVICE` token.
+// The catalog service imports it to emit `catalog.product.published` / `.archived` onto its own
+// queue, where nothing is bound — reserved surfaces (README §2).
+//
+// `catalog.variant.created` does NOT ride this client. It targets the inventory consumer's queue
+// (ADR-008/020), which is why `CatalogRabbitmqPublisher` holds a second, inventory-bound client
+// beside this one.
 @Module({
   imports: [
     ConfigModule,

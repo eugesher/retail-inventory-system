@@ -1,25 +1,16 @@
 // The bounded optimistic-concurrency retry protocol (ADR-036), in one place (ADR-045).
 //
-// Four modules run this loop — inventory `stock`, retail `cart` / `orders` / `returns`. They
-// used to run four hand-copied versions of it, which meant four independent chances for the
-// protocol ADR-036 actually specifies to drift: the log LEVELS (`info` while retrying, `warn`
-// on exhaustion), the rule that ONLY a lost compare-and-swap retries, and the bounded budget.
-//
-// What is generalised is exactly that invariant core — the loop, the levels, the two message
-// texts. What is NOT generalised is anything a module owns: its conflict type, its terminal
-// `*DomainException`, and the fields it puts on the trace. Those arrive as closures, because
-// a lib cannot know that a lost stock CAS identifies its row by `(variantId, stockLocationId)`
-// while a cart identifies its by `cartId`.
-//
-// This is deliberately NOT a line-count optimisation. A naive "one generic loop" that pushed
-// the logging out to the caller would have *added* lines — the duplicated `for`/`try`/`catch`
-// is only eight of them. The win is that the protocol becomes single-source and provable,
-// rather than the sum of four approximations of it.
+// The invariant core lives here and is not negotiable per module: the loop, the bounded budget,
+// the log levels, the two message texts, and the rule that **only a lost compare-and-swap
+// retries**. Everything a module genuinely owns arrives as a closure — its conflict type, its
+// terminal `*DomainException`, the fields it puts on the trace — because a lib cannot know that
+// a lost stock CAS identifies its row by `(variantId, stockLocationId)` while a cart identifies
+// its by `cartId`.
 
-// A structural logger, NOT `PinoLogger`. `libs/common` is framework-free — `Result`,
-// `DomainException`, pagination, `bodyFingerprint` — and importing `nestjs-pino` to write two
-// lines would end that. `PinoLogger` satisfies this shape structurally, so every caller passes
-// its own logger unchanged.
+// A structural logger, NOT `PinoLogger`. `libs/common` is framework-free, and importing
+// `nestjs-pino` to write two lines would end that (the `boundaries` rules reject it).
+// `PinoLogger` satisfies this shape structurally, so every caller passes its own logger
+// unchanged.
 export interface IOccRetryLogger {
   info(context: Record<string, unknown>, message: string): void;
   warn(context: Record<string, unknown>, message: string): void;
@@ -33,10 +24,10 @@ export interface IOccRetryPolicy<TConflict> {
 
   logger: IOccRetryLogger;
 
-  // The bounded budget, injected from `OCC_RETRY_ATTEMPTS` — never a constant. A caller may
-  // pass `1` to disable retrying (the cart does, when the client pinned an `If-Match`
-  // version: a lost race must surface immediately rather than silently resolve to a
-  // different outcome).
+  // The bounded budget, injected from `OCC_RETRY_ATTEMPTS` — never a constant. Pass `1` to
+  // disable retrying, which is what a client-pinned `If-Match` version requires: a lost race
+  // must surface as a conflict rather than silently resolve to a different outcome than the one
+  // the caller pinned.
   maxAttempts: number;
 
   // Narrows the caught error to THIS module's conflict type. A type guard rather than a base

@@ -70,12 +70,19 @@ import { DeliveryRetryScheduler } from './infrastructure/scheduling';
 // `DatabaseModule.forFeature(notificationEntities)` registers the two persistence entities the
 // notification microservice owns (its first DB tables, ADR-033). The two repository
 // ports (`NOTIFICATION_TEMPLATE_REPOSITORY` / `NOTIFICATION_DELIVERY_REPOSITORY`) are
-// bound to their TypeORM adapters here. `RenderAndDispatchUseCase` is the first
-// consumer of all four seams (template repo + delivery repo + renderer + `NOTIFIER`):
-// it resolves the latest active template, renders subject/body, persists a `queued`
-// `NotificationDelivery` row BEFORE the `NOTIFIER` call, then flips it `→ sent`/`→ failed`.
-// The consumers are rewired onto it in a later capability; the five inline use cases
-// still run unchanged today.
+// bound to their TypeORM adapters here. `RenderAndDispatchUseCase` binds all four seams
+// (template repo + delivery repo + renderer + `NOTIFIER`): it resolves the latest active
+// template, renders subject/body, persists a `queued` `NotificationDelivery` row BEFORE the
+// `NOTIFIER` call, then flips it `→ sent`/`→ failed`.
+//
+// **Every dispatch consumer goes through it, and it is the only thing that CREATES a delivery.**
+// A new consumer that calls `NOTIFIER` directly skips the delivery row, the consent gate and the
+// dedupe key in one move.
+//
+// There is a second `NOTIFIER.send` — `RetryDeliveryUseCase.reattempt` — and it is not an
+// alternative to this one. It re-sends a row that **already exists and is already rendered**, so
+// it has no template to resolve, no consent left to decide and nothing to dedupe. Both the manual
+// retry RPC and the scheduled sweeper reach the notifier through it.
 //
 // `NotificationsController` serves the service's non-health `@MessagePattern` surface
 // (ADR-033): the template authoring/read RPCs (`notification.template.author` /

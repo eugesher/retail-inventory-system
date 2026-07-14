@@ -48,11 +48,9 @@ const CURRENCY_PATTERN = /^[A-Za-z]{3}$/;
 // the other aggregates' `<TId | null>` shape; in practice a live cart always
 // carries a concrete id.
 //
-// `version` is the optimistic-concurrency token: it ships and advances on every
-// mutation now, even though no concurrency guard consumes it yet — retrofitting an
-// OCC column onto a populated table later is a destructive `ALTER TABLE`, so the
-// column is cheapest up front (ADR-028 §6, the same reasoning ADR-027 used for
-// `stock_level.version`).
+// `version` is the OCC token, and **the guard is live**: `runWithCartWriteRetry` re-reads under a
+// fresh transaction when a compare-and-swap is lost, and surfaces a `409` once the budget is spent
+// (ADR-036/045). The in-memory bump here exists so the model is testable without a database.
 export class Cart extends AggregateRoot<string | null> {
   private readonly _customerId: string | null;
   private readonly _currency: string;
@@ -220,14 +218,30 @@ export class Cart extends AggregateRoot<string | null> {
     this.addDomainEvent(new CartLineRemovedEvent({ cartId: this.requireId(), lineId }));
   }
 
-  // active → converted. Called by Place Order (a later capability) once the cart's
-  // lines are snapshotted into the order. Terminal; re-placing a converted cart is
-  // an idempotency concern handled at the use-case layer, not here.
+  // **Neither status mutator below has a caller, yet both statuses are reached.** The `Cart`
+  // aggregate does not drive its own terminal transitions: each one is performed by *another*
+  // module, in **raw SQL**, because neither module may import `cart/`.
+  //
+  //   converted  ← `orders/`, via `ORDER_CART_READER`:
+  //                `UPDATE cart SET status='converted' … WHERE id=? AND status='active'`
+  //   abandoned  ← the gateway's `auth/`, via `CUSTOMER_ERASURE_WRITER`:
+  //                `UPDATE cart SET status='abandoned' … WHERE customer_id=? AND status='active'`
+  //
+  // Both bump `version` in the same statement, so a concurrent cart writer loses its CAS and
+  // retries against the changed row.
+
+  // active → converted. Terminal. **Do not call this, and do not "wire it up" to Place Order.**
+  // The reader's `WHERE status = 'active'` is not a filter — it is the compare-and-swap that
+  // serialises two concurrent places into one order. Setting the status through the aggregate
+  // instead would write the same value **without that CAS**, and the racing second place would
+  // succeed.
   public markConverted(): void {
     this.transitionFromActive(CartStatusEnum.CONVERTED, 'markConverted');
   }
 
-  // active → abandoned. No producer yet — ships for the later purge capability.
+  // active → abandoned. Terminal. Reached only by a customer erasure (ADR-037), which abandons
+  // every active cart the erased customer owns — a cart is a disposable working set, not a record
+  // to preserve. Place Order reads the status and rejects it.
   public markAbandoned(): void {
     this.transitionFromActive(CartStatusEnum.ABANDONED, 'markAbandoned');
   }

@@ -40,9 +40,9 @@ import { resolveCustomerEmail } from './resolve-customer-email';
 // way (void an authorization / flag a capture for refund) and releases the stock back to
 // `available`.
 //
-// **Authorization is owner-or-staff** (ADR-024 / ADR-028 §7) via `loadAuthorizedOrder`:
-// a customer may cancel **its own** pending order (`order.customerId === actorId`), or a
-// staff caller with `order:cancel` (folded into `isStaffCancel`) may cancel any.
+// Authorization goes through `loadAuthorizedOrder` (the rule is stated there, once); the override is
+// `order:cancel`. **A customer may cancel its own order** — unlike Cancel *Line*, which is
+// staff-only.
 //
 // **Precondition — no physically-shipped stock can be stranded.** The order must have
 // **no `shipped`/`delivered` fulfillment** (`ORDER_NOT_CANCELLABLE`, 409). This is the
@@ -51,12 +51,15 @@ import { resolveCustomerEmail } from './resolve-customer-email';
 // not catch a shipped order — the fulfillment-presence check does. `pending` fulfillments
 // are allowed; they are cancelled along with the order.
 //
-// **Payment outcome split** (ADR-028 §6 / ADR-031): a `captured` payment is **flagged for
-// refund** (the money is gone — `flagged_for_refund = true`; the later refund capability
-// issues the actual refund), an `authorized` payment is **voided** (the held authorization
-// is released, no money ever taken). The order's payment *axis* keeps its value — there is
-// no `voided` member on `OrderPaymentStatusEnum`; the `payment` row carries `voided`, the
-// deliberate orthogonality of ADR-028 §2.
+// **The payment outcome splits on whether the money already moved** (ADR-031). An `authorized`
+// payment is **voided** — nothing was taken, nothing is owed. A `captured` one is **flagged for
+// refund**: the money is gone, so cancellation cannot undo it, and `flagged_for_refund = true` is a
+// *claim* that a refund is owed. **The flag alone gives nobody their money back** — retail's own
+// `OrderCancelledConsumer` reads the cancellation event and issues the refund.
+//
+// The order's payment *axis* keeps its value: there is no `voided` member on
+// `OrderPaymentStatusEnum`. Only the `payment` row carries `voided` — the deliberate orthogonality
+// of ADR-028 §2.
 //
 // **Ordering** (the cross-cutting consistency rule): the local writes (cancel the order,
 // cancel `pending` fulfillments, settle the payment) commit first; the allocation release
@@ -253,9 +256,10 @@ export class CancelOrderUseCase {
   // orders' allocations. A fully-cancelled line holds nothing and is dropped: inventory
   // rejects a non-positive line quantity.
   //
-  // The line's allocation location is `default-warehouse` (Place allocated there); a
-  // multi-location sourcing record is a later capability. `reason 'order-cancelled'` is the
-  // movement's `reason_code` (distinct from the optional human `reason` on the event).
+  // The cancel releases from `default-warehouse` because **that is where Place allocated it** — an
+  // order is allocated from exactly one location and the system records no other. `reason
+  // 'order-cancelled'` is the movement's `reason_code`, distinct from the optional human `reason`
+  // that rides the event.
   private static buildCancelAllocationPayload(
     order: Order,
     actorId: string,

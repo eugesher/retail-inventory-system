@@ -45,18 +45,14 @@ interface ITransferred {
   inMovement: StockMovement;
 }
 
-// Transfer Stock moves a positive `quantity` of on-hand for one variant between two
-// stock locations, atomically (ADR-030). It is the inventory ledger's last writer:
-// every counter-changing inventory operation now leaves a `StockMovement`.
+// Moves on-hand for one variant between two locations, atomically (ADR-030).
 //
-// The ledger's type set has **no `transfer` member** — a transfer is modelled as a
-// PAIR of `adjustment` movements that share one `referenceType: 'transfer'` +
-// `referenceId: <transferId>`: the source leg `quantity = −quantity`
-// (`reasonCode: 'transfer-out'`) and the destination leg `quantity = +quantity`
-// (`reasonCode: 'transfer-in'`). Reconstructing a transfer is a query for that
-// reference pair; the fixed sign-per-type invariant stays intact (adjustment alone
-// accepts both signs). In-transit / transfer-order documents are deliberately out
-// of scope — a transfer records nothing between the two locations.
+// **The ledger has no `transfer` type.** A transfer is a PAIR of `adjustment` movements sharing one
+// `referenceType: 'transfer'` + `referenceId`: the source leg negative (`transfer-out`), the
+// destination leg positive (`transfer-in`). Reconstructing a transfer means querying that reference
+// pair — nothing in the ledger records the movement *between* the locations, and there is no
+// in-transit state. Modelling it this way is what keeps the sign-per-type invariant intact, since
+// `adjustment` is the only type allowed either sign.
 //
 // Both legs commit in ONE transaction under the shared bounded optimistic write
 // protocol: two version-checked `StockLevel` persists + two ledger appends inside

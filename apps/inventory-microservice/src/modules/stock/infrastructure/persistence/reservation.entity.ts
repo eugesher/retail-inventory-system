@@ -15,16 +15,10 @@ import { ReservationStatusEnum } from '../../domain';
 // string-PK override `CartEntity` / `AddressEntity` / `StockLocationEntity` use.
 const ReservationBaseEntity: abstract new () => Omit<BaseEntity, 'id'> = BaseEntity;
 
-// A TTL-bounded, cart-scoped hold (ADR-030). `variant_id` is mapped as a plain
-// BIGINT scalar with NO `@ManyToOne`, and `cart_id` as a plain CHAR(36) scalar:
-// the inventory module must not import the catalog `ProductVariantEntity` or the
-// retail `CartEntity` (the forbidden cross-module import; ADR-004 / ADR-017). The
-// FKs that tie these columns to `product_variant(id)` / `cart(id)` /
-// `stock_location(id)` live only in the migration (the `stock_level.variant_id`
-// precedent).
-//
-// SnakeNamingStrategy maps `variantId` → `variant_id`, `stockLocationId` →
-// `stock_location_id`, `cartId` → `cart_id`, `expiresAt` → `expires_at` (ADR-019).
+// **`variant_id` and `cart_id` are plain scalars with NO `@ManyToOne`.** Inventory may not import
+// the catalog or retail entities, so the relations cannot be expressed here — **the FKs exist only
+// in the migration**. A reader who trusts the entity will conclude there is no referential
+// integrity; there is, and TypeORM simply cannot see it.
 @Entity('reservation')
 export class ReservationEntity extends ReservationBaseEntity {
   @PrimaryColumn({ type: 'char', length: 36 })
@@ -48,11 +42,8 @@ export class ReservationEntity extends ReservationBaseEntity {
   @Column({ type: 'enum', enum: ReservationStatusEnum, default: ReservationStatusEnum.ACTIVE })
   public status: ReservationStatusEnum;
 
-  // Optimistic-concurrency token. TypeORM owns the persisted value via
-  // `@VersionColumn` (incremented on each managed save); the no-oversell invariant
-  // it ultimately guards runs inside the bounded optimistic write protocol the
-  // Reserve / Allocate use cases add (ADR-030 §4). The `StockLevelEntity`
-  // precedent.
+  // The OCC token. TypeORM increments the persisted value on every managed save — the domain's own
+  // in-memory bump exists so the model stays testable without a database, not to drive this column.
   @VersionColumn()
   public version: number;
 }

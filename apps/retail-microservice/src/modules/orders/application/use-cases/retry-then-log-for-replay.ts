@@ -1,9 +1,9 @@
 import { PinoLogger } from 'nestjs-pino';
 
 export interface IRetryThenLogForReplayOptions {
-  // Bounded attempt budget — retries are immediate (no backoff), the realistic failure
-  // being a transient RMQ hiccup the broker recovers from; a backoff is a later
-  // refinement that would live here, in the one place the posture is defined.
+  // Retries are immediate — there is no backoff. **A retry after a timeout races the original**,
+  // because a timeout does not cancel an RPC that is still travelling; raising this budget widens
+  // that window rather than the resilience. See the note on `replayMessage`.
   maxAttempts: number;
   logger: PinoLogger;
   correlationId: string;
@@ -13,20 +13,23 @@ export interface IRetryThenLogForReplayOptions {
   // Identifying fields logged on every retry warn and on the final poison-record error
   // (the full payload an operator needs to replay the operation).
   context: Record<string, unknown>;
-  // The terminal error message — the post-commit posture differs per caller (an
-  // allocation release over-holds the stock, a Commit Sale replay is idempotent on
-  // `fulfillmentId`), so each caller spells out what awaiting-replay means.
+  // What awaiting-replay costs, in the caller's own words — the posture differs. A failed allocation
+  // release **over-holds** stock; a failed Commit Sale leaves it **undecremented**. Both are
+  // conservative: nothing is oversold while an operator replays.
   replayMessage: string;
 }
 
-// Runs a post-commit inventory `operation`, retrying up to `maxAttempts`. On a
-// persistent failure it logs the full `context` at `error` (a poison record for operator
-// replay) and returns **WITHOUT throwing**: the local transaction has already committed
-// and must not be rolled back (the post-commit eventual-consistency posture, ADR-031). A
-// failed operation leaves stock over-held/undecremented until a manual replay frees it —
-// it never corrupts the counters. Shared by Cancel Order / Cancel Line (allocation
-// release) and Ship (Commit Sale) so the retry/log-for-replay policy lives in exactly one
-// place (the `order-access` shared-helper precedent).
+// The one post-commit retry posture, for every cross-service call this module makes after its own
+// transaction has committed.
+//
+// On a persistent failure it logs the whole `context` at `error` — a poison record an operator can
+// replay from — and **returns WITHOUT throwing**. The local write is already durable and must not be
+// unwound: the money is taken and the box has left (ADR-031).
+//
+// **The inventory operations behind this are idempotent against a SEQUENTIAL replay only.** Their
+// probes read outside their transactions and no UNIQUE backs them, so a retry that fires while the
+// original is still in flight — which is what a timeout produces — can apply twice. That is the
+// hazard this helper's `maxAttempts` sits on top of, and it is why raising it is not free.
 export async function retryThenLogForReplay(
   operation: () => Promise<unknown>,
   options: IRetryThenLogForReplayOptions,

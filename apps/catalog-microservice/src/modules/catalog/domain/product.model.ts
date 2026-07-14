@@ -65,10 +65,10 @@ export class Product extends AggregateRoot<number | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // Creates a DRAFT product with no variants and records NO event — there is no
-  // ProductCreated event in the catalog model (the three events are
-  // variant-created / published / archived). Variants are added through
-  // `addVariant`, which records `VariantCreatedEvent` per variant.
+  // Creates a DRAFT product with no variants and records NO event. **There is no
+  // `ProductCreated` event** — creating a product announces nothing, because a product with no
+  // variants is not yet anything the rest of the platform can act on. The first announcement is
+  // `VariantCreatedEvent`, recorded per variant by `addVariant`.
   public static create(props: { name: string; slug: string; description?: string }): Product {
     return new Product({
       id: null,
@@ -123,8 +123,8 @@ export class Product extends AggregateRoot<number | null> {
   // the concrete id from the persisted aggregate (ADR-025).
   //
   // slug/sku global uniqueness is NOT checked here — the aggregate cannot see
-  // other aggregates. That is a repository-level guarantee asserted in the
-  // register/add-variant use-case spec (later work) via a repository double.
+  // other aggregates. That is a repository-level guarantee, pinned in
+  // `spec/add-variant.use-case.spec.ts` against a repository double.
   public addVariant(input: AddVariantInput): ProductVariant {
     const variant = new ProductVariant({
       id: null,

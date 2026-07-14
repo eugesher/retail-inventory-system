@@ -1,15 +1,14 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.return.rejected` event, published after a return
-// request walks `requested → rejected` (staff `order:return-authorize`). Rejection is
-// terminal, so it stamps the RMA's `closedAt`. Framework-free (ADR-011) — the Reject use
-// case maps the saved aggregate onto this interface before emitting. The past-tense
-// counterpart of the imperative `retail.return.reject` command (ADR-008). Emitted onto
-// `retail_queue` (the producer's own queue — a reserved surface today, no consumer), the
-// internal-status half of the eventing split (the buyer-facing requested/authorized/
-// received events go to `notification_events`). `closedAt` is the rejection timestamp;
-// `reason` is the optional human-supplied rejection reason. `eventVersion` is pinned to
-// `'v1'`; `occurredAt` and `closedAt` are ISO-8601 strings.
+// `retail.return.rejected` — a **reserved surface** (README §2). Not dead code.
+//
+// Rejection is terminal, and it stamps `closedAt` — the same field a *successful* closure stamps.
+// A consumer cannot tell the two apart from `closedAt` alone; the routing key is the only
+// discriminator.
+//
+// This is the internal-status half of the returns eventing split — the buyer-facing events go to
+// `notification_events`. `reason` is optional and human-supplied. `occurredAt` and `closedAt` are
+// ISO-8601.
 export interface IRetailReturnRejectedEvent extends ICorrelationPayload {
   rmaId: number;
   rmaNumber: string;

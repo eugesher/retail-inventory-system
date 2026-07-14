@@ -5,10 +5,11 @@
 //   negative (stock leaving / hold torn down) → sale, allocation, release
 //   either non-zero sign (operator's delta)  → adjustment
 //
-// All six ship as the complete type set even though `sale` / `return` gain
-// producers only with the later fulfilment / returns capabilities — the enum is
-// the whole vocabulary ADR-030 pins, so a movement row never needs a schema
-// change to record a kind that was always foreseen.
+// All six are produced today: `receipt` by Receive, `adjustment` by Adjust AND by
+// Transfer (which writes TWO of them — one out, one in — under a single `transfer`
+// reference id, so `(reference_type, reference_id)` is NOT unique for a transfer),
+// `allocation` by Allocate, `release` by Release / Cancel-allocation / the TTL
+// sweep, `sale` by Commit-sale, `return` by Restock-from-return.
 //
 // This is a WIRE CONTRACT: it rides `StockMovementView`, the audit list query
 // payload, and the future `inventory.stock-movement.recorded` event, so it lives

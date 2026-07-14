@@ -26,8 +26,9 @@ export enum ReturnErrorCodeEnum {
   // state forbids, thrown by the `ReturnRequest` mutators, 409.
   RETURN_INVALID_STATUS_TRANSITION = 'RETURN_INVALID_STATUS_TRANSITION',
   // An inspection recorded a bad condition/disposition enum or a negative refund
-  // amount — thrown by `ReturnLine.inspect`, 400. (The Inspect use case also raises it
-  // for cross-aggregate inspection breaches in a later capability.)
+  // amount — thrown by `ReturnLine.inspect`, 400. The Inspect use case raises the same code for
+  // the two breaches a single line cannot see: **inspecting one line twice, and not inspecting
+  // them all.** An inspection is all-or-nothing — one request must cover every line on the RMA.
   RETURN_INSPECTION_INVALID = 'RETURN_INSPECTION_INVALID',
   // Optimistic-concurrency conflict on a return-request status write → 409 (ADR-036).
   // Two staff raced the same RMA's lifecycle and the bounded retry budget was exhausted
@@ -42,7 +43,7 @@ export enum ReturnErrorCodeEnum {
   // the CAS loss is retried.
   RETURN_VERSION_MISMATCH = 'VERSION_MISMATCH',
 
-  // --- Thrown by the use cases (later tasks) ---
+  // --- Thrown by the use cases ---
   // The return request being read/operated on does not exist — 404 (the read +
   // authorize/reject/receive/inspect/close operations resolve an RMA by id).
   RETURN_NOT_FOUND = 'RETURN_NOT_FOUND',
@@ -66,8 +67,7 @@ export enum ReturnErrorCodeEnum {
   RETURN_QUANTITY_EXCEEDS_RETURNABLE = 'RETURN_QUANTITY_EXCEEDS_RETURNABLE',
   // A requested `orderLineId` does not name a line on the order — 404 (Open).
   RETURN_ORDER_LINE_NOT_FOUND = 'RETURN_ORDER_LINE_NOT_FOUND',
-  // A `returnLineId` referenced by an inspect request does not exist on the RMA — 404
-  // (Inspect, a later capability).
+  // A `returnLineId` referenced by an inspect request does not exist on the RMA — 404 (Inspect).
   RETURN_LINE_NOT_FOUND = 'RETURN_LINE_NOT_FOUND',
 }
 

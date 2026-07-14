@@ -8,8 +8,15 @@ import { IPricingRepositoryPort, PRICING_REPOSITORY } from '../ports';
 import { toPriceView } from './price-view.factory';
 
 // Select Applicable Price — the deterministic `(variantId, currency, asOf)` → one
-// Price answer. It backs the GET single-price endpoint and (later) the publish
-// precondition. The repository returns the **coarse** candidate set (every row
+// Price answer, behind the GET single-price endpoint.
+//
+// **Catalog's publish precondition does NOT come through here**, even though it asks a similar
+// question ("does this variant have an in-effect price?"). Catalog cannot call a pricing use case
+// — the boundaries lint forbids the cross-module import — so it runs its own parameterized read
+// of the `price` table through `ACTIVE_PRICE_PROBE`. Two readers of one table, by design. Do not
+// "unify" them: the second one exists precisely because the first is unreachable from catalog.
+//
+// The repository returns the **coarse** candidate set (every row
 // whose `[validFrom, validTo)` interval contains `asOf`); the **resolution** —
 // highest `priority`, then latest `validFrom` — lives **here**, not in SQL, so it
 // stays unit-testable against an in-memory repository double and free to evolve

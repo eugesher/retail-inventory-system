@@ -28,8 +28,9 @@ export class FulfillmentLineInputDto {
 }
 
 // Request body for `POST /api/orders/:orderId/fulfillments`. `stockLocationId` is
-// optional — the retail use case defaults it to `default-warehouse` (multi-location
-// sourcing is a later capability). `lines` must be a non-empty array of
+// optional — the retail use case defaults it to `default-warehouse`. **One fulfillment ships
+// from exactly one location**: to split an order across warehouses, create one fulfillment per
+// location. `lines` must be a non-empty array of
 // `FulfillmentLineInputDto`; `@ValidateNested({ each: true })` + `@Type` make
 // class-validator recurse into each entry, and `@ArrayNotEmpty` rejects an empty
 // shipment at the edge (the domain `Fulfillment.create` is the backstop). The

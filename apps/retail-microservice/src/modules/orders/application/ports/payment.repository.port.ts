@@ -14,9 +14,9 @@ export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
 //   It accepts an optional `scope` so authorize-on-place persists the `Payment` and
 //   advances `order.paymentStatus` in one short follow-up transaction (ADR-017 §6).
 // - `findById` is the by-id load path.
-// - `findByOrderId` resolves the single payment for an order — one payment per order
-//   in this capability (split-payment / multi-capture are later capabilities), so a
-//   single `Payment | null` is the right shape, not an array. It accepts an optional
+// - `findByOrderId` resolves the single payment for an order — **an order has exactly one
+//   payment**, because nothing anywhere creates a second one; that is why the shape is a
+//   single `Payment | null` and not an array. It accepts an optional
 //   `scope` so a use case that retries its transaction on an optimistic conflict
 //   (capture / ship / cancel, ADR-036) re-loads the payment INSIDE each attempt's
 //   transaction — a fresh domain object per attempt keeps its mutators

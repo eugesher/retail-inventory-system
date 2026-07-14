@@ -1,88 +1,74 @@
 import { DomainException } from '@retail-inventory-system/common';
 
-// Stable, greppable codes for every inventory domain / write-path invariant
-// violation. The code is the part the presentation-layer
-// `InventoryRpcExceptionFilter` maps onto an HTTP status + wire error shape
-// (`{ statusCode, message, code }`); the domain itself stays transport-free
-// (ADR-027, mirroring the catalog/pricing filters — ADR-025 / ADR-026).
+// Stable, greppable codes for every inventory invariant a caller can trip.
+//
+// **The code → HTTP status table is `presentation/inventory-rpc-exception.filter.ts`, and it is
+// not restated here.** The domain stays transport-free: it names *what went wrong*, and the filter
+// alone decides what that is worth over HTTP. A second copy of the mapping would drift from the
+// one the code actually runs.
+//
+// What is worth saying is what the code names cannot:
 export enum InventoryErrorCodeEnum {
-  // Malformed-input invariants → 400. Normally caught by the gateway request
-  // DTOs first; these are the backstop for the directly-reachable RMQ path.
+  // Malformed input. The gateway DTOs normally catch these first — these are the backstop for the
+  // RMQ path, which is directly reachable on the bus with no pipe in front of it.
   STOCK_RECEIVE_QUANTITY_INVALID = 'INVENTORY_STOCK_RECEIVE_QUANTITY_INVALID',
   STOCK_ADJUSTMENT_DELTA_INVALID = 'INVENTORY_STOCK_ADJUSTMENT_DELTA_INVALID',
   STOCK_ADJUSTMENT_REASON_REQUIRED = 'INVENTORY_STOCK_ADJUSTMENT_REASON_REQUIRED',
-  // Transfer-input invariants → 400 (ADR-030). A non-positive / non-integer
-  // `quantity`, and a transfer whose source and destination are the same location
-  // (a no-op that would otherwise debit then credit the same row). A source
-  // shortfall needs no new code — `changeOnHand(−quantity)` already throws
-  // `STOCK_RESULT_NEGATIVE` (409); unknown/inactive locations reuse the existing
-  // `STOCK_LOCATION_NOT_FOUND` / `STOCK_LOCATION_INACTIVE` codes.
+
+  // A transfer to the location it came from is rejected rather than treated as a no-op — it would
+  // otherwise debit and credit the same row. **A source shortfall has no code of its own**:
+  // `changeOnHand(−quantity)` already raises `STOCK_RESULT_NEGATIVE`, and unknown or inactive
+  // locations reuse the two `STOCK_LOCATION_*` codes below.
   TRANSFER_QUANTITY_INVALID = 'INVENTORY_TRANSFER_QUANTITY_INVALID',
   TRANSFER_SAME_LOCATION = 'INVENTORY_TRANSFER_SAME_LOCATION',
 
-  // Lookup miss → 404: the named stock location does not exist.
   STOCK_LOCATION_NOT_FOUND = 'INVENTORY_STOCK_LOCATION_NOT_FOUND',
-
-  // Conflicts with current state → 409: the request is well-formed but clashes
-  // with what is persisted — the location is deactivated, or applying the delta
-  // would drive on-hand below zero.
   STOCK_LOCATION_INACTIVE = 'INVENTORY_STOCK_LOCATION_INACTIVE',
   STOCK_RESULT_NEGATIVE = 'INVENTORY_STOCK_RESULT_NEGATIVE',
 
-  // Optimistic-concurrency exhaustion → 409: the write retried the version-checked
-  // update the bounded number of times and still lost the race to a concurrent
-  // writer on the same `(variantId, stockLocationId)`. The caller may simply retry.
+  // The version-checked write lost its race the bounded number of times. **The caller may simply
+  // retry** — nothing is wrong with the request, only with its timing.
   STOCK_WRITE_CONFLICT = 'INVENTORY_STOCK_WRITE_CONFLICT',
 
-  // Reservation invariants (ADR-030). The TTL-bounded, cart-scoped hold the
-  // inventory-reservation capability builds on. The aggregate enforces these now;
-  // the Reserve / Release / Allocate use cases that surface them to a caller land
-  // in later sessions.
-  //
-  // Malformed input → 400: a non-positive / non-integer reserved quantity.
   RESERVATION_QUANTITY_INVALID = 'INVENTORY_RESERVATION_QUANTITY_INVALID',
-  // Illegal status-machine move → 409: e.g. releasing a non-active hold, or
-  // reactivating a committed one. The request is well-formed but clashes with the
-  // hold's current lifecycle state.
+
+  // An illegal move on the hold's status machine — releasing one that is not active, reactivating
+  // a `committed` one.
   RESERVATION_INVALID_STATE = 'INVENTORY_RESERVATION_INVALID_STATE',
-  // Wall-clock-expired commit → 409: `commit` was called on a hold whose
-  // `expiresAt` is already in the past. The allocate use case refreshes the TTL
-  // first when it decides to honor a stale-but-still-held hold, so this never
-  // surfaces out of allocate.
+
+  // `commit` on a hold whose `expiresAt` has passed — **even though the row still says `active`**,
+  // because expiry is wall-clock and nothing flips the status until the sweep runs. Allocate
+  // refreshes the TTL first when it decides to honour a stale-but-unswept hold, so this never
+  // escapes from there.
   RESERVATION_EXPIRED = 'INVENTORY_RESERVATION_EXPIRED',
 
-  // No-oversell rejection → 409 (ADR-030 §3): a Reserve asked for more than the
-  // variant's `available` at the location. Carries the live `available` in the
-  // exception's structured `details` so a client branches on the number, not the
-  // human message. The reserve-side counterpart of `STOCK_RESULT_NEGATIVE`.
+  // The no-oversell rejection (ADR-030 §3). **It carries the live `available` in `details`**, so a
+  // client branches on the number rather than parsing a human message. The reserve-side twin of
+  // `STOCK_RESULT_NEGATIVE`.
   OUT_OF_STOCK = 'INVENTORY_OUT_OF_STOCK',
 
-  // Release-by-id miss → 404: the `reservationId` selector named a hold that does
-  // not exist. (The release-by-cart selector returns an idempotent empty result on
-  // a no-match instead — only the precise by-id path 404s.)
+  // **Only the by-id release path can raise this.** A release by `cartId` that matches nothing
+  // returns an idempotent empty result instead — removing a line twice must not error, while
+  // naming a hold that does not exist must.
   RESERVATION_NOT_FOUND = 'INVENTORY_RESERVATION_NOT_FOUND',
 
-  // Malformed Release selector → 400: a release request must carry EXACTLY one
-  // selector family — either `reservationId` (one row) or `cartId` (+ optional
-  // `variantId` / `stockLocationId`, all matching active rows). Supplying both, or
-  // neither, is rejected here.
+  // A release must carry **exactly one** selector family: `reservationId`, or `cartId` (optionally
+  // narrowed). Both, or neither, is rejected here rather than silently guessed at.
   RESERVATION_SELECTOR_INVALID = 'INVENTORY_RESERVATION_SELECTOR_INVALID',
 }
 
-// The inventory bounded context's concrete `DomainException` (the third in the
-// repo, after `CatalogDomainException` and `PricingDomainException`). A single
-// throwable per context carries a typed `code` from `InventoryErrorCodeEnum`,
-// satisfying the base's abstract `code` contract while keeping the domain
-// transport-free — HTTP status is decided by the presentation filter, never here
-// (ADR-027). The earlier inventory model threw plain `Error`; the Receive/Adjust
-// write path is the first inventory flow that surfaces a domain rejection to an
-// HTTP caller, so it needs a typed, mappable error.
+// **One throwable for the whole context** — the code, not the class, is what distinguishes a
+// rejection. Every bounded context in this repo does the same, so a `catch` never has to enumerate
+// exception types.
+//
+// Not every inventory failure comes through here, and that is deliberate: a **counter drift** is
+// thrown as a plain `Error` (see `stock-level.model.ts`), because a typed exception would dress a
+// broken invariant up as a business outcome and let a caller retry into it.
 export class InventoryDomainException extends DomainException {
   public readonly code: InventoryErrorCodeEnum;
-  // Optional structured payload forwarded through the RPC filter and the gateway
-  // error util (ADR-030 §6), so a client branches on data (e.g. `{ available }` on
-  // an out-of-stock rejection) rather than parsing the human message. Frozen-shaped
-  // (`Readonly`) because it is read, never mutated, downstream.
+  // Structured payload forwarded intact through the RPC filter and the gateway error util
+  // (ADR-030 §6), so a client branches on **data** — `{ available }` on an out-of-stock — instead
+  // of parsing a human message that is free to change.
   public readonly details?: Readonly<Record<string, unknown>>;
 
   constructor(

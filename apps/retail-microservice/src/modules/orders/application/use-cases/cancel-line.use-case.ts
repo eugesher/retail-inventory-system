@@ -53,9 +53,12 @@ import { runWithOrderWriteRetry } from './order-write';
 // over-release). The same blind spot let Create Fulfillment ship units whose allocation had
 // already been released.
 //
-// **No money mutation.** The line's money snapshot stands and the order's totals are
-// untouched — a credit/refund is the later refund capability's job. This capability emits
-// **no event** (Cancel Line has no past-tense surface).
+// **No money mutation, and no refund.** The line's money snapshot stands and the order's totals
+// are untouched. Note the asymmetry with Cancel *Order*, which flags the payment and lets
+// `OrderCancelledConsumer` auto-refund it: **cancelling a line moves no money and triggers
+// nothing that will.** Refunding those units is a separate, deliberate Issue Refund call. This
+// use case also emits **no event** — Cancel Line has no past-tense surface, so nothing
+// downstream can react to it either.
 //
 // **Ordering** (the cross-cutting consistency rule, the Cancel Order posture): the local
 // write commits FIRST, then the allocation release runs post-commit, retried then logged

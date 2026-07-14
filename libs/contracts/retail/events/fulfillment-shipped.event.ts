@@ -1,28 +1,17 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.fulfillment.shipped` event, published by the
-// retail microservice after a shipment ships (the `Fulfillment` walks `pending →
-// shipped`). Framework-free — a domain object is never serialized across services
-// (ADR-011); the Ship use case maps the shipped aggregate onto this interface before
-// emitting.
+// `retail.fulfillment.shipped` — emitted onto `notification_events`, where the notification
+// service's shipment-confirmation consumer binds it (an event goes to the queue of whoever consumes
+// it, ADR-008/020). The emit is best-effort post-commit: the shipment is already durable, so a
+// broker failure loses the confirmation, never the shipment.
 //
-// It is the past-tense counterpart of the imperative `retail.fulfillment.ship`
-// command (the `catalog.variant.create`/`.created` split, ADR-008). Emitted onto
-// `notification_events` (the consumer's own queue — the producer-targets-consumer-queue
-// pattern `retail.order.placed` uses, ADR-008/020), where the notification service binds
-// a shipment-confirmation consumer for it, so it is a best-effort post-commit emit
-// (ADR-020). The payload carries the shipment header: `orderId` / `fulfillmentId`
-// identify the shipment, `trackingNumber` / `carrier` are the carrier metadata a
-// confirmation needs (`carrier` may be null), and `shippedAt` is the ship timestamp.
-// `eventVersion` is pinned to `'v1'`; a breaking change ships `'v2'`. `occurredAt` and
-// `shippedAt` are ISO-8601 strings.
+// **`customerEmail` is carried ON the event, resolved producer-side from the shared `customer`
+// table.** That is deliberate (ADR-033): it spares the consumer a cross-service RPC per delivery.
+// It is `null` for a tombstoned customer, and `customerLocale` always ships `null` — nothing in
+// this system resolves a locale.
 //
-// `customerEmail` / `customerLocale` carry the buyer's notification contact, resolved
-// producer-side from the shared `customer` table (a raw-SQL reader, no gateway-entity
-// import) so the shipment-confirmation consumer has a recipient WITHOUT a per-delivery
-// cross-service RPC (ADR-033 choice). The email is `null` for a tombstoned/missing
-// customer; `customerLocale` is a placeholder shipped `null` today (locale deferred).
-// Both optional — the field is additive on the wire.
+// `trackingNumber` is non-nullable here because a fulfillment **cannot reach `shipped` without
+// one** — `Fulfillment.ship` rejects a blank. The carrier is not held to the same standard.
 export interface IRetailFulfillmentShippedEvent extends ICorrelationPayload {
   orderId: number;
   fulfillmentId: number;

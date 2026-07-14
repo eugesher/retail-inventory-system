@@ -31,10 +31,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // referenced columns.
 export class CreateOrderLineAddressTables1781101255857 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Polymorphic over (owner_type, owner_id): an address belongs to a `customer`
-    // (a future address-book entry) or an `order` (a place-time snapshot). This
-    // chain writes only `order` rows. `owner_id` is VARCHAR(36) so it holds either a
-    // customer's CHAR(36) UUID or an order's (short, stringified) numeric id.
+    // Polymorphic over (owner_type, owner_id): an address belongs to a `customer` or an `order`
+    // (a place-time snapshot). `owner_id` is VARCHAR(36) so it holds either a customer's CHAR(36)
+    // UUID or an order's (short, stringified) numeric id.
+    //
+    // The `customer` half was shaped for an address book that **was never built** — nothing has
+    // ever written a `customer` row, here or since. Only `order` rows exist.
     await queryRunner.query(`
       CREATE TABLE address (
         id             CHAR(36)     NOT NULL PRIMARY KEY,

@@ -14,21 +14,17 @@ import {
   IStockWithInvalidationOptions,
 } from '../../application/ports';
 
-// Domain-shaped cache over the generic `ICachePort` (ADR-006): the use cases
-// depend on `IStockCachePort` and never see a key string. The cached value is a
-// per-variant `VariantStockView` projection keyed on `variantId` under the `v3`
-// key shape — bumped `v1 → v2` when the value reshaped from the old per-product
-// SUM aggregate (ADR-027), then `v2 → v3` when TTL'd reservations started moving
-// `quantityReserved` so the same field set carries a new meaning (ADR-030 §7).
+// The domain-shaped cache over the generic `ICachePort`. Use cases depend on `IStockCachePort` and
+// never see a key string, so a stock key cannot be built anywhere but here.
 //
-// Audit closures: CACHE-001/004 by ADR-021 (single-flight + jitter),
-// CACHE-003/009 by ADR-022 (schema-version + opt-in tenant segments),
-// CACHE-005 by the `available` flag from `get` (Redis-down request emits
-// one warn instead of three).
+// **The port offers only `getOrLoad` and `withInvalidation` — the composed operations** (ADR-049).
+// There is no public `get`, `set` or `invalidate`, and that is the whole design: each of those,
+// called on its own from inside a transaction, writes or clears pre-commit data and leaves the
+// cache permanently wrong. The two survivors are the shapes that cannot be misused.
 @Injectable()
 export class StockCache implements IStockCachePort {
-  // ADR-021 ±10% TTL jitter; the floor preserves ADR-002's TTL-as-safety-net
-  // role so a missed invalidate still has a bounded staleness window.
+  // ±10% TTL jitter, so a burst of entries written together does not expire together and stampede
+  // the database in one tick (ADR-021).
   private static readonly JITTER_FRACTION = 0.1;
 
   constructor(
@@ -93,20 +89,21 @@ export class StockCache implements IStockCachePort {
     const { value, available } = await this.get(payload);
     if (value !== undefined) return value;
 
-    // CACHE-005: outer `get` already warn-logged on outage; skip the
-    // single-flight + write-back to avoid duplicate warns against a dead
-    // client. DB fallback continues via the direct loader call.
+    // **`available: false` means Redis is down, not that the key was missing.** Go straight to the
+    // loader: single-flighting through a dead client would only queue callers behind a lock nobody
+    // can take, and each attempt would warn again. A cache outage must degrade to a slow read, never
+    // to a stalled one.
     if (!available) return loader();
 
-    // Re-check inside the leader handles the rare race where a hit lands
-    // between the outer `get` and the leader starting.
+    // The re-check inside the leader catches the narrow race where another writer's value lands
+    // between the outer read and the leader starting.
     return this.cache.singleFlight(cacheKey, async () => {
       const insideLeader = await this.get(payload);
       if (insideLeader.value !== undefined) return insideLeader.value;
 
       const data = await loader();
-      // Inner re-check may observe an outage the outer read missed; skip
-      // the write-back so we do not emit a second warn.
+      // The inner read may see an outage the outer one missed — skip the write-back rather than warn
+      // twice about the same dead client.
       if (insideLeader.available) {
         await this.set({ variantId, stockLocationIds, tenantId, data, correlationId });
       }
@@ -115,17 +112,17 @@ export class StockCache implements IStockCachePort {
   }
 
   private configuredTtl(): number {
-    // Defensive coerce: the Joi schema in libs/config supplies a default,
-    // but some unit-test bootstraps skip env loading. `CACHE_TTL_MS_PRODUCT_STOCK`
-    // is retained as the TTL env (it now governs the variant-availability cache).
+    // **The env var is named for a product and governs a variant.** `CACHE_TTL_MS_PRODUCT_STOCK`
+    // predates the move to variant-keyed stock and was kept rather than re-named; do not go looking
+    // for a variant-named one. The `?? 60000` is not redundant with the Joi default — some unit-test
+    // bootstraps skip env loading entirely.
     return this.configService.get<number>('CACHE_TTL_MS_PRODUCT_STOCK') ?? 60000;
   }
 
   private jitterTtl(ttl: number): number {
-    // Symmetric ±JITTER_FRACTION; floor()ed for the integer-ms contract of
-    // `ICachePort.set`. Clamped to ≥1ms so a very small configured TTL cannot
-    // floor to 0/negative — keyv treats a non-positive TTL as "no expiry", which
-    // would defeat the TTL-as-safety-net role this jitter is meant to preserve.
+    // **Clamped to ≥ 1 ms, and that clamp is load-bearing:** keyv reads a non-positive TTL as
+    // "no expiry". A small configured TTL plus a negative jitter would floor to zero and produce an
+    // entry that never expires — the exact opposite of what the TTL is for.
     const offset = (Math.random() * 2 - 1) * StockCache.JITTER_FRACTION * ttl;
     return Math.max(1, Math.floor(ttl + offset));
   }
@@ -153,12 +150,14 @@ export class StockCache implements IStockCachePort {
     const { tenantId, correlationId } = opts ?? {};
     const variantIds = [...new Set(items.map((i) => i.variantId))];
 
-    // ADR-022 / ADR-027 / ADR-030 transition window — five prefixes per variantId:
-    //   * v3 current (tenanted, CACHE-003 / CACHE-009)
-    //   * v2 pre-bump (single-tenant — the `v2 → v3` reservation-semantics bump, ADR-030 §7)
-    //   * v1 pre-bump (single-tenant — keyed the old productId axis; wiped by id)
-    //   * pre-v1 post-ADR-016 (single-tenant — never carried a tenant segment)
-    //   * pre-ADR-016 legacy (single-tenant by construction)
+    // **Five prefixes per variant, and therefore five Redis SCAN passes on every stock write.**
+    // One is the live `v3` key; the other four are retired shapes (`v2`, `v1`, the unversioned
+    // pre-v1, and the pre-ADR-016 `stock:<productId>:` convention), wiped so a rolling deploy
+    // cannot serve entries the previous version wrote.
+    //
+    // The cost is real and the transition windows are not: no deploy has ever straddled these key
+    // versions, and `cache-keys.ts` records that no production data exists under any of them. This
+    // is a known finding, not an oversight — see the legacy builders in `libs/cache/cache-keys.ts`.
     let totalUnlinked = 0;
     try {
       const counts = await Promise.all(

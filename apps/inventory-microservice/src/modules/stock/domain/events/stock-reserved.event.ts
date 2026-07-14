@@ -1,12 +1,14 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Fires when a Reserve operation holds stock for a cart (ADR-030). `aggregateId`
-// is the `variantId` (the downstream backbone key); `quantity` is the absolute
-// held quantity for the `(cartId, variantId, stockLocationId)` triple after the
-// reserve, `reservationId` the hold's UUID, and `expiresAt` the TTL instant.
-// `StockLevel`/`Reservation` are not `AggregateRoot`s, so the Reserve use case
-// constructs this event after the save commits rather than pulling it from a model
-// (ADR-012 §carried-forward; the `StockReceivedEvent` precedent).
+// Raised when Reserve holds stock for a cart (ADR-030). **A hold, not a sale** — nothing has left
+// `quantity_on_hand`.
+//
+// `quantity` is the **absolute** held amount for the `(cartId, variantId, stockLocationId)` triple
+// after the reserve, not the increment this call added.
+//
+// `expiresAt` is when the TTL lapses. The hold does not release itself at that instant — the sweep
+// does, later, and raises a `StockReleasedEvent` when it gets there. Between the two moments the
+// units are still held and `available` is still short of them.
 export class StockReservedEvent extends DomainEvent<number> {
   public readonly stockLocationId: string;
   public readonly quantity: number;

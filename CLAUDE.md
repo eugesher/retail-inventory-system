@@ -157,7 +157,10 @@ Non-obvious facts, each worth a debugging cycle.
 - `boundaries` takes the **first** matching element pattern, so order in `boundariesElements`
   is load-bearing: `shared-module-barrel` (`modules/auth/index.ts`) must stay ahead of
   `nest-module` (`modules/*/*.ts`), which matches it too. Mirror any change into
-  `spec/architecture-lint.spec.ts`, which **inlines its own copy** of the taxonomy.
+  `spec/architecture-lint.spec.ts`, which **inlines its own copy** of the taxonomy — and note
+  that **nothing checks the mirror**. That spec lints against its own copy, never against
+  `eslint.config.mjs`, so weakening a production rule leaves all 74 of its tests green. It guards
+  the plugin's behaviour, not your config.
 - `test:infra:reload` runs **both** migration pipelines; `yarn migration:run` alone leaves
   `ris_eventstore` empty.
 
@@ -511,5 +514,12 @@ numbered by delivery order. Point-in-time review findings live under
 [`docs/audits/`](docs/audits/).
 
 **One architectural exception: `ARCH-LINT-EX-02`** (ADR-017 §6) — the gateway `auth` barrel is
-the sole cross-module-consumable barrel (`iam` / `customer-admin`). The `EntityManager` downcast
-lives only in `TypeormTransactionAdapter` + `StockTypeormRepository`.
+the sole cross-module-consumable barrel (`iam` / `customer-admin`).
+
+**The `EntityManager` downcast is an `infrastructure/` idiom, not a two-file exception.** Every
+repository that accepts an `ITransactionScope` casts it back to use it (11 files, `orders/`,
+`returns/`, `stock/`) — that is what an opaque scope costs. The rule ARCH-LINT-EX-01's closure
+actually bought is the one to keep: **`EntityManager` never reaches `application/`**, which the
+`application-use-case` denylist enforces. *(ADR-017 §6 names only `TypeormTransactionAdapter` +
+`StockTypeormRepository`; that was true when it was written and the idiom has since generalised. An
+accepted ADR is immutable — this needs a forward-supersession pointer, not an edit.)*

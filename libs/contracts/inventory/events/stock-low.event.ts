@@ -1,15 +1,17 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `inventory.stock.low` event published by the
-// inventory microservice when a variant's on-hand quantity at a stock location
-// drops at or below the configured low-stock threshold. Framework-free.
+// `inventory.stock.low` — **the one inventory event with a real consumer.** The notification
+// service binds it for an ops alert, so it is emitted onto `notification_events` rather than
+// inventory's own queue (an event goes to the queue of whoever consumes it, ADR-008/020). Every
+// other `inventory.*` event is a reserved surface.
 //
-// Re-keyed onto the new inventory model (ADR-027): the running totals live per
-// `(variantId, stockLocationId)`, so the event carries those two keys rather
-// than the retired `productId` / `storageId` pair. `quantity` is the post-commit
-// `StockLevel.quantityOnHand`; `threshold` is the cross-service constant
-// `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`. `eventVersion` is pinned to `'v1'`; a
-// breaking payload change ships as `'v2'`. `occurredAt` is an ISO-8601 string.
+// **It fires on the way DOWN, and only on the way down.** The emitter requires a negative delta
+// *and* a resulting on-hand at or below the threshold. A level that is already below and simply
+// stays there raises nothing; neither does a partial restock that leaves it below. **Silence is not
+// evidence that stock is healthy** — it means nothing crossed the line just now.
+//
+// `quantity` is the post-commit `quantityOnHand`, keyed per `(variantId, stockLocationId)`
+// (ADR-027).
 export interface IInventoryStockLowEvent extends ICorrelationPayload {
   variantId: number;
   stockLocationId: string;

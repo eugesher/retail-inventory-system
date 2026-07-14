@@ -7,16 +7,11 @@ import {
   ReturnStatusEnum,
 } from '../enums';
 
-// RPC/HTTP response shape for one return line — which `OrderLine` quantity is coming
-// back, with the per-line inspection outcome once it has been recorded. A **class**
-// carrying `@ApiResponseProperty` (not a plain interface) so the gateway can declare
-// it as a Swagger response type — `@nestjs/swagger` is the documented lib-contracts
-// exception (ADR-017), mirroring `FulfillmentLineView` / `OrderLineView`.
+// One return line: which `OrderLine` quantity is coming back, and — once the warehouse has
+// inspected it — what became of it.
 //
-// `orderLineId` points back at the placed order's line; `quantity` is the number of
-// units of that line being returned. `condition` / `disposition` /
-// `lineRefundAmountMinor` are all `null` until the line is inspected (the warehouse
-// `inventory:receive-return` step records them).
+// `condition`, `disposition` and `lineRefundAmountMinor` are all `null` until that inspection
+// happens. A `null` there means "not yet inspected", never "inspected and found to be nothing".
 export class ReturnLineView {
   @ApiResponseProperty()
   public id: number;

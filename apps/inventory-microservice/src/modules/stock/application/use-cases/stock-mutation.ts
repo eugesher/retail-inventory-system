@@ -18,46 +18,43 @@ import {
 } from '../ports';
 import { StockWriteConflictError } from './stock-write-conflict.error';
 
-// The minimal dependency set the bounded-retry core needs: a transaction port to
-// open a fresh unit of work per attempt, a logger for the retry/exhaustion trace, and
-// the bounded retry budget. `IStockMutationDeps` is a superset, so it satisfies this
-// structurally.
+// `IStockMutationDeps` is a superset of this, so it satisfies it structurally — a use case that
+// already has the full mutation deps can pass them straight to the retry core.
 export interface IStockWriteRetryDeps {
   transactionPort: ITransactionPort;
   logger: PinoLogger;
-  // The optimistic-concurrency retry budget — how many fresh-transaction attempts a lost
-  // compare-and-swap may burn before the write surfaces a `409 STOCK_WRITE_CONFLICT`.
-  // Injected from `OCC_RETRY_ATTEMPTS` (ADR-036), never a hardcoded constant: the use
-  // case resolves the value-provider token and threads it in, so the budget is a single
-  // env-driven knob (default 5) rather than a literal buried in the protocol.
+  // Injected from `OCC_RETRY_ATTEMPTS`, **never a literal** — the budget is one env-driven knob,
+  // not a number buried in the protocol (ADR-036).
   maxAttempts: number;
 }
 
-// Logging/identity context for the retry trace + the exhaustion error message.
-// Optional throughout: a multi-row write (Release) may span several
-// (variantId, stockLocationId) pairs, so it omits the per-row identity.
+// Every field is optional because a multi-row write (Release) spans several
+// `(variantId, stockLocationId)` pairs and has no single row identity to give.
 export interface IStockWriteRetryContext {
   variantId?: number;
   stockLocationId?: string;
   correlationId?: string;
 }
 
-// The stock module's binding of the shared OCC retry protocol (ADR-036/045), and the one that
-// is not a plain delegation: it is the ONLY caller whose attempt runs inside a transaction —
-// `transactionPort.runInTransaction` opens a fresh snapshot per attempt, so a retry re-reads
-// the now-current rows rather than the stale ones it lost against. The other three modules do
-// their compare-and-swap inside `repository.save`, so their attempt is a bare thunk.
+// The stock module's binding of the shared OCC retry protocol (ADR-036/045).
 //
-// The loop, the log levels and both message texts come from `runWithOccRetry`. What stays here
-// is what only inventory knows: `StockWriteConflictError` (a lost CAS on
-// `persistStockLevelChange`, or a lost INSERT race on the reservation UNIQUE triple), the row
-// identity on the trace, and the terminal `409 STOCK_WRITE_CONFLICT`.
+// **The transaction is opened HERE, inside the retry loop — not by the caller.** That is what
+// makes a retry sound: `runInTransaction` gives each attempt a fresh snapshot, so the second
+// attempt re-reads the rows the first one lost against instead of retrying against a stale view.
+// The retail bindings invert this — their caller owns the `runInTransaction` and hands the retry
+// helper a thunk — so do not copy this file's shape into one of them without checking which end
+// owns the unit of work.
 //
-// The retry trace takes `(variantId, stockLocationId)` from the CONFLICT, not from `context`:
-// for a multi-row write (Release / Allocate) the losing row is more precise than the caller's
-// context. `fromVersion` is the `expectedVersion` the CAS targeted — `null` on a first-touch
-// INSERT race, and the conflict path is deliberately query-free, so the winning `toVersion` is
-// never read back.
+// The loop, the log levels and both message texts come from `runWithOccRetry`. What stays here is
+// what only inventory knows: `StockWriteConflictError` (a lost CAS on `persistStockLevelChange`, or
+// a lost INSERT race on the reservation UNIQUE triple), the row identity on the trace, and the
+// terminal `STOCK_WRITE_CONFLICT`.
+//
+// **The retry trace takes `(variantId, stockLocationId)` from the CONFLICT, not from `context`.**
+// A multi-row write (Release, Allocate) spans several rows, so the losing row is more precise than
+// the caller's idea of what it was writing. `fromVersion` is `null` on a first-touch INSERT race,
+// and the conflict path is query-free on purpose — the winning `toVersion` is never read back,
+// because reading it would cost a round trip to log a number nobody acts on.
 export async function runWithStockWriteRetry<T>(
   deps: IStockWriteRetryDeps,
   attempt: (scope: ITransactionScope) => Promise<T>,

@@ -44,12 +44,10 @@ export enum CatalogErrorCodeEnum {
   CATEGORY_SORT_ORDER_INVALID = 'CATALOG_CATEGORY_SORT_ORDER_INVALID',
   CATEGORY_INVALID_STATE_TRANSITION = 'CATALOG_CATEGORY_INVALID_STATE_TRANSITION',
   CATEGORY_CYCLE = 'CATALOG_CATEGORY_CYCLE',
-  // Repository-level rejections surfaced by the category use cases (which arrive
-  // in the create/reparent work). The aggregate cannot see other aggregates, so
-  // global slug uniqueness, parent existence, and target-category lookup are
-  // pre-checked through the repository port and raised with these codes (the
-  // UNIQUE constraint remains the hard guard). Landing the codes + the filter
-  // mappings now keeps the filter total and the next session contract-only.
+  // The category half of the same repository-level channel described above: slug uniqueness,
+  // parent existence and target-category lookup are cross-aggregate facts the `Category` model
+  // cannot see, so a use case pre-checks them through the repository port and raises these codes.
+  // The UNIQUE constraint stays the hard guard.
   CATEGORY_NOT_FOUND = 'CATALOG_CATEGORY_NOT_FOUND',
   CATEGORY_PARENT_NOT_FOUND = 'CATALOG_CATEGORY_PARENT_NOT_FOUND',
   CATEGORY_SLUG_TAKEN = 'CATALOG_CATEGORY_SLUG_TAKEN',

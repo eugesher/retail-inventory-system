@@ -2,17 +2,16 @@ import { ApiResponseProperty } from '@nestjs/swagger';
 
 import { NotificationChannelEnum } from './enums';
 
-// RPC/HTTP response shape for one notification template — one versioned entry in the
-// per `(eventType, channel, locale)` registry. A **class** carrying
-// `@ApiResponseProperty` (not a plain interface) so the gateway can declare it as a
-// Swagger response type — `@nestjs/swagger` is the documented lib-contracts exception
-// (ADR-017), mirroring `ReturnRequestView` / `OrderView`.
+// One versioned entry in the per-`(eventType, channel, locale)` registry.
 //
-// `version` is the **business** version (an INT that climbs on every edit — old
-// versions are retained for audit/rollback), distinct from an OCC `@VersionColumn`.
-// `active` is the soft-delete flag: a deactivated template is hidden from the "find
-// latest active" resolution but kept on the row (never a `deletedAt` timestamp).
-// `subject` is nullable — sms/push templates carry no subject.
+// **`version` is the BUSINESS version, not an OCC token.** It climbs on every edit and old
+// versions are kept for audit and rollback — it has nothing to do with the `@VersionColumn` that
+// guards concurrent writes elsewhere in this repo. Two different things wear the same name; do
+// not compare-and-swap on this one.
+//
+// `active` is the soft-delete flag: a deactivated template drops out of the "find latest active"
+// resolution but stays on the row — there is no `deletedAt` here. `subject` is `null` for sms and
+// push, which carry none.
 export class NotificationTemplateView {
   @ApiResponseProperty()
   public id: number;

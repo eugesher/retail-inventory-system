@@ -1,32 +1,26 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// One line of a commit-sale request: the variant, the location (optional — omit
-// to target `INVENTORY_DEFAULT_STOCK_LOCATION`), and the positive quantity being
-// shipped. Mirrors `IAllocationLine` (the allocate/cancel line shape) so the
-// order-side inventory operations stay shape-aligned.
+// An omitted `stockLocationId` targets `INVENTORY_DEFAULT_STOCK_LOCATION`. `quantity` is a
+// positive integer — the sign is applied by the ledger, not by the caller.
 export interface ICommitSaleLine {
   variantId: number;
   stockLocationId?: string;
   quantity: number;
 }
 
-// RPC payload for `inventory.stock.commit-sale` (Retail ship flow → Inventory).
-// Commit Sale physically ships an order's allocated stock at fulfillment time
-// (ADR-031): per line it moves units OUT of BOTH `quantity_on_hand` and
-// `quantity_allocated` (the allocated stock physically leaving) in one
-// `StockLevel.commitSale`, and appends one strictly-negative `sale`
-// `StockMovement` referencing the fulfillment.
+// **The RPC on which stock physically leaves.** Per line it decrements **both** `quantity_on_hand`
+// and `quantity_allocated` in one `StockLevel.commitSale` and appends a strictly-negative `sale`
+// movement (ADR-031). Everything upstream — reserve, allocate — only moved counters around.
 //
-// It is **all-lines-atomic** (a partial ship never commits) and **idempotent on
-// `fulfillmentId`** — a `sale` movement already referencing this fulfillment means
-// the commit already happened, so a retry (a transient RMQ re-delivery after the
-// retail ship committed) decrements nothing and re-returns the prior result. The
-// lines ride the payload — rather than the inventory service reading retail's
-// fulfillment tables — so the commit needs no cross-service read (the allocate
-// precedent, ADR-030 §4). `lines` must be non-empty; each `quantity` a positive
-// integer; an omitted `stockLocationId` targets `INVENTORY_DEFAULT_STOCK_LOCATION`.
-// Extends `ICorrelationPayload`; this interface doubles as the `CommitSaleUseCase`
-// input shape.
+// **All-lines-atomic:** a partial ship never commits. **Idempotent on `fulfillmentId`:** a `sale`
+// movement already referencing this fulfillment means the commit happened, so a redelivery
+// decrements nothing and replays the prior result. That matters because the retail ship commits
+// its own transaction *first* and then calls this — an RMQ retry after a successful commit is a
+// normal event, not an anomaly.
+//
+// **The lines ride the payload rather than inventory reading retail's tables.** Inventory owns no
+// view of a fulfillment and must not grow one; the caller states what it shipped (ADR-030 §4).
+// `lines` must be non-empty.
 export interface ICommitSalePayload extends ICorrelationPayload {
   orderId: number;
   fulfillmentId: string;

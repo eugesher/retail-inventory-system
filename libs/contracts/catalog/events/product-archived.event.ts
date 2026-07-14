@@ -1,16 +1,13 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `catalog.product.archived` event, emitted by the
-// catalog microservice after a product transitions `active → archived` (the
-// catalog's terminal soft-delete — the row stays resolvable by id/slug but is
-// hidden from the browse list). A plain interface, never a serialized
-// `DomainEvent` subclass (ADR-011 / ADR-025); the archive use case drains the
-// in-process `ProductArchivedEvent` and maps it here.
+// `catalog.product.archived` — a **reserved surface** (README §2). Not dead code.
 //
-// `archivedAt` is the business timestamp of the transition; `occurredAt` is the
-// event-envelope timestamp — both ISO-8601 strings carrying the same instant
-// today. `eventVersion` is pinned to `'v1'`; a breaking payload change ships as
-// `'v2'`.
+// Archiving is the catalog's terminal **soft-delete**: the product drops out of the browse list
+// but stays resolvable by id and slug, so an order line placed years ago can still name it.
+//
+// `archivedAt` is the business instant of the `active → archived` transition; `occurredAt` is the
+// envelope's. They are separate fields carrying the same value, and a consumer must not assume
+// they always will.
 export interface ICatalogProductArchivedEvent extends ICorrelationPayload {
   productId: number;
   archivedAt: string;

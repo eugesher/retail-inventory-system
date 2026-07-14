@@ -1,24 +1,17 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.refund.issued` event, published by the retail
-// microservice when a refund issues successfully (the `Refund` walks `pending → issued`
-// and the `Payment` accumulates `refunded_amount_minor`). Framework-free (ADR-011); the
-// Issue Refund use case maps the persisted refund onto this interface before emitting.
+// `retail.refund.issued` — emitted onto `notification_events`, where the refund-confirmation
+// consumer binds it (ADR-008/020). Best-effort post-commit.
 //
-// Emitted onto `notification_events` (the notification service's own queue, the
-// producer-targets-consumer-queue pattern, ADR-008/020) so a refund-confirmation fan-out
-// can consume it. `refundId` / `orderId` / `paymentId` identify the rows; `amountMinor`
-// is this refund's amount in integer minor units (cents). `issuedAt` is the gateway's
-// refund stamp (ISO-8601); `eventVersion` is pinned to `'v1'`; `occurredAt` is an
-// ISO-8601 string.
+// `amountMinor` is **this refund's** amount, not the order's running total. A partial refund is
+// legal, and a second one can follow, so a consumer summing these gets the total refunded while
+// any single event tells it only what moved this time.
 //
-// The refund event carries no `customerId` of its own, so `customerEmail` / `customerLocale`
-// are resolved producer-side from the refund's **order** `customerId` against the shared
-// `customer` table (a raw-SQL reader, no gateway-entity import) — giving the
-// refund-confirmation consumer a recipient WITHOUT a per-delivery cross-service RPC (ADR-033
-// choice), in place of the older `order:<orderId>` derived recipient. The email is `null` for
-// a tombstoned/missing customer; `customerLocale` is a placeholder shipped `null` today
-// (locale deferred). Both optional — additive on the wire.
+// **The refund has no `customerId` of its own** — a refund belongs to a payment, which belongs to
+// an order, which belongs to a buyer. `customerEmail` is therefore resolved producer-side by
+// walking to the *order's* customer, so the consumer needs no per-delivery RPC (ADR-033). It is
+// `null` for a tombstoned customer, and `customerLocale` always ships `null` — nothing in this
+// system resolves a locale.
 export interface IRetailRefundIssuedEvent extends ICorrelationPayload {
   refundId: number;
   orderId: number;

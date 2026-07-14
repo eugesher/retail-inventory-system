@@ -8,7 +8,7 @@ export const FULFILLMENT_REPOSITORY = Symbol('FULFILLMENT_REPOSITORY');
 // `typeorm` in `application/ports`). The TypeORM details live entirely in
 // `FulfillmentTypeormRepository`.
 //
-// Every method is **scope-aware** so the later fulfillment operations can join the
+// Every method is **scope-aware** so a fulfillment operation can join the
 // order's transaction (ADR-017 §6 / ADR-031): Ship persists the fulfillment, advances
 // the order's fulfillment axis, and captures payment in one unit of work, so the use
 // case hands one `scope` to every repository it touches without ever seeing an

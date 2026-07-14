@@ -10,19 +10,14 @@ import { SweepExpiredReservationsUseCase } from '../../application/use-cases';
 // test that needs to reach the live timer resolves `SchedulerRegistry` and asks for it.
 export const RESERVATION_SWEEP_INTERVAL_NAME = 'reservation-ttl-sweep';
 
-// The `@nestjs/schedule` driver for the expired-reservation sweep (ADR-038). It is a
-// provider (not a controller) — `ScheduleModule.forRoot()` (wired in `stock.module.ts`)
-// brings in the `SchedulerRegistry` this class registers its timer with. All sweep logic
-// lives in `SweepExpiredReservationsUseCase`; this class only drives it on a timer and
-// guards the tick so a thrown sweep never crashes the scheduler loop (the notification
-// `DeliveryRetryScheduler` / retail `IdempotencyPurgeScheduler` precedent — the schedule
-// stays in `infrastructure/`, never in the use case).
+// The timer that drives the expired-reservation sweep (ADR-038). **A schedule lives in
+// `infrastructure/`, never in a use case** — this class holds no sweep logic at all; it decides
+// only *when* and guards the tick so a thrown sweep cannot kill the loop.
 //
-// Unlike those two, the cadence is CONFIGURED (`RESERVATION_SWEEP_INTERVAL_SECONDS`, Joi
-// default 60), which is why the interval is registered imperatively rather than declared
-// with a schedule decorator: a decorator's `ms` argument is evaluated when the class is
-// defined, long before the DI container can resolve the injected value. `SchedulerRegistry`
-// is the seam Nest provides for a cadence that is only known at instantiation.
+// **The cadence is CONFIGURED, which is why the interval is registered imperatively** rather than
+// declared with a schedule decorator. A decorator's `ms` argument is evaluated when the class is
+// *defined* — long before DI can resolve an injected value — so a configured cadence simply cannot
+// be expressed that way. `SchedulerRegistry` is the seam Nest provides for exactly this.
 //
 // The interval decides only how promptly an already-expired hold is reclaimed;
 // `RESERVATION_TTL_MINUTES` is what bounds a hold's life. A cadence longer than the TTL

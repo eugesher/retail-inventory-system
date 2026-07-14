@@ -1,8 +1,8 @@
 // Lifecycle states for a catalog Product.
 //
 // Soft-delete is modelled as the terminal `ARCHIVED` state — there is no
-// `deletedAt` timestamp on the aggregate (the inherited persistence column is
-// left inert; see the persistence work and ADR-025). Archived rows stay
+// `deletedAt` timestamp on the aggregate, and `BaseEntity`'s inherited `deleted_at` column stays
+// inert (`ProductEntity` says so; nothing in catalog ever soft-deletes). Archived rows stay
 // resolvable forever because historical orders and stock reference variants by
 // id, so an archived product must never become unreachable.
 //
