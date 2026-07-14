@@ -3,6 +3,10 @@
 - **Date**: 2026-05-14
 - **Status**: Accepted
 
+> **§6's claim that the `EntityManager` downcast "lives only in the two infrastructure-layer adapters"
+> is superseded by [ADR-054](054-the-entity-manager-downcast-is-an-idiom.md)** — it is 14 sites in 11
+> files, and always would have been. The rest of this ADR stands.
+
 ---
 
 ## Context

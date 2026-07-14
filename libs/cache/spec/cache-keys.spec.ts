@@ -9,17 +9,21 @@ import { CACHE_KEYS } from '../cache-keys';
 //     stock-location set. Carries the schema-version segment (CACHE-003 fix) and
 //     the opt-in tenant segment (CACHE-009 fix) alongside the pre-existing
 //     CACHE-010 (localeCompare sort) and CACHE-011 (non-glob `__all__` sentinel) fixes.
-//   * Pre-v3 (v2) shape — `ris:inventory:stock:v2:<id>:` — retained as
-//     `inventoryStockLegacyPrefixV2` for the rolling-deploy transition window
-//     that adopts v3 (ADR-030 §7, the reservation-semantics bump).
-//   * Pre-v2 (v1) shape — `ris:inventory:stock:v1:<id>:` — retained as
-//     `inventoryStockLegacyPrefixV1` for the v1→v2 transition (ADR-027).
-//   * Pre-v1 (post-ADR-016) shape — `ris:<service>:<aggregate>:<id>:` —
-//     retained as `inventoryStockLegacyPrefix` for the original v1 transition.
-//   * Pre-ADR-016 legacy shape — `stock:<productId>:*` — retained for the
-//     original ADR-016 transition window. Must keep producing the same
-//     wire format, including the deliberately-preserved `charCodeAt` sort
-//     bug.
+//
+// The four RETIRED shapes below have **no caller**. `StockCache` used to sweep each
+// of them on every stock write, for a rolling-deploy transition window; that sweep is
+// gone (ISSUE-03) — it was four Redis SCAN passes per variant that could never match,
+// and could not have been served if they had, because no read path builds a retired
+// key. These specs pin the SHAPES, which is all the builders are now: a registry of
+// what each version bump changed (ADR-046).
+//   * Pre-v3 (v2) — `ris:inventory:stock:v2:<id>:` — `inventoryStockLegacyPrefixV2`
+//     (ADR-030 §7, the reservation-semantics bump).
+//   * Pre-v2 (v1) — `ris:inventory:stock:v1:<id>:` — `inventoryStockLegacyPrefixV1`
+//     (ADR-027).
+//   * Pre-v1 (post-ADR-016) — `ris:<service>:<aggregate>:<id>:` —
+//     `inventoryStockLegacyPrefix`.
+//   * Pre-ADR-016 — `stock:<productId>:*` — `productStockPrefix`. Must keep producing
+//     the same wire format, including the deliberately-preserved `charCodeAt` sort bug.
 describe('CACHE_KEYS', () => {
   describe('inventoryStock (current convention — v3, keyed on variantId)', () => {
     it('embeds the v3 schema-version segment in the single-tenant prefix', () => {
@@ -98,31 +102,25 @@ describe('CACHE_KEYS', () => {
     });
   });
 
-  describe('inventoryStockLegacyPrefixV2 (pre-v3 — invalidate-only)', () => {
-    it('returns the retired v2 shape so the v3 deploy can wipe in-flight v2 entries', () => {
-      // The invalidate path uses this to wipe in-flight entries written under
-      // the previous v2 shape during the rolling deploy that adopts v3 (ADR-030
-      // §7). Reads and writes MUST go through `inventoryStockPrefix` (the v3
-      // builder above).
+  describe('inventoryStockLegacyPrefixV2 (pre-v3 — RETIRED, no caller)', () => {
+    it('still produces the retired v2 shape', () => {
+      // Nothing reads, writes or sweeps this shape. The builder is a registry entry
+      // recording what the v2→v3 bump changed (ADR-030 §7). Reads and writes go through
+      // `inventoryStockPrefix` (the v3 builder above) and nowhere else.
       expect(CACHE_KEYS.inventoryStockLegacyPrefixV2(42)).toBe('ris:inventory:stock:v2:42:');
     });
   });
 
-  describe('inventoryStockLegacyPrefixV1 (pre-v2 — invalidate-only)', () => {
-    it('returns the retired v1 shape so a later deploy can wipe in-flight v1 entries', () => {
-      // The invalidate path uses this to wipe in-flight entries written under
-      // the v1 shape during a rolling deploy. Reads and writes MUST go through
-      // `inventoryStockPrefix` (the v3 builder above).
+  describe('inventoryStockLegacyPrefixV1 (pre-v2 — RETIRED, no caller)', () => {
+    it('still produces the retired v1 shape', () => {
+      // ADR-027's shape. No caller — see the note at the top of this file.
       expect(CACHE_KEYS.inventoryStockLegacyPrefixV1(42)).toBe('ris:inventory:stock:v1:42:');
     });
   });
 
-  describe('inventoryStockLegacyPrefix (pre-v1 — invalidate-only)', () => {
-    it('returns the pre-v1 shape without a version segment', () => {
-      // The invalidate path uses this to wipe in-flight entries written
-      // under the post-ADR-016 / pre-ADR-022 shape during the rolling
-      // deploy. Reads and writes MUST go through `inventoryStockPrefix`
-      // (the v3 builder above).
+  describe('inventoryStockLegacyPrefix (pre-v1 — RETIRED, no caller)', () => {
+    it('still produces the pre-v1 shape, without a version segment', () => {
+      // The post-ADR-016 / pre-ADR-022 shape: no version, and never a tenant segment.
       expect(CACHE_KEYS.inventoryStockLegacyPrefix(42)).toBe('ris:inventory:stock:42:');
     });
   });
@@ -266,8 +264,10 @@ describe('CACHE_KEYS', () => {
     });
   });
 
-  describe('productStockPrefix (pre-ADR-016 legacy — invalidate-only)', () => {
-    it('is the bare stock prefix — the exact wire shape `delByPrefix` must still SCAN for', () => {
+  describe('productStockPrefix (pre-ADR-016 — RETIRED, no caller)', () => {
+    it('is the bare, un-namespaced stock prefix from before ADR-016', () => {
+      // No longer SCANned for. Kept as the record of the original convention — the only
+      // stock shape that never carried the `ris:` namespace at all.
       expect(CACHE_KEYS.productStockPrefix(42)).toBe('stock:42:');
     });
   });

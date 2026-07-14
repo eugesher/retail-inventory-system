@@ -61,12 +61,34 @@ describe('Payment', () => {
     });
   });
 
-  describe('capture', () => {
-    it('transitions authorized → captured and stamps capturedAt', () => {
+  // The capture is a THREE-step claim now, not one mutator (ADR-052): `beginCapture` (the durable
+  // claim, taken under a row lock and committed BEFORE the gateway is called), then either
+  // `completeCapture` (the gateway said yes) or `releaseCapture` (it said no, so we KNOW no money
+  // moved). Money can only move while a claim is held, and only one caller can hold it.
+  const captured = (): Payment => {
+    const payment = Payment.authorized(authorizedInput());
+    payment.beginCapture();
+    payment.completeCapture(new Date('2026-06-11T09:30:00Z'));
+    return payment;
+  };
+
+  describe('capture claim', () => {
+    it('beginCapture transitions authorized → capturing without stamping capturedAt', () => {
+      const payment = Payment.authorized(authorizedInput());
+
+      payment.beginCapture();
+
+      expect(payment.status).toBe(PaymentStatusEnum.CAPTURING);
+      // Nothing was charged yet — a capturedAt here would be a lie the ledger keeps.
+      expect(payment.capturedAt).toBeNull();
+    });
+
+    it('completeCapture transitions capturing → captured and stamps capturedAt', () => {
       const payment = Payment.authorized(authorizedInput());
       const at = new Date('2026-06-11T09:30:00Z');
 
-      payment.capture(at);
+      payment.beginCapture();
+      payment.completeCapture(at);
 
       expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
       expect(payment.capturedAt).toEqual(at);
@@ -74,14 +96,47 @@ describe('Payment', () => {
       expect(payment.authorizedAt).toEqual(new Date('2026-06-10T00:00:00Z'));
     });
 
-    it('rejects capturing a payment that is not authorized (double-capture)', () => {
+    it('releaseCapture returns a declined claim to authorized, still capturable', () => {
       const payment = Payment.authorized(authorizedInput());
-      payment.capture(new Date());
 
-      expect(() => payment.capture(new Date())).toThrow(OrderDomainException);
+      payment.beginCapture();
+      payment.releaseCapture();
+
+      expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
+      expect(payment.capturedAt).toBeNull();
+      // And it can be claimed again — a declined capture does not burn the authorization.
+      expect(() => payment.beginCapture()).not.toThrow();
     });
 
-    it('rejects capturing a reconstituted non-authorized payment', () => {
+    // **The mutual exclusion, at the domain.** The second claimant is rejected here; in production it
+    // is rejected while still holding the row lock, which is why it never reaches the gateway.
+    it('rejects a SECOND claim on an already-claimed payment (the double-charge guard)', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.beginCapture();
+
+      expect(() => payment.beginCapture()).toThrow(OrderDomainException);
+      expect(payment.status).toBe(PaymentStatusEnum.CAPTURING);
+    });
+
+    it('rejects claiming an already-captured payment (double-capture)', () => {
+      expect(() => captured().beginCapture()).toThrow(OrderDomainException);
+    });
+
+    // A path that reaches CAPTURED without passing through CAPTURING is a path that charged the
+    // gateway without holding the lock — the exact defect the claim exists to make unexpressible.
+    it('rejects completing a capture nobody claimed', () => {
+      const payment = Payment.authorized(authorizedInput());
+
+      expect(() => payment.completeCapture(new Date())).toThrow(OrderDomainException);
+    });
+
+    it('rejects releasing a claim nobody holds', () => {
+      const payment = Payment.authorized(authorizedInput());
+
+      expect(() => payment.releaseCapture()).toThrow(OrderDomainException);
+    });
+
+    it('rejects claiming a reconstituted non-authorized payment', () => {
       const failed = Payment.reconstitute({
         id: 9,
         orderId: 1,
@@ -94,7 +149,17 @@ describe('Payment', () => {
         capturedAt: null,
       });
 
-      expect(() => failed.capture(new Date())).toThrow(OrderDomainException);
+      expect(() => failed.beginCapture()).toThrow(OrderDomainException);
+    });
+
+    // Cancel Order must not be able to void money that may already be gone. It refuses a `CAPTURING`
+    // order outright, and the domain refuses too — belt and braces on the one transition where being
+    // wrong means the customer is charged for a cancelled order.
+    it('rejects voiding a payment whose capture is in flight', () => {
+      const payment = Payment.authorized(authorizedInput());
+      payment.beginCapture();
+
+      expect(() => payment.void()).toThrow(OrderDomainException);
     });
   });
 
@@ -111,7 +176,8 @@ describe('Payment', () => {
 
     it('rejects voiding a captured payment', () => {
       const payment = Payment.authorized(authorizedInput());
-      payment.capture(new Date());
+      payment.beginCapture();
+      payment.completeCapture(new Date());
 
       expect(() => payment.void()).toThrow(OrderDomainException);
     });
@@ -127,7 +193,8 @@ describe('Payment', () => {
   describe('flagForRefund', () => {
     it('sets the refund flag on a captured payment', () => {
       const payment = Payment.authorized(authorizedInput());
-      payment.capture(new Date());
+      payment.beginCapture();
+      payment.completeCapture(new Date());
 
       payment.flagForRefund();
 
@@ -138,7 +205,8 @@ describe('Payment', () => {
 
     it('is idempotent (flagging twice is a no-op, not an error)', () => {
       const payment = Payment.authorized(authorizedInput());
-      payment.capture(new Date());
+      payment.beginCapture();
+      payment.completeCapture(new Date());
 
       payment.flagForRefund();
       expect(() => payment.flagForRefund()).not.toThrow();
@@ -152,7 +220,8 @@ describe('Payment', () => {
     // mutator's precondition is met.
     const capturedPayment = (amountMinor = 5997): Payment => {
       const payment = Payment.authorized({ ...authorizedInput(), amountMinor });
-      payment.capture(new Date('2026-06-11T09:30:00Z'));
+      payment.beginCapture();
+      payment.completeCapture(new Date('2026-06-11T09:30:00Z'));
       return payment;
     };
 

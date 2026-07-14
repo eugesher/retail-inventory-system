@@ -184,18 +184,59 @@ export class Payment extends AggregateRoot<number | null> {
     return this._refundedAmountMinor;
   }
 
-  // `AUTHORIZED → CAPTURED`, stamping `capturedAt`. **The one transition on which money actually
-  // moves** — an authorization only reserves it. Rejects any non-`authorized` start, which is what
-  // makes a double-capture impossible at the domain rather than at the caller.
-  public capture(at: Date): void {
+  // `AUTHORIZED → CAPTURING` — **the durable claim, and the transition that must commit BEFORE the
+  // gateway is called** (ADR-052). It is not bookkeeping: it is the mutual exclusion. Both capture
+  // paths (explicit capture, ship-triggered capture) take it under a `SELECT … FOR UPDATE`, so the
+  // loser of a race blocks on the row, wakes to find `CAPTURING` rather than `AUTHORIZED`, and is
+  // rejected **before it can reach the processor**.
+  //
+  // The rejection is `PAYMENT_INVALID_STATUS_TRANSITION` (409) — the same code a double-capture
+  // raised before, but now raised at the only moment it is worth anything: while the money is still
+  // in the customer's account.
+  public beginCapture(): void {
     if (this._status !== PaymentStatusEnum.AUTHORIZED) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
-        `Payment.capture: can only capture an authorized payment (current: ${this._status})`,
+        `Payment.beginCapture: can only claim an authorized payment (current: ${this._status})`,
+      );
+    }
+    this._status = PaymentStatusEnum.CAPTURING;
+  }
+
+  // `CAPTURING → CAPTURED`, stamping `capturedAt`. **Records that money moved; it does not move it.**
+  // The gateway has already confirmed by the time this runs, and the claim proves this caller was the
+  // one entitled to ask.
+  //
+  // It refuses to complete a capture nobody claimed. That is not defensive noise: a path that reaches
+  // `CAPTURED` without passing through `CAPTURING` is a path that charged the gateway without holding
+  // the lock, which is the entire defect ADR-052 exists to make unexpressible.
+  public completeCapture(at: Date): void {
+    if (this._status !== PaymentStatusEnum.CAPTURING) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
+        `Payment.completeCapture: can only complete a claimed capture (current: ${this._status})`,
       );
     }
     this._status = PaymentStatusEnum.CAPTURED;
     this._capturedAt = at;
+  }
+
+  // `CAPTURING → AUTHORIZED` — the claim released because the gateway **declined**, so no money
+  // moved and the authorization is still capturable.
+  //
+  // **Only a caller that KNOWS the charge did not land may call this.** A caller that merely *thinks*
+  // so — a crashed request, a timeout, a sweeper guessing — must not: releasing a claim whose charge
+  // actually landed hands the next caller a second charge on the same authorization. That is why the
+  // stale-claim sweeper only *surfaces* `CAPTURING` rows and never resolves them (ADR-052), and why
+  // this method is reachable from exactly one place: the explicit `!result.captured` branch.
+  public releaseCapture(): void {
+    if (this._status !== PaymentStatusEnum.CAPTURING) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
+        `Payment.releaseCapture: can only release a claimed capture (current: ${this._status})`,
+      );
+    }
+    this._status = PaymentStatusEnum.AUTHORIZED;
   }
 
   // `AUTHORIZED → VOIDED`. Driven by Cancel Order when it cancels an order whose

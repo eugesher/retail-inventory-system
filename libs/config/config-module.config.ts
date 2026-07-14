@@ -81,16 +81,30 @@ export const configModuleConfig = {
     // fails boot (the `RESERVATION_TTL_MINUTES` precedent).
     OCC_RETRY_ATTEMPTS: Joi.number().integer().min(1).default(5),
 
+    // How old a `capturing` payment must be before it is REPORTED as stranded (ADR-052). A capture
+    // claim is committed before the gateway call and resolved a round-trip later, so anything still
+    // `capturing` after this long belongs to a request that died mid-charge — and nobody knows
+    // whether the money moved. **It is a reporting horizon, not a TTL**: nothing expires and nothing
+    // is released, because releasing a claim whose charge landed is how you charge twice. Defaulted,
+    // so a missing var never fails boot (the `RESERVATION_TTL_MINUTES` precedent).
+    CAPTURE_CLAIM_STALE_MINUTES: Joi.number().integer().positive().default(15),
+
     // Ops mailbox for system-only notifications with no customer recipient
     // (e.g. the inventory low-stock alert). Defaulted so a missing var never fails boot.
     OPS_NOTIFICATIONS_EMAIL: Joi.string().email().default('ops@example.com'),
     // Max attempts before a notification delivery is abandoned and
     // `notifications.delivery.failed` is emitted.
     MAX_DELIVERY_ATTEMPTS: Joi.number().integer().positive().default(3),
-    // **DEAD KEY — nothing reads this.** It is validated and defaulted here, so it passes boot in
-    // every service, but no DI token, use case or scheduler consumes it and no delivery-retention
-    // purge exists. `notification_delivery` grows without bound; setting this changes nothing.
-    // Either wire a purge (the `IdempotencyPurgeScheduler` shape) or delete the key.
+    // How long a `notification_delivery` row is kept before the nightly retention sweep hard-deletes
+    // it (`PurgeAgedDeliveriesUseCase`, driven by `DeliveryRetentionScheduler`). **It was a DEAD KEY
+    // for eleven epics** — validated and defaulted here, so it passed boot in every service, with no
+    // token, no use case and no scheduler reading it. An operator who set it got silence, and
+    // `notification_delivery` grew for the life of the deployment (ISSUE-08).
+    //
+    // **Shortening it is not free.** A delivery row is the dedupe anchor (`delivery_dedupe_key`), so
+    // purging it retires that anchor: an event re-processed past the horizon dispatches a SECOND
+    // notification. Ninety days is safe because no broker redelivers a ninety-day-old message — that
+    // is the argument, and it stops holding at a horizon a broker could outlive.
     RETENTION_DELIVERY_DAYS: Joi.number().integer().positive().default(90),
     // TTL (seconds) for a cached notification consent snapshot (ADR-037). The consent
     // cache is kept fresh by the customer.consent.updated / customer.erased consumer, so

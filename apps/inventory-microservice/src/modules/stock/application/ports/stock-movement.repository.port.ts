@@ -38,13 +38,23 @@ export interface IStockMovementRepositoryPort {
   // Newest-first page of one variant's movements, optionally narrowed by type and an inclusive
   // `occurred_at` window.
   listByVariant(query: IStockMovementListQuery): Promise<IStockMovementPage>;
-  // Reference-based existence probe — the idempotency lookup for the Commit Sale
-  // RPC (ADR-031): a `sale` movement already referencing a fulfillment means the
-  // commit already happened, so a re-delivery must NOT decrement again. Backed by a
-  // `SELECT 1 … WHERE reference_type = ? AND reference_id = ? LIMIT 1` against the
-  // existing `IDX_STOCK_MOVEMENT_REFERENCE (reference_type, reference_id)` index. It
-  // is a READ — the append-only invariant (no save/update/delete) is preserved.
-  // Scope-aware so the probe can join the same unit of work as the write when needed.
+  // Reference-based existence probe — the FAST PATH of the Commit Sale (ADR-031) and
+  // Restock From Return (ADR-032) idempotency, and **not** its guarantee. A `sale` /
+  // `return` movement already referencing the document means the work happened, so a
+  // sequential re-delivery short-circuits here without opening a transaction.
+  //
+  // **A probe cannot make either operation idempotent, whatever `scope` it is given.**
+  // It is a check-then-act: two concurrent deliveries both read "absent" and both fall
+  // through, and passing the write's `scope` does not close that — under REPEATABLE READ
+  // both transactions still read a snapshot in which the other's row does not exist. The
+  // guarantee is `UC_STOCK_MOVEMENT_DEDUPE`, the ledger UNIQUE that the losing writer's
+  // INSERT breaks (migration `1783872387242`); each use case catches that duplicate-key
+  // error and returns the same no-op. Do not "strengthen" this probe — strengthen
+  // nothing, it is already only an optimisation.
+  //
+  // Backed by a `SELECT 1 … WHERE reference_type = ? AND reference_id = ? LIMIT 1`
+  // against `IDX_STOCK_MOVEMENT_REFERENCE (reference_type, reference_id)`. It is a READ —
+  // the append-only invariant (no save/update/delete) is preserved.
   existsByReference(
     referenceType: string,
     referenceId: string,

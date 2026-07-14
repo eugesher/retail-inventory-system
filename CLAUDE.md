@@ -133,9 +133,14 @@ Non-obvious facts, each worth a debugging cycle.
   `OCC_RETRY_ATTEMPTS`, `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
   `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS`,
   `RETURN_WINDOW_DAYS`,
-  `IDEMPOTENCY_KEY_TTL_HOURS`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
-  `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`, `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
+  `IDEMPOTENCY_KEY_TTL_HOURS`, `CAPTURE_CLAIM_STALE_MINUTES`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
+  `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`, `RETAIL_DEFAULT_CURRENCY`,
+  `CATALOG_GATEWAY_DEFAULT_CURRENCY`, `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only).
+  Those **three** currency tokens all read the one `DEFAULT_CURRENCY` var, deliberately: a catalog
+  quoting EUR, a cart opening in USD and a price read scoped to a third would each be wrong in a
+  different direction — and `Order.currency` is immutable, so the wrong unit is baked in forever.
+  **No currency default is a literal anywhere.**
   `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects, so
   `ReservationSweepScheduler` registers its timer via `SchedulerRegistry.addInterval` in
   `onModuleInit` — and **must** `deleteInterval` in `onModuleDestroy`, or a leaked timer hangs
@@ -156,11 +161,10 @@ Non-obvious facts, each worth a debugging cycle.
   `boundaries/*` rule to make code pass.
 - `boundaries` takes the **first** matching element pattern, so order in `boundariesElements`
   is load-bearing: `shared-module-barrel` (`modules/auth/index.ts`) must stay ahead of
-  `nest-module` (`modules/*/*.ts`), which matches it too. Mirror any change into
-  `spec/architecture-lint.spec.ts`, which **inlines its own copy** of the taxonomy — and note
-  that **nothing checks the mirror**. That spec lints against its own copy, never against
-  `eslint.config.mjs`, so weakening a production rule leaves all 74 of its tests green. It guards
-  the plugin's behaviour, not your config.
+  `nest-module` (`modules/*/*.ts`), which matches it too. **There is nothing to mirror** —
+  `spec/architecture-lint.spec.ts` reads the resolved production config
+  (`eslint --print-config`), so weakening a rule, downgrading its severity or reshuffling the
+  element order turns the suite red. Weaken nothing to make code pass; you will be told.
 - `test:infra:reload` runs **both** migration pipelines; `yarn migration:run` alone leaves
   `ris_eventstore` empty.
 
@@ -253,8 +257,9 @@ business consumer, still captured by the firehose. [`README.md`
 
 ## Background jobs (cron)
 
-Three timers, in three services (`*.scheduler.ts`); `ScheduleModule.forRoot()` is wired in each
-one's Nest module. Cadences, registering files and what a missed tick costs:
+**Five** timers, in three services (`*.scheduler.ts`); `ScheduleModule.forRoot()` is wired in each
+one's Nest module (retail and notification own two each). Cadences, registering files and what a
+missed tick costs:
 [`README.md` §13](README.md#13-background-jobs).
 
 ## Service Structure
@@ -507,7 +512,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `051`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `055`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under
@@ -516,10 +521,15 @@ numbered by delivery order. Point-in-time review findings live under
 **One architectural exception: `ARCH-LINT-EX-02`** (ADR-017 §6) — the gateway `auth` barrel is
 the sole cross-module-consumable barrel (`iam` / `customer-admin`).
 
-**The `EntityManager` downcast is an `infrastructure/` idiom, not a two-file exception.** Every
-repository that accepts an `ITransactionScope` casts it back to use it (11 files, `orders/`,
-`returns/`, `stock/`) — that is what an opaque scope costs. The rule ARCH-LINT-EX-01's closure
-actually bought is the one to keep: **`EntityManager` never reaches `application/`**, which the
-`application-use-case` denylist enforces. *(ADR-017 §6 names only `TypeormTransactionAdapter` +
-`StockTypeormRepository`; that was true when it was written and the idiom has since generalised. An
-accepted ADR is immutable — this needs a forward-supersession pointer, not an edit.)*
+**The `EntityManager` downcast is an `infrastructure/` idiom, not a two-file exception** (ADR-054).
+The cast has **two directions and only one is confined**: *constructing* a scope happens in exactly
+one file (the `unique symbol` brand enforces it), while *consuming* one happens in **every repository
+that accepts a scope** — 14 sites, 11 files, and counting. That is the arithmetic of an opaque handle,
+not drift. The rule ARCH-LINT-EX-01's closure actually bought is the one to keep: **`EntityManager`
+never reaches `application/`**, which the `application-use-case` / `application-port` denylists enforce
+and `spec/architecture-lint.spec.ts` guards.
+
+**An obligation queued behind a condition must be registered in `spec/transition-windows.spec.ts`**
+with an owner and a `reviewBy` date — the test goes red on that date (ADR-053). A *reserved surface*
+(an unused `CACHE_KEYS` builder, an unused `EXCHANGES` member) is **not** a window: nobody owes
+anything. The question is whether a future event is supposed to make somebody act.

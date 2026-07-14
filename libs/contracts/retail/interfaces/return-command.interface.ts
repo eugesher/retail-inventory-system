@@ -70,8 +70,10 @@ export interface IRetailReturnGetPayload extends ICorrelationPayload {
   isStaff: boolean;
 }
 
-// The owner-check here resolves the buyer from the RMAs themselves, not from `orderId` — a caller
-// who owns no RMA on the order sees an empty list rather than a rejection.
+// The owner-check resolves the buyer from the **ORDER**, not from the RMA rows — a caller who does
+// not own the order is refused with `RETURN_ACCESS_FORBIDDEN` (403), never handed an empty list
+// (ADR-051). Checking the rows instead was the old shape and it leaked anyway: it answered *"does
+// this order have returns?"* to a caller who may not know the order exists.
 export interface IRetailReturnListPayload extends ICorrelationPayload {
   orderId: number;
   actorId: string;

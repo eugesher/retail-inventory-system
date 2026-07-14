@@ -1691,15 +1691,18 @@ ADRs: [002](docs/adr/002-redis-cache-aside-product-stock.md),
 
 ## 13. Background jobs
 
-Three timers run inside three different services. Each one only decides how *promptly* an
-already-due row is handled — none of them is load-bearing for correctness, and each wraps its
-tick in a `try` / `catch` that warn-logs and returns, so a fault never stops the loop.
+**Five** timers run inside three different services (retail and notification own two each). Each one
+only decides how *promptly* an already-due row is handled — none of them is load-bearing for
+correctness, and each wraps its tick in a `try` / `catch` that warn-logs and returns, so a fault never
+stops the loop.
 
 | Job | Registering file | Cadence | What a missed tick costs |
 | --- | --- | --- | --- |
 | Reservation TTL sweep | `apps/inventory-microservice/…/stock/infrastructure/scheduling/reservation-sweep.scheduler.ts` | `RESERVATION_SWEEP_INTERVAL_SECONDS` (default `60`) | stranded holds keep depressing `available` — the system under-sells |
 | Idempotency-key TTL purge | `apps/retail-microservice/…/orders/infrastructure/idempotency/idempotency-purge.scheduler.ts` | fixed `@Cron`, every 10 minutes | `idempotency_key` keeps rows past `IDEMPOTENCY_KEY_TTL_HOURS`; the table grows |
 | Notification delivery retry sweep | `apps/notification-microservice/…/notifications/infrastructure/scheduling/delivery-retry.scheduler.ts` | fixed `@Interval`, 60 s | a `failed` delivery waits one more interval for its next attempt |
+| Stranded capture-claim report | `apps/retail-microservice/…/orders/infrastructure/scheduling/stale-capture-claim.scheduler.ts` | fixed `@Cron`, every 10 minutes | a payment stuck `capturing` (a request that died mid-charge) goes unreported for one more tick. **It REPORTS and resolves nothing** — the gateway cannot be asked whether the charge landed, so releasing the claim risks a second charge and completing it records money that may never have moved (ADR-052) |
+| Notification delivery retention purge | `apps/notification-microservice/…/notifications/infrastructure/scheduling/delivery-retention.scheduler.ts` | fixed `@Cron`, daily at 03:00 | `notification_delivery` keeps rows past `RETENTION_DELIVERY_DAYS` (default 90). A **hard** delete — soft-deleting would hide the dedupe anchor and send the same notification twice |
 
 Only the reservation sweep's cadence is configurable, which is why it alone registers its timer
 imperatively through `SchedulerRegistry.addInterval` — a `@Cron` / `@Interval` argument is fixed

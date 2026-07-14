@@ -13,6 +13,13 @@ import { BaseEntity } from '@retail-inventory-system/database';
 // the `id`, every index, and the FK on `variant_id` all live there — and `variant_id` is a plain
 // scalar here because inventory may not import the catalog entity. `referenceId` is polymorphic and
 // carries **no FK at all**: do not join on it.
+//
+// **`movement_dedupe_key` is deliberately NOT mapped here** (the `price.open_scope_key` precedent,
+// ADR-026). It is a STORED generated column and a DB-internal idempotency backstop: with
+// `synchronize` off TypeORM never touches it, and an INSERT that omits it lets MySQL compute it.
+// Mapping it would make TypeORM try to WRITE a generated column, which MySQL rejects. It is not
+// missing — it is the guard that makes Commit Sale and Restock From Return idempotent against a
+// concurrent redelivery (migration `1783872387242`).
 @Entity('stock_movement')
 export class StockMovementEntity extends BaseEntity {
   @Column({ type: 'bigint', unsigned: true })

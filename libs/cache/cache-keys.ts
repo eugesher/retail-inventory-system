@@ -3,10 +3,10 @@
 //
 //   ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]
 //
-// Five stock key families coexist: the live `v3` and four retired shapes exposed
-// **invalidate-only**, so the write path can wipe entries a previous deploy wrote. Read or write
-// through a legacy builder and you will hit a shape nothing else maintains. Why each bump
-// happened is ADR-016 / ADR-022 / ADR-030 §7.
+// Five stock key families are declared, but only the live `v3` has a caller. The four retired
+// shapes are **read by nothing, written by nothing, and (since ISSUE-03) swept by nothing** — they
+// remain as a registry of what each version bump changed. Read or write through one and you will
+// hit a shape nothing else maintains. Why each bump happened is ADR-016 / ADR-022 / ADR-030 §7.
 
 // Per-aggregate schema versions. A bump is a one-line edit that re-keys every entry on the next
 // deploy.
@@ -118,15 +118,26 @@ export const CACHE_KEYS = {
   notificationsConsent: (customerId: string, opts?: ITenantOptions): string =>
     `${CACHE_KEYS.notificationsConsentPrefix(opts)}${customerId}`,
 
-  // -- Retired shapes: SCAN+UNLINK only, never read, never written -----------
-  // `StockCache.withInvalidation` feeds each of these to `delByPrefix` so a rolling deploy
-  // wipes whatever the previous key version left behind. There is deliberately no full-key
-  // builder to match any of them: nothing writes these shapes, so a complete key would have no
-  // caller (ADR-046 deleted the one that did). Do not add one back for symmetry.
+  // -- Retired shapes: NO CALLER. Never read, never written, and no longer swept ------------
+  // **These four have no caller anywhere.** `StockCache` used to feed each of them to
+  // `delByPrefix` on every stock write, so that a rolling deploy across a key-version bump could
+  // not serve entries the previous version had written. That sweep is gone (ISSUE-03): it was four
+  // Redis SCAN passes per variant on the hot path of every stock mutation, and it **could not have
+  // mattered even if it had matched** — there is deliberately no full-key builder for any of these
+  // shapes, so nothing can read one back. An entry under a retired key is unreachable garbage that
+  // expires on its own TTL; wiping it eagerly bought nothing.
   //
-  // The v1 family keyed the old `productId` axis; these wipe by the now-`variantId` numeric id
-  // instead, which is close enough for a transition window and exact enough for a tree with no
-  // production data.
+  // They are kept as a **registry**, on ADR-046's basis — *"one line in a registry, where being a
+  // complete registry is the point"* — and because they document what each bump changed. They are
+  // not kept because anything is defending against them: the project has never deployed, so no
+  // Redis holds a key in any of these shapes.
+  //
+  // **Do not restore the sweep, and do not add a full-key builder for symmetry.** If a future bump
+  // needs a transition window, give it an owner and a close date; the condition on these four
+  // ("after the rolling deploy completes") was met three times and nobody acted.
+  //
+  // The v1 family keyed the old `productId` axis; the builders take the now-`variantId` numeric id
+  // instead — a mismatch that never mattered, because there was never data to match.
   inventoryStockLegacyPrefixV2: (id: number): string => `ris:inventory:stock:v2:${id}:`,
 
   inventoryStockLegacyPrefixV1: (id: number): string => `ris:inventory:stock:v1:${id}:`,
