@@ -150,24 +150,35 @@ export class StockCache implements IStockCachePort {
     const { tenantId, correlationId } = opts ?? {};
     const variantIds = [...new Set(items.map((i) => i.variantId))];
 
-    // **Five prefixes per variant, and therefore five Redis SCAN passes on every stock write.**
-    // One is the live `v3` key; the other four are retired shapes (`v2`, `v1`, the unversioned
-    // pre-v1, and the pre-ADR-016 `stock:<productId>:` convention), wiped so a rolling deploy
-    // cannot serve entries the previous version wrote.
+    // **Exactly ONE prefix per variant — one Redis SCAN + UNLINK per variant per write.**
+    // `delByPrefix` is a SCAN, not a keyspace lookup, and this runs on the hot path of every
+    // receive, adjust, reserve, release, allocate, commit-sale, restock and transfer.
     //
-    // The cost is real and the transition windows are not: no deploy has ever straddled these key
-    // versions, and `cache-keys.ts` records that no production data exists under any of them. This
-    // is a known finding, not an oversight — see the legacy builders in `libs/cache/cache-keys.ts`.
+    // This used to fan out to **five**: the live `v3` key plus the four retired shapes (`v2`, `v1`,
+    // the unversioned pre-v1, and the pre-ADR-016 `stock:<productId>:` convention), swept so a
+    // rolling deploy could not serve entries a previous key version had written. Four of those five
+    // SCANs **could never match anything, and could not have mattered if they had**: there is no
+    // read path for a retired shape — `cache-keys.ts` exposes no full-key builder for one — so an
+    // entry under an old key is unreachable garbage that no request could ever be served, and it
+    // expires on its own TTL. Sweeping it bought nothing and cost a SCAN per write, forever
+    // (ISSUE-03).
+    //
+    // **The builders survive in `libs/cache/cache-keys.ts` and now have no caller at all** — kept as
+    // a registry of the retired shapes, on ADR-046's "a complete registry is the point" basis, not
+    // because anything is defending against them. Nothing is: the project has never deployed, so no
+    // Redis anywhere holds a key in any of those shapes.
+    //
+    // Do not re-add a sweep here. If a future key bump genuinely needs a transition window, it needs
+    // one with an owner and a close date — not a permanent tax on every write (ADR-046: *"a deletion
+    // queued behind a condition, with no owner and no check, is not queued — it is forgotten"*). The
+    // condition on these four ("after the rolling deploy completes") was met three times and nobody
+    // acted, which is how five SCANs ended up on the hot path.
     let totalUnlinked = 0;
     try {
       const counts = await Promise.all(
-        variantIds.flatMap((variantId) => [
+        variantIds.map((variantId) =>
           this.cache.delByPrefix(CACHE_KEYS.inventoryStockPrefix(variantId, { tenantId })),
-          this.cache.delByPrefix(CACHE_KEYS.inventoryStockLegacyPrefixV2(variantId)),
-          this.cache.delByPrefix(CACHE_KEYS.inventoryStockLegacyPrefixV1(variantId)),
-          this.cache.delByPrefix(CACHE_KEYS.inventoryStockLegacyPrefix(variantId)),
-          this.cache.delByPrefix(CACHE_KEYS.productStockPrefix(variantId)),
-        ]),
+        ),
       );
       totalUnlinked = counts.reduce((sum, n) => sum + n, 0);
     } catch (error) {
