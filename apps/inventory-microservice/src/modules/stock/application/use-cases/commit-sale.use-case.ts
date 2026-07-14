@@ -59,27 +59,23 @@ interface ICommitOutcome {
   levels: ICommittedLevel[];
 }
 
-// Commit Sale physically ships an order's allocated stock at fulfillment time
-// (ADR-031). Per line it moves units OUT of BOTH `quantity_on_hand` and
-// `quantity_allocated` (the allocated stock physically leaving) in one
-// `StockLevel.commitSale` — `available` is unchanged because both counters
-// subtract from it — and appends one strictly-negative `sale` `StockMovement`
-// referencing the fulfillment. This is the long-reserved `sale` ledger type's
-// first producer (ADR-030 §2 shipped the enum).
+// **The operation on which stock physically leaves** (ADR-031). Per line it decrements *both*
+// `quantity_on_hand` and `quantity_allocated` in one `StockLevel.commitSale` and appends a
+// strictly-negative `sale` movement. `available` does not move — both counters subtract from it, so
+// they cancel: shipping stock that was already promised neither frees nor consumes availability.
 //
-// **Idempotent on `fulfillmentId`**: a `sale` movement already referencing this
-// fulfillment means the commit already happened, so a re-delivery (the
-// cross-service retry path — retail drives this AFTER its local ship commits, so a
-// transient RMQ failure can re-deliver) decrements nothing and re-returns the prior
-// result. The probe runs BEFORE any write, against the ledger's
-// `(reference_type, reference_id)` index.
+// **Idempotent on `fulfillmentId`.** Retail drives this **after** its own ship transaction has
+// committed, so a transient RMQ failure re-delivers a request whose work is already durable. The
+// probe — a lookup on the ledger's `(reference_type, reference_id)` index — runs **before any
+// write**: a `sale` movement already naming this fulfillment means the commit happened, so the
+// replay decrements nothing and returns the prior result.
 //
-// **All-lines-atomic**: every line is computed in memory (where `commitSale`'s
-// drift / `STOCK_RESULT_NEGATIVE` rejections throw) before ANY persist, then every
-// distinct level is persisted once and every movement appended, all inside one
-// `withInvalidation(runWithStockWriteRetry(...))` — a rejection on any line rolls
-// the whole transaction back (the Allocate / Cancel precedent). No reservation rows
-// are touched (the holds were committed at allocate-time).
+// **All-lines-atomic.** Every line is computed in memory, where a drift or a `STOCK_RESULT_NEGATIVE`
+// throws, before a single persist. A rejection on any line rolls the whole transaction back — there
+// is no such thing as a half-shipped commit.
+//
+// **No reservation row is touched.** The holds were already committed at allocate-time; by the time
+// stock ships, there is nothing left holding it.
 @Injectable()
 export class CommitSaleUseCase {
   constructor(
