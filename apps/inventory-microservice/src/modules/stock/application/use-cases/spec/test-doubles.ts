@@ -394,8 +394,26 @@ export class InMemoryStockMovementRepository implements IStockMovementRepository
   // the counter's transaction, ADR-030 §2).
   public readonly appendScopes: (ITransactionScope | undefined)[] = [];
   private nextId = 1;
+  private duplicateOnNextAppend = false;
+
+  // Arms the next `append` to fail the way MySQL fails it when the writer loses the
+  // `UC_STOCK_MOVEMENT_DEDUPE` race — the ONLY way a unit spec can reach that path,
+  // since an in-memory double has no UNIQUE to break. The shape (not the class) is the
+  // contract `isDuplicateEntryError` duck-types against, and the real driver nests the
+  // errno under `driverError`, so reproduce that nesting rather than a flat object.
+  public failNextAppendWithDuplicateEntry(): void {
+    this.duplicateOnNextAppend = true;
+  }
 
   public append(movement: StockMovement, scope?: ITransactionScope): Promise<StockMovement> {
+    if (this.duplicateOnNextAppend) {
+      this.duplicateOnNextAppend = false;
+      const error = new Error(
+        'Duplicate entry for key stock_movement.UC_STOCK_MOVEMENT_DEDUPE',
+      ) as Error & { driverError: { errno: number; code: string } };
+      error.driverError = { errno: 1062, code: 'ER_DUP_ENTRY' };
+      return Promise.reject(error);
+    }
     this.appendScopes.push(scope);
     const persisted = StockMovement.reconstitute({
       id: this.nextId++,

@@ -23,13 +23,16 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { LedgerReplayError } from './ledger-replay.error';
 import { maybeEmitLowStock } from './low-stock.emitter';
 import { emitMovementRecorded } from './movement-recorded.emitter';
+import { isDuplicateEntryError } from './mysql-error.util';
 import {
   INormalizedReservationLine,
   levelKey,
   loadDistinctLevels,
   normalizeReservationLines,
+  requireDistinctLevels,
 } from './reservation-mutation';
 import { runWithStockWriteRetry } from './stock-mutation';
 
@@ -64,10 +67,13 @@ interface ICommitOutcome {
 // strictly-negative `sale` movement. `available` does not move — both counters subtract from it, so
 // they cancel: shipping stock that was already promised neither frees nor consumes availability.
 //
-// **Idempotent on `fulfillmentId` against a SEQUENTIAL replay** — see the probe below for the
-// qualifier, which is load-bearing. Retail drives this *after* its own ship transaction has
-// committed, so a transient RMQ failure re-delivers a request whose work is already durable, and a
-// redelivery that arrives once the first call has finished decrements nothing.
+// **Idempotent on `fulfillmentId`, including against CONCURRENT redeliveries.** Retail drives this
+// *after* its own ship transaction has committed, so a transient RMQ failure re-delivers a request
+// whose work is already durable — and the broker never promises the redelivery waits for the
+// original to finish. Two mechanisms, in that order: the `existsByReference` probe short-circuits
+// the sequential replay (the common case), and `UC_STOCK_MOVEMENT_DEDUPE` — a UNIQUE on the ledger —
+// is what actually holds when two deliveries are in flight at once. **The probe is an optimisation;
+// the constraint is the guarantee.** Both paths return the same no-op result and neither throws.
 //
 // **All-lines-atomic.** Every line is computed in memory, where a drift or a `STOCK_RESULT_NEGATIVE`
 // throws, before a single persist. A rejection on any line rolls the whole transaction back — there
@@ -104,17 +110,23 @@ export class CommitSaleUseCase {
     );
 
     const lines = normalizeReservationLines(payload.lines, 'Commit sale');
+    // Two lines on one level would collide on `UC_STOCK_MOVEMENT_DEDUPE` and the catch
+    // below would misread the collision as a replay. Rejecting it here is what keeps
+    // that error's meaning single — see `requireDistinctLevels`.
+    requireDistinctLevels(lines, 'Commit sale');
 
-    // Idempotency-first (ADR-031): a `sale` movement already referencing this fulfillment means the
-    // commit happened, so re-return the lines without decrementing. Skipping `withInvalidation`
-    // entirely is right — nothing changed, so there is nothing to invalidate.
+    // The FAST PATH, not the guard (ADR-031). A `sale` movement already referencing this
+    // fulfillment means the commit happened, so re-return the lines without decrementing;
+    // skipping `withInvalidation` entirely is right, because nothing changed.
     //
-    // **This probe is SEQUENTIAL-only, and the distinction matters.** It runs outside the
-    // transaction, and `IDX_STOCK_MOVEMENT_REFERENCE` is a plain index, not a UNIQUE — so nothing
-    // stops two *concurrent* deliveries of the same `fulfillmentId` from both reading "not yet
-    // committed" and both decrementing. A redelivery that arrives *after* the first call finished is
-    // safe; two in flight at once are not. Do not describe this as idempotent without that
-    // qualifier.
+    // **This probe cannot make the operation idempotent, and must not be read as if it
+    // did.** It is a READ outside the write transaction, so two *concurrent* deliveries
+    // of one `fulfillmentId` both see "not yet committed" and both fall through. What
+    // makes the operation idempotent is `UC_STOCK_MOVEMENT_DEDUPE` (migration
+    // `1783872387242`) — a UNIQUE the losing writer's INSERT breaks, caught below. The
+    // probe is kept because a redelivery that arrives *after* the first call finished is
+    // the overwhelmingly common case, and short-circuiting it costs one indexed SELECT
+    // instead of a whole transaction that would only roll back.
     const alreadyCommitted = await this.movementRepository.existsByReference(
       FULFILLMENT_REFERENCE_TYPE,
       fulfillmentId,
@@ -127,26 +139,51 @@ export class CommitSaleUseCase {
       return { committed: lines.map((line) => this.toEntry(line)) };
     }
 
-    const outcome = await this.stockCache.withInvalidation(
-      () =>
-        runWithStockWriteRetry(
-          {
-            transactionPort: this.transactionPort,
-            logger: this.logger,
-            maxAttempts: this.maxAttempts,
-          },
-          (scope) => this.commitOnce(scope, orderId, fulfillmentId, lines, actorId),
-          { correlationId },
-        ),
-      // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
-      // covering every location facet, so the raw per-line items are enough.
-      (result) =>
-        result.lines.map((row) => ({
-          variantId: row.variantId,
-          stockLocationId: row.stockLocationId,
-        })),
-      { correlationId },
-    );
+    let outcome: ICommitOutcome;
+    try {
+      outcome = await this.stockCache.withInvalidation(
+        () =>
+          runWithStockWriteRetry(
+            {
+              transactionPort: this.transactionPort,
+              logger: this.logger,
+              maxAttempts: this.maxAttempts,
+            },
+            (scope) => this.commitOnce(scope, orderId, fulfillmentId, lines, actorId),
+            { correlationId },
+          ),
+        // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
+        // covering every location facet, so the raw per-line items are enough.
+        (result) =>
+          result.lines.map((row) => ({
+            variantId: row.variantId,
+            stockLocationId: row.stockLocationId,
+          })),
+        { correlationId },
+      );
+    } catch (error) {
+      // THE GUARD, in its two forms. A concurrent delivery beat us to the ledger, and we
+      // learned it either by SEEING its `sale` row under our own snapshot
+      // (`LedgerReplayError`, phase 0) or by breaking `UC_STOCK_MOVEMENT_DEDUPE` on the
+      // INSERT (`isDuplicateEntryError`) when neither snapshot saw the other. Either way
+      // the whole transaction rolled back, so this attempt decremented nothing — the
+      // outcome is the winner's, and it is exactly what the probe returns for a
+      // sequential replay.
+      //
+      // **This must not rethrow.** The caller is an `@MessagePattern`, and an exception
+      // out of one is blind-redelivered by the broker in a hot loop — which would put a
+      // *third* delivery on the same fulfillment. Neither error is a
+      // `StockWriteConflictError`, so `runWithStockWriteRetry` correctly does not retry
+      // them either: a retry would just re-lose the same race.
+      if (error instanceof LedgerReplayError || isDuplicateEntryError(error)) {
+        this.logger.info(
+          { correlationId, orderId, fulfillmentId },
+          'Commit sale lost a concurrent race — the ledger already holds this fulfillment, nothing decremented',
+        );
+        return { committed: lines.map((line) => this.toEntry(line)) };
+      }
+      throw error;
+    }
 
     this.logger.info(
       { correlationId, orderId, fulfillmentId, committedCount: outcome.lines.length },
@@ -183,6 +220,24 @@ export class CommitSaleUseCase {
     lines: INormalizedReservationLine[],
     actorId: string | null,
   ): Promise<ICommitOutcome> {
+    // Phase 0 — re-probe UNDER THE SCOPE, so the question is asked of the very snapshot
+    // this attempt will write in. If a concurrent delivery committed before this
+    // transaction opened, its `sale` row is visible here and we must unwind NOW: phase 2
+    // would otherwise re-read a level whose `quantity_allocated` the winner already
+    // consumed and throw `StockLevel.commitSale`'s drift `Error` — a 500 out of an
+    // `@MessagePattern`, which the broker blind-redelivers in a hot loop. See
+    // `LedgerReplayError` for why this and `UC_STOCK_MOVEMENT_DEDUPE` cover disjoint
+    // windows and both are needed.
+    if (
+      await this.movementRepository.existsByReference(
+        FULFILLMENT_REFERENCE_TYPE,
+        fulfillmentId,
+        scope,
+      )
+    ) {
+      throw new LedgerReplayError(FULFILLMENT_REFERENCE_TYPE, fulfillmentId);
+    }
+
     // Phase 1 — load each distinct level once, capturing its optimistic token.
     const levels = await loadDistinctLevels(this.repository, lines, scope);
 

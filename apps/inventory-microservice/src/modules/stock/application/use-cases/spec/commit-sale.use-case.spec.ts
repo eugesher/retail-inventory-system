@@ -272,4 +272,44 @@ describe('CommitSaleUseCase', () => {
       code: InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
     });
   });
+
+  // The ledger UNIQUE (`UC_STOCK_MOVEMENT_DEDUPE`) is what actually makes this operation
+  // idempotent against a CONCURRENT redelivery; the `existsByReference` probe is only the
+  // sequential fast path. An in-memory double has no UNIQUE to break, so the spec arms
+  // the driver error the real adapter would raise and asserts the translation.
+  describe('losing a concurrent race must be a successful no-op, never a throw', () => {
+    it('translates the ledger duplicate-key error into the same replay result', async () => {
+      seedLevel({ onHand: 10, allocated: 4 });
+      movements.failNextAppendWithDuplicateEntry();
+
+      const result = await commit([{ variantId: VARIANT_ID, quantity: 4 }]);
+
+      // The winner's outcome, re-reported. **Not a throw**: this runs under an
+      // `@MessagePattern`, and an exception out of one is blind-redelivered by the broker
+      // in a hot loop — which would put a third delivery on the same fulfillment.
+      expect(result).toEqual({
+        committed: [{ variantId: VARIANT_ID, stockLocationId: LOCATION, quantity: 4 }],
+      });
+      expect(movements.appended).toHaveLength(0);
+    });
+  });
+
+  // Two lines on one `(variant, location)` would generate the SAME dedupe key, and the
+  // duplicate-key catch above would then misread the payload's own collision as a replay
+  // — reporting a commit that never happened. Rejecting it here is what keeps that error
+  // unambiguous. Retail cannot produce such a payload (a cart merges lines by variant),
+  // but the RPC is directly reachable over RabbitMQ.
+  it('rejects two lines that share a (variant, location) level', async () => {
+    seedLevel({ onHand: 10, allocated: 4 });
+
+    await expect(
+      commit([
+        { variantId: VARIANT_ID, quantity: 2 },
+        { variantId: VARIANT_ID, quantity: 1 },
+      ]),
+    ).rejects.toMatchObject({ code: InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID });
+
+    expect(movements.appended).toHaveLength(0);
+    expect(cache.invalidations).toHaveLength(0);
+  });
 });
