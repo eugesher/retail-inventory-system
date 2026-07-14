@@ -10,3 +10,4 @@ export * from './render-and-dispatch.use-case';
 export * from './transport-subject';
 export * from './transactional-event-types';
 export * from './send-marketing.use-case';
+export * from './purge-aged-deliveries.use-case';

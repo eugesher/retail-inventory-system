@@ -258,8 +258,9 @@ business consumer, still captured by the firehose. [`README.md`
 
 ## Background jobs (cron)
 
-Three timers, in three services (`*.scheduler.ts`); `ScheduleModule.forRoot()` is wired in each
-one's Nest module. Cadences, registering files and what a missed tick costs:
+**Five** timers, in three services (`*.scheduler.ts`); `ScheduleModule.forRoot()` is wired in each
+one's Nest module (retail and notification own two each). Cadences, registering files and what a
+missed tick costs:
 [`README.md` §13](README.md#13-background-jobs).
 
 ## Service Structure

@@ -17,6 +17,7 @@ export class FakeLogger {
   // dispatch-failed warn branches without disturbing the `logs` (info) ordering the
   // sibling specs assert on.
   public readonly warns: { context: unknown; message?: string }[] = [];
+  public readonly debugs: { context: unknown; message?: string }[] = [];
 
   public assign(context: Record<string, unknown>): void {
     this.assignments.push(context);
@@ -28,6 +29,14 @@ export class FakeLogger {
 
   public warn(context: unknown, message?: string): void {
     this.warns.push({ context, message });
+  }
+
+  // `PinoLogger` has one and this double did not — so a use case that debug-logs its quiet path (the
+  // retention sweep's "nothing aged out") crashed the spec with `logger.debug is not a function`. A
+  // double that is missing a method the real thing has does not fail honestly; it fails somewhere
+  // unrelated, at the first caller that reaches for it.
+  public debug(context: unknown, message?: string): void {
+    this.debugs.push({ context, message });
   }
 }
 
@@ -218,5 +227,22 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
   public listRetryable(maxAttempts: number, limit: number): Promise<NotificationDelivery[]> {
     const matched = this.rows.filter((r) => r.attemptCount < maxAttempts);
     return Promise.resolve(matched.slice(0, limit));
+  }
+
+  // The retention sweep's HARD delete (ISSUE-08). It really removes the rows — a double that merely
+  // flagged them would model a *soft* delete, which is the one thing this must not be: the row is the
+  // dedupe anchor, and a hidden-but-present row means the same notification sends twice.
+  //
+  // `createdAt` is null on a domain object that never round-tripped through the mapper; such a row is
+  // treated as **not yet aged**, the conservative direction (a purge that deletes what it cannot date
+  // is worse than one that skips it).
+  public deleteOlderThan(horizon: Date, limit: number): Promise<number> {
+    const doomed = this.rows
+      .filter((r) => r.createdAt !== null && r.createdAt < horizon)
+      .slice(0, limit);
+    for (const row of doomed) {
+      this.rows.splice(this.rows.indexOf(row), 1);
+    }
+    return Promise.resolve(doomed.length);
   }
 }

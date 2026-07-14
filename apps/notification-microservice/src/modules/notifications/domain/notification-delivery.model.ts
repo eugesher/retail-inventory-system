@@ -58,10 +58,15 @@ export interface IOpenNotificationDeliveryInput {
 // `SKIPPED_NO_CONSENT` status (the consent-gate short-circuit, ADR-037) and never
 // enters that walk.
 //
-// **A delivery row is never deleted, and nothing bounds the table.** `deletedAt` stays inert and
-// there is no retention sweep — `notification_delivery` grows for the life of the deployment. The
-// `RETENTION_DELIVERY_DAYS` env var exists and validates (Joi, default 90), but **no code reads
-// it**, so setting it changes nothing.
+// **A delivery row is never SOFT-deleted — `deletedAt` is inert, and deliberately so**: the row is the
+// source of truth for *"did we already send this?"*, and a hidden-but-present row that the dedupe
+// query no longer sees means the same notification is sent twice.
+//
+// **It is HARD-deleted, once it ages out** (`PurgeAgedDeliveriesUseCase`, nightly, bounded). The
+// horizon is `RETENTION_DELIVERY_DAYS` (Joi default 90) — a key that **existed and was read by
+// nothing** until ISSUE-08, while this table, on the hot path of every order, fulfillment, return and
+// refund, grew for the life of the deployment. Retiring the row retires its dedupe anchor with it;
+// that coupling is stated on `INotificationDeliveryRepositoryPort.deleteOlderThan` and is accepted.
 //
 // `attemptCount` is **monotonic** — only `markSent` / `markFailed` (the two
 // attempt-consuming transitions) increment it; `markDelivered` / `markBounced` record a
