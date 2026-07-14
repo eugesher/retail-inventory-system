@@ -575,4 +575,86 @@ describe('PlaceOrderUseCase', () => {
       // cart-conversion CAS loses'); this test isolates the store's convergence step.
     });
   });
+  // ════════════════════════════════════════════════════════════════════════════════════════
+  // A DECLINED AUTHORIZATION (ISSUE-06 / ADR-052).
+  //
+  // **This branch had never been executed by a test.** `FakePaymentGateway` has taken an `approve`
+  // flag all along and `makeHarness` has forwarded it — and **not one spec ever passed `false`.** The
+  // decline was modelled (a typed `ORDER_PAYMENT_NOT_APPROVED` code exists; someone expected declines)
+  // and then never exercised, which is exactly how the orphan survived eleven epics: the bound gateway
+  // always approves, so the path was unreachable in production *and* in CI.
+  // ════════════════════════════════════════════════════════════════════════════════════════
+  describe('a declined authorization', () => {
+    it('surfaces the decline rather than returning a successful order', async () => {
+      const h = makeHarness(activeCart(), catalogMaps(), false);
+
+      await expect(h.useCase.execute(placePayload())).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED,
+      });
+    });
+
+    it('RELEASES the allocation — the stock does not stay held for an order that can never ship', async () => {
+      const h = makeHarness(activeCart(), catalogMaps(), false);
+
+      await expect(h.useCase.execute(placePayload())).rejects.toThrow();
+
+      // The compensation ran, against the SAME lines the allocate used.
+      expect(h.inventory.cancelCalls).toHaveLength(1);
+      expect(h.inventory.cancelCalls[0]).toMatchObject({
+        lines: h.inventory.allocateCalls[0].lines,
+        // The ledger records WHY: not an operator cancelling, but a place that never got off the
+        // ground. Distinguishing it from `place-rollback` (the pre-commit window) and from
+        // `order-cancelled` matters to anyone reading the movement ledger.
+        reason: 'authorization-declined',
+      });
+    });
+
+    it('marks the order dead on BOTH axes — cancelled (that) and payment-failed (why)', async () => {
+      const h = makeHarness(activeCart(), catalogMaps(), false);
+
+      await expect(h.useCase.execute(placePayload())).rejects.toThrow();
+
+      const order = (await h.orderRepository.findById(1))!;
+      // The lifecycle axis says the order is dead...
+      expect(order.status).toBe(OrderStatusEnum.CANCELLED);
+      // ...and the payment axis says why. Two orthogonal axes (ADR-028 §2), no new enum member:
+      // `OrderPaymentStatusEnum.FAILED` was in the contract and in the column all along, with nothing
+      // producing it.
+      expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.FAILED);
+      // It used to read `pending` / `none` — indistinguishable from a healthy order.
+      expect(order.status).not.toBe(OrderStatusEnum.PENDING);
+    });
+
+    it('emits NOTHING — no consumer was ever told this order was born', async () => {
+      const h = makeHarness(activeCart(), catalogMaps(), false);
+
+      await expect(h.useCase.execute(placePayload())).rejects.toThrow();
+
+      // `emitEvents` runs after the authorize, so `retail.order.placed` never fired. Announcing a
+      // cancellation would announce the death of something nobody heard was born — and would drive
+      // `OrderCancelledConsumer` into an auto-refund of a payment that does not exist.
+      expect(h.publisher.placed).toHaveLength(0);
+      expect(h.publisher.orderCancelled).toHaveLength(0);
+      expect(h.publisher.authorized).toHaveLength(0);
+    });
+
+    // **The assertion that makes this `high` rather than `medium`.**
+    it('REFUSES the retry instead of reporting the dead order as a success', async () => {
+      const h = makeHarness(activeCart(), catalogMaps(), false);
+      await expect(h.useCase.execute(placePayload())).rejects.toThrow();
+
+      // The customer, having seen an error, tries again. The cart is `converted` (the CAS is the
+      // double-place guard and cannot be reversed), so the repeat-place path fires — and it used to
+      // return `toOrderView(existing, null)`: **a 200/201 with `payment: undefined`.** The customer
+      // whose card was declined was told their order went through.
+      //
+      // A fresh idempotency key, so the request-level replay guard does not fire and we reach the
+      // converted-cart branch for real.
+      await expect(
+        h.useCase.execute(placePayload({ idempotencyKey: 'idem-retry' })),
+      ).rejects.toMatchObject({
+        code: OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED,
+      });
+    });
+  });
 });
