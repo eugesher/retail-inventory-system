@@ -134,8 +134,13 @@ Non-obvious facts, each worth a debugging cycle.
   `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS`,
   `RETURN_WINDOW_DAYS`,
   `IDEMPOTENCY_KEY_TTL_HOURS`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
-  `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`, `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
+  `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`, `RETAIL_DEFAULT_CURRENCY`,
+  `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only).
+  `CATALOG_DEFAULT_CURRENCY` and `RETAIL_DEFAULT_CURRENCY` **deliberately read the one
+  `DEFAULT_CURRENCY` var**: a catalog quoting EUR and a cart opening in USD bakes the wrong
+  unit into an immutable `Order.currency`. A third reader still mints its own literal —
+  `PriceQueryDto.currency = 'USD'` defaults the price-read endpoints at the gateway edge.
   `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects, so
   `ReservationSweepScheduler` registers its timer via `SchedulerRegistry.addInterval` in
   `onModuleInit` — and **must** `deleteInterval` in `onModuleDestroy`, or a leaked timer hangs
