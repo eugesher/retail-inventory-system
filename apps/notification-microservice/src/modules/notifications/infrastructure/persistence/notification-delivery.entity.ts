@@ -10,8 +10,11 @@ import { BaseEntity } from '@retail-inventory-system/database';
 // (docs/adr/033-notification-templates-deliveries-and-render-dispatch.md). It keeps
 // `BaseEntity`'s generated numeric PK (the migration widens the
 // `@PrimaryGeneratedColumn()` int to BIGINT UNSIGNED) plus `createdAt` / `updatedAt` /
-// `deletedAt`. `deletedAt` stays **INERT**: a delivery row is live-ephemeral and never
-// soft-deleted (a `RETENTION_DELIVERY_DAYS` purge is a deferred future capability).
+// `deletedAt`. `deletedAt` stays **INERT** — a delivery row is never soft-deleted, and that is
+// deliberate: the row IS the dedupe anchor (`delivery_dedupe_key`), so a hidden-but-present row the
+// dedupe query no longer sees would let the same notification send twice. **The retention sweep HARD-
+// deletes instead** (`PurgeAgedDeliveriesUseCase`, nightly, bounded, `RETENTION_DELIVERY_DAYS`) — the
+// table was unbounded until ISSUE-08, when that config key finally got a reader.
 //
 // `template_id` is a plain BIGINT scalar — the `FK_NOTIFICATION_DELIVERY_TEMPLATE`
 // foreign key (`→ notification_template(id)`, `ON DELETE RESTRICT` so deliveries outlive

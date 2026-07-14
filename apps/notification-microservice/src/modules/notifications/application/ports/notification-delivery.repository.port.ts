@@ -60,6 +60,26 @@ export interface INotificationDeliveryPage {
 //   `(status, last_attempt_at)` index. It returns a bounded batch (not a page): the
 //   sweeper only iterates the rows and never needs a full match count, so it skips the
 //   `COUNT(*)` the paged `list` pays.
+// - `deleteOlderThan` is **the port's only destructive verb, and it is a deliberate one** (ISSUE-08).
+//   Until it existed this seam was append-and-update-only, and `notification_delivery` grew for the
+//   life of the deployment: a row per notification on the hot path of every order, fulfillment,
+//   return and refund, never soft-deleted (`deletedAt` is inert **by design** — the row is the source
+//   of truth for *"did we already send this?"*) and never hard-deleted, because there was no sweep.
+//   `RETENTION_DELIVERY_DAYS` named the purge and **nothing read it.**
+//
+//   **A HARD delete, and it must be.** Soft-deleting is the tempting shortcut and it is wrong: the
+//   row **is** the dedupe anchor (the generated `delivery_dedupe_key`), so a soft-deleted row that
+//   the dedupe query no longer sees means the same notification is sent **twice**. There is no third
+//   option — hard delete, or nothing.
+//
+//   **The retention horizon and the dedupe guarantee are therefore COUPLED, and that is a decision,
+//   not an accident.** Purging a row past the horizon retires its dedupe anchor: an event re-processed
+//   after that point would dispatch a *second* notification. It is safe because RabbitMQ will not
+//   redeliver a 90-day-old message — but it is safe *by that argument*, and if the horizon is ever
+//   shortened to something a broker CAN outlive, this stops being true.
+//
+//   Bounded by `limit` so one sweep can never take a table-sized lock; the scheduler simply runs
+//   again. Returns the row count so the sweep can log real churn.
 export interface INotificationDeliveryRepositoryPort {
   save(delivery: NotificationDelivery): Promise<NotificationDelivery>;
   findById(id: number): Promise<NotificationDelivery | null>;
@@ -75,4 +95,5 @@ export interface INotificationDeliveryRepositoryPort {
     page: INotificationDeliveryPageRequest,
   ): Promise<INotificationDeliveryPage>;
   listRetryable(maxAttempts: number, limit: number): Promise<NotificationDelivery[]>;
+  deleteOlderThan(horizon: Date, limit: number): Promise<number>;
 }

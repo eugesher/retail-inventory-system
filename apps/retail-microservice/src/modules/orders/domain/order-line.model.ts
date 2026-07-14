@@ -143,18 +143,19 @@ export class OrderLine extends Entity<number | null> {
     return this.quantity - this._cancelledQuantity;
   }
 
-  // Records `units` of this line as cancelled (Cancel Line, ADR-031). The caller has
-  // already established that the units are unshipped — the fulfilled count lives on the
-  // order's `fulfillment` rows, which a child entity cannot see. What the line owns is
-  // its own bound: the running total may never exceed the ordered quantity, so a repeat
-  // cancel of the same units is rejected here even if the caller's remainder maths were
-  // wrong. That makes this the last line of defence against the over-release the
-  // unrecorded-cancellation bug produced.
+  // **The last thing standing between a caller's arithmetic and an over-release of stock.**
   //
-  // Carries **no money mutation** — `lineTotalMinor` stays the place-time snapshot; a
-  // credit is the refund capability's job. Cancelling the whole line moves it to the
-  // terminal `cancelled` status; a partial cancel leaves the fulfillment-progress status
-  // alone (the remaining units still ship).
+  // The line cannot see the `fulfillment` rows, so it cannot know how many units already shipped —
+  // the caller establishes that. What the line *does* own is its own bound: cancelled units may
+  // never exceed `activeQuantity`, so a repeat cancel of the same units is refused **even if the
+  // caller's remainder maths were wrong**. That bound is load-bearing, because the quantity released
+  // back to inventory is derived from what was cancelled here: **bound the cancellation and you have
+  // bounded the release.**
+  //
+  // Carries **no money mutation.** `lineTotalMinor` stays the place-time snapshot — cancelling units
+  // does not credit them, and a refund is a separate, explicit act. Cancelling the whole line moves
+  // it to `cancelled`; a partial cancel leaves the fulfillment-progress status alone, because the
+  // remaining units still ship.
   public cancelQuantity(units: number): void {
     if (!Number.isInteger(units) || units <= 0) {
       throw new OrderDomainException(
@@ -183,10 +184,13 @@ export class OrderLine extends Entity<number | null> {
   // fulfillments, so this mutator only guards the axis. A move to the same status is
   // an idempotent no-op (the Ship recompute touches every order line, including ones a
   // prior shipment already fully shipped). A **strictly backward** move, or a move to a
-  // status outside this fulfillment-progress subset (`cancelled`/`returned` belong to
-  // later capabilities), is an internal-invariant breach the use case never produces —
-  // a plain `Error` (500), the `OrderLine`-other-guards style. Carries no money
-  // mutation, so the place-time snapshot stays intact.
+  // status outside the fulfillment-progress subset, is an internal-invariant breach the use
+  // case never produces — a plain `Error` (500), the `OrderLine`-other-guards style. Carries
+  // no money mutation, so the place-time snapshot stays intact.
+  //
+  // `cancelled` and `returned` are outside that subset, for different reasons: `cancelled` is
+  // reached, but by `cancelQuantity` above (a different axis), so routing it through here would
+  // be a bug; `returned` has no producer anywhere.
   public markFulfillment(next: OrderLineStatusEnum): void {
     const target = OrderLine.fulfillmentRank(next);
     const current = OrderLine.fulfillmentRank(this._status);
@@ -203,9 +207,8 @@ export class OrderLine extends Entity<number | null> {
     this._status = next;
   }
 
-  // The forward ordinal of the fulfillment-progress subset; `null` for the
-  // `cancelled`/`returned` values that belong to later capabilities, so a stray call
-  // with one of them is rejected rather than silently ranked.
+  // The forward ordinal of the fulfillment-progress subset; `null` for `cancelled`/`returned`,
+  // so a stray call with one of them is rejected rather than silently ranked.
   private static fulfillmentRank(status: OrderLineStatusEnum): number | null {
     switch (status) {
       case OrderLineStatusEnum.ALLOCATED:

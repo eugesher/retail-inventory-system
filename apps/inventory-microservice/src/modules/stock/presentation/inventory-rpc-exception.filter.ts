@@ -57,8 +57,11 @@ export class InventoryRpcExceptionFilter implements RpcExceptionFilter<Inventory
     // The errored stream value is what the RMQ client receives as the rejection
     // payload (the same channel the catalog/pricing filters use). `details` rides
     // along only when present (e.g. `{ available }` on `OUT_OF_STOCK`) — ADR-030
-    // §6; the gateway util forwards it once the retail-wiring capability teaches
-    // `throwRpcError` to, and harmlessly drops it until then.
+    // §6; the gateway's `throwRpcError` forwards an object-valued `details` verbatim
+    // and harmlessly drops an absent one, so a client can read `details.available`
+    // without a second stock call. (The cart / orders / returns filters say the same;
+    // this one alone still promised the forwarding as *future* work long after it
+    // shipped, which `spec/throw-rpc-error.util.spec.ts` now pins.)
     return throwError(() => ({
       statusCode,
       message: exception.message,

@@ -62,7 +62,9 @@ export class CategoryTypeormRepository
     return reloaded;
   }
 
-  public async findById(id: number): Promise<Category | null> {
+  // Private (ADR-049): `save`'s re-read is the only caller. It is not on the port —
+  // callers address a category by `slug` or by `path`.
+  private async findById(id: number): Promise<Category | null> {
     const entity = await this.categoryRepository.findOne({ where: { id } });
     return entity ? CategoryMapper.toDomain(entity) : null;
   }

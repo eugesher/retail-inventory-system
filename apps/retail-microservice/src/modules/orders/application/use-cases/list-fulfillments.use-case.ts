@@ -16,12 +16,9 @@ import { toFulfillmentView } from './fulfillment-view.factory';
 // for one order, newest-first (`shipped_at DESC, id DESC` via `listByOrderId`). An
 // order with no fulfillments resolves to an empty array (a 200, not a 404).
 //
-// **Authorization is owner-or-staff `order:read`** (ADR-024 / ADR-028 §7), enforced
-// here via `loadAuthorizedOrder`: allow if `canReadAny` (the gateway already confirmed
-// the caller carries `order:read`) **or** `order.customerId === actorId` (the owning
-// customer) — else `ORDER_ACCESS_FORBIDDEN` (403); a missing order is 404. The order
-// is loaded only to gate the read — the authorization rule lives on the order, the
-// fulfillments hang off it.
+// Authorization goes through `loadAuthorizedOrder` (the rule is stated there, once); the override is
+// `order:read`. **The order is loaded solely to gate the read** — a fulfillment has no owner of its
+// own, so the authorization rule lives on the order it hangs off.
 @Injectable()
 export class ListFulfillmentsUseCase {
   constructor(

@@ -1,7 +1,5 @@
-import { AddressOwnerTypeEnum } from '@retail-inventory-system/contracts';
-
 import { Address } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const ADDRESS_REPOSITORY = Symbol('ADDRESS_REPOSITORY');
 
@@ -12,12 +10,13 @@ export const ADDRESS_REPOSITORY = Symbol('ADDRESS_REPOSITORY');
 // `save` upserts by the caller-assigned CHAR(36) UUID and re-reads for the
 // committed timestamps; it accepts an optional `scope` so Place Order writes both
 // snapshot addresses inside the same transaction as the order + cart-conversion
-// writes (ADR-017 §6). `findByOwner` resolves all addresses for a
-// `(ownerType, ownerId)` pair — backed by the composite `(owner_type, owner_id)`
-// index — and is the read the order view uses to resolve an order's snapshotted
-// billing/shipping rows.
+// writes (ADR-017 §6).
+//
+// Write-only, and deliberately so (ADR-049). An order's addresses are immutable
+// snapshots; the order view surfaces `billingAddressId` / `shippingAddressId` and never
+// resolves the rows, so this port had no read with a caller. The two it used to declare
+// were worse than idle: `findByOwner(CUSTOMER, id)` returns a customer's address book —
+// the concept the snapshot design exists to rule out (README §5).
 export interface IAddressRepositoryPort {
   save(address: Address, scope?: ITransactionScope): Promise<Address>;
-  findById(id: string): Promise<Address | null>;
-  findByOwner(ownerType: AddressOwnerTypeEnum, ownerId: string): Promise<Address[]>;
 }

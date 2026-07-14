@@ -24,10 +24,12 @@ import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto
 // never burns the shared seeded variants 1-4 the other suites read. The slug/SKU
 // family is `e2e-cart-rr-*` and each variant gets its own product.
 //
-// Out of scope (a deliberate descope, recorded in the implementation doc): a
-// cart-*abandonment* release-all scenario is NOT testable end-to-end — no
-// abandonment producer exists in the system yet (the purge flow that flips
-// `active → abandoned` belongs to a later capability). The release-all-by-cart
+// Out of scope, and the reason is worth stating precisely, because it is not the obvious one.
+// A cart-*abandonment* release-all scenario is not testable end-to-end — **not because nothing
+// abandons a cart** (a customer erasure does, ADR-037) but because **abandoning a cart releases
+// nothing**. The erasure flips `status = 'abandoned'` in raw SQL and makes no inventory call at
+// all, so the holds simply stay until their TTL lapses and the reservation sweeper reclaims them
+// (ADR-038). There is no abandonment→release codepath for an e2e to drive. The release-all-by-cart
 // codepath is unit-locked inventory-side instead (`release-reservation.use-case.spec.ts`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';

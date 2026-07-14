@@ -1,5 +1,5 @@
 import { ReturnRequest } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const RETURN_REQUEST_REPOSITORY = Symbol('RETURN_REQUEST_REPOSITORY');
 
@@ -8,11 +8,12 @@ export const RETURN_REQUEST_REPOSITORY = Symbol('RETURN_REQUEST_REPOSITORY');
 // `typeorm` in `application/ports`). The TypeORM details live entirely in
 // `ReturnRequestTypeormRepository`.
 //
-// `save` / `findById` are **scope-aware** so the later returns operations can join a
-// transaction (ADR-017 §6 / ADR-032): Inspect/Close persist the RMA alongside the
-// orders `Refund` + `Payment` writes in one unit of work, so the use case hands one
-// `scope` to every repository it touches without ever seeing an `EntityManager`.
-// Without a `scope` the method opens its own transaction. `listByOrderId` is a plain
+// `save` / `findById` are **scope-aware** (ADR-017 §6 / ADR-032) so Inspect can re-read the RMA
+// and write it back **inside one attempt's transaction**, which is what makes the OCC retry
+// sound: a lost compare-and-swap re-runs against fresh, committed state. The scope carries the
+// RMA root and its lines — **nothing else.** Returns cannot reach the orders module's `Refund` or
+// `Payment` (the boundaries lint forbids the import), so no returns transaction has ever spanned
+// them. Without a `scope` the method opens its own transaction. `listByOrderId` is a plain
 // read (no scope) — it backs both the list endpoint and the Open use case's
 // already-returned-quantity sum.
 //

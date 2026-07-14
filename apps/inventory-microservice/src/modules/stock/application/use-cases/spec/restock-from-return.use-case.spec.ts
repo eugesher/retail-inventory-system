@@ -292,4 +292,37 @@ describe('RestockFromReturnUseCase', () => {
       code: InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
     });
   });
+
+  // The inverted twin of Commit Sale's guard. A double-credit does not lose stock — it
+  // INVENTS stock that never came back, and phantom inventory oversells.
+  describe('losing a concurrent race must be a successful no-op, never a throw', () => {
+    it('translates the ledger duplicate-key error into the same replay result', async () => {
+      seedLevel({ onHand: 10 });
+      movements.failNextAppendWithDuplicateEntry();
+
+      const result = await restock([line({ quantity: 2 })]);
+
+      expect(result.restocked).toHaveLength(1);
+      expect(movements.appended).toHaveLength(0);
+      // NOT asserted here: that the level write rolled back. `ImmediateTransactionPort`
+      // just runs the callback — it has no rollback, so the in-memory level keeps the
+      // credit even though a real transaction would undo it. What this spec owns is the
+      // TRANSLATION (no throw, replay result, no ledger row); that the counter is
+      // restored is the transaction's job, and it is proven against real MySQL in
+      // `test/concurrent-commit-sale.e2e-spec.ts`.
+    });
+  });
+
+  // Two lines on one level share a dedupe key, which would make the duplicate-key catch
+  // above misread the payload's own collision as a replay — see the Commit Sale twin.
+  it('rejects two lines that share a (variant, location) level', async () => {
+    seedLevel({ onHand: 10 });
+
+    await expect(
+      restock([line({ quantity: 2 }), line({ returnLineId: RETURN_LINE_ID + 1, quantity: 1 })]),
+    ).rejects.toMatchObject({ code: InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID });
+
+    expect(movements.appended).toHaveLength(0);
+    expect(cache.invalidations).toHaveLength(0);
+  });
 });

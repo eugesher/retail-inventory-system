@@ -5,7 +5,8 @@
 #  apps/api-gateway/src/modules/auth/presentation/customer-auth.controller.ts)
 #
 # Routes here cover the gateway's full auth surface:
-#   1. Staff login — canonical /auth/staff/login and the deprecated /auth/login alias.
+#   1. Staff login — /auth/staff/login (the only staff login path; ADR-050 removed
+#      the /auth/login alias).
 #   2. Refresh, logout, me, admin/ping — refresh-token rotation + permission gating.
 #   3. Customer register/login/me — the parallel customer auth lane.
 #
@@ -27,22 +28,6 @@
 # holds every code in the registry, so this token unlocks the whole IAM
 # surface in http/iam.http.
 POST {{baseUrl}}/auth/staff/login
-Content-Type: application/json
-
-{
-  "email": "admin@example.com",
-  "password": "admin1234"
-}
-
-###
-
-# @name staffLoginDeprecated
-# POST /api/auth/login
-# Deprecated alias for back-compat (one release; remove in a future release).
-# Same handler, same body, same response shape — only the URL differs. The
-# multi-prefix wiring is on StaffLoginController via @Controller(['auth',
-# 'auth/staff']).
-POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
@@ -107,8 +92,8 @@ Authorization: Bearer {{staffLogin.response.body.$.accessToken}}
 # POST /api/auth/customer/register
 # Creates a Customer in `status='active'`, `email_verified_at: null`. Email is
 # case-folded and uniqueness-checked at the repository layer — duplicates →
-# 409. Password is hashed with argon2id (OWASP 2024 defaults — see
-# AUTH_ARGON2_* env in CLAUDE.md).
+# 409. Password is hashed with argon2id (OWASP 2024 defaults — the
+# AUTH_ARGON2_* keys in `libs/config/config-module.config.ts`).
 POST {{baseUrl}}/auth/customer/register
 Content-Type: application/json
 

@@ -102,8 +102,9 @@ export class ReturnRabbitmqPublisher implements IReturnEventsPublisherPort {
     await this.risEvents.mirror(ROUTING_KEYS.RETAIL_RETURN_REJECTED, event);
   }
 
-  // `retail.return.closed` rides the `RETAIL_MICROSERVICE` client onto `retail_queue` —
-  // a reserved surface today (the later refund capability is the natural consumer).
+  // `retail.return.closed` rides the `RETAIL_MICROSERVICE` client onto `retail_queue` and **binds
+  // no consumer** — a reserved surface, caught only by the firehose. Closing an RMA settles no
+  // money; see `CloseReturnUseCase`.
   public async publishReturnClosed(event: IRetailReturnClosedEvent): Promise<void> {
     await firstValueFrom(
       this.retailClient.emit<void, IRetailReturnClosedEvent>(

@@ -73,8 +73,9 @@ export class RefreshTokenUseCase {
 
     const matches = await this.hasher.verify(subject.refreshTokenHash, command.refreshToken);
     if (!matches) {
-      // Rotation reuse — clear the live hash so a leaked stale refresh token
-      // can't roll forward (ADR-010).
+      // Rotation reuse — clear the live hash so a leaked stale refresh token can't roll forward
+      // (ADR-010 §3, "Refresh-token rotation with reuse detection" — a live section; only that
+      // ADR's *RBAC model* was superseded, by ADR-024).
       subject.rotateRefreshTokenHash(null);
       await resolved.persist();
       this.logger.warn({ userId: subject.id }, 'RefreshFailed: rotation reuse detected');

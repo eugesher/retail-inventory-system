@@ -33,6 +33,12 @@ interface ITestCustomerSeed {
 //   ...-a000-... → users
 //   ...-b000-... → permissions
 //   ...-c000-... → roles
+//
+// **Every `PermissionCodeEnum` member must have a row here.** The `admin` role takes
+// `Object.values(PermissionCodeEnum)` wholesale (see `ROLE_SEEDS`), and `seedRoles` resolves each
+// code to an id from this list — so a member added to the enum and forgotten here has no id and
+// **`seedRoles` throws, naming the code**. The seed fails loudly rather than quietly handing admin
+// a role that is missing a permission, which would surface as a baffling `403` in an unrelated e2e.
 const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: string }[] = [
   {
     id: '00000000-0000-4000-b000-000000000001',
@@ -98,6 +104,11 @@ const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: str
     id: '00000000-0000-4000-b000-000000000010',
     code: PermissionCodeEnum.ORDER_RETURN_AUTHORIZE,
     description: 'Authorize, reject, and close return requests',
+  },
+  {
+    id: '00000000-0000-4000-b000-000000000016',
+    code: PermissionCodeEnum.IAM_STAFF_CREATE,
+    description: 'Create a staff user',
   },
   {
     id: '00000000-0000-4000-b000-00000000000a',

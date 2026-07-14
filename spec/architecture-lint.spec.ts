@@ -1,9 +1,35 @@
-// Regression test for the eslint-plugin-boundaries rules wired in
-// `eslint.config.mjs` (ADR-017). The fixtures below intentionally violate
-// each rule in §3 of the recommendation; the spec asserts that ESLint
-// reports the expected `boundaries/*` ruleId for each fixture so the rules
-// cannot be silently weakened in a future refactor without a failing test.
+// Fixture suite for the eslint-plugin-boundaries rules of ADR-017. Each fixture below
+// intentionally violates one rule, and the spec asserts ESLint reports the expected
+// `boundaries/*` ruleId for it.
+//
+// **It lints against the REAL `eslint.config.mjs` — the one CI runs.** `beforeAll` asks the ESLint
+// binary, through `--print-config`, *"what configuration do you actually apply to this source file?"*
+// and the fixtures are then linted with the answer: the resolved `boundaries/elements`, the resolved
+// `boundaries/dependencies` rules, and the resolved severities. **Weaken a rule in the production
+// config and these tests go red** — demonstrated both ways round when this was fixed:
+//
+//   'boundaries/no-unknown-files': 'error' → 'off'      →  1 test red
+//   drop 'typeorm' from the domain denylist             →  5 tests red
+//
+// **It used to do the opposite, and that is why this comment is long.** The suite built its `Linter`
+// from its own hand-mirrored copies of the taxonomy, so it proved only *"the plugin, given THIS
+// taxonomy, reports these ruleIds"* — and nothing at all about the config CI runs. Setting
+// `'boundaries/no-unknown-files': 'off'` in `eslint.config.mjs` left **all 74 tests green**, and
+// `yarn lint` green with it. ADR-017 makes `yarn lint` the authority on where a file belongs, and
+// forbids weakening a `boundaries/*` rule to make code pass — and the thing everyone believed was
+// the backstop for that rule was **a false green light** (ISSUE-10). At 1029 lines and 74
+// passing tests, nobody re-derives it.
+//
+// **There is no second copy of the taxonomy any more.** Not a mirrored one, not a shared one —
+// `eslint.config.mjs` is the single source, and this file reads it through the ESLint API rather
+// than restating it. Drift is not *detected*; it is **impossible**.
+//
+// What the fixtures still buy, and it is real: they pin **the plugin's own behaviour** — the v6
+// `DependencySelector` shape, the `{{from.captured.module}}` templating, the first-match element
+// ordering — against a plugin upgrade changing semantics under us. They are the independent
+// expectation. That is why they are hand-written and stay hand-written.
 
+import { execFileSync } from 'child_process';
 import { Linter } from 'eslint';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,138 +54,59 @@ type Plugin = NonNullable<Linter.Config['plugins']>[string];
 
 const ROOT = path.resolve(__dirname, '..');
 
-// Element-type taxonomy and rules — keep mirrored with eslint.config.mjs.
-// Inlined here so the spec is hermetic and independent of any future
-// refactor that splits the production config into multiple files.
-const ELEMENTS = [
-  {
-    type: 'domain',
-    pattern: 'apps/*/src/modules/*/domain/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  {
-    type: 'application-use-case',
-    pattern: 'apps/*/src/modules/*/application/use-cases/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  {
-    type: 'application-port',
-    pattern: 'apps/*/src/modules/*/application/ports/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  {
-    type: 'presentation',
-    pattern: 'apps/*/src/modules/*/presentation/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  {
-    type: 'infrastructure',
-    pattern: 'apps/*/src/modules/*/infrastructure/**',
-    mode: 'file',
-    capture: ['app', 'module'],
-  },
-  { type: 'lib-contracts', pattern: 'libs/contracts/**', mode: 'file' },
-  { type: 'lib-ddd', pattern: 'libs/ddd/**', mode: 'file' },
-  { type: 'lib-common', pattern: 'libs/common/**', mode: 'file' },
-  { type: 'lib-messaging', pattern: 'libs/messaging/**', mode: 'file' },
-  { type: 'lib-cache', pattern: 'libs/cache/**', mode: 'file' },
-  { type: 'lib-database', pattern: 'libs/database/**', mode: 'file' },
-];
+// **The taxonomy is NOT restated here.** It is read from the production config at run time — see
+// `beforeAll`. What lives in this file is the thing the production config cannot supply: an
+// independent expectation of what its rules ought to reject.
 
-// v6 DependencySelector helpers — mirror eslint.config.mjs.
-const sameModule = (type: string): object => ({
-  to: {
-    type,
-    captured: {
-      app: '{{from.captured.app}}',
-      module: '{{from.captured.module}}',
-    },
-  },
-});
-const lib = (type: string): object => ({ to: { type } });
+// The file whose RESOLVED configuration is the one under test. It has to be a real source file the
+// boundaries block actually applies to — ESLint resolves a config per path, and a path that matched
+// nothing would hand back an empty rule set and quietly turn every assertion below into a tautology.
+const PROBE_FILE =
+  'apps/api-gateway/src/modules/cart/application/use-cases/create-cart.use-case.ts';
 
-const DEPENDENCY_RULES = [
-  // Blanket allow for any external / node-core target.
-  { from: { type: '*' }, allow: { to: { origin: ['external', 'core'] } } },
-  // Internal allow rules per layer.
-  {
-    from: { type: 'domain' },
-    allow: [sameModule('domain'), lib('lib-ddd'), lib('lib-common'), lib('lib-contracts')],
-  },
-  {
-    from: { type: 'application-use-case' },
-    allow: [
-      sameModule('domain'),
-      sameModule('application-port'),
-      lib('lib-ddd'),
-      lib('lib-common'),
-      lib('lib-contracts'),
-    ],
-  },
-  {
-    from: { type: 'application-port' },
-    allow: [sameModule('domain'), lib('lib-ddd'), lib('lib-contracts')],
-  },
-  {
-    from: { type: 'presentation' },
-    allow: [
-      sameModule('application-use-case'),
-      sameModule('application-port'),
-      lib('lib-contracts'),
-      lib('lib-messaging'),
-    ],
-  },
-  {
-    from: { type: 'infrastructure' },
-    allow: [
-      sameModule('domain'),
-      sameModule('application-port'),
-      sameModule('infrastructure'),
-      lib('lib-cache'),
-      lib('lib-messaging'),
-      lib('lib-contracts'),
-    ],
-  },
-  // External denylists per source layer.
-  {
-    from: { type: 'domain' },
-    disallow: {
-      dependency: {
-        module: ['@nestjs/*', 'typeorm', '@keyv/redis', 'amqplib', 'axios', 'nestjs-pino'],
-      },
-    },
-  },
-  {
-    from: { type: 'application-use-case' },
-    disallow: {
-      dependency: {
-        module: ['@keyv/redis', 'amqplib', '@nestjs/cache-manager', '@nestjs/typeorm', 'typeorm'],
-      },
-    },
-  },
-  {
-    from: { type: 'application-port' },
-    disallow: {
-      dependency: { module: ['@nestjs/common', 'typeorm', '@keyv/redis', 'amqplib'] },
-    },
-  },
-  {
-    from: { type: 'presentation' },
-    disallow: { dependency: { module: ['typeorm', '@keyv/redis', '@nestjs/typeorm'] } },
-  },
-  {
-    from: { type: 'lib-contracts' },
-    disallow: { dependency: { module: ['@nestjs/common', '@nestjs/typeorm', 'typeorm'] } },
-  },
-  {
-    from: { type: 'lib-ddd' },
-    disallow: { dependency: { module: ['@nestjs/*', 'typeorm', '@keyv/redis', 'amqplib'] } },
-  },
-];
+// Populated in `beforeAll` from `eslint.config.mjs`, via ESLint's own resolver — so it carries every
+// merged config block, every override and every severity exactly as CI sees them.
+let resolved: Linter.Config;
+
+// Ask ESLint what it ACTUALLY applies to `PROBE_FILE`. This is the whole fix: not a second copy of
+// the taxonomy kept in step by discipline, and not a shared module both sides import — **the resolved
+// production configuration itself**, merged from every matching block in `eslint.config.mjs`, with
+// every override and every severity already folded in.
+//
+// It matters that this is the *resolved* config and not the source of one config object. A rule can
+// be weakened three ways — change the severity, weaken a `disallow`, or add a later block that
+// overrides an earlier one — and only the resolved answer catches all three. A shared-taxonomy module
+// would have caught the first two and missed the third, which is the one that looks most like a
+// harmless refactor.
+//
+// **It runs ESLint as a CHILD PROCESS, and that is not a detour — it is the only way.** The in-process
+// `ESLint#calculateConfigForFile` does exactly this job and **cannot be used from here**:
+// `eslint.config.mjs` is ESM, ESLint loads it with a dynamic `import()`, and **Jest's VM sandbox
+// rejects that outright** — *"A dynamic import callback was invoked without
+// --experimental-vm-modules"*. A real Node process has no such restriction, and `eslint
+// --print-config` is the CLI surface of the very same resolver.
+//
+// So the spec asks the **same ESLint binary CI runs**, on the same config file, and parses its answer.
+// It costs one process spawn, once, in `beforeAll`.
+beforeAll(() => {
+  const json = execFileSync('npx', ['eslint', '--print-config', PROBE_FILE], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  resolved = JSON.parse(json) as Linter.Config;
+
+  // **Fail loudly if the probe resolved to nothing.** A `PROBE_FILE` that matched no config block
+  // would hand back an empty rule set, every fixture below would report no violation, and the suite
+  // would go green while guarding nothing — which is precisely the failure mode this whole task
+  // exists to remove. Do not let it come back through the side door.
+  if (resolved.settings?.['boundaries/elements'] === undefined) {
+    throw new Error(
+      `PROBE_FILE (${PROBE_FILE}) resolved to a config with no boundaries/elements — the suite would ` +
+        'prove nothing. Point it at a source file the boundaries block actually applies to.',
+    );
+  }
+}, 120_000);
 
 function buildLinter(): { linter: Linter; config: Linter.Config[] } {
   const linter = new Linter({ configType: 'flat' });
@@ -174,19 +121,13 @@ function buildLinter(): { linter: Linter; config: Linter.Config[] } {
         // The plugin types its rules loosely; the cast is hermetic to the test.
         boundaries: boundariesPlugin as unknown as Plugin,
       },
-      settings: {
-        'boundaries/elements': ELEMENTS,
-        'boundaries/include': ['apps/**/*.ts', 'libs/**/*.ts'],
-        'boundaries/ignore': ['**/spec/**', '**/*.spec.ts'],
-        'import/resolver': {
-          typescript: { project: path.join(ROOT, 'tsconfig.json') },
-          node: true,
-        },
-      },
+      // Straight from the production config — `boundaries/elements` (in its ORDER, which is
+      // load-bearing: the plugin takes the FIRST matching pattern), `include`, `ignore`.
+      settings: resolved.settings,
       rules: {
-        'boundaries/dependencies': [
-          'error',
-          { default: 'disallow', checkAllOrigins: true, rules: DEPENDENCY_RULES },
+        'boundaries/dependencies': resolved.rules?.['boundaries/dependencies'] as Linter.RuleEntry,
+        'boundaries/no-unknown-files': resolved.rules?.[
+          'boundaries/no-unknown-files'
         ] as Linter.RuleEntry,
       },
     },
@@ -203,6 +144,49 @@ function lint(code: string, relPath: string): Linter.LintMessage[] {
 function ruleIds(messages: Linter.LintMessage[]): string[] {
   return messages.map((m) => m.ruleId ?? '');
 }
+
+// Direct assertions on the RESOLVED production config. The fixtures below prove *"this taxonomy
+// rejects this import"*; these prove *"the production config still carries that taxonomy, at that
+// severity, in that order."* They catch what a fixture structurally cannot:
+//
+//   * a severity dropped to `warn` — every fixture still reports its ruleId, so every fixture stays
+//     green, and CI stops failing. **A warning is not a guard.**
+//   * the element ORDER reshuffled — `boundaries` takes the FIRST matching pattern, so `nest-module`
+//     (`modules/*/*.ts`) drifting ahead of `shared-module-barrel` (`modules/auth/index.ts`) silently
+//     retypes the gateway `auth` barrel and quietly kills `ARCH-LINT-EX-02`. An `Object.entries`
+//     round-trip or a tidy-up sort would do it, and nothing else in this file would notice.
+describe('the production config itself (eslint.config.mjs, as ESLint resolves it)', () => {
+  const severityOf = (entry: unknown): unknown =>
+    Array.isArray(entry) ? (entry as unknown[])[0] : entry;
+
+  // 2 = error. A `warn` here would let every violation through CI while this suite stayed green.
+  it('enforces boundaries/no-unknown-files at ERROR, not warn', () => {
+    expect(severityOf(resolved.rules?.['boundaries/no-unknown-files'])).toBe(2);
+  });
+
+  it('enforces boundaries/dependencies at ERROR, and denies by default', () => {
+    const entry = resolved.rules?.['boundaries/dependencies'] as [number, { default: string }];
+    expect(severityOf(entry)).toBe(2);
+    // `default: 'allow'` would invert the entire model — everything permitted unless named — and not
+    // one fixture below would change its answer, because each names its own violation.
+    expect(entry[1].default).toBe('disallow');
+  });
+
+  it('keeps shared-module-barrel AHEAD of nest-module — first match wins (ARCH-LINT-EX-02)', () => {
+    const types = (resolved.settings?.['boundaries/elements'] as { type: string }[]).map(
+      (e) => e.type,
+    );
+    const barrel = types.indexOf('shared-module-barrel');
+    const nestModule = types.indexOf('nest-module');
+
+    expect(barrel).toBeGreaterThanOrEqual(0);
+    expect(nestModule).toBeGreaterThanOrEqual(0);
+    // Both patterns match `modules/auth/index.ts`. Whichever comes first wins, and the gateway `auth`
+    // barrel — the repo's ONE sanctioned cross-module-consumable barrel — depends on it being this
+    // one.
+    expect(barrel).toBeLessThan(nestModule);
+  });
+});
 
 describe('boundaries rules (ADR-017)', () => {
   describe('boundaries/dependencies — external denylists', () => {
@@ -750,33 +734,24 @@ describe('boundaries rules (ADR-017)', () => {
     });
   });
 
-  // The event-store microservice (the sixth deployable, ADR-034/035) follows the
-  // canonical per-module hexagonal layout — its context modules live under
-  // `infrastructure/`, so the generic `apps/*/src/modules/*/...` element patterns classify
-  // its layers automatically with no `eslint.config.mjs` change. These fixtures repeat the
-  // bumpers there, pointed at the real event-store paths, and add the sibling-module
-  // isolation between its two append-only contexts (`domain-events` ↔ `audit-log`). Note:
-  // the event store has no `presentation/` layer — its firehose dispatcher is a
-  // context-root `@Controller()` (FirehoseConsumer), an unmatched element outside the
-  // per-module taxonomy (like the bounded-context aggregator module itself), so it carries
-  // no presentation bumper. The append-only repository shape is locked by the separate
-  // structural assertion that follows this block.
+  // The event-store microservice (the sixth deployable, ADR-034/035) is ONE module —
+  // `modules/audit-and-events/` — holding both append-only logs as two aggregates
+  // (ADR-042), so the generic `apps/*/src/modules/*/...` element patterns classify its layers
+  // with no `eslint.config.mjs` special case. These fixtures repeat the per-layer bumpers
+  // there, pointed at the real event-store paths. The append-only repository shape is locked
+  // by the separate structural assertion that follows this block.
   describe('boundaries/dependencies — event-store microservice', () => {
+    const M = 'apps/event-store-microservice/src/modules/audit-and-events';
+
     it('domain (DomainEvent, AuditLogEntry frozen value objects) may not import @nestjs/common', () => {
       const code = `import { Injectable } from '@nestjs/common';\nexport const x = Injectable;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/domain-events/domain/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/domain/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
     it('domain may not import typeorm', () => {
       const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/audit-log/domain/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/domain/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
@@ -784,19 +759,13 @@ describe('boundaries rules (ADR-017)', () => {
       // The ingest use cases reach the append-only logs via the repository ports
       // (DOMAIN_EVENT_REPOSITORY / AUDIT_LOG_REPOSITORY) — never via EntityManager.
       const code = `import { EntityManager } from 'typeorm';\nexport type X = EntityManager;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/domain-events/application/use-cases/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/application/use-cases/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
     it('application use-case may not import @nestjs/typeorm', () => {
       const code = `import { InjectRepository } from '@nestjs/typeorm';\nexport const x = InjectRepository;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/audit-log/application/use-cases/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/application/use-cases/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
@@ -804,27 +773,26 @@ describe('boundaries rules (ADR-017)', () => {
       // IDomainEventRepositoryPort / IAuditLogRepositoryPort return the DomainEvent /
       // AuditLogEntry value objects only — no TypeORM Repository leak across the seam.
       const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/domain-events/application/ports/__fixture__.ts',
-      );
+      const messages = lint(code, `${M}/application/ports/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
     });
 
-    it('domain-events domain may not import the audit-log module domain (cross-module)', () => {
-      // Resolves to a real audit-log file, so the boundaries resolver types the target as
-      // the audit-log `domain`. `sameModule('domain')` requires the same app *and* module,
-      // so a domain-events → audit-log domain edge is cross-module and disallowed — locking
-      // in the isolation between the event store's two append-only contexts. The only link
-      // is the context-root FirehoseConsumer, which injects each module's ingest use case
-      // via DI (a port), never a cross-module domain import.
-      // 2 levels up: domain → domain-events, then audit-log/domain/...
-      const code = `import { AuditLogEntry } from '../../audit-log/domain/audit-log-entry.model';\nexport type Y = AuditLogEntry;\n`;
-      const messages = lint(
-        code,
-        'apps/event-store-microservice/src/modules/domain-events/domain/__fixture__.ts',
-      );
+    it('presentation (FirehoseConsumer, AuditQueryController) may not import typeorm', () => {
+      // The event store gained a `presentation/` layer with ADR-042: both controllers inject
+      // use cases of this module, so neither needs a home outside the hexagon any more.
+      const code = `import { Repository } from 'typeorm';\nexport type X = Repository<unknown>;\n`;
+      const messages = lint(code, `${M}/presentation/__fixture__.ts`);
       expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('the trace use case may inject BOTH repository ports — they are one module (ADR-042)', () => {
+      // The read that motivated ADR-042. Under the old two-module split this edge was
+      // cross-module and illegal, which is what forced a raw-SQL reader port over the
+      // sibling's table. Both logs now live here, so the port import is an ordinary
+      // `sameModule` edge.
+      const code = `import { AUDIT_LOG_REPOSITORY, DOMAIN_EVENT_REPOSITORY } from '../ports';\nexport const x = [AUDIT_LOG_REPOSITORY, DOMAIN_EVENT_REPOSITORY];\n`;
+      const messages = lint(code, `${M}/application/use-cases/__fixture__.ts`);
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
     });
   });
 
@@ -838,8 +806,8 @@ describe('boundaries rules (ADR-017)', () => {
   // `append`, via TypeORM `insert`.
   describe('event-store repositories are append-only (structural)', () => {
     const repoFiles = [
-      'apps/event-store-microservice/src/modules/domain-events/infrastructure/persistence/domain-event-typeorm.repository.ts',
-      'apps/event-store-microservice/src/modules/audit-log/infrastructure/persistence/audit-log-entry-typeorm.repository.ts',
+      'apps/event-store-microservice/src/modules/audit-and-events/infrastructure/persistence/domain-event-typeorm.repository.ts',
+      'apps/event-store-microservice/src/modules/audit-and-events/infrastructure/persistence/audit-log-entry-typeorm.repository.ts',
     ];
 
     it.each(repoFiles)(
@@ -868,6 +836,99 @@ describe('boundaries rules (ADR-017)', () => {
         expect(source).not.toMatch(/\b(save|update|delete|softDelete|remove)\s*\(/);
       },
     );
+  });
+
+  // ADR-041. Before this taxonomy existed, `modules/<m>/<m>.module.ts` and the module-root
+  // `index.ts` barrel matched no element pattern, so `boundaries/dependencies` skipped them
+  // entirely — cross-module isolation held for a deep path (`../orders/application/ports`)
+  // but not for the barrel (`../orders`). These fixtures pin the closed hole: the sole
+  // cross-module seam is the `auth` barrel (ADR-024), and everything else stays shut.
+  describe('boundaries/dependencies — module composition root (ADR-041)', () => {
+    it('nest-module may not reach a sibling module through a deep path', () => {
+      const code = `import { ORDER_REPOSITORY } from '../orders/application/ports';\nexport const x = ORDER_REPOSITORY;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/__fixture__.module.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('nest-module may not reach a sibling module through its barrel', () => {
+      const code = `import { orderEntities } from '../orders';\nexport const x = orderEntities;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/__fixture__.module.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('a use case may not reach a sibling module through its barrel', () => {
+      const code = `import { orderEntities } from '../../../orders';\nexport const x = orderEntities;\n`;
+      const messages = lint(
+        code,
+        'apps/retail-microservice/src/modules/cart/application/use-cases/__fixture__.ts',
+      );
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('nest-module may wire its own module’s use cases', () => {
+      const code = `import { ReserveStockUseCase } from './application/use-cases';\nexport const x = ReserveStockUseCase;\n`;
+      const messages = lint(
+        code,
+        'apps/inventory-microservice/src/modules/stock/__fixture__.module.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    it('the gateway auth barrel is the one sanctioned cross-module seam (ADR-024)', () => {
+      const code = `import { ROLE_REPOSITORY } from '../../../auth';\nexport const x = ROLE_REPOSITORY;\n`;
+      const messages = lint(
+        code,
+        'apps/api-gateway/src/modules/iam/application/use-cases/__fixture__.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    // `no-unknown-files` only became enforceable once the composition roots and barrels were
+    // typed. It is the bumper against the drift returning: a file that belongs to no element
+    // is a file no other rule can govern.
+    it('a file matching no element pattern is rejected outright', () => {
+      const code = `export const orphan = 1;\n`;
+      const messages = lint(code, 'apps/api-gateway/src/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/no-unknown-files');
+    });
+
+    it('the module composition root itself matches an element pattern', () => {
+      const code = `export const x = 1;\n`;
+      const messages = lint(code, 'apps/retail-microservice/src/modules/cart/cart.module.ts');
+      expect(ruleIds(messages)).not.toContain('boundaries/no-unknown-files');
+    });
+  });
+
+  // ADR-043. The transaction seam is the one thing `libs/database` knows about the domain
+  // kernel. The edge is one-way by construction, and these two fixtures are what keep it so —
+  // widen `lib-ddd`'s allow list and the second one fails.
+  describe('boundaries/dependencies — the transaction seam (ADR-043)', () => {
+    it('lib-database MAY import lib-ddd (the adapter implements ITransactionPort)', () => {
+      const code = `import { ITransactionPort } from '@retail-inventory-system/ddd';\nexport type X = ITransactionPort;\n`;
+      const messages = lint(code, 'libs/database/__fixture__.ts');
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
+
+    it('lib-ddd may NOT import lib-database — the reverse edge stays shut', () => {
+      const code = `import { BaseEntity } from '@retail-inventory-system/database';\nexport const x = BaseEntity;\n`;
+      const messages = lint(code, 'libs/ddd/__fixture__.ts');
+      expect(ruleIds(messages)).toContain('boundaries/dependencies');
+    });
+
+    it('an application use case may reach the seam through lib-ddd, not lib-database', () => {
+      const code = `import { TRANSACTION_PORT } from '@retail-inventory-system/ddd';\nexport const x = TRANSACTION_PORT;\n`;
+      const messages = lint(
+        code,
+        'apps/inventory-microservice/src/modules/stock/application/use-cases/__fixture__.ts',
+      );
+      expect(messages.filter((m) => (m.ruleId ?? '').startsWith('boundaries/'))).toEqual([]);
+    });
   });
 
   describe('positive cases — allowed edges do not flag', () => {

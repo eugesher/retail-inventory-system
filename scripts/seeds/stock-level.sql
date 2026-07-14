@@ -5,9 +5,11 @@
 -- seed reproduces its effect for `yarn test:seed`, which may run before any RMQ
 -- consumer is up.
 --
--- quantity_allocated / quantity_reserved start at 0 (no reservation capability
--- yet) so `available = on_hand - allocated - reserved = 100`. `version` is the
--- optimistic-lock token; it starts at 0 (matching `StockLevel.initialAt`).
+-- quantity_allocated / quantity_reserved start at 0 — nothing is held against a freshly
+-- seeded row — so `available = on_hand - allocated - reserved = 100`. A suite that reserves
+-- or allocates moves those counters; that is why the suites which mutate stock mint their own
+-- variants rather than burning 1..4. `version` is the optimistic-lock token; it starts at 0
+-- (matching `StockLevel.initialAt`).
 -- INSERT IGNORE makes a re-run a no-op — the UNIQUE (variant_id, stock_location_id)
 -- key rejects a duplicate row, so re-seeding never errors or double-counts.
 -- Runs after catalog-product-variant.sql (FK stock_level.variant_id ->

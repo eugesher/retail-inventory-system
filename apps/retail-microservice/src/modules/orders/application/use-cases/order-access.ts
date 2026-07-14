@@ -1,17 +1,21 @@
 import { Order, OrderDomainException, OrderErrorCodeEnum } from '../../domain';
 import { IOrderRepositoryPort } from '../ports';
 
-// Loads an order and asserts the caller may see it — the retail-side half of the
-// bearer-plus-owner-or-staff model (ADR-028 §7), shared by the order read + capture
-// use cases so the not-found + authorization rule lives in exactly one place (the
-// cart context's `loadOwnedCart` precedent). `staffOverride` is the per-operation
-// staff grant the gateway already confirmed (`order:read` for the read path,
-// `order:capture` for capture): a staff caller may reach any order, a customer only
-// its own. A permission code is a staff override layered over the owner-check, never
-// a customer gate (ADR-024).
+// **The one gate. Every use case that touches an order by id comes through here** — read, capture,
+// ship, deliver, cancel, fulfil, list. If a new one does not, the module has grown a second
+// authorization model without deciding to.
 //
-// A missing order is a 404 (`ORDER_NOT_FOUND`); a non-owner-non-staff caller is a 403
-// (`ORDER_ACCESS_FORBIDDEN`) — both surface through the orders RPC exception filter.
+// **The rule (ADR-028 §7), stated once so nothing else has to restate it:** a customer is
+// authorized by *authentication plus ownership*, never by a permission code — customer tokens carry
+// no `permissions` claim at all (ADR-024), so a `@RequiresPermission('customer:…')` gate would
+// reject the very customers it was written to admit. **`staffOverride` is a staff grant layered over
+// the owner-check, never a customer gate.** The gateway has already confirmed it; retail only reads
+// the resolved boolean, and re-asserts ownership itself rather than trusting the edge.
+//
+// A missing order is `ORDER_NOT_FOUND`; a non-owner without the override is `ORDER_ACCESS_FORBIDDEN`.
+// **The two are deliberately distinguishable** — this surface confirms that an order exists to a
+// caller who may not read it. (`list-returns` takes the opposite posture and filters instead. Nothing
+// records which was intended.)
 export async function loadAuthorizedOrder(
   repository: IOrderRepositoryPort,
   orderId: number,

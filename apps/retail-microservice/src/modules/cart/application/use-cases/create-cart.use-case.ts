@@ -9,16 +9,21 @@ import {
   CART_REPOSITORY,
   ICartEventsPublisherPort,
   ICartRepositoryPort,
+  RETAIL_DEFAULT_CURRENCY,
 } from '../ports';
 import { toCartView } from './cart-view.factory';
 
-const DEFAULT_CURRENCY = 'USD';
-
-// Opens a new active cart for the caller. The currency defaults to USD when
-// omitted; `customerId` is the resolved caller (a registered or guest customer —
-// Q7: every cart has a Customer row). After persistence the use case drains the
-// in-process `CartCreatedEvent` and emits the reserved `retail.cart.created`
-// wire event (best-effort post-commit, ADR-020).
+// Opens a new active cart for the caller. `customerId` is the resolved caller (a
+// registered or guest customer — Q7: every cart has a Customer row). After persistence
+// the use case drains the in-process `CartCreatedEvent` and emits the reserved
+// `retail.cart.created` wire event (best-effort post-commit, ADR-020).
+//
+// **The currency default is CONFIGURED, not literal** (`RETAIL_DEFAULT_CURRENCY` ←
+// `DEFAULT_CURRENCY`, the same env var catalog reads). It used to be a file-local
+// `const DEFAULT_CURRENCY = 'USD'`, which meant an operator who set `DEFAULT_CURRENCY=EUR`
+// got a catalog quoting EUR and carts still opening in USD — and since `Cart.currency` is
+// immutable (ADR-028 §1) and the order snapshots it at place-time, the wrong unit was
+// baked into the order and the payment with nothing downstream able to notice.
 @Injectable()
 export class CreateCartUseCase {
   constructor(
@@ -26,13 +31,15 @@ export class CreateCartUseCase {
     private readonly repository: ICartRepositoryPort,
     @Inject(CART_EVENTS_PUBLISHER)
     private readonly publisher: ICartEventsPublisherPort,
+    @Inject(RETAIL_DEFAULT_CURRENCY)
+    private readonly defaultCurrency: string,
     @InjectPinoLogger(CreateCartUseCase.name)
     private readonly logger: PinoLogger,
   ) {}
 
   public async execute(payload: IRetailCartCreatePayload): Promise<CartView> {
     const { customerId, currency, correlationId } = payload;
-    const resolvedCurrency = currency ?? DEFAULT_CURRENCY;
+    const resolvedCurrency = currency ?? this.defaultCurrency;
 
     this.logger.info({ correlationId, customerId, currency: resolvedCurrency }, 'Creating cart');
 

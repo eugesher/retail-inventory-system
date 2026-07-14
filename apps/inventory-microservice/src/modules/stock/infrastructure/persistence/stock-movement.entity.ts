@@ -3,27 +3,23 @@ import { Column, Entity } from 'typeorm';
 import { StockMovementTypeEnum } from '@retail-inventory-system/contracts';
 import { BaseEntity } from '@retail-inventory-system/database';
 
-// One immutable row of the inventory audit ledger (ADR-030 §2). `BaseEntity`
-// supplies the BIGINT UNSIGNED `id` (the migration widens the
-// `@PrimaryGeneratedColumn()` int to BIGINT — `synchronize` is off, so the
-// migration is the source of truth) plus `createdAt` / `updatedAt` / `deletedAt`.
+// One immutable row of the audit ledger (ADR-030 §2).
 //
-// `updatedAt` and `deletedAt` are **INERT by construction**: the ledger is
-// append-only, so a row is never updated and never soft-deleted. They exist only
-// because the entity extends `BaseEntity`; nothing ever writes them after the
-// initial INSERT.
+// **`updatedAt` and `deletedAt` are INERT.** They exist only because the entity extends
+// `BaseEntity`; the ledger is append-only and nothing writes them after the INSERT. A row whose
+// `updated_at` differs from its `created_at` is evidence of a bug, not of an edit.
 //
-// `variantId` is mapped as a plain BIGINT scalar with NO `@ManyToOne` relation
-// (the inventory module must not import the catalog `ProductVariantEntity` — the
-// forbidden cross-module import, ADR-004 / ADR-017); the FK that ties it to
-// `product_variant(id)` lives only in the migration. `referenceId` is polymorphic
-// and carries NO FK at all (the `media_asset.owner_id` precedent, ADR-029). The
-// table's indexes likewise live only in the migration (the source of truth with
-// `synchronize` off — the `StockLevelEntity` / `ReservationEntity` convention).
+// **The schema is the migration, not this file.** `synchronize` is off, so the BIGINT widening of
+// the `id`, every index, and the FK on `variant_id` all live there — and `variant_id` is a plain
+// scalar here because inventory may not import the catalog entity. `referenceId` is polymorphic and
+// carries **no FK at all**: do not join on it.
 //
-// SnakeNamingStrategy maps `variantId` → `variant_id`, `stockLocationId` →
-// `stock_location_id`, `reasonCode` → `reason_code`, `occurredAt` → `occurred_at`,
-// etc. (ADR-019).
+// **`movement_dedupe_key` is deliberately NOT mapped here** (the `price.open_scope_key` precedent,
+// ADR-026). It is a STORED generated column and a DB-internal idempotency backstop: with
+// `synchronize` off TypeORM never touches it, and an INSERT that omits it lets MySQL compute it.
+// Mapping it would make TypeORM try to WRITE a generated column, which MySQL rejects. It is not
+// missing — it is the guard that makes Commit Sale and Restock From Return idempotent against a
+// concurrent redelivery (migration `1783872387242`).
 @Entity('stock_movement')
 export class StockMovementEntity extends BaseEntity {
   @Column({ type: 'bigint', unsigned: true })

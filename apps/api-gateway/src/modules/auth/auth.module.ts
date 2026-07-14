@@ -34,9 +34,9 @@ import {
   ValidateJwtSubjectUseCase,
 } from './application/use-cases';
 import { Argon2PasswordAdapter } from './infrastructure/argon2';
-import { RmqAuditLogPublisher } from './infrastructure/audit';
+import { AuditLogRabbitmqPublisher } from './infrastructure/audit';
 import { JwtTokenAdapter } from './infrastructure/jwt';
-import { RmqCustomerEventsPublisher } from './infrastructure/messaging';
+import { CustomerEventsRabbitmqPublisher } from './infrastructure/messaging';
 import {
   ConsentRecordEntity,
   ConsentRecordTypeormRepository,
@@ -79,12 +79,21 @@ const authLibProviders = [
 const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
   imports: [TypeOrmModule.forFeature([StaffUserEntity, CustomerEntity])],
   providers: authLibProviders,
-  exports: [
-    STAFF_USER_REPOSITORY,
-    CUSTOMER_REPOSITORY,
-    AUTH_USER_VALIDATOR,
-    ValidateJwtSubjectUseCase,
-  ],
+  // Both of these are LOAD-BEARING, for different reasons — and the difference is worth stating,
+  // because it is not visible from the file layout:
+  //
+  //   `STAFF_USER_REPOSITORY` leaves the app entirely: re-exporting the dynamic module is what
+  //   propagates it to AuthModule's downstream consumers (today: IAM).
+  //
+  //   `CUSTOMER_REPOSITORY` never leaves AuthModule — but its PROVIDER lives here, inside the
+  //   dynamic AuthLibModule, while its eight consumers (Login/Logout/Register/Refresh/Erase/…)
+  //   are AuthModule's own use cases. Those are two different Nest modules despite sharing a
+  //   directory, so without this export the whole gateway fails to boot.
+  //
+  // `AUTH_USER_VALIDATOR` and `ValidateJwtSubjectUseCase` used to ride along and are gone:
+  // `libs/auth`'s `JwtStrategy` resolves the validator from `providers` above, inside the same
+  // module, and nothing else consumed either.
+  exports: [STAFF_USER_REPOSITORY, CUSTOMER_REPOSITORY],
 });
 
 @Module({
@@ -98,10 +107,10 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     ]),
     authLibDynamicModule,
     // The producer-side client for the `ris.events` topic exchange — the real
-    // `RmqAuditLogPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy`
+    // `AuditLogRabbitmqPublisher` injects its `RIS_EVENTS_PUBLISHER` `ClientProxy`
     // to emit `audit.staff.action` (ADR-035).
     MicroserviceClientRisEventsModule,
-    // The `notification_events` producer client — `RmqCustomerEventsPublisher`
+    // The `notification_events` producer client — `CustomerEventsRabbitmqPublisher`
     // injects its `NOTIFICATION_MICROSERVICE` `ClientProxy` to emit the two
     // `customer.*` privacy events onto the notification consumers' queue (ADR-037).
     MicroserviceClientNotificationModule,
@@ -123,8 +132,8 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
     // The audit seam (ADR-035): the real RMQ adapter publishes `audit.staff.action`
     // onto `ris.events`. `iam` consumes `AUDIT_LOG_PUBLISHER` through this module's
     // export (there is no second binding in `iam`).
-    RmqAuditLogPublisher,
-    { provide: AUDIT_LOG_PUBLISHER, useExisting: RmqAuditLogPublisher },
+    AuditLogRabbitmqPublisher,
+    { provide: AUDIT_LOG_PUBLISHER, useExisting: AuditLogRabbitmqPublisher },
 
     RoleTypeormRepository,
     { provide: ROLE_REPOSITORY, useExisting: RoleTypeormRepository },
@@ -139,8 +148,8 @@ const authLibDynamicModule: DynamicModule = AuthLibModule.forRootAsync({
 
     // The customer-privacy event publisher (ADR-037): emits `customer.consent.updated`
     // / `customer.erased` onto `notification_events` and mirrors onto `ris.events`.
-    RmqCustomerEventsPublisher,
-    { provide: CUSTOMER_EVENTS_PUBLISHER, useExisting: RmqCustomerEventsPublisher },
+    CustomerEventsRabbitmqPublisher,
+    { provide: CUSTOMER_EVENTS_PUBLISHER, useExisting: CustomerEventsRabbitmqPublisher },
 
     // The cross-context erasure writer (ADR-037 §3): nulls the customer + address
     // + cart PII in one transaction over the shared `retail_db` via raw SQL. It

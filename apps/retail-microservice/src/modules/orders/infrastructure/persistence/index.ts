@@ -7,7 +7,8 @@ import { OrderLineEntity } from './order-line.entity';
 import { PaymentEntity } from './payment.entity';
 import { RefundEntity } from './refund.entity';
 
-// A concrete entity array (spreadable) so retail `app.module.ts` can merge it with
+// A concrete entity array — UNANNOTATED on purpose (see the note on `DatabaseModule.forRoot`)
+// — so it is spreadable and retail `app.module.ts` can merge it with
 // `cartEntities` into the one `DatabaseModule.forRoot([...])` connection. Adding a row
 // here is what registers its table at the root connection — `app.module.ts` spreads
 // `orderEntities`, so no edit there is needed. The `IdempotencyKeyEntity` (the
@@ -47,4 +48,3 @@ export * from './payment.mapper';
 export * from './payment-typeorm.repository';
 export * from './refund.mapper';
 export * from './refund-typeorm.repository';
-export * from './typeorm-transaction.adapter';

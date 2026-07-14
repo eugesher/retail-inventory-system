@@ -16,12 +16,16 @@ import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
 // Close Return walks an `inspected` RMA → `closed` (staff `order:return-authorize`, gated
-// at the gateway) — the terminal settlement of the RMA, stamping `closedAt`. The domain
-// `close(now)` enforces the legal transition (`RETURN_INVALID_STATUS_TRANSITION` from any
-// non-`inspected` start). The actual refund, when money is owed, is issued by the later
-// refund capability (which consumes the `retail.return.closed` event); this use case only
-// closes the RMA. Emits `retail.return.closed` onto `retail_queue` (reserved) best-effort
-// post-commit (ADR-020).
+// at the gateway), stamping `closedAt`. The domain `close(now)` enforces the legal transition
+// (`RETURN_INVALID_STATUS_TRANSITION` from any non-`inspected` start).
+//
+// **Closing an RMA moves no money, and triggers nothing that will.** It is the terminal state of
+// the *return*, not of the *refund*. `retail.return.closed` is emitted best-effort post-commit
+// (ADR-020) onto `retail_queue` and **binds no consumer** — a reserved surface. Settlement is
+// manual and deliberate: Inspect records what each line earns (`lineRefundAmountMinor`), the RMA
+// view surfaces it, and a staff member issues the money through the orders refund endpoint.
+// Contrast Cancel *Order*, which flags the payment and auto-refunds through a consumer. The
+// return path has no such loop.
 @Injectable()
 export class CloseReturnUseCase {
   constructor(

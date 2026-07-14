@@ -8,8 +8,8 @@ import { IStockRepositoryPort, ITransactionScope } from '../ports';
 
 const MS_PER_MINUTE = 60_000;
 
-// A request line normalized at the edge — the optional location resolved to the
-// default. Shared by the all-lines-atomic order-side use cases (Allocate / Cancel).
+// A request line with its optional location already resolved to the default. Every all-lines-atomic
+// operation normalizes at the edge, so the write path below never sees an unresolved location.
 export interface INormalizedReservationLine {
   variantId: number;
   stockLocationId: string;
@@ -29,8 +29,8 @@ export function levelKey(variantId: number, stockLocationId: string): string {
   return `${variantId}:${stockLocationId}`;
 }
 
-// The TTL expiry instant for a reservation (`now + ttlMinutes`), shared by Reserve
-// (mint / refresh) and Allocate (refresh-then-commit of a wall-clock-stale hold).
+// The TTL instant, computed in one place so a hold minted by Reserve and a hold refreshed by
+// Allocate cannot disagree about when it lapses.
 export function reservationExpiresAt(now: Date, ttlMinutes: number): Date {
   return new Date(now.getTime() + ttlMinutes * MS_PER_MINUTE);
 }
@@ -63,6 +63,42 @@ export function normalizeReservationLines(
       quantity: line.quantity,
     };
   });
+}
+
+// The precondition of the LEDGER-BACKED idempotency guard (`UC_STOCK_MOVEMENT_DEDUPE`).
+// Commit Sale and Restock From Return are made idempotent by a UNIQUE over
+// `(type, referenceType, referenceId, variantId, stockLocationId)`, so each of them
+// catches the duplicate-key error and reads it as *"a concurrent redelivery of this
+// request lost the race"* — a successful no-op.
+//
+// **That reading is only sound while one request cannot collide with ITSELF.** Two
+// lines of one payload sharing a `(variantId, stockLocationId)` would produce the same
+// key, and the use case would then mistake its own malformed payload for a replay and
+// report a commit that never happened. So reject it here, at the edge, and the
+// duplicate-key error keeps exactly one meaning.
+//
+// Nothing upstream can produce such a payload — a cart merges lines by `variantId`
+// (`Cart.addLine`), so an order carries one line per variant, and a fulfillment ships
+// from one location. But that invariant lives in ANOTHER service and no constraint
+// holds it, and both RPCs are directly reachable over RabbitMQ. This is the backstop
+// that makes the guard's meaning local (the `normalizeReservationLines` precedent).
+//
+// Deliberately NOT folded into `normalizeReservationLines`: Allocate and Cancel
+// Allocation share that helper, are not ledger-deduped, and legitimately tolerate
+// lines that share a level (`loadDistinctLevels` sums them).
+export function requireDistinctLevels(lines: INormalizedReservationLine[], label: string): void {
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const key = levelKey(line.variantId, line.stockLocationId);
+    if (seen.has(key)) {
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
+        `${label} requires one line per (variant, location); variant ${line.variantId} @ ` +
+          `${line.stockLocationId} appears twice — merge the lines and resend`,
+      );
+    }
+    seen.add(key);
+  }
 }
 
 // Phase 1 of an all-lines-atomic write: load each distinct `(variantId, location)`

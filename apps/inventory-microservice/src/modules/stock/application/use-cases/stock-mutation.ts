@@ -1,5 +1,7 @@
 import { PinoLogger } from 'nestjs-pino';
 
+import { runWithOccRetry } from '@retail-inventory-system/common';
+
 import {
   InventoryDomainException,
   InventoryErrorCodeEnum,
@@ -16,40 +18,43 @@ import {
 } from '../ports';
 import { StockWriteConflictError } from './stock-write-conflict.error';
 
-// The minimal dependency set the bounded-retry core needs: a transaction port to
-// open a fresh unit of work per attempt, a logger for the retry/exhaustion trace, and
-// the bounded retry budget. `IStockMutationDeps` is a superset, so it satisfies this
-// structurally.
+// `IStockMutationDeps` is a superset of this, so it satisfies it structurally — a use case that
+// already has the full mutation deps can pass them straight to the retry core.
 export interface IStockWriteRetryDeps {
   transactionPort: ITransactionPort;
   logger: PinoLogger;
-  // The optimistic-concurrency retry budget — how many fresh-transaction attempts a lost
-  // compare-and-swap may burn before the write surfaces a `409 STOCK_WRITE_CONFLICT`.
-  // Injected from `OCC_RETRY_ATTEMPTS` (ADR-036), never a hardcoded constant: the use
-  // case resolves the value-provider token and threads it in, so the budget is a single
-  // env-driven knob (default 5) rather than a literal buried in the protocol.
+  // Injected from `OCC_RETRY_ATTEMPTS`, **never a literal** — the budget is one env-driven knob,
+  // not a number buried in the protocol (ADR-036).
   maxAttempts: number;
 }
 
-// Logging/identity context for the retry trace + the exhaustion error message.
-// Optional throughout: a multi-row write (Release) may span several
-// (variantId, stockLocationId) pairs, so it omits the per-row identity.
+// Every field is optional because a multi-row write (Release) spans several
+// `(variantId, stockLocationId)` pairs and has no single row identity to give.
 export interface IStockWriteRetryContext {
   variantId?: number;
   stockLocationId?: string;
   correlationId?: string;
 }
 
-// The reusable no-oversell write protocol, generalized out of `applyOnHandChange`
-// so every reserve-side use case (Reserve / Release) shares one budget and one
-// conflict-translation policy (ADR-030 §3). It opens a fresh transaction per
-// attempt and runs `attempt(scope)`; a `StockWriteConflictError` (a lost
-// compare-and-swap on `persistStockLevelChange`, or a lost INSERT race on the
-// reservation UNIQUE triple translated by the repository) is retried up to the
-// injected `deps.maxAttempts` budget (`OCC_RETRY_ATTEMPTS`, ADR-036), re-reading the
-// now-current rows under a new snapshot. Every other error — a domain rejection
-// (`OUT_OF_STOCK`, below-zero) or anything unexpected — propagates immediately and is
-// never retried. Exhaustion surfaces a 409 `STOCK_WRITE_CONFLICT`.
+// The stock module's binding of the shared OCC retry protocol (ADR-036/045).
+//
+// **The transaction is opened HERE, inside the retry loop — not by the caller.** That is what
+// makes a retry sound: `runInTransaction` gives each attempt a fresh snapshot, so the second
+// attempt re-reads the rows the first one lost against instead of retrying against a stale view.
+// The retail bindings invert this — their caller owns the `runInTransaction` and hands the retry
+// helper a thunk — so do not copy this file's shape into one of them without checking which end
+// owns the unit of work.
+//
+// The loop, the log levels and both message texts come from `runWithOccRetry`. What stays here is
+// what only inventory knows: `StockWriteConflictError` (a lost CAS on `persistStockLevelChange`, or
+// a lost INSERT race on the reservation UNIQUE triple), the row identity on the trace, and the
+// terminal `STOCK_WRITE_CONFLICT`.
+//
+// **The retry trace takes `(variantId, stockLocationId)` from the CONFLICT, not from `context`.**
+// A multi-row write (Release, Allocate) spans several rows, so the losing row is more precise than
+// the caller's idea of what it was writing. `fromVersion` is `null` on a first-touch INSERT race,
+// and the conflict path is query-free on purpose — the winning `toVersion` is never read back,
+// because reading it would cost a round trip to log a number nobody acts on.
 export async function runWithStockWriteRetry<T>(
   deps: IStockWriteRetryDeps,
   attempt: (scope: ITransactionScope) => Promise<T>,
@@ -58,49 +63,28 @@ export async function runWithStockWriteRetry<T>(
   const { transactionPort, logger, maxAttempts } = deps;
   const { variantId, stockLocationId, correlationId } = context;
 
-  for (let attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
-    try {
-      return await transactionPort.runInTransaction((scope) => attempt(scope));
-    } catch (error) {
-      if (!(error instanceof StockWriteConflictError)) {
-        throw error;
-      }
-      if (attemptNo >= maxAttempts) {
-        logger.warn(
-          { correlationId, variantId, stockLocationId, attempts: attemptNo, maxAttempts },
-          'Stock write conflict exhausted retry budget',
-        );
-        const target =
-          variantId !== undefined ? `for variant ${variantId} @ ${stockLocationId} ` : '';
-        throw new InventoryDomainException(
-          InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
-          `Stock write ${target}lost the optimistic race after ${attemptNo} attempts`,
-        );
-      }
-      // OCC retries log at `info`, not `debug` (ADR-036): a lost compare-and-swap is a
-      // normal, expected outcome under contention, and the headline concurrency tests
-      // assert this trace fires with the attempt count + the row identity + the version
-      // we raced from. The conflict error carries the precise `(variantId,
-      // stockLocationId)` of the row that lost — more precise than `context` for a
-      // multi-row write (Release / Allocate) — and `expectedVersion`, the `fromVersion`
-      // our CAS targeted (null on a first-touch INSERT race; the conflict path is
-      // deliberately query-free, so the winning `toVersion` is not read back).
-      logger.info(
-        {
-          correlationId,
-          variantId: error.variantId,
-          stockLocationId: error.stockLocationId,
-          attempt: attemptNo,
-          maxAttempts,
-          fromVersion: error.expectedVersion ?? undefined,
-        },
-        'Stock write conflict — retrying with a fresh read',
+  return runWithOccRetry(() => transactionPort.runInTransaction((scope) => attempt(scope)), {
+    subject: 'Stock',
+    logger,
+    maxAttempts,
+    isConflict: (error): error is StockWriteConflictError =>
+      error instanceof StockWriteConflictError,
+    retryContext: (conflict) => ({
+      correlationId,
+      variantId: conflict.variantId,
+      stockLocationId: conflict.stockLocationId,
+      fromVersion: conflict.expectedVersion ?? undefined,
+    }),
+    exhaustedContext: () => ({ correlationId, variantId, stockLocationId }),
+    onExhausted: (_conflict, attempts) => {
+      const target =
+        variantId !== undefined ? `for variant ${variantId} @ ${stockLocationId} ` : '';
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
+        `Stock write ${target}lost the optimistic race after ${attempts} attempts`,
       );
-    }
-  }
-
-  // Unreachable: the final attempt either returns or throws inside the loop.
-  throw new Error('runWithStockWriteRetry: optimistic retry loop exited unexpectedly');
+    },
+  });
 }
 
 export interface IStockMutationDeps extends IStockWriteRetryDeps {

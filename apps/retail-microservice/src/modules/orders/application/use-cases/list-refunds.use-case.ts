@@ -16,12 +16,13 @@ import { toRefundView } from './refund-view.factory';
 // read sibling of Issue Refund — the order-scoped refund timeline an operator or the
 // owning customer inspects.
 //
-// **Authorization is owner-or-staff** `order:read` (ADR-024 / ADR-028 §7): the customer
-// is never permission-gated for its own order's refunds (the route is bearer-protected),
-// while the staff override is folded into `isStaff` at the gateway. A non-owner-non-staff
-// caller gets `REFUND_ACCESS_FORBIDDEN` (403) — the refund surface's dedicated code,
-// distinct from `ORDER_ACCESS_FORBIDDEN` so the refund reads carry their own messaging. A
-// missing order is `ORDER_NOT_FOUND` (404).
+// Owner-or-staff on `order:read`, but **this one does NOT go through `loadAuthorizedOrder`** — it
+// owner-checks inline so it can raise `REFUND_ACCESS_FORBIDDEN` rather than the order's code, giving
+// the refund surface its own messaging. The check itself is the same one, and so is the answer.
+//
+// **A non-owner is REFUSED (403), not filtered** — the rule for every order-scoped list, now written
+// down (ADR-051). `list-returns` used to take the opposite posture on the same shape of request and
+// hand back an empty list; it no longer does.
 @Injectable()
 export class ListRefundsForOrderUseCase {
   constructor(

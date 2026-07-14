@@ -50,22 +50,21 @@ export interface IShipFulfillmentInput {
 // with its own status; the order's own `fulfillment_status` is the roll-up across
 // them (computed by the operations, not here).
 //
-// The id is the auto-increment BIGINT assigned by persistence (`null` until then),
-// the `Order` / `Payment` precedent. `version` is the per-shipment
-// optimistic-concurrency token: it ships and advances on every mutation now (the
-// concurrency the cross-cutting consistency rule names), even though enforcement is
-// a later hardening — retrofitting an OCC column onto a populated table is a
-// destructive `ALTER`, so the column is cheapest up front (the ADR-028 §6 /
-// ADR-027 reasoning).
+// `version` is the per-shipment OCC token, and it advances on every mutation. **The
+// ship-vs-cancel status transitions are not settled by it, though** — those are serialised by a
+// pessimistic `SELECT … FOR UPDATE` on the row, because two transitions on one fulfillment must
+// not both be allowed to try. Read that scope literally: the lock decides which *transition*
+// wins and nothing else. Ship captures the payment **before** it takes the lock, so a ship that
+// loses the race can still have moved the customer's money (`ShipFulfillmentUseCase`).
 //
 // **The aggregate enforces only its own shape** — ≥ 1 line, each line's quantity > 0,
-// the legal status transitions, and tracking-on-ship. The cross-fulfillment invariant
-// (the per-`OrderLine` sum across all of an order's shipments ≤ the ordered quantity)
-// is **NOT** here: the aggregate cannot see sibling fulfillments or the order's line
-// quantities, so the **Create Fulfillment use case** enforces it (ADR-031). Records
-// no domain events — the `retail.fulfillment.created` event is built and emitted by
-// the Create use case after persistence assigns ids (the `Order.place` / ADR-011
-// precedent).
+// the legal status transitions, and tracking-on-ship. The cross-fulfillment invariant is **NOT**
+// here: the aggregate cannot see sibling fulfillments or the order's line quantities, so the
+// **Create Fulfillment use case** enforces it (ADR-031) — bounding the per-`OrderLine` sum across
+// an order's shipments by the line's **active** quantity (`ordered − cancelled`, ADR-040), not by
+// the place-time ordered quantity. Records no domain events — the `retail.fulfillment.created`
+// event is built and emitted by the Create use case after persistence assigns ids (the
+// `Order.place` / ADR-011 precedent).
 export class Fulfillment extends AggregateRoot<number | null> {
   private readonly _orderId: number;
   private readonly _stockLocationId: string;

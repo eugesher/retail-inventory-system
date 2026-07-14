@@ -1,18 +1,15 @@
 import { ICorrelationPayload } from '../../microservices';
 import { StockMovementTypeEnum } from '../enums';
 
-// Wire-format shape for the `inventory.stock-movement.recorded` event, published
-// for **every** insert into the append-only audit ledger (ADR-030 §2) — the
-// system's highest-volume stream. It echoes the `StockMovementView` fields
-// (renaming the row's `id` to `movementId` to disambiguate it on the wire) plus the
-// standard event envelope.
+// `inventory.stock-movement.recorded` — a **reserved surface** (README §2). Not dead code.
 //
-// A reserved surface: emitted onto `inventory_queue` with no *business* consumer —
-// it is captured by the event-store firehose, which binds `#` on the `ris.events`
-// mirror (docs/adr/035-event-store-firehose-topic-exchange.md). `quantity` is
-// **signed** (the per-type sign of ADR-030 §2). The publisher takes the domain
-// `StockMovement` record directly (a wrapper event class would only duplicate the
-// row). `eventVersion` is pinned to `'v1'`; `occurredAt` is ISO-8601.
+// **The system's highest-volume stream:** one event per insert into the append-only ledger
+// (ADR-030 §2), so every receive, adjust, reserve, release, allocate, sale and return emits one
+// of these *in addition to* its own typed event. A consumer that binds this is binding all of
+// them.
+//
+// `quantity` is **signed**, per the fixed per-type sign (ADR-030 §2). `movementId` is the ledger
+// row's `id`, renamed on the wire so it cannot be mistaken for the variant or the reference.
 export interface IInventoryStockMovementRecordedEvent extends ICorrelationPayload {
   movementId: number;
   variantId: number;

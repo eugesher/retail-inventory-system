@@ -16,3 +16,4 @@ export * from './purge-expired-idempotency-keys.use-case';
 export * from './refund-view.factory';
 export * from './resolve-customer-email';
 export * from './ship-fulfillment.use-case';
+export * from './report-stale-capture-claims.use-case';

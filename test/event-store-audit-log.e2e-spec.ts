@@ -111,7 +111,7 @@ describe('Event store captures a staff Assign Role into the audit log (e2e)', ()
     await eventStore.initialize();
 
     const adminLogin = await server()
-      .post('/api/auth/login')
+      .post('/api/auth/staff/login')
       .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
     adminAuth = `Bearer ${(adminLogin.body as ITokenResponse).accessToken}`;
   }, timeout);

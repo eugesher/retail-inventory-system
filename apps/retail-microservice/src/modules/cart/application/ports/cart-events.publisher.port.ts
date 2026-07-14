@@ -15,11 +15,11 @@ export const CART_EVENTS_PUBLISHER = Symbol('CART_EVENTS_PUBLISHER');
 // in-process `DomainEvent` is drained and mapped at the application layer — a
 // `DomainEvent` subclass is never serialized across services (ADR-011).
 //
-// All four are reserved surfaces today — emitted onto the retail service's own
-// `retail_queue` with no cross-service consumer bound yet (the
-// producer-targets-consumer-queue pattern, ADR-008 / ADR-020). A publish failure
-// is best-effort: the use case warn-logs and swallows it because the cart write
-// has already committed.
+// **Every `retail.cart.*` event is a reserved surface** — emitted onto the retail service's own
+// `retail_queue`, with no `@EventPattern` bound to any of them (the
+// producer-targets-consumer-queue pattern, ADR-008 / ADR-020: with no consumer, the producer's
+// own queue is where they land). A publish failure is best-effort: the use case warn-logs and
+// swallows it because the cart write has already committed.
 export interface ICartEventsPublisherPort {
   publishCartCreated(event: IRetailCartCreatedEvent): Promise<void>;
   publishCartLineAdded(event: IRetailCartLineAddedEvent): Promise<void>;

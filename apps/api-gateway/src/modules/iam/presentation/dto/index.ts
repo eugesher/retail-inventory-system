@@ -1,3 +1,4 @@
+export * from './create-staff-user.request.dto';
 export * from './assign-staff-role.request.dto';
 export * from './create-role.request.dto';
 export * from './role.response.dto';

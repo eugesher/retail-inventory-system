@@ -2,15 +2,11 @@ import { ApiResponseProperty } from '@nestjs/swagger';
 
 import { FulfillmentStatusEnum } from '../enums';
 
-// RPC/HTTP response shape for one fulfillment line — which `OrderLine` quantity is
-// in this shipment. A **class** carrying `@ApiResponseProperty` (not a plain
-// interface) so the gateway can declare it as a Swagger response type —
-// `@nestjs/swagger` is the documented lib-contracts exception (ADR-017), mirroring
-// `OrderLineView` / `CartLineView`.
+// One fulfillment line: how much of an `OrderLine` is in *this* shipment.
 //
-// `orderLineId` points back at the placed order's line; `quantity` is the number of
-// units of that line included in this shipment (a partial shipment carries fewer
-// than the line's ordered quantity, the remainder shipping in a later fulfillment).
+// `quantity` is the shipped-here amount, **not** the line's ordered amount. A partial shipment
+// carries fewer units and the remainder goes out in a separate fulfillment, so summing this field
+// across an order's fulfillments — not reading any one of them — is what tells you what shipped.
 export class FulfillmentLineView {
   @ApiResponseProperty()
   public id: number;

@@ -1,25 +1,22 @@
-// A TTL-bounded, cart-scoped hold on stock for one variant at one location
-// (ADR-030). It is the unit that lets two carts NOT race for the last item before
-// either checks out: while a `Reservation` is `active`, its `quantity` is counted
-// into `StockLevel.quantityReserved`, so it is subtracted from `available`.
+// A TTL-bounded, cart-scoped hold on stock (ADR-030). **It is the thing that stops two carts
+// racing for the last item before either checks out:** while a hold is `active` its `quantity` sits
+// in `StockLevel.quantityReserved` and is therefore subtracted from `available`.
 //
-// Framework-free per ADR-004, modelled in the `StockLevel` style: a plain class
-// with private mutable fields + getters and invariants enforced in the factories /
-// mutators — NOT an `AggregateRoot`. The inventory context emits events from its
-// use cases, never pulls them from the model, so there is no `pullDomainEvents()`.
+// The typed-vs-plain-`Error` split is the same as `StockLevel`'s — a typed exception marks a state
+// a caller can legitimately reach, a plain `Error` marks an internal bug. Every invariant below is
+// pinned in `domain/spec/reservation.model.spec.ts`, including the ones that are easy to doubt: the
+// strict-`<` expiry boundary, and that a `committed` hold refuses to reactivate.
 //
-// `variantId` is an OPAQUE cross-service link to the catalog `product_variant`,
-// and `cartId` an OPAQUE link to the retail `cart`; the inventory domain MUST NOT
-// import the catalog or retail aggregates — the only coupling is the FKs in
-// persistence (ADR-004 / ADR-017 / ADR-027 / ADR-028).
+// `variantId` and `cartId` are **opaque** links — inventory imports no catalog or retail type, and
+// the only coupling is an FK in persistence.
 
 import { randomUUID } from 'crypto';
 
 import { InventoryDomainException, InventoryErrorCodeEnum } from './inventory.exception';
 
-// The hold's lifecycle. Lives in `domain/`, NOT in `libs/contracts`: the wire
-// carries the raw string (the lifecycle-enum convention — `CategoryStatusEnum`
-// stays in catalog `domain/` the same way, ADR-025 §7 / ADR-029).
+// **Deliberately in `domain/`, not `libs/contracts`** — the wire carries the raw string. A consumer
+// that wants to switch on a hold's status is switching on a string it cannot import, and that is
+// the point: the lifecycle is inventory's, not the wire's (ADR-025 §7).
 export enum ReservationStatusEnum {
   ACTIVE = 'active',
   COMMITTED = 'committed',
@@ -27,8 +24,8 @@ export enum ReservationStatusEnum {
   EXPIRED = 'expired',
 }
 
-// Full reconstruction shape (the load path). `create` derives `id`, `status`, and
-// `version` itself, so its input is the narrower `ICreateReservationProps` below.
+// The load path's shape. `create` derives `id`, `status` and `version` itself, which is why its
+// input is the narrower `ICreateReservationProps`.
 export interface IReservationProps {
   id: string | null;
   variantId: number;
@@ -75,17 +72,14 @@ export class Reservation {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // Opens a fresh `active` hold at `version 0`, generating the CHAR(36) UUID id
-  // in-app (the `Cart.create` precedent — the id is concrete immediately, never
-  // null on a created hold). Rejects a non-positive / non-integer `quantity` with
-  // a typed `RESERVATION_QUANTITY_INVALID`.
+  // The **id is minted in-app**, so a freshly created hold already has a concrete `id` — it is
+  // never `null` the way a DB-sequenced aggregate's is before its insert.
   public static create(props: ICreateReservationProps): Reservation {
     Reservation.requirePositiveInt(props.quantity);
 
-    // A past (or now) `expiresAt` at create time is an internal caller bug — the
-    // TTL is always computed forward (`now + RESERVATION_TTL_MINUTES`) — not user
-    // input, so it is a plain `Error`, deliberately NOT a typed domain exception
-    // that the filter would surface as a client-facing 4xx.
+    // A past `expiresAt` at create time cannot come from a user: the TTL is always computed forward
+    // from now. So it is an internal bug, and a plain `Error` — not a typed exception the filter
+    // would dress up as a 4xx for a caller who did nothing wrong.
     if (!(props.expiresAt instanceof Date) || Number.isNaN(props.expiresAt.getTime())) {
       throw new Error('Reservation.create: expiresAt must be a valid Date');
     }
@@ -105,10 +99,10 @@ export class Reservation {
     });
   }
 
-  // The load path: rebuilds a persisted hold from storage in ANY state, including an
-  // `active` row whose `expiresAt` is already in the past — expiry is a wall-clock
-  // fact, not a stored transition, so the row keeps its status until something flips
-  // it. No guards beyond what the DB already enforced at write time.
+  // **Expiry is a wall-clock fact, not a stored transition.** This rebuilds a row in ANY state,
+  // including an `active` one whose `expiresAt` has already passed — nothing flips a status by
+  // itself, so a lapsed hold stays `active` in the table until the sweep gets to it. That is why
+  // this path guards nothing: the row is already what it is.
   public static reconstitute(props: IReservationProps): Reservation {
     return new Reservation(props);
   }
@@ -129,9 +123,9 @@ export class Reservation {
     return this._version;
   }
 
-  // The idempotent re-reserve path (`active → active`): adjust the held quantity
-  // and push the TTL forward. Called when a shopper changes a cart line's quantity
-  // or re-adds an already-held variant.
+  // The idempotent re-reserve (`active → active`). `quantity` is the **new absolute** held amount,
+  // not an increment — re-adding a variant already in the cart lands here, and passing a delta
+  // would silently shrink the hold.
   public refresh(quantity: number, expiresAt: Date): void {
     this.requireActive('refresh');
     Reservation.requirePositiveInt(quantity);
@@ -140,29 +134,28 @@ export class Reservation {
     this.bumpVersion();
   }
 
-  // active → released (terminal). The counter the hold occupied is returned to
-  // `available` by the Release use case; the row survives (the UNIQUE triple keeps
-  // it addressable for a later `reactivate`).
+  // **This only flips the status. It does not return the counter.** Handing the held units back to
+  // `available` is the Release use case's job, in the same transaction — a `release()` on its own
+  // leaks the hold's quantity out of `available` forever. The row itself survives, because the
+  // all-statuses UNIQUE triple keeps it addressable for a later `reactivate`.
   public release(): void {
     this.requireActive('release');
     this._status = ReservationStatusEnum.RELEASED;
     this.bumpVersion();
   }
 
-  // active → expired (terminal). Any other source status is rejected with
-  // `RESERVATION_INVALID_STATE`. Like `release`, it only flips the status: returning
-  // the counter the hold occupied to `available` is the caller's job.
+  // Same as `release`: **the status moves, the counter does not.** Returning the units is the
+  // sweep's job.
   public expire(): void {
     this.requireActive('expire');
     this._status = ReservationStatusEnum.EXPIRED;
     this.bumpVersion();
   }
 
-  // active → committed: the hold is converted into a firm allocation at order
-  // placement. Rejects a wall-clock-expired hold with `RESERVATION_EXPIRED` — the
-  // allocate use case refreshes the TTL first when it decides to honor a
-  // stale-but-still-held reservation, so commit never silently converts an expired
-  // hold.
+  // The hold becomes a firm allocation at placement. **A wall-clock-expired hold is refused here**,
+  // even though the row still says `active` — so a commit can never quietly convert something the
+  // TTL had already given up on. When the allocate use case decides to honour a stale-but-unswept
+  // hold, it must refresh the TTL first, in the open.
   public commit(now: Date): void {
     this.requireActive('commit');
     if (this.isExpired(now)) {
@@ -175,10 +168,11 @@ export class Reservation {
     this.bumpVersion();
   }
 
-  // released | expired → active: the row-reuse path that keeps the all-statuses
-  // UNIQUE triple `(cartId, variantId, stockLocationId)` workable when a shopper
-  // re-adds a previously removed (or lapsed) line. `committed` is terminal and is
-  // NOT reactivatable — a placed order's allocation is never reopened as a hold.
+  // Row reuse. The UNIQUE triple `(cartId, variantId, stockLocationId)` spans **all** statuses, so a
+  // shopper re-adding a line they removed cannot insert a second row — it revives the old one.
+  //
+  // **`committed` is terminal and never reactivates.** A placed order's allocation is not a hold to
+  // be reopened, and the spec pins the refusal.
   public reactivate(quantity: number, expiresAt: Date): void {
     if (
       this._status !== ReservationStatusEnum.RELEASED &&
@@ -212,10 +206,8 @@ export class Reservation {
     }
   }
 
-  // Every successful mutation advances the OCC token so "version bumps on each
-  // mutation" is observable in the unit spec. Persistence delegates the stored
-  // value to TypeORM's `@VersionColumn`; this in-memory bump keeps the domain
-  // self-describing (the `StockLevel` / `Cart` precedent).
+  // The stored value is TypeORM's `@VersionColumn`; this in-memory bump exists so the domain is
+  // testable without a database, and so the spec can assert the OCC token moves on every mutation.
   private bumpVersion(): void {
     this._version += 1;
   }

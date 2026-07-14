@@ -4,7 +4,7 @@ import {
 } from '@retail-inventory-system/contracts';
 import { AggregateRoot } from '@retail-inventory-system/ddd';
 
-import { NotificationDomainException } from './notification-domain.exception';
+import { NotificationDomainException } from './notification.exception';
 import { NotificationErrorCodeEnum } from './notification-error-code.enum';
 
 export interface INotificationDeliveryProps {
@@ -56,9 +56,17 @@ export interface IOpenNotificationDeliveryInput {
 // (and `FAILED → SENT` once a retry succeeds) — the retry sweeper re-attempts `failed`
 // rows. A row created via the `skipped` factory is born in the terminal
 // `SKIPPED_NO_CONSENT` status (the consent-gate short-circuit, ADR-037) and never
-// enters that walk. The row is **live-ephemeral**: it is never deleted (a
-// `RETENTION_DELIVERY_DAYS` purge is a deferred future capability), so `deletedAt`
-// stays inert.
+// enters that walk.
+//
+// **A delivery row is never SOFT-deleted — `deletedAt` is inert, and deliberately so**: the row is the
+// source of truth for *"did we already send this?"*, and a hidden-but-present row that the dedupe
+// query no longer sees means the same notification is sent twice.
+//
+// **It is HARD-deleted, once it ages out** (`PurgeAgedDeliveriesUseCase`, nightly, bounded). The
+// horizon is `RETENTION_DELIVERY_DAYS` (Joi default 90) — a key that **existed and was read by
+// nothing** until ISSUE-08, while this table, on the hot path of every order, fulfillment, return and
+// refund, grew for the life of the deployment. Retiring the row retires its dedupe anchor with it;
+// that coupling is stated on `INotificationDeliveryRepositoryPort.deleteOlderThan` and is accepted.
 //
 // `attemptCount` is **monotonic** — only `markSent` / `markFailed` (the two
 // attempt-consuming transitions) increment it; `markDelivered` / `markBounced` record a

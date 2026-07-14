@@ -1,12 +1,11 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Fires when a Receive Stock operation raises a variant's on-hand quantity at a
-// stock location (ADR-027). `aggregateId` is the `variantId` (the downstream
-// backbone key); `quantityDelta` is the positive amount received and `newOnHand`
-// the post-commit running total. `actorId` is the staff user who performed the
-// receive (optional). `StockLevel` is not an `AggregateRoot`, so the use case
-// constructs this event after the save commits rather than pulling it from the
-// aggregate (ADR-012 §carried-forward).
+// Raised when Receive Stock raises a variant's on-hand at a location.
+//
+// `quantityDelta` is the amount received (always positive); `newOnHand` is the running total
+// *after* the commit. One is a delta and the other an absolute — reading either for the other is
+// the mistake this note exists to prevent. `actorId` is absent when a direct RMQ caller receives
+// with no authenticated principal.
 export class StockReceivedEvent extends DomainEvent<number> {
   public readonly stockLocationId: string;
   public readonly quantityDelta: number;

@@ -39,10 +39,11 @@ import {
 // thrown `NotificationDomainException` is mapped to the wire `{ statusCode, message,
 // code }` shape by the `APP_FILTER`-registered `NotificationRpcExceptionFilter`.
 //
-// `record-outcome` is the ESP-webhook seam — the internal RPC a future provider-webhook
-// bridge (HTTP endpoint + signature verification + payload mapping) would call. That
-// bridge is out of scope this capability, so there is no gateway HTTP route for it; the
-// `list`/`get` reads do get gateway routes (a later capability).
+// **`record-outcome` is the one RPC here with no gateway HTTP route.** It is the ESP-webhook
+// seam: the internal RPC a provider-webhook bridge (HTTP endpoint + signature verification +
+// payload mapping) would call — and **no such bridge exists anywhere in the system**, so nothing
+// outside this service can reach it. Every other pattern on this controller is fronted by a route
+// under `/api/notifications`.
 @Controller()
 export class NotificationsController {
   constructor(
@@ -100,7 +101,7 @@ export class NotificationsController {
 
   // The operator manual-retry of one `failed` delivery — re-dispatches the
   // already-rendered content, forcing past the scheduled sweeper's backoff gate (ADR-033).
-  // The gateway manual-retry HTTP route that fronts this RPC is a later capability.
+  // Fronted by `POST /api/notifications/deliveries/:id/retry`.
   @MessagePattern(ROUTING_KEYS.NOTIFICATION_DELIVERY_RETRY)
   public async retryDelivery(
     @Payload() payload: INotificationDeliveryRetryPayload,
@@ -109,9 +110,13 @@ export class NotificationsController {
   }
 
   // The staff-triggered marketing dispatch (ADR-037). It routes through the shared
-  // Render & Dispatch pipeline, where the consent-gate decides send vs
-  // `skipped-no-consent`. Resolves the resulting `NotificationDeliveryView`, or `null`
-  // when no active marketing template resolves (the seeded template is a later capability).
+  // Render & Dispatch pipeline, where the consent-gate decides send vs `skipped-no-consent`.
+  // Resolves the resulting `NotificationDeliveryView`, or `null` when no active marketing
+  // template resolves — a success that sent nothing, not an error.
+  //
+  // **A `null` here almost always means the seed did not run.** The marketing template ships in
+  // `scripts/seeds/notification-template.sql` (`yarn test:seed`), not in a migration, so
+  // `yarn migration:run` alone leaves the registry empty. See `SendMarketingUseCase`.
   @MessagePattern(ROUTING_KEYS.NOTIFICATION_MARKETING_SEND)
   public async sendMarketing(
     @Payload() payload: INotificationMarketingSendPayload,

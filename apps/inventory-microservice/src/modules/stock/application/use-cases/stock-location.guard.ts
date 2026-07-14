@@ -1,11 +1,11 @@
 import { InventoryDomainException, InventoryErrorCodeEnum } from '../../domain';
 import { IStockRepositoryPort } from '../ports';
 
-// Shared write-path guard: a Receive/Adjust write must target an existing,
-// active stock location. Hoisted out of both write use cases (which enforced an
-// identical not-found-then-inactive check) so the policy lives in one place and
-// a future rule change (e.g. allowing receives into a dropship-virtual location)
-// is made once.
+// The shared write-path guard: **every** stock write must target a location that exists and is
+// active. One policy in one place — a transfer runs it twice, once per leg.
+//
+// The order matters: not-found is checked before inactive, so naming a location that never existed
+// and naming one that was deactivated give a caller different answers.
 export const requireActiveLocation = async (
   repository: IStockRepositoryPort,
   stockLocationId: string,

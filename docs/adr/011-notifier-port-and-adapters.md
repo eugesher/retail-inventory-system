@@ -37,7 +37,7 @@ modules/notifications/
     use-cases/     # one class per use case; inject ports, not adapters
   infrastructure/
     consumers/     # @EventPattern / @MessagePattern subscribers (RMQ)
-    delivery/      # NOTIFIER adapters: log, email, webhook
+    delivery/      # NOTIFIER adapters: log (+ a flaky log double for tests)
     *.module.ts    # binds port symbols to concrete adapters
   presentation/    # RMQ-only here (health); HTTP for services that need it
 ```
@@ -53,8 +53,8 @@ but slightly different per service."
 not on a specific delivery mechanism. The DI symbol is `NOTIFIER` (a
 `Symbol`, not a string token — the same convention `RETAIL_GATEWAY_PORT` /
 `USER_REPOSITORY` use). `notifications.module.ts` binds `NOTIFIER` to a
-concrete adapter; swapping log → email → webhook is a one-line `useClass`
-change once the target adapter is implemented.
+concrete adapter, and it is the only place that names one — so an email or webhook
+transport, once written, is bound here without touching a use case.
 
 **Rejected: a `NotifierService` concrete with feature flags for channels.**
 Conflates delivery selection with business logic and forces every
@@ -71,10 +71,15 @@ Rationale: a logging notifier is the only adapter that has zero external
 dependencies and can be reasoned about in unit tests with a Pino spy.
 Email and webhook adapters need network reachability, transport
 credentials, and retry policies — none of which are appropriate to wire
-on the migration's critical path. `EmailNotifierAdapter` and
-`WebhookNotifierAdapter` exist as scaffolds (TODOs) so the DI slot is
-visible and the rebind is a one-line change when the real implementation
-arrives.
+on the migration's critical path.
+
+> **Superseded by [ADR-048](048-two-scaffold-adapters-that-were-never-wired.md).** This ADR
+> also shipped `EmailNotifierAdapter` and `WebhookNotifierAdapter` as scaffolds that threw
+> `not implemented`, on the claim that they kept "the DI slot visible" and made the rebind
+> "a one-line change". Neither held: they were registered in no module — there was no slot —
+> and a real transport needs a dependency, credentials, config and a retry policy, none of
+> which a throwing stub provides. **They are deleted.** The seam is `INotifierPort` (§2),
+> which is unaffected.
 
 ### 4. Consumers are infrastructure, not presentation
 
@@ -156,10 +161,11 @@ the consumer.
   values: `RETAIL_ORDER_CREATED`, `INVENTORY_STOCK_LOW`,
   `NOTIFICATION_HEALTH_PING`. The spec in `libs/messaging/spec/` asserts
   both libs agree on every value.
-- `EmailNotifierAdapter` and `WebhookNotifierAdapter` are scaffolds that
+- `EmailNotifierAdapter` and `WebhookNotifierAdapter` ship as scaffolds that
   throw `not implemented` on `send()`. No new runtime dependencies
   (`nodemailer`, `axios`, etc.) were added — deferred until the adapter
-  is actually wired post-migration.
+  is actually wired post-migration. **(Deleted by [ADR-048](048-two-scaffold-adapters-that-were-never-wired.md):
+  two months and nine capabilities later they were still throwing, and still wired to nothing.)**
 - The inventory and retail alignments will copy the notification module's directory layout
   verbatim. If they need to deviate, the deviation should land here as a
   follow-up ADR rather than silently in the code.

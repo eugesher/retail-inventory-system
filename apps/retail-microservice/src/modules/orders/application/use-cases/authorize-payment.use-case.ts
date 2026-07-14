@@ -35,9 +35,8 @@ export interface IAuthorizePaymentInput {
 // transaction (`TRANSACTION_PORT`). On a non-approval (unreachable with the fake,
 // but modeled) the order stays `paymentStatus=none` and a typed `409` is surfaced.
 //
-// It is its own use case (not inlined into Place Order) so it is unit-testable
-// against a fake `PAYMENT_GATEWAY` in isolation, and so the later explicit-capture
-// capability can sit alongside it symmetrically.
+// It is its own use case (not inlined into Place Order) so it is unit-testable against a fake
+// `PAYMENT_GATEWAY` in isolation, and so it sits symmetrically beside `CapturePaymentUseCase`.
 @Injectable()
 export class AuthorizePaymentUseCase {
   constructor(

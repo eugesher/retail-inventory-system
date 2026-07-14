@@ -45,10 +45,16 @@ export class ActivePriceProbeTypeormAdapter implements IActivePriceProbePort {
 
     // A `?` placeholder per id, built from the array *length* (never the values),
     // so every id and the currency are driver-bound parameters rather than
-    // string-concatenated SQL. `UTC_TIMESTAMP()` evaluates "now" in the DB so the
+    // string-concatenated SQL. `UTC_TIMESTAMP()` evaluates "now" in the DB, so the
     // probe needs no injected clock. The `[validFrom, validTo)` containment test
     // mirrors the pricing repository's `findInEffect` candidate query — a row is
     // in effect when it has started and has not yet closed.
+    //
+    // **This comparison is only sound because the driver is pinned to UTC** (`timezone: 'Z'`,
+    // `DatabaseModule.forRoot`). `valid_from` was *written* through that driver; unpin it and
+    // mysql2 falls back to the Node host's local zone, so the stored instant shifts by the host's
+    // offset while `UTC_TIMESTAMP()` does not — and a price silently becomes active hours early or
+    // late. A new connection that forgets the pin breaks this query and nothing else will say so.
     const placeholders = variantIds.map(() => '?').join(', ');
     const rows = await this.variantRepository.manager.query<IPricedVariantRow[]>(
       `SELECT DISTINCT variant_id AS variantId

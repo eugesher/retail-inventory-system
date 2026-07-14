@@ -1,8 +1,8 @@
 // Lifecycle states for a catalog MediaAsset.
 //
 // Soft-delete is modelled as the terminal `ARCHIVED` state — there is no
-// `deletedAt` timestamp on the aggregate (the inherited persistence column is
-// left inert; see the persistence work and ADR-025 / ADR-029). Detach archives
+// `deletedAt` timestamp on the aggregate, and `BaseEntity`'s inherited `deleted_at` column stays
+// inert (`MediaAssetEntity` says so; nothing in catalog ever soft-deletes). Detach archives
 // the row rather than deleting it, so anything that captured the media id
 // historically still resolves it; an archived asset never reappears in a browse
 // (the list read filters to `active`).

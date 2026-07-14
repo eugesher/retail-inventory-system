@@ -1,2 +1,2 @@
 export * from './infrastructure/persistence';
-export * from './infrastructure/stock.module';
+export * from './stock.module';

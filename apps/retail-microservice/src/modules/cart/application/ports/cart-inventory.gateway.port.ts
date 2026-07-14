@@ -13,11 +13,10 @@ export const CART_INVENTORY_GATEWAY = Symbol('CART_INVENTORY_GATEWAY');
 // (ADR-009 / ADR-020) — `CartInventoryRabbitmqAdapter` is the only `ClientProxy`
 // holder behind it.
 //
-// This is the cart half of what the plan called `INVENTORY_RESERVATION_GATEWAY`;
-// it lands as a module-prefixed port (`CART_INVENTORY_GATEWAY`) because the cart
-// and orders modules are isolated (ADR-028) and each follows the established
-// `<MODULE>_<DOWNSTREAM>_GATEWAY` convention (`CART_CATALOG_GATEWAY` /
-// `ORDER_CATALOG_GATEWAY`). The order half is `ORDER_INVENTORY_GATEWAY`.
+// **The port is named after the CONSUMING module, not the downstream one** — hence
+// `CART_INVENTORY_GATEWAY` here and `ORDER_INVENTORY_GATEWAY` in orders, two ports onto the same
+// inventory surface. The modules are isolated (ADR-028), so a shared port would be a shared
+// dependency between them by the back door.
 //
 // - `reserveStock` holds the **absolute** target quantity for the
 //   `(cartId, variantId)` triple at the default location (no `stockLocationId` —

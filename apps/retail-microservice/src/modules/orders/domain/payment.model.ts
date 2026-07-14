@@ -13,9 +13,8 @@ export interface IPaymentProps {
   gatewayReference: string;
   authorizedAt: Date | null;
   capturedAt: Date | null;
-  // Set by Cancel Order on a captured payment (a later capability) to mark that a
-  // refund is owed; a refund capability consumes it. Optional on the load path and
-  // defaults `false` — a freshly authorized payment is never flagged.
+  // Set by Cancel Order when it cancels an order whose payment was already captured. Optional on
+  // the load path and defaults `false` — a freshly authorized payment is never flagged.
   flaggedForRefund?: boolean;
   // Cumulative refunded total in minor units; the refund operation increments it and
   // the partial-vs-full decision reads it against `amountMinor`. Optional on the load
@@ -52,8 +51,7 @@ export interface IPaymentAuthorizedInput {
 // state is `AUTHORIZED` — there is no `NONE` (that member lives only on the order's
 // payment *axis*, for the pre-payment window). The id is the auto-increment BIGINT
 // assigned by persistence (`null` until then). The aggregate records no domain
-// events; the order's place / capture use cases own the wire events (later
-// capabilities), never the payment domain.
+// events — the use cases own the wire events, never the payment domain.
 export class Payment extends AggregateRoot<number | null> {
   private readonly _orderId: number;
   private readonly _amountMinor: number;
@@ -172,44 +170,82 @@ export class Payment extends AggregateRoot<number | null> {
     return this._capturedAt;
   }
 
-  // True once Cancel Order flags a captured payment as owing a refund (a later
-  // capability writes it). `false` for every freshly authorized payment — the
-  // mutator that sets it ships with its consumer, not here.
+  // **`flaggedForRefund` is orthogonal to `status`.** A captured payment that Cancel Order flagged
+  // stays `CAPTURED` — the flag says money is *owed back*, not that it has moved. Only `refund()`
+  // moves the status.
   public get flaggedForRefund(): boolean {
     return this._flaggedForRefund;
   }
 
-  // The cumulative amount refunded against this payment, in minor units. `0` for
-  // every freshly authorized payment — the `refund()` mutator that increments it
-  // ships with its consumer (the issue-refund capability), not here. The column +
-  // field + getter ship now so no later schema migration is needed (the
-  // `flagged_for_refund`-ships-now precedent, ADR-028 §6).
+  // The **cumulative** total refunded against this payment, not the last refund's amount. A partial
+  // refund leaves the payment `CAPTURED` and this number short of `amountMinor`; the difference is
+  // what may still be refunded.
   public get refundedAmountMinor(): number {
     return this._refundedAmountMinor;
   }
 
-  // The **only** mutation: `AUTHORIZED → CAPTURED`, stamping `capturedAt`. Rejects
-  // any non-`authorized` start (double-capture or capture of a voided/failed
-  // payment). Void / refund / fail land with later capabilities — deliberately
-  // absent here (they would be dead, untested transitions in this chain).
-  public capture(at: Date): void {
+  // `AUTHORIZED → CAPTURING` — **the durable claim, and the transition that must commit BEFORE the
+  // gateway is called** (ADR-052). It is not bookkeeping: it is the mutual exclusion. Both capture
+  // paths (explicit capture, ship-triggered capture) take it under a `SELECT … FOR UPDATE`, so the
+  // loser of a race blocks on the row, wakes to find `CAPTURING` rather than `AUTHORIZED`, and is
+  // rejected **before it can reach the processor**.
+  //
+  // The rejection is `PAYMENT_INVALID_STATUS_TRANSITION` (409) — the same code a double-capture
+  // raised before, but now raised at the only moment it is worth anything: while the money is still
+  // in the customer's account.
+  public beginCapture(): void {
     if (this._status !== PaymentStatusEnum.AUTHORIZED) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
-        `Payment.capture: can only capture an authorized payment (current: ${this._status})`,
+        `Payment.beginCapture: can only claim an authorized payment (current: ${this._status})`,
+      );
+    }
+    this._status = PaymentStatusEnum.CAPTURING;
+  }
+
+  // `CAPTURING → CAPTURED`, stamping `capturedAt`. **Records that money moved; it does not move it.**
+  // The gateway has already confirmed by the time this runs, and the claim proves this caller was the
+  // one entitled to ask.
+  //
+  // It refuses to complete a capture nobody claimed. That is not defensive noise: a path that reaches
+  // `CAPTURED` without passing through `CAPTURING` is a path that charged the gateway without holding
+  // the lock, which is the entire defect ADR-052 exists to make unexpressible.
+  public completeCapture(at: Date): void {
+    if (this._status !== PaymentStatusEnum.CAPTURING) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
+        `Payment.completeCapture: can only complete a claimed capture (current: ${this._status})`,
       );
     }
     this._status = PaymentStatusEnum.CAPTURED;
     this._capturedAt = at;
   }
 
+  // `CAPTURING → AUTHORIZED` — the claim released because the gateway **declined**, so no money
+  // moved and the authorization is still capturable.
+  //
+  // **Only a caller that KNOWS the charge did not land may call this.** A caller that merely *thinks*
+  // so — a crashed request, a timeout, a sweeper guessing — must not: releasing a claim whose charge
+  // actually landed hands the next caller a second charge on the same authorization. That is why the
+  // stale-claim sweeper only *surfaces* `CAPTURING` rows and never resolves them (ADR-052), and why
+  // this method is reachable from exactly one place: the explicit `!result.captured` branch.
+  public releaseCapture(): void {
+    if (this._status !== PaymentStatusEnum.CAPTURING) {
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.PAYMENT_INVALID_STATUS_TRANSITION,
+        `Payment.releaseCapture: can only release a claimed capture (current: ${this._status})`,
+      );
+    }
+    this._status = PaymentStatusEnum.AUTHORIZED;
+  }
+
   // `AUTHORIZED → VOIDED`. Driven by Cancel Order when it cancels an order whose
-  // payment was authorized-but-not-captured: voiding releases the held authorization so
-  // no money is ever taken. Rejects any non-`authorized` start (a captured payment is
-  // flagged for refund instead — `flagForRefund` — and a voided/failed one is already
-  // terminal) with `PAYMENT_INVALID_STATUS_TRANSITION` (409). The in-process fake
-  // gateway has no `void` call (it never reserved real funds); a real gateway would
-  // void the authorization here — out of scope for this capability.
+  // payment was authorized but never captured: no money was taken, so none needs giving back. A
+  // captured payment cannot come here — it goes to `flagForRefund` instead.
+  //
+  // **This void is bookkeeping only.** The bound gateway is a fake that never reserved real funds,
+  // so nothing is released anywhere; a real processor would need its authorization voided here, and
+  // that call does not exist. The row will say `VOIDED` regardless.
   public void(): void {
     if (this._status !== PaymentStatusEnum.AUTHORIZED) {
       throw new OrderDomainException(
@@ -220,21 +256,20 @@ export class Payment extends AggregateRoot<number | null> {
     this._status = PaymentStatusEnum.VOIDED;
   }
 
-  // Marks that this payment owes a refund. Driven by Cancel Order when it cancels an
-  // order whose payment was already **captured** — the money is gone, so cancellation
-  // cannot simply void it; it flags the row and the refund capability issues the
-  // actual refund. **Idempotent** — flagging an already-flagged payment is a no-op, not
-  // an error. The flag is orthogonal to `status` (a captured payment stays `captured`
-  // while flagged); only a refund moves the status (`refund()` below, ADR-028 §6).
+  // **Cancel Order's answer when the money has already moved.** A captured payment cannot be voided
+  // — the funds are gone — so cancellation flags the row and leaves the actual reversal to a refund.
+  // **Flagging is idempotent**, and it is a *claim*, not a settlement: the flag alone gives nobody
+  // their money back.
   public flagForRefund(): void {
     this._flaggedForRefund = true;
   }
 
-  // Records a refund of `amountMinor` against this captured payment — the writer of the
-  // `refunded_amount_minor` counter that shipped ahead of its consumer (ADR-028 §6).
-  // Driven by the Issue Refund use case **after** the gateway confirms the refund; the
-  // use case validates the request against the refundable ceiling first, so the guards
-  // here are defense-in-depth (an internal caller bug, not a user-reachable rejection):
+  // Records a refund against this captured payment. **Driven by Issue Refund AFTER the gateway has
+  // confirmed** — this method never asks anyone for money, it only writes down that money went
+  // back. Calling it without a confirmed gateway refund records a lie.
+  //
+  // The use case validates against the refundable ceiling first, so the guards below are
+  // defence-in-depth against an internal bug, not user-reachable rejections:
   //
   // - `amountMinor` must be a positive integer — a **plain `Error`** (a use case never
   //   reaches this with a bad amount; the typed `REFUND_AMOUNT_INVALID` lives on `Refund`).

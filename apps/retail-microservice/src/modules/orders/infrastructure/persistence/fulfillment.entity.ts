@@ -49,10 +49,9 @@ export class FulfillmentEntity extends BaseEntity {
   @Column({ type: 'timestamp', nullable: true })
   public deliveredAt: Date | null;
 
-  // Optimistic-concurrency token. TypeORM owns the persisted value via
-  // `@VersionColumn` (incremented on each managed save); the guard it enables is a
-  // later concurrency-hardening capability. Shipping the column now keeps that
-  // retrofit non-destructive (the `order.version` / ADR-028 §6 precedent).
+  // The OCC token, per shipment. **But the ship-vs-cancel race is not settled by it** — that one is
+  // serialised by a pessimistic `SELECT … FOR UPDATE` on this row, because two transitions on one
+  // fulfillment must not both be allowed to try. The version guards the *order*'s writes around it.
   @VersionColumn()
   public version: number;
 

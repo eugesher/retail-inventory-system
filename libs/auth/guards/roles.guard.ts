@@ -1,0 +1,14 @@
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+
+import { enforceRequiredClaim } from '../guards/claim-guard.util';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+
+  public canActivate(context: ExecutionContext): boolean {
+    return enforceRequiredClaim(this.reflector, context, ROLES_KEY, (user) => user.roles);
+  }
+}

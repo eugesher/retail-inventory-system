@@ -1,14 +1,12 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// Fires when a Restock from Return puts a return request's `restock`-disposition
-// stock back on-hand (ADR-032). `aggregateId` is the `variantId` (the downstream
-// backbone key); `quantity` is the restocked quantity for the line (strictly
-// positive — on-hand only rises), `returnRequestId` the RMA whose inspection
-// triggered the restock — the idempotency anchor (the `return` movement references
-// it) — and `returnLineId` the specific line that was restocked. `StockLevel` is
-// not an `AggregateRoot`, so the Restock use case constructs this event after the
-// save commits rather than pulling it from a model (the `StockCommittedEvent`
-// precedent).
+// The mirror of `StockCommittedEvent`: on-hand rises, and only rises (ADR-032).
+//
+// **Only `restock`-disposition lines get here.** Goods scrapped or quarantined at inspection never
+// re-enter sellable inventory and raise nothing — so counting these events counts what came *back
+// to the shelf*, not what came back to the warehouse.
+//
+// `returnRequestId` is the idempotency anchor; the `return` movement references it.
 export class StockReturnedEvent extends DomainEvent<number> {
   public readonly stockLocationId: string;
   public readonly quantity: number;

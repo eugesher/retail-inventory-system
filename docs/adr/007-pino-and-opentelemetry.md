@@ -90,6 +90,9 @@ exporter consume.
 
 ### `TraceContextInterceptor` for response headers
 
+> **Amendment ([ADR-046](046-libs-layout-and-dead-export-removal.md), 2026-07-12).** The interceptor shipped as a no-op placeholder "so app modules can declare the import". No app module ever did, in fourteen ADRs' worth of work — so it is **deleted**. If response-header trace propagation is wanted, it will be written against the requirement that exists then.
+
+
 A Nest interceptor copies the active span context onto Pino's
 per-request bindings and (once the SDK is wired) onto the response header
 (`traceparent`). The interceptor ships in the library-shape work as a

@@ -56,9 +56,25 @@ const PROVISIONAL_ORDER_NUMBER = 'PENDING';
 // `ownerType=order` copies (ADR-028 §5), allocates the cart's stock holds into the
 // order **inside the place transaction, after the cart-conversion CAS** (ADR-030 —
 // reserved → allocated, or a direct allocation fallback), authorizes payment inline
-// via the `PAYMENT_GATEWAY` (authorize-on-place, Q5) — allocate precedes payment, so
-// money is never authorized for stock that could not be allocated — and emits
-// `retail.order.placed` + `retail.payment.authorized` post-commit.
+// via the `PAYMENT_GATEWAY` (authorize-on-place), and emits `retail.order.placed` +
+// `retail.payment.authorized` post-commit.
+//
+// **Allocate precedes payment, so money is never authorized for stock that could not be allocated.
+// The inverse does not hold by ordering — it holds by COMPENSATION** (ISSUE-06 / ADR-052). The
+// authorize runs *after* the place transaction has committed, so a decline lands on an order, a
+// `converted` cart and an allocation that already exist. `compensateDeclinedAuthorization` releases
+// the stock and marks the order dead on both axes (`paymentStatus = failed`, `status = cancelled`),
+// and `resolveExistingOrder` refuses to hand the corpse back as a success.
+//
+// It did none of that for eleven epics: a declined card left an order reading `pending` / `none` —
+// **indistinguishable from a healthy one** — that could never ship, that nothing cancelled, whose
+// stock was held forever, and whose retry returned **200 with a successful-looking `OrderView`**. The
+// bound gateway always approves, so no test could reach the path; it is the shape of the seam, not
+// the odds, that made it a defect.
+//
+// **The cart stays `converted` even on a decline.** That `UPDATE cart SET status='converted' … WHERE
+// status='active'` **is** the double-place compare-and-swap; reversing it re-opens the race. The
+// customer starts a new cart — worse UX, and honest.
 //
 // **The snapshot is the contract with the buyer.** A later catalog/price/name change
 // must never rewrite a placed order, so the line freezes the catalog values at
@@ -219,8 +235,13 @@ export class PlaceOrderUseCase {
       );
     }
     if (cart.status === CartStatusEnum.CONVERTED) {
-      // Repeat-place idempotency: the cart already converted, so return the order it
-      // converted into (plus its payment) instead of placing a second one.
+      // Repeat-place idempotency: the cart already converted, so return the order it converted into
+      // rather than minting a second one.
+      //
+      // **`converted` does NOT mean "paid"** — the CAS that sets it runs inside the place
+      // transaction, and the authorization runs after that transaction commits. So a cart can be
+      // converted against an order whose card was declined, and `resolveExistingOrder` **refuses**
+      // that one rather than reporting it as a success (ISSUE-06). It used to report it.
       return this.resolveExistingOrder(cartId, correlationId);
     }
     if (cart.status === CartStatusEnum.ABANDONED) {
@@ -312,9 +333,11 @@ export class PlaceOrderUseCase {
           lines: allocationLines,
           correlationId,
         });
-        // The allocation committed inventory-side. From here only the place tx's
-        // own commit can still fail; if it does, the orphaned allocation is
-        // compensated below.
+        // The allocation committed inventory-side. From here **inside this callback** only the
+        // commit can still fail, and the `catch` below compensates that. The authorize, which runs
+        // after this transaction returns, can also fail — and `compensateDeclinedAuthorization`
+        // handles that one (ISSUE-06). **Two failure windows, two compensations; they are not the
+        // same one, and the `catch` below cannot reach the second.**
         allocated = true;
         allocatedOrderId = orderId;
         return persisted;
@@ -353,13 +376,27 @@ export class PlaceOrderUseCase {
     // 4. Authorize payment inline (the out-of-process gateway call runs outside the
     //    DB transaction; the Payment + paymentStatus advance commit in a short
     //    follow-up transaction inside the authorize use case).
-    const payment = await this.authorizePayment.execute({
-      orderId,
-      amountMinor: saved.grandTotalMinor,
-      currency: saved.currency,
-      method: payload.paymentMethod,
-      correlationId,
-    });
+    //
+    // **The commit above is the durable claim; this is the fallible call that follows it, and THIS
+    // is its designed failure path** (ADR-052). A decline used to escape uncaught: the order, the
+    // cart conversion and the allocation were all committed, and nothing unwound any of them. The
+    // `catch` around the transaction cannot fire — the commit *succeeded*. The result was an order
+    // that read `pending` / `none` (indistinguishable from a healthy one), could never ship (Ship
+    // refuses an order with no `Payment`), was cancelled by nothing (no timer reconciles orders), and
+    // held its stock allocated **forever**. And the customer's retry was handed it **as a success**.
+    let payment: Payment;
+    try {
+      payment = await this.authorizePayment.execute({
+        orderId,
+        amountMinor: saved.grandTotalMinor,
+        currency: saved.currency,
+        method: payload.paymentMethod,
+        correlationId,
+      });
+    } catch (err) {
+      await this.compensateDeclinedAuthorization(orderId, allocationLines, correlationId);
+      throw err;
+    }
 
     // Re-read the order so the view carries the attached addresses + the advanced
     // `paymentStatus`.
@@ -378,7 +415,86 @@ export class PlaceOrderUseCase {
     return toOrderView(finalOrder, payment);
   }
 
+  // Unwinds a place whose authorization was declined (ISSUE-06 / ADR-052).
+  //
+  // The order, the cart conversion and the allocation are already committed — that is the shape of
+  // the seam, and it is not going to change: authorizing *inside* the place transaction would hold a
+  // DB transaction open across a payment processor for the length of a round-trip. (The transaction
+  // *is* held across the **inventory** allocate RPC, and that is earned and stated: in-cluster,
+  // disjoint tables, bounded. A payment gateway is none of those three.)
+  //
+  // So the commit stands, and this makes it **honest** instead of leaving it silently broken:
+  //
+  // - **The stock goes back.** `cancelAllocation` is the same inventory RPC the pre-commit
+  //   compensation uses. Without it this fix would have renamed the bug, not closed it.
+  // - **The order is marked dead, on BOTH axes.** `markPaymentFailed()` (payment axis: *why*) and
+  //   `cancel()` (lifecycle axis: *that*). Two orthogonal axes, no new enum member, no migration —
+  //   `OrderPaymentStatusEnum.FAILED` has been in the contract and in the column all along, with
+  //   nothing producing it.
+  // - **No event is emitted.** `retail.order.placed` never fired either — `emitEvents` runs after the
+  //   authorize — so no consumer has ever heard of this order, and announcing its cancellation would
+  //   be announcing the death of something nobody was told was born. It would also drive
+  //   `OrderCancelledConsumer` into an auto-refund of a payment that does not exist.
+  //
+  // **The cart stays `converted`, and that is deliberate.** The `UPDATE cart SET status='converted' …
+  // WHERE status='active'` **is** the compare-and-swap that serialises two concurrent places;
+  // un-converting it re-opens the double-place race. The customer starts a new cart. Worse UX, and
+  // honest — which is the trade.
+  //
+  // **Best-effort, and it rethrows the original decline regardless.** A failure to compensate is
+  // logged loudly and does not mask the decline the caller actually needs to hear about.
+  private async compensateDeclinedAuthorization(
+    orderId: number,
+    allocationLines: { variantId: number; quantity: number }[],
+    correlationId: string,
+  ): Promise<void> {
+    try {
+      await this.inventory.cancelAllocation({
+        orderId,
+        lines: allocationLines,
+        // The ledger records WHY the hold was unwound: not an operator cancelling an order, but a
+        // place that never got off the ground.
+        reason: 'authorization-declined',
+        correlationId,
+      });
+    } catch (cancelErr) {
+      this.logger.error(
+        { err: cancelErr as Error, correlationId, orderId },
+        'Failed to release the allocation of a declined order — stock is held for an order that can never ship',
+      );
+    }
+
+    try {
+      await this.transactionPort.runInTransaction(async (scope) => {
+        const fresh = await this.orderRepository.findById(orderId, scope);
+        if (!fresh) {
+          throw new Error(`Order ${orderId} vanished while compensating a declined authorization`);
+        }
+        const versionAtLoad = fresh.version;
+        fresh.markPaymentFailed();
+        fresh.cancel();
+        await this.orderRepository.save(fresh, scope, versionAtLoad);
+      });
+    } catch (markErr) {
+      this.logger.error(
+        { err: markErr as Error, correlationId, orderId },
+        'Failed to mark a declined order payment-failed — it will read as a live pending order',
+      );
+    }
+  }
+
   // The repeat-place path: a converted cart resolves to the order it converted into.
+  //
+  // **A converted cart does NOT mean a paid order**, and this is where that used to become a lie. The
+  // CAS that sets `converted` runs *inside* the place transaction; the authorization runs *after* it
+  // commits. So a cart can be converted against an order whose card was declined — and this branch
+  // used to hand that order back as a **successful `OrderView` with `payment: undefined`, 200/201**.
+  // **The customer whose card was declined was told, on retry, that their order went through.**
+  //
+  // Now it refuses. An order with no `Payment` row is an order whose authorize never succeeded (the
+  // authorize commits the row in its own short transaction, so the row exists iff it approved), and
+  // there is nothing to hand back. The cart is spent — the CAS cannot be reversed without re-opening
+  // the double-place race — so the honest answer is a 409 and a new cart.
   private async resolveExistingOrder(cartId: string, correlationId: string): Promise<OrderView> {
     const existing = await this.orderRepository.findBySourceCartId(cartId);
     if (!existing) {
@@ -387,6 +503,21 @@ export class PlaceOrderUseCase {
       throw new Error(`Cart ${cartId} is converted but has no order`);
     }
     const payment = await this.paymentRepository.findByOrderId(existing.id!);
+    if (!payment) {
+      // No payment row ⇒ the authorize never approved. Either it was declined (and the compensation
+      // has already cancelled the order and released the stock), or the process died between the
+      // place commit and the authorize — in which case the order is still `pending` / `none` and its
+      // stock is still held. **Both are refusals, and neither is a success.**
+      this.logger.warn(
+        { correlationId, cartId, orderId: existing.id, orderStatus: existing.status },
+        'Repeat place on a cart whose order was never paid for — refusing rather than reporting success',
+      );
+      throw new OrderDomainException(
+        OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED,
+        `Cart ${cartId} was placed as order ${existing.orderNumber}, but its payment was not approved. ` +
+          'The cart cannot be reused; start a new one.',
+      );
+    }
     this.logger.info(
       { correlationId, cartId, orderId: existing.id, orderNumber: existing.orderNumber },
       'Repeat place — returning the existing order (cart already converted)',

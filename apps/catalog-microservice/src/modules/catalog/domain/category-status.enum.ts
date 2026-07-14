@@ -1,8 +1,8 @@
 // Lifecycle states for a catalog Category.
 //
 // Soft-delete is modelled as the terminal `ARCHIVED` state — there is no
-// `deletedAt` timestamp on the aggregate (the inherited persistence column is
-// left inert; see the persistence work and ADR-025). An archived category stays
+// `deletedAt` timestamp on the aggregate, and `BaseEntity`'s inherited `deleted_at` column stays
+// inert (`CategoryEntity` says so; nothing in catalog ever soft-deletes). An archived category stays
 // resolvable forever because a product membership or a historical reference may
 // still point at its id, so an archived category must never become unreachable.
 //

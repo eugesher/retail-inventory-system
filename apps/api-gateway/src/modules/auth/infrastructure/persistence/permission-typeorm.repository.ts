@@ -14,11 +14,6 @@ export class PermissionTypeormRepository implements IPermissionRepositoryPort {
     private readonly repository: Repository<PermissionEntity>,
   ) {}
 
-  public async findAll(): Promise<PermissionAggregate[]> {
-    const entities = await this.repository.find();
-    return entities.map((e) => PermissionMapper.toDomain(e));
-  }
-
   public async findByCodes(codes: string[]): Promise<PermissionAggregate[]> {
     if (codes.length === 0) return [];
     const entities = await this.repository.find({ where: { code: In(codes) } });

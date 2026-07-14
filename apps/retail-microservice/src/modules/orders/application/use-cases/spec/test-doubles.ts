@@ -390,14 +390,6 @@ export class FakeAddressRepository implements IAddressRepositoryPort {
     this.byId.set(address.id!, address);
     return Promise.resolve(address);
   }
-
-  public findById(id: string): Promise<Address | null> {
-    return Promise.resolve(this.byId.get(id) ?? null);
-  }
-
-  public findByOwner(): Promise<Address[]> {
-    return Promise.resolve([...this.byId.values()]);
-  }
 }
 
 // In-memory payment store that assigns BIGINT ids and resolves the single payment
@@ -438,6 +430,29 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
     return Promise.resolve(latest);
   }
 
+  // The locked read (ADR-052). **An in-memory double cannot simulate a row lock, and must not
+  // pretend to.** What it can do — and what the use-case specs actually need — is return the CURRENT
+  // stored state, which is what `FOR UPDATE` guarantees and a snapshot read does not. The mutual
+  // exclusion itself is only provable against a real database, and it is:
+  // `test/concurrent-capture-double-charge.e2e-spec.ts` counts the gateway calls.
+  public findByOrderIdForUpdate(orderId: number): Promise<Payment | null> {
+    return this.findByOrderId(orderId);
+  }
+
+  // The stranded-claim query (ADR-052). `updatedAt` is null on an in-memory `Payment` that was never
+  // round-tripped through the mapper, so a row with no stamp is treated as **not yet stale** — the
+  // conservative direction: this report's whole point is that a false positive sends an operator to
+  // reconcile a payment that is merely young.
+  public listStaleCaptureClaims(olderThan: Date): Promise<Payment[]> {
+    const stale = [...this.byId.values()].filter(
+      (payment) =>
+        payment.status === PaymentStatusEnum.CAPTURING &&
+        payment.updatedAt !== null &&
+        payment.updatedAt < olderThan,
+    );
+    return Promise.resolve(stale);
+  }
+
   private rebuild(payment: Payment, id: number): Payment {
     return Payment.reconstitute({
       id,
@@ -455,6 +470,10 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
       // re-read view (the real `PaymentMapper` round-trips both directions).
       flaggedForRefund: payment.flaggedForRefund,
       refundedAmountMinor: payment.refundedAmountMinor,
+      // The real `PaymentMapper` round-trips `updated_at`, and the stranded-capture-claim report
+      // measures its horizon from it (ADR-052). Dropping it here made every saved payment look
+      // brand-new, which would have silently disarmed that report's specs.
+      updatedAt: payment.updatedAt,
     });
   }
 }
@@ -591,11 +610,6 @@ export class FakeRefundRepository implements IRefundRepositoryPort {
     const stored = this.rebuild(refund, id);
     this.byId.set(id, stored);
     return Promise.resolve(this.rebuild(stored, id));
-  }
-
-  public findById(id: number): Promise<Refund | null> {
-    const refund = this.byId.get(id);
-    return Promise.resolve(refund ? this.rebuild(refund, id) : null);
   }
 
   public findByOrderId(orderId: number): Promise<Refund[]> {

@@ -68,7 +68,7 @@ export interface IRenderAndDispatchInput {
 // (recording the reason) on a thrown NOTIFIER.
 //
 // The ordering is the point (ADR-033): the queued row is written first so a crash
-// mid-send still leaves an auditable record the retry sweeper (a later capability) can
+// mid-send still leaves an auditable record the retry sweeper (`DeliveryRetryScheduler`) can
 // pick up — the inverse order (send then record) loses the delivery silently on a crash
 // after the send. A NOTIFIER failure is therefore **recorded, not rethrown** — the row
 // captures the failure and the sweeper re-attempts; rethrowing would lose the audit row's

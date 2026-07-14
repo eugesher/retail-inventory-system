@@ -29,8 +29,15 @@ import {
   STOCK_REPOSITORY,
   TRANSACTION_PORT,
 } from '../ports';
+import { LedgerReplayError } from './ledger-replay.error';
 import { emitMovementRecorded } from './movement-recorded.emitter';
-import { INormalizedReservationLine, levelKey, loadDistinctLevels } from './reservation-mutation';
+import { isDuplicateEntryError } from './mysql-error.util';
+import {
+  INormalizedReservationLine,
+  levelKey,
+  loadDistinctLevels,
+  requireDistinctLevels,
+} from './reservation-mutation';
 import { runWithStockWriteRetry } from './stock-mutation';
 
 // The ledger-reference family the restock idempotency probe + the `return`
@@ -95,22 +102,21 @@ function normalizeRestockLines(
   });
 }
 
-// Restock from Return physically returns a return request's `restock`-disposition
-// stock to sellable inventory at inspection time (ADR-032). Per line it puts units
-// back IN to `quantity_on_hand` (one positive `StockLevel.changeOnHand(+quantity)`
-// — reserved/allocated untouched, so `available` rises by the same amount) and
-// appends one strictly-positive `return` `StockMovement` referencing the return
-// request. This is the long-reserved `return` ledger type's FIRST producer (ADR-030
-// §2 shipped the enum; the mirror of ADR-031's `sale` from Commit Sale).
+// The mirror of Commit Sale (ADR-032). Per line it puts units back into `quantity_on_hand` and
+// appends a strictly-positive `return` movement. Reserved and allocated are untouched, so
+// `available` rises by the full amount — a returned unit is immediately sellable again.
 //
-// **Idempotent on `returnRequestId`**: a `return` movement already referencing this
-// return request means the restock already happened, so a re-delivery (the
-// cross-service retry path — retail drives this AFTER its local inspect commits, so
-// a transient RMQ failure can re-deliver) increments nothing and re-returns the
-// prior result. The probe runs BEFORE any write, against the ledger's
-// `(reference_type, reference_id)` index. One Inspect → one restock RPC per return,
-// so per-request idempotency is the right grain (the Commit Sale `fulfillmentId`
-// precedent).
+// **Only `restock`-disposition lines reach here.** Goods scrapped or quarantined at inspection came
+// back to the warehouse but never to the shelf, and inventory never hears about them at all.
+//
+// **Idempotent on `returnRequestId`, including against CONCURRENT redeliveries**: retail drives this
+// **after** its own inspect transaction has committed, so a transient RMQ failure re-delivers a
+// request whose work is already durable — and the broker never promises the redelivery waits for the
+// original. Two mechanisms, in that order: the `existsByReference` probe short-circuits the
+// sequential replay, and `UC_STOCK_MOVEMENT_DEDUPE` — a UNIQUE on the ledger — holds when two
+// deliveries are in flight at once. **The probe is an optimisation; the constraint is the
+// guarantee.** One Inspect → one restock RPC per return, so per-request idempotency is the right
+// grain (the Commit Sale `fulfillmentId` precedent).
 //
 // **All-lines-atomic**: every line is computed in memory before ANY persist, then
 // every distinct level is persisted once and every movement appended, all inside
@@ -147,12 +153,21 @@ export class RestockFromReturnUseCase {
     );
 
     const lines = normalizeRestockLines(payload.lines, 'Restock from return');
+    // Two lines on one level would collide on `UC_STOCK_MOVEMENT_DEDUPE` and the catch
+    // below would misread the collision as a replay — see `requireDistinctLevels`.
+    requireDistinctLevels(lines, 'Restock from return');
     const referenceId = String(returnRequestId);
 
-    // Idempotency-first (ADR-032): if a `return` movement already references this
-    // return request the restock already happened — re-return the request's lines
-    // WITHOUT incrementing again. Skipping the whole `withInvalidation` is correct:
-    // nothing changed, so there is nothing to invalidate.
+    // The FAST PATH, not the guard (ADR-032). A `return` movement already referencing
+    // this return request means the restock happened — re-return the request's lines
+    // WITHOUT incrementing again, skipping `withInvalidation` entirely because nothing
+    // changed.
+    //
+    // **It runs outside the write transaction, so it cannot serialise two CONCURRENT
+    // deliveries** — both would read "not yet restocked" and both would credit the
+    // stock. What makes this idempotent is `UC_STOCK_MOVEMENT_DEDUPE` (migration
+    // `1783872387242`), caught below. The probe survives as the cheap short-circuit for
+    // the sequential replay, which is the common case.
     const alreadyRestocked = await this.movementRepository.existsByReference(
       RETURN_REQUEST_REFERENCE_TYPE,
       referenceId,
@@ -165,26 +180,47 @@ export class RestockFromReturnUseCase {
       return { restocked: lines.map((line) => this.toEntry(line)) };
     }
 
-    const outcome = await this.stockCache.withInvalidation(
-      () =>
-        runWithStockWriteRetry(
-          {
-            transactionPort: this.transactionPort,
-            logger: this.logger,
-            maxAttempts: this.maxAttempts,
-          },
-          (scope) => this.restockOnce(scope, returnRequestId, lines, actorId),
-          { correlationId },
-        ),
-      // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
-      // covering every location facet, so the raw per-line items are enough.
-      (result) =>
-        result.lines.map((row) => ({
-          variantId: row.variantId,
-          stockLocationId: row.stockLocationId,
-        })),
-      { correlationId },
-    );
+    let outcome: IRestockOutcome;
+    try {
+      outcome = await this.stockCache.withInvalidation(
+        () =>
+          runWithStockWriteRetry(
+            {
+              transactionPort: this.transactionPort,
+              logger: this.logger,
+              maxAttempts: this.maxAttempts,
+            },
+            (scope) => this.restockOnce(scope, returnRequestId, lines, actorId),
+            { correlationId },
+          ),
+        // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
+        // covering every location facet, so the raw per-line items are enough.
+        (result) =>
+          result.lines.map((row) => ({
+            variantId: row.variantId,
+            stockLocationId: row.stockLocationId,
+          })),
+        { correlationId },
+      );
+    } catch (error) {
+      // THE GUARD — the inverted twin of Commit Sale's, in the same two forms: we either
+      // SAW the winner's `return` row under our own snapshot (`LedgerReplayError`) or
+      // broke `UC_STOCK_MOVEMENT_DEDUPE` on the INSERT. Either way the transaction rolled
+      // back and this attempt incremented nothing.
+      //
+      // The stakes are the mirror image of Commit Sale's: an uncaught double-credit
+      // invents stock that never came back, and phantom inventory OVERSELLS. It also
+      // must not rethrow — an exception out of an `@MessagePattern` is blind-redelivered
+      // by the broker in a hot loop.
+      if (error instanceof LedgerReplayError || isDuplicateEntryError(error)) {
+        this.logger.info(
+          { correlationId, returnRequestId },
+          'Restock lost a concurrent race — the ledger already holds this return request, nothing incremented',
+        );
+        return { restocked: lines.map((line) => this.toEntry(line)) };
+      }
+      throw error;
+    }
 
     this.logger.info(
       { correlationId, returnRequestId, restockedCount: outcome.lines.length },
@@ -209,6 +245,24 @@ export class RestockFromReturnUseCase {
     lines: INormalizedRestockLine[],
     actorId: string | null,
   ): Promise<IRestockOutcome> {
+    // Phase 0 — re-probe UNDER THE SCOPE (the Commit Sale protocol; see
+    // `LedgerReplayError`). Restock has no counter that would trip on a winner's commit
+    // the way `StockLevel.commitSale`'s drift check does — `changeOnHand(+q)` never
+    // rejects — so a loser reaching phase 3 would be caught by `UC_STOCK_MOVEMENT_DEDUPE`
+    // anyway. This probe still earns its place: it unwinds the loser BEFORE it performs a
+    // level write that is only going to roll back, and it keeps the two ledger-deduped
+    // use cases telling one story rather than two.
+    const referenceIdProbe = String(returnRequestId);
+    if (
+      await this.movementRepository.existsByReference(
+        RETURN_REQUEST_REFERENCE_TYPE,
+        referenceIdProbe,
+        scope,
+      )
+    ) {
+      throw new LedgerReplayError(RETURN_REQUEST_REFERENCE_TYPE, referenceIdProbe);
+    }
+
     // Phase 1 — load each distinct level once (lazy-init a missing one: a returned
     // variant may have no level at the receiving location, e.g. a fresh location —
     // the Receive precedent), capturing its optimistic token before any mutation.

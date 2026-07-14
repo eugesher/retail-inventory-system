@@ -1,42 +1,35 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format command payloads for the six cart RPCs (API Gateway → Retail). Each
-// extends `ICorrelationPayload` so the correlation id threads through to the
-// retail handler's inline logging (ADR-001 / ADR-011). They are the single source
-// of truth for both ends: the gateway `CartRabbitmqAdapter` sends them and the
-// retail cart use cases consume them as their `execute(payload)` input, so a drift
-// fails TypeScript on both sides (the contract test).
+// Wire-format command payloads for the six cart RPCs (ADR-028). One type, both ends: a drift fails
+// TypeScript on the gateway *and* in retail. That is the contract test.
 //
-// `customerId` is the resolved caller (the gateway folds `@CurrentUser().id` in).
-// Carrying it on the read/write commands lets each retail use case re-assert
-// `cart.customerId === payload.customerId` as defense-in-depth, in addition to
-// the gateway's owner-check (ADR-028 §7) — the retail service never blindly
-// trusts the edge.
+// **`customerId` rides on every command, including the reads, on purpose.** The gateway has
+// already owner-checked; carrying the caller through lets each retail use case re-assert
+// `cart.customerId === payload.customerId` itself. Retail does not trust the edge — remove this
+// field and the only thing standing between a cart and a stranger is one guard in another
+// deployable.
 //
-// `expectedVersion` (the three line-mutating payloads) is the optional
-// optimistic-concurrency precondition (ADR-036): the gateway parses the
-// `If-Match: <version>` header and threads the version here. When present the
-// retail use case rejects a write whose loaded cart version differs with a
-// `409 VERSION_MISMATCH` (carrying `details.currentVersion`) and does **not**
-// retry — the client's view is stale. When absent, a lost race is retried up to
-// the `OCC_RETRY_ATTEMPTS` budget before surfacing the same `409`.
+// **`expectedVersion` decides whether a lost race is retried or refused.** The gateway parses
+// `If-Match: <version>` and threads it here. **Present:** a write whose loaded cart has moved on
+// is rejected with `409 VERSION_MISMATCH` (carrying `details.currentVersion`) and is **not**
+// retried — the client pinned a version, so silently resolving to a different one would answer a
+// question it did not ask. **Absent:** the lost race is retried up to `OCC_RETRY_ATTEMPTS` before
+// surfacing the same `409` (ADR-036/045).
 
-// `retail.cart.create` — opens a new active cart for the caller. `currency` is
-// optional; the use case defaults it to `'USD'`.
+// An omitted `currency` becomes `USD`.
 export interface IRetailCartCreatePayload extends ICorrelationPayload {
   customerId: string;
   currency?: string;
 }
 
-// `retail.cart.get` — reads a cart by id (owner-checked).
 export interface IRetailCartGetPayload extends ICorrelationPayload {
   cartId: string;
   customerId: string;
 }
 
-// `retail.cart.add-line` — adds (or increments) a line for `variantId`. The price
-// is snapshotted server-side via `catalog.price.select` — the caller never sends
-// a price.
+// **The caller never sends a price.** Add-line snapshots it server-side through
+// `catalog.price.select`, so there is no field here to tamper with — and adding a variant already
+// in the cart increments the existing line rather than opening a second one (ADR-028 §1).
 export interface IRetailCartAddLinePayload extends ICorrelationPayload {
   cartId: string;
   customerId: string;
@@ -45,8 +38,8 @@ export interface IRetailCartAddLinePayload extends ICorrelationPayload {
   expectedVersion?: number;
 }
 
-// `retail.cart.change-line-quantity` — sets a line's quantity to a new positive
-// value (a `0` is rejected — removal is the explicit op).
+// `quantity` must be positive: a `0` is rejected rather than treated as a removal, which is its
+// own operation.
 export interface IRetailCartChangeLineQuantityPayload extends ICorrelationPayload {
   cartId: string;
   customerId: string;
@@ -55,7 +48,6 @@ export interface IRetailCartChangeLineQuantityPayload extends ICorrelationPayloa
   expectedVersion?: number;
 }
 
-// `retail.cart.remove-line` — drops a line from the cart.
 export interface IRetailCartRemoveLinePayload extends ICorrelationPayload {
   cartId: string;
   customerId: string;
@@ -63,10 +55,10 @@ export interface IRetailCartRemoveLinePayload extends ICorrelationPayload {
   expectedVersion?: number;
 }
 
-// `retail.cart.claim` — promotes a guest cart to a registered customer. The
-// re-point happens only if `cart.customerId === fromCustomerId` (knowing the
-// guest id is the ownership proof); `newCustomerId` is the registered customer
-// the gateway resolved from the bearer token (ADR-028 §1, Q1/Q7).
+// Promotes a guest cart to a registered customer. **Knowing the guest id IS the ownership proof** —
+// the re-point happens only when `cart.customerId === fromCustomerId`, and a guest is a real,
+// authenticatable row rather than a null owner (ADR-028 §1). `newCustomerId` is whoever the bearer
+// token resolved to.
 export interface IRetailCartClaimPayload extends ICorrelationPayload {
   cartId: string;
   fromCustomerId: string;

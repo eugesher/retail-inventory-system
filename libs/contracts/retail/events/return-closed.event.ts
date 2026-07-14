@@ -1,15 +1,14 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.return.closed` event, published after a return
-// request walks `inspected → closed` (staff `order:return-authorize` settles the RMA).
-// Closure is terminal, so it stamps the RMA's `closedAt`. Framework-free (ADR-011) — the
-// Close use case maps the saved aggregate onto this interface before emitting. The
-// past-tense counterpart of the imperative `retail.return.close` command (ADR-008).
-// Emitted onto `retail_queue` (the producer's own queue — a reserved surface today, no
-// consumer), the internal-status half of the eventing split (the later refund capability
-// is the natural consumer, since a closed RMA with money owed triggers a refund).
-// `closedAt` is the closure timestamp. `eventVersion` is pinned to `'v1'`; `occurredAt`
-// and `closedAt` are ISO-8601 strings.
+// `retail.return.closed` — a **reserved surface** (README §2). Not dead code.
+//
+// Closure is terminal and stamps `closedAt`. **Closing an RMA does not refund it**: refunds are
+// issued through `retail.refund.issue` against a captured payment, and nothing consumes this
+// event to trigger one. A closed RMA with money owed still needs the refund raised explicitly.
+//
+// This is the internal-status half of the returns eventing split — the buyer-facing
+// `requested` / `authorized` / `received` / `inspected` events go to `notification_events`.
+// `occurredAt` and `closedAt` are ISO-8601.
 export interface IRetailReturnClosedEvent extends ICorrelationPayload {
   rmaId: number;
   rmaNumber: string;

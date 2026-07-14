@@ -1,7 +1,7 @@
 import { StockMovementTypeEnum } from '@retail-inventory-system/contracts';
 
 import { StockMovement } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const STOCK_MOVEMENT_REPOSITORY = Symbol('STOCK_MOVEMENT_REPOSITORY');
 
@@ -28,24 +28,33 @@ export interface IStockMovementListQuery {
 // port's type surface, not merely by convention — an UPDATE or DELETE is not
 // expressible against this seam. Domain types only — no `typeorm` leak (ADR-017).
 export interface IStockMovementRepositoryPort {
-  // INSERT a new movement and re-read it so the DB-assigned BIGINT `id` (and the
-  // stored `occurred_at`) come back concrete. Scope-aware so a movement is written
-  // in the SAME unit of work as the `StockLevel` counter change that caused it
-  // (Release / Allocate / Cancel-Allocation today; Receive / Adjust / Transfer in
-  // later capabilities): a rolled-back counter change leaves no orphan movement row.
+  // INSERT and re-read, so the DB-assigned `id` and stored `occurred_at` come back concrete.
+  //
+  // **`scope` is what keeps the ledger honest.** Every write path passes one, so the movement lands
+  // in the SAME unit of work as the counter change that caused it — a rolled-back change can leave
+  // no orphan row explaining a change that never happened.
   append(movement: StockMovement, scope?: ITransactionScope): Promise<StockMovement>;
-  // Newest-first (`occurred_at DESC, id DESC`) page of one variant's movements,
-  // optionally narrowed by type and an inclusive `occurred_at` window. Backs the
-  // audit read RPC + HTTP endpoint (a later capability); the method ships now so
-  // the seam is complete.
+
+  // Newest-first page of one variant's movements, optionally narrowed by type and an inclusive
+  // `occurred_at` window.
   listByVariant(query: IStockMovementListQuery): Promise<IStockMovementPage>;
-  // Reference-based existence probe — the idempotency lookup for the Commit Sale
-  // RPC (ADR-031): a `sale` movement already referencing a fulfillment means the
-  // commit already happened, so a re-delivery must NOT decrement again. Backed by a
-  // `SELECT 1 … WHERE reference_type = ? AND reference_id = ? LIMIT 1` against the
-  // existing `IDX_STOCK_MOVEMENT_REFERENCE (reference_type, reference_id)` index. It
-  // is a READ — the append-only invariant (no save/update/delete) is preserved.
-  // Scope-aware so the probe can join the same unit of work as the write when needed.
+  // Reference-based existence probe — the FAST PATH of the Commit Sale (ADR-031) and
+  // Restock From Return (ADR-032) idempotency, and **not** its guarantee. A `sale` /
+  // `return` movement already referencing the document means the work happened, so a
+  // sequential re-delivery short-circuits here without opening a transaction.
+  //
+  // **A probe cannot make either operation idempotent, whatever `scope` it is given.**
+  // It is a check-then-act: two concurrent deliveries both read "absent" and both fall
+  // through, and passing the write's `scope` does not close that — under REPEATABLE READ
+  // both transactions still read a snapshot in which the other's row does not exist. The
+  // guarantee is `UC_STOCK_MOVEMENT_DEDUPE`, the ledger UNIQUE that the losing writer's
+  // INSERT breaks (migration `1783872387242`); each use case catches that duplicate-key
+  // error and returns the same no-op. Do not "strengthen" this probe — strengthen
+  // nothing, it is already only an optimisation.
+  //
+  // Backed by a `SELECT 1 … WHERE reference_type = ? AND reference_id = ? LIMIT 1`
+  // against `IDX_STOCK_MOVEMENT_REFERENCE (reference_type, reference_id)`. It is a READ —
+  // the append-only invariant (no save/update/delete) is preserved.
   existsByReference(
     referenceType: string,
     referenceId: string,

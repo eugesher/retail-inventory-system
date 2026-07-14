@@ -1,16 +1,14 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// Wire-format shape for the `retail.refund.failed` event, published by the retail
-// microservice when the payment gateway **declines** a refund (the `Refund` walks
-// `pending → failed`, terminal; the `Payment` is left unchanged). Framework-free
-// (ADR-011). Unreachable with the always-succeed fake gateway, but modeled so a real
-// processor's decline has a home (the `ORDER_PAYMENT_NOT_APPROVED` precedent).
+// `retail.refund.failed` — a **reserved surface** (README §2). Not dead code.
 //
-// Emitted onto `retail_queue` (the producer's own queue — a reserved surface today, no
-// consumer), distinct from the buyer-facing `retail.refund.issued` on `notification_events`.
-// Same identity + amount fields as the issued event plus a `failureReason` carrying the
-// gateway's decline detail. `eventVersion` is pinned to `'v1'`; `occurredAt` is an
-// ISO-8601 string.
+// **It is also unreachable.** The bound payment gateway is a fake that always succeeds, so no code
+// path emits it; it is modelled so that a real processor's decline has somewhere to land. Do not
+// write a test that expects to observe it, and do not conclude from its silence that refunds
+// cannot fail.
+//
+// On a decline the `Refund` walks `pending → failed` (terminal) and the `Payment` is left
+// untouched. `failureReason` carries the gateway's detail. `occurredAt` is ISO-8601.
 export interface IRetailRefundFailedEvent extends ICorrelationPayload {
   refundId: number;
   orderId: number;

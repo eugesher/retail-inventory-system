@@ -1,5 +1,5 @@
 import { Reservation } from '../../domain';
-import { ITransactionScope } from './transaction.port';
+import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const RESERVATION_REPOSITORY = Symbol('RESERVATION_REPOSITORY');
 
@@ -36,9 +36,12 @@ export interface IReservationRepositoryPort {
   // hold released or refreshed between the scan and the write is observed there, not
   // here.
   listExpiredActive(now: Date, limit: number, scope?: ITransactionScope): Promise<Reservation[]>;
-  // Insert-or-update by id; re-reads the saved row so the committed `version` and
-  // the DB timestamps come back concrete. A lost INSERT race on the UNIQUE triple
-  // is translated to `StockWriteConflictError` so the shared bounded-retry write
-  // protocol (a later capability) re-reads and converges.
+  // Insert-or-update by id, re-reading so the committed `version` and DB timestamps come back
+  // concrete.
+  //
+  // **A lost INSERT race on the UNIQUE triple is translated into `StockWriteConflictError`** — the
+  // same error a lost compare-and-swap raises — so `runWithStockWriteRetry` cannot tell them apart
+  // and re-reads and converges either way. Two shoppers racing to hold the last unit of the same
+  // variant is a *normal* outcome, not a driver error.
   save(reservation: Reservation, scope?: ITransactionScope): Promise<Reservation>;
 }

@@ -273,6 +273,14 @@ describe('ROUTING_KEYS', () => {
     expect(ROUTING_KEYS.NOTIFICATION_HEALTH_PING).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATION_HEALTH_PING,
     );
+    expect(ROUTING_KEYS.CATALOG_HEALTH_PING).toBe(
+      MicroserviceMessagePatternEnum.CATALOG_HEALTH_PING,
+    );
+    expect(ROUTING_KEYS.INVENTORY_HEALTH_PING).toBe(
+      MicroserviceMessagePatternEnum.INVENTORY_HEALTH_PING,
+    );
+    expect(ROUTING_KEYS.RETAIL_HEALTH_PING).toBe(MicroserviceMessagePatternEnum.RETAIL_HEALTH_PING);
+    expect(ROUTING_KEYS.AUDIT_HEALTH_PING).toBe(MicroserviceMessagePatternEnum.AUDIT_HEALTH_PING);
     expect(ROUTING_KEYS.NOTIFICATION_TEMPLATE_AUTHOR).toBe(
       MicroserviceMessagePatternEnum.NOTIFICATION_TEMPLATE_AUTHOR,
     );

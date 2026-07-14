@@ -1,12 +1,11 @@
 import { ICorrelationPayload } from '../../microservices';
 
-// A single address bundle supplied on the Place Order request body — the buyer's
-// billing or shipping address. At place-time each becomes an immutable
-// `ownerType=order` `Address` snapshot copied onto the order (ADR-028 §5), never a
-// reference into a (future) customer address book. `line2` / `phone` are optional;
-// `country` is a 2-letter ISO code (the gateway DTO validates length, the domain
-// upper-cases + re-validates). The same shape is the source of truth for the
-// gateway request DTO's nested object and the retail use case's snapshot input.
+// At place-time each bundle becomes an **immutable `ownerType=order` `Address` snapshot** copied
+// onto the order (ADR-028 §5). It is not a reference — there is no customer address book in this
+// system, and editing a customer's details later cannot rewrite where a past order shipped.
+//
+// `country` is a 2-letter ISO code, validated for length at the gateway and upper-cased and
+// re-validated in the domain: the wire type says `string` and means less than that.
 export interface IAddressInput {
   recipientName: string;
   line1: string;
@@ -18,24 +17,21 @@ export interface IAddressInput {
   phone?: string;
 }
 
-// Wire-format command payload for `retail.cart.place` (API Gateway → Retail).
-// Extends `ICorrelationPayload` so the correlation id threads through to the
-// retail handler's inline logging (ADR-001 / ADR-011). The single source of truth
-// for both ends: the gateway adapter sends it and the retail `PlaceOrderUseCase`
-// consumes it.
+// `retail.cart.place` — the one-shot that turns a mutable cart into an immutable order.
 //
-// `customerId` is the resolved caller (the gateway folds `@CurrentUser().id` in);
-// the retail use case re-asserts `cart.customerId === customerId` as the
-// owner-check (ADR-028 §7). `shippingAddress` / `billingAddress` are the snapshot
-// bundles. `paymentMethod` is an optional opaque method token forwarded to the
-// `PAYMENT_GATEWAY` (the fake ignores it beyond echoing a default).
-// `idempotencyKey` is the client-supplied `Idempotency-Key` header, now **required
-// and deduplicated** (ADR-036): the retail `PlaceOrderUseCase` fingerprints the
-// canonical body and replays the stored `OrderView` on a same-key/same-body retry,
-// rejects a same-key/different-body reuse with `422`, and treats a missing key as a
-// `400` backstop (the gateway enforces the header at the edge). Cart state remains
-// the durable second layer — a re-place with a *new* key on an already-`converted`
-// cart still returns the order it converted into via `source_cart_id` (ADR-028 §6).
+// `customerId` is the resolved caller, and retail re-asserts `cart.customerId === customerId`
+// itself rather than trusting the gateway's owner-check (ADR-028 §7). `paymentMethod` is an opaque
+// token forwarded to the `PAYMENT_GATEWAY`; the bound fake ignores it beyond echoing a default.
+//
+// **`idempotencyKey` is optional in the type and required in fact** (ADR-036): the use case
+// fingerprints the canonical body, replays the stored `OrderView` on a same-key/same-body retry,
+// `422`s a same-key/different-body reuse, and `400`s an absent key.
+//
+// **Cart state is the durable second layer.** Even a re-place under a *brand-new* key, on a cart
+// already `converted`, returns the order it converted into — resolved through `source_cart_id`
+// (ADR-028 §6). The idempotency store can expire; the cart's status cannot. Double-placing is
+// therefore blocked by two independent mechanisms, and the slower one is the one that never
+// forgets.
 export interface IPlaceOrderPayload extends ICorrelationPayload {
   cartId: string;
   customerId: string;
