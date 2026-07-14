@@ -8,10 +8,11 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 //
 // Every PII column on the new `customer` table is nullable so the row can
 // later be tombstoned in place (Q6) while preserving the customer id;
-// `password_hash` is nullable so future guest / social rows (Q7) can exist
-// without breaking the schema. The `status` enum already includes `guest`
-// and `deleted` even though no flow produces those rows in this baseline — the
-// column shape must accept them on day one.
+// `password_hash` is nullable so passwordless rows can exist without breaking the schema. The
+// `status` enum already includes `guest` and `deleted` even though no flow produces those rows in
+// this baseline — the column shape must accept them on day one. (Both arrived: guest sessions mint
+// `guest`, an erasure tombstones to `deleted`. **Social login never did** — no provider is wired
+// anywhere, so a passwordless row is a guest, never a federated identity.)
 export class CreateCustomerTable1779906269812 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query('ALTER TABLE `order` DROP FOREIGN KEY FK_ORDER_CUSTOMER;');

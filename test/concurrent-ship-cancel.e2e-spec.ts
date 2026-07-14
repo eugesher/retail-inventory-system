@@ -25,10 +25,13 @@ import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto
 // case's transaction under a pessimistic write lock on the contended `fulfillment`
 // row: the two transitions serialise on that row, so the loser blocks until the
 // winner commits and then observes the committed status, which its precondition
-// rejects. This single-writer-per-status-transition guard is what the suite proves;
-// strict optimistic-concurrency on `order.version` (a per-aggregate compare-and-swap
-// across every order write) is a later capability and is not what serialises this
-// race today.
+// rejects. This single-writer-per-status-transition guard is what the suite proves.
+//
+// **Not the OCC.** Optimistic concurrency on `order.version` is live (`runWithOrderWriteRetry`
+// wraps every order write, ADR-036/045) — it is simply not what settles *this* race. A lost CAS
+// retries; a lost status transition must be rejected outright, and only the pessimistic row lock
+// can decide which of two transitions on one fulfillment gets to try. Do not read a green run
+// here as evidence that the OCC serialises ship-vs-cancel; it does not.
 //
 // Winner-AGNOSTIC: the suite never assumes WHICH side wins — it classifies each race
 // by outcome and asserts the corresponding consistent end-state. It asserts DB-backed

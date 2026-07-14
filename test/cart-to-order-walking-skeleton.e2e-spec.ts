@@ -279,9 +279,12 @@ describe('Cart → Order walking skeleton (e2e)', () => {
     });
 
     // Step 8 — re-placing the now-converted cart returns the SAME order + payment.
-    // Repeat-safety is cart-state-driven (the cart is `converted`), not header dedupe:
-    // a brand-new Idempotency-Key still resolves to the existing order. Key-based
-    // dedupe is a later capability.
+    //
+    // **This pins the cart-state guard, NOT the idempotency store.** Key-based dedupe is live
+    // (ADR-036), so the test deliberately sends a **brand-new** `Idempotency-Key`: that misses the
+    // store entirely, and the place still resolves to the existing order — because the cart is
+    // already `converted`. The two mechanisms are independent, and this assertion goes red only if
+    // the cart-state guard breaks. A reused key would prove the other one.
     it('is repeat-safe: re-placing the now-converted cart returns the same order + payment', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .post(`/api/cart/${cartId}/place`)

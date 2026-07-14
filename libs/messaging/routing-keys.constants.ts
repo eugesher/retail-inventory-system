@@ -142,13 +142,10 @@ export const ROUTING_KEYS = {
   NOTIFICATION_MARKETING_SEND: 'notification.marketing.send',
   // NOT a queue subject — the one entry in this map that is not a routing key. It is a
   // template-registry key: the `eventType` half of the `(eventType, channel, locale)` natural key
-  // a marketing template must be authored under. It lives in a shared lib so whoever authors that
-  // template uses the exact string the gateway defaults to.
-  //
-  // **No template is authored under it.** Nothing seeds one — not a migration, not
-  // `scripts/test-db-seed.ts` — so `POST /api/notifications/marketing/send` resolves no template
-  // and returns `null` on a fresh database. Deliberately absent from `TRANSACTIONAL_EVENT_TYPES`,
-  // so the consent gate treats it as marketing (ADR-037).
+  // the marketing template is authored under (`scripts/seeds/notification-template.sql`). It lives
+  // in a shared lib precisely so the seed and the gateway's default cannot disagree — they are the
+  // same constant. Deliberately absent from `TRANSACTIONAL_EVENT_TYPES`, so the consent gate
+  // treats a send of it as marketing (ADR-037).
   MARKETING_EMAIL_PROMO: 'marketing.email.promo',
   CUSTOMER_CONSENT_UPDATED: 'customer.consent.updated',
   CUSTOMER_ERASED: 'customer.erased',

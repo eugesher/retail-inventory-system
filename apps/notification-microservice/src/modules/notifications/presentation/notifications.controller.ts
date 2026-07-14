@@ -112,12 +112,11 @@ export class NotificationsController {
   // The staff-triggered marketing dispatch (ADR-037). It routes through the shared
   // Render & Dispatch pipeline, where the consent-gate decides send vs `skipped-no-consent`.
   // Resolves the resulting `NotificationDeliveryView`, or `null` when no active marketing
-  // template resolves.
+  // template resolves — a success that sent nothing, not an error.
   //
-  // **`null` is what a fresh database returns.** No marketing template is seeded — not by
-  // `scripts/test-db-seed.ts`, not by a migration — so until a staff member authors one and
-  // activates it, this RPC succeeds and sends nothing. That is a `null`, not an error, and it is
-  // easy to mistake for a broken pipeline.
+  // **A `null` here almost always means the seed did not run.** The marketing template ships in
+  // `scripts/seeds/notification-template.sql` (`yarn test:seed`), not in a migration, so
+  // `yarn migration:run` alone leaves the registry empty. See `SendMarketingUseCase`.
   @MessagePattern(ROUTING_KEYS.NOTIFICATION_MARKETING_SEND)
   public async sendMarketing(
     @Payload() payload: INotificationMarketingSendPayload,
