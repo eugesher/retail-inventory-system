@@ -47,21 +47,28 @@ endpoints documentation.
 
 ## 2. The merge algorithm
 
-`LoginUseCase` and `RefreshTokenUseCase` both compute the claim with the
-same one-liner:
+`LoginUseCase` and `RefreshTokenUseCase` both need the identical claim. The
+expression therefore lives **once, on the `StaffUser` aggregate**, as the
+`permissionCodes` getter
+(`apps/api-gateway/src/modules/auth/domain/staff-user.model.ts:96`); both use cases
+simply read it, so the two issue paths cannot drift apart:
 
 ```ts
-const permissions = Array.from(
-  new Set(user.roles.flatMap((role) => Array.from(role.permissions))),
-).sort();
+public get
+permissionCodes()
+:
+PermissionCodeEnum[]
+{
+    return Array.from(new Set(this._roles.flatMap((role) => Array.from(role.permissions)))).sort();
+}
 ```
 
 Three properties of this expression are load-bearing:
 
 - **Set-union dedupes.** Two roles sharing `catalog:read` produce one
   entry, not two. The wire size of the JWT stays bounded by the size of
-  `PermissionCodeEnum` (12 codes when the guard was introduced, 22
-  today), not by the number of roles bound to the StaffUser.
+  `PermissionCodeEnum` (12 codes when this epic shipped, 22 today), not by the
+  number of roles bound to the StaffUser.
 - **`sort()` makes the array deterministic.** Same StaffUser + same
   role-permission bindings → byte-identical JSON payload. That matters
   for two reasons. Test assertions can rely on `toEqual(expected)`
@@ -83,36 +90,51 @@ IAM role-edit for an already-signed-in actor.
 
 ## 3. The validator's contract
 
-`ValidateStaffUserUseCase` (the `IAuthUserValidator` implementation
-bound to `AUTH_USER_VALIDATOR` in `auth.module.ts`) is what
-`libs/auth`'s `JwtStrategy` calls on every authenticated request. Its
-contract now reads: *"given a verified access payload, return the
-`ICurrentUser` it represents, asserting only that the underlying row is
-still active."*
+`ValidateJwtSubjectUseCase` — renamed from `ValidateStaffUserUseCase` when the
+customer half landed, see
+[`04-customer-register-and-login.md`](./04-customer-register-and-login.md) §2 — is
+the `IAuthUserValidator` implementation bound to `AUTH_USER_VALIDATOR` in
+`auth.module.ts`, and it is what `libs/auth`'s `JwtStrategy` calls on every
+authenticated request. Its contract reads: *"given a verified access payload,
+return the `ICurrentUser` it represents, asserting only that the underlying
+subject is still active."*
 
 ```ts
-public async validate(payload: IJwtAccessPayload): Promise<ICurrentUser> {
-  const user = await this.users.findById(payload.sub);
-  if (!user?.isActive) {
-    throw new UnauthorizedException('Account is no longer active');
-  }
+public async
+validate(payload
+:
+IJwtAccessPayload
+):
+Promise < ICurrentUser > {
+    const active =
+        (await this.staff.existsActiveById(payload.sub)) ||
+        (await this.customers.existsAuthenticatableById(payload.sub));
 
-  return {
+    if(!
+active
+)
+{
+    throw new UnauthorizedException('Account is no longer active');
+}
+
+return {
     id: payload.sub,
     email: payload.email,
     roles: payload.roles,
     permissions: payload.permissions ?? [],
-  };
+};
 }
 ```
 
 Two things to notice:
 
-- **The row lookup is preserved** — not for `roles`/`permissions`, but
+- **A liveness lookup is preserved** — not for `roles`/`permissions`, but
   to honor suspension and soft-delete. A StaffUser whose account is
   suspended between two requests must be rejected on the second one,
   even if their access JWT has not expired. The 401 from this branch is
   the kill-switch for token revocation in the absence of a JWT blacklist.
+  It is a bare existence probe (`existsActiveById`), not a full row load — the
+  identity claims already travel in the verified payload.
 - **`payload.permissions ?? []`** is the one-release-tolerance default.
   Tokens minted before this deploy carry no `permissions` claim; their
   next refresh repopulates the claim. The fallback prevents a stale
@@ -160,12 +182,12 @@ controller, it tells `PermissionsGuard` to admit the request only if
 // apps/api-gateway/src/modules/auth/presentation/auth-admin.controller.ts
 @Controller('auth/admin')
 export class AuthAdminController {
-  @Get('ping')
-  @RequiresPermission(PermissionCodeEnum.AUDIT_READ)
-  @ApiBearerAuth()
-  public ping(): { ok: true } {
-    return { ok: true };
-  }
+    @Get('ping')
+    @RequiresPermission(PermissionCodeEnum.AUDIT_READ)
+    @ApiBearerAuth()
+    public ping(): { ok: true } {
+        return {ok: true};
+    }
 }
 ```
 
@@ -183,9 +205,10 @@ content-type: application/json
 }
 ```
 
-The seeded `admin` role bundles every code in the registry (see
+The seeded `admin` role bundles every code in the registry — 12 when this epic
+shipped, 22 today, since the seed binds `Object.values(PermissionCodeEnum)` (see
 [`02-role-and-permission-relational-model.md`](./02-role-and-permission-relational-model.md))
-and so admits the request with `200 {"ok":true}`. That asymmetry is the
+— and so admits the request with `200 {"ok":true}`. That asymmetry is the
 test fixture exercised by the two assertions in `test/auth.e2e-spec.ts`'s
 `Permissions guard (/api/auth/admin/ping)` block.
 
@@ -221,9 +244,9 @@ in this order — and the order is load-bearing, not cosmetic:
 
 ```ts
 providers: [
-  { provide: APP_GUARD, useClass: JwtAuthGuard },      // 1. authenticate
-  { provide: APP_GUARD, useClass: RolesGuard },        // 2. role bundle
-  { provide: APP_GUARD, useClass: PermissionsGuard },  // 3. atomic code
+    {provide: APP_GUARD, useClass: JwtAuthGuard},      // 1. authenticate
+    {provide: APP_GUARD, useClass: RolesGuard},        // 2. role bundle
+    {provide: APP_GUARD, useClass: PermissionsGuard},  // 3. atomic code
 ],
 ```
 
@@ -236,10 +259,10 @@ layer's preconditions assume the previous layer's invariants:
   missing a valid bearer token returns 401 here and the role / permission
   guards never see it.
 - `RolesGuard` runs next. It needs `request.user.roles` (set by
-  `ValidateStaffUserUseCase` — see §3 above). For routes without
+  `ValidateJwtSubjectUseCase` — see §3 above). For routes without
   `@Roles()` metadata it is a no-op pass-through.
 - `PermissionsGuard` runs last. It needs `request.user.permissions` —
-  also set by `ValidateStaffUserUseCase`, sourced from
+  also set by `ValidateJwtSubjectUseCase`, sourced from
   `IJwtAccessPayload.permissions`. For routes without
   `@RequiresPermission()` metadata it is a no-op pass-through.
 
@@ -251,16 +274,21 @@ single-knob `@Public()` ergonomic from ADR-010.
 
 ## 9. OR-semantics in the decorator
 
-`PermissionsGuard.canActivate` uses `required.some((code) =>
-user.permissions.includes(code))` — multiple codes on the same decorator
-call mean *any one is sufficient*:
+`PermissionsGuard.canActivate` delegates to the shared `enforceRequiredClaim`
+helper (`libs/auth/guards/claim-guard.util.ts:32`, extracted so `RolesGuard` and
+`PermissionsGuard` cannot drift apart), which does
+`required.some((value) => claim.includes(value))` — multiple codes on the same
+decorator call mean *any one is sufficient*:
 
 ```ts
 @RequiresPermission(
-  PermissionCodeEnum.CATALOG_WRITE,
-  PermissionCodeEnum.CATALOG_PUBLISH,
+    PermissionCodeEnum.CATALOG_WRITE,
+    PermissionCodeEnum.CATALOG_PUBLISH,
 )
-public update(): … { … }
+public
+update()
+: … { …
+}
 ```
 
 A caller with either `catalog:write` *or* `catalog:publish` passes. The
@@ -283,10 +311,10 @@ ALL-codes plus *any one* of the OR-codes.
 
 ## 10. No DB hit per request
 
-`PermissionsGuard.canActivate` is purely in-memory: it reads metadata
-off the handler / class via `Reflector` and intersects it with
-`request.user.permissions` — a `string[]` already on the request from
-`JwtStrategy.validate(...)`. There is no repository, no cache, no
+`PermissionsGuard.canActivate` is purely in-memory: through
+`enforceRequiredClaim` it reads metadata off the handler / class via `Reflector`
+and intersects it with `request.user.permissions` — a `string[]` already on the
+request from `JwtStrategy.validate(...)`. There is no repository, no cache, no
 network call. The cost is one array `.some()` per gated request.
 
 This is the payoff of §1's inflate-at-issue choice. The corollary is
@@ -301,7 +329,7 @@ This is the intentional trade for never paying a DB hit on the guard's
 hot path, and it is the line operators of the IAM admin endpoints
 need to know about. Token revocation under the same model rides on
 `StaffUser.isActive`: a suspended user is rejected by
-`ValidateStaffUserUseCase` regardless of permission staleness, so the
+`ValidateJwtSubjectUseCase` regardless of permission staleness, so the
 worst-case window for *who* may act is bounded by the request, not by
 JWT lifetime.
 

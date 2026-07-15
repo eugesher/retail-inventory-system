@@ -18,28 +18,33 @@ the gate decorator in
 
 ## 1. Endpoint surface
 
-The gateway gains five admin-gated HTTP routes mounted at `/api/iam`.
-Every route requires a bearer access token AND the listed permission
-code (the global `PermissionsGuard` enforces both).
+The gateway gains five admin-gated HTTP routes mounted at `/api/iam` *(when this
+epic shipped; a sixth landed later — see the note below)*. Every route requires a
+bearer access token AND the listed permission code (the global `PermissionsGuard`
+enforces both).
 
-| Method | Path                                       | Permission       | Notes                                              |
-| ------ | ------------------------------------------ | ---------------- | -------------------------------------------------- |
-| GET    | `/api/iam/roles`                           | `iam:role-edit`  | Returns `Role[]` sorted by name ASC.               |
-| POST   | `/api/iam/roles`                           | `iam:role-edit`  | 201 on create; 409 on duplicate name.              |
-| PATCH  | `/api/iam/roles/:id`                       | `iam:role-edit`  | Description + permission set; name read-only.      |
-| POST   | `/api/iam/staff/:id/roles`                 | `iam:assign`     | Idempotent — re-assign is a no-op.                 |
-| DELETE | `/api/iam/staff/:id/roles/:roleName`       | `iam:assign`     | 204 on success; refuses last role with 409.        |
+| Method | Path                                 | Permission      | Notes                                         |
+|--------|--------------------------------------|-----------------|-----------------------------------------------|
+| GET    | `/api/iam/roles`                     | `iam:role-edit` | Returns `Role[]` sorted by name ASC.          |
+| POST   | `/api/iam/roles`                     | `iam:role-edit` | 201 on create; 409 on duplicate name.         |
+| PATCH  | `/api/iam/roles/:id`                 | `iam:role-edit` | Description + permission set; name read-only. |
+| POST   | `/api/iam/staff/:id/roles`           | `iam:assign`    | Idempotent — re-assign is a no-op.            |
+| DELETE | `/api/iam/staff/:id/roles/:roleName` | `iam:assign`    | 204 on success; refuses last role with 409.   |
+
+> **A sixth route landed later ([ADR-047](../../adr/047-staff-user-creation-over-http.md)):**
+> `POST /api/iam/staff`, gated on its own code `iam:staff-create` (deliberately
+> **not** `iam:assign` — minting a principal is a higher privilege than re-binding
+> roles on an existing one). It injects auth's `RegisterStaffUserUseCase` through the
+> `auth` barrel. That is why the registry (see
+> [`02-…md`](./02-role-and-permission-relational-model.md) §3) is 22 codes today, not
+> the 12 this epic seeded.
 
 Both permission codes were already in the registry
 (`libs/contracts/auth/permission.enum.ts`) and seeded into the
 `permission` table when the role/permission schema was seeded; the
-seeded `admin` role bundles every code in the registry, so the e2e
-fixture admin can hit every endpoint here.
-
-A sixth route, `POST /api/iam/staff` (`iam:staff-create`), landed later
-and is covered by
-[ADR-047](../../adr/047-staff-user-creation-over-http.md); it is not
-part of the five described below.
+seeded `admin` role bundles every code in the registry (twelve at the time, 22
+today — the seed binds `Object.values(PermissionCodeEnum)`), so the e2e fixture
+admin can hit every endpoint here.
 
 ## 2. Request/response shapes
 
@@ -53,7 +58,12 @@ Response: `RoleResponseDto[]`, sorted by `name` ASC.
     "id": "00000000-0000-4000-c000-000000000001",
     "name": "admin",
     "description": "Full access to every permission code",
-    "permissionCodes": ["audit:read", "catalog:read", "catalog:write", "..."]
+    "permissionCodes": [
+      "audit:read",
+      "catalog:read",
+      "catalog:write",
+      "..."
+    ]
   }
 ]
 ```
@@ -63,7 +73,13 @@ Response: `RoleResponseDto[]`, sorted by `name` ASC.
 Request `CreateRoleRequestDto`:
 
 ```json
-{ "name": "audit-reader", "description": "Read-only auditor", "permissionCodes": ["audit:read"] }
+{
+  "name": "audit-reader",
+  "description": "Read-only auditor",
+  "permissionCodes": [
+    "audit:read"
+  ]
+}
 ```
 
 Validation:
@@ -79,7 +95,13 @@ Response: same shape as a single element of `GET /api/iam/roles`.
 Request `UpdateRoleRequestDto`:
 
 ```json
-{ "description": "Audit log read-only access", "permissionCodes": ["audit:read", "order:read"] }
+{
+  "description": "Audit log read-only access",
+  "permissionCodes": [
+    "audit:read",
+    "order:read"
+  ]
+}
 ```
 
 Either field may be omitted. Both omitted → 400 `"No-op patch"`.
@@ -93,7 +115,12 @@ read-only — renaming a seeded role is explicitly disallowed.
 Request `AssignStaffRoleRequestDto`:
 
 ```json
-{ "roleNames": ["warehouse-staff", "order-support"] }
+{
+  "roleNames": [
+    "warehouse-staff",
+    "order-support"
+  ]
+}
 ```
 
 Response:
@@ -102,7 +129,11 @@ Response:
 {
   "id": "00000000-0000-4000-a000-000000000001",
   "email": "operator@example.com",
-  "roleNames": ["admin", "order-support", "warehouse-staff"]
+  "roleNames": [
+    "admin",
+    "order-support",
+    "warehouse-staff"
+  ]
 }
 ```
 
@@ -112,18 +143,18 @@ No request body. No response body.
 
 ## 3. Error model
 
-| HTTP | Path                                                | Trigger                                                                           |
-| ---- | --------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 400  | `POST /iam/roles`                                   | `permissionCodes` contains unknown entries (response lists which).                |
-| 400  | `PATCH /iam/roles/:id`                              | Both `description` and `permissionCodes` omitted — "No-op patch".                |
-| 400  | `PATCH /iam/roles/:id`                              | `permissionCodes` contains unknown entries.                                       |
-| 400  | `POST /iam/staff/:id/roles`                         | `roleNames` references an unknown role (response lists which).                    |
-| 404  | `PATCH /iam/roles/:id`                              | Role id does not exist.                                                           |
-| 404  | `POST /iam/staff/:id/roles`                         | StaffUser id does not exist, or status is `suspended`.                            |
-| 404  | `DELETE /iam/staff/:id/roles/:roleName`             | StaffUser id does not exist.                                                      |
-| 404  | `DELETE /iam/staff/:id/roles/:roleName`             | StaffUser exists but does not currently have `:roleName` — "Role not bound".     |
-| 409  | `POST /iam/roles`                                   | `name` collides with an existing role.                                            |
-| 409  | `DELETE /iam/staff/:id/roles/:roleName`             | Would remove the last remaining role — "Cannot revoke the last remaining role". |
+| HTTP | Path                                    | Trigger                                                                         |
+|------|-----------------------------------------|---------------------------------------------------------------------------------|
+| 400  | `POST /iam/roles`                       | `permissionCodes` contains unknown entries (response lists which).              |
+| 400  | `PATCH /iam/roles/:id`                  | Both `description` and `permissionCodes` omitted — "No-op patch".               |
+| 400  | `PATCH /iam/roles/:id`                  | `permissionCodes` contains unknown entries.                                     |
+| 400  | `POST /iam/staff/:id/roles`             | `roleNames` references an unknown role (response lists which).                  |
+| 404  | `PATCH /iam/roles/:id`                  | Role id does not exist.                                                         |
+| 404  | `POST /iam/staff/:id/roles`             | StaffUser id does not exist, or status is `suspended`.                          |
+| 404  | `DELETE /iam/staff/:id/roles/:roleName` | StaffUser id does not exist.                                                    |
+| 404  | `DELETE /iam/staff/:id/roles/:roleName` | StaffUser exists but does not currently have `:roleName` — "Role not bound".    |
+| 409  | `POST /iam/roles`                       | `name` collides with an existing role.                                          |
+| 409  | `DELETE /iam/staff/:id/roles/:roleName` | Would remove the last remaining role — "Cannot revoke the last remaining role". |
 
 The choices follow the standard semantics: 409 is "your request would
 create an invalid state and the resource exists"; 400 is "the input is
@@ -139,10 +170,11 @@ All multi-row mutations are wrapped in a transaction at the **adapter**
 layer, not the use case (the architecture lint forbids `typeorm` imports
 in `application/`, ADR-017 §4). Two adapter methods open transactions:
 
-- `RoleTypeormRepository.replacePermissions(role, codes)` — clears the
-  role's `role_permissions` rows and inserts the new bindings inside one
-  `entityManager.transaction(...)`. Observers reading the join table
-  cannot see a transient empty set.
+- `RoleTypeormRepository.update(role, codes?)` — writes the scalar columns and,
+  when `codes` is supplied, clears the role's `role_permissions` rows and inserts
+  the new bindings inside one `entityManager.transaction(...)`. Observers reading
+  the join table cannot see a transient empty set. Passing `codes === undefined`
+  (a description-only patch) skips the join rewrite entirely.
 - `RoleTypeormRepository.save(role)` — does a single `repository.save`,
   which TypeORM treats as one atomic statement for the row + its `@JoinTable`.
 - `StaffUserTypeormRepository.save(user)` — same pattern for
@@ -170,21 +202,26 @@ ships, the safest behavior at the domain boundary is
 that re-running the same `roleNames` payload always converges to the
 same state with no side-effects.
 
-## 6. Audit-log call sites
+## 6. Audit-log call sites — forward reference
 
 The five use cases each represent an auditable mutation. The
-`AUDIT_LOG_PUBLISHER` port wraps the call sites these use cases add —
-`CreateRoleUseCase`, `UpdateRoleUseCase`, `AssignStaffRoleUseCase`,
-`RevokeStaffRoleUseCase` — in `AUDIT_LOG_PUBLISHER.publish(...)` calls.
-The port was bound to a log-only no-op when these use cases landed, so
-that the call sites existed before there was anything behind them; it is
-now bound to `AuditLogRabbitmqPublisher`, which mirrors each event onto
-the `ris.events` topic exchange under `audit.staff.action`.
+`AUDIT_LOG_PUBLISHER` port (a no-op publisher when this epic shipped; since the
+audit-log delivery work it resolves to `AuditLogRabbitmqPublisher`, bound at
+`apps/api-gateway/src/modules/auth/auth.module.ts:136`) wraps the call sites these
+use cases add — `CreateRoleUseCase`, `UpdateRoleUseCase`,
+`AssignStaffRoleUseCase`, `RevokeStaffRoleUseCase` — in
+`AUDIT_LOG_PUBLISHER.publish(...)` calls. The use cases exist first so
+the publisher wiring has something to decorate — and, as predicted, the swap
+touched none of them.
 
-The two domain events these use cases raise
+Alongside the publisher call, the two new domain events
 (`StaffUserRolesAssignedEvent`, `StaffUserRoleRevokedEvent`, in
-`apps/api-gateway/src/modules/auth/domain/events/`) are attached to the
-aggregate's pending events queue and drained by the repository on save.
+`apps/api-gateway/src/modules/auth/domain/events/`) are recorded onto the
+aggregate's pending-events queue by `recordRolesAssigned` / `recordRoleRevoked`.
+Nothing drains that queue: `StaffUserTypeormRepository.save(...)` never calls
+`pullDomainEvents()`, and no dispatcher reads it. The queue is latent scaffolding;
+the effective audit surface for these mutations is the
+`AUDIT_LOG_PUBLISHER.publish(...)` call in the use case.
 
 ## 7. Why a separate `iam` module
 
@@ -219,7 +256,8 @@ New under `apps/api-gateway/src/modules/iam/`:
 Modified:
 
 - `apps/api-gateway/src/app/app.module.ts` — imports `IamModule`.
-- `apps/api-gateway/src/modules/auth/infrastructure/auth.module.ts` —
+- `apps/api-gateway/src/modules/auth/auth.module.ts` (the module file sits at the
+  module root, not under `infrastructure/`) —
   the `AuthLibModule.forRootAsync(...)` dynamic module is now captured
   in a constant and re-exported from `AuthModule.exports[]` so that
   `STAFF_USER_REPOSITORY` propagates to IAM. (NestJS does not let an
@@ -228,7 +266,7 @@ Modified:
 - `apps/api-gateway/src/modules/auth/index.ts` — re-exports the three
   repository tokens, the three aggregates, and the two new events.
 - `apps/api-gateway/src/modules/auth/application/ports/role.repository.port.ts` —
-  `IRoleRepositoryPort` extended with `findById` and `replacePermissions`.
+  `IRoleRepositoryPort` extended with `findById` and `update(role, codes?)`.
 - `apps/api-gateway/src/modules/auth/infrastructure/persistence/role-typeorm.repository.ts` —
   implements both new methods; `save` now resolves permission ids by
   code before persist (previous code-only DeepPartial silently skipped

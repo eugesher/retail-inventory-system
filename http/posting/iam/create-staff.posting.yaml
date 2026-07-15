@@ -1,0 +1,27 @@
+name: create-staff
+description: |-
+  POST /api/iam/staff
+  Creates a staff user with one or more roles (ADR-047). Requires
+  `iam:staff-create` — a distinct code, NOT iam:assign: minting a principal
+  is a higher privilege than binding a role to an existing one.
+  Body shape (CreateStaffUserRequestDto):
+    email: valid email, ≤255 — unique in staff_user.email (409 on duplicate)
+    password: string, 8..128 — argon2-hashed, same policy as customer register
+    roleNames: string[], non-empty & unique — every name must exist in the
+               role table (400 lists the unknown names); an empty array is 400.
+  Returns 201 with the StaffUser projection { id, email, roleNames }. Use a
+  fresh email each run, or expect 409 on the second send.
+method: POST
+url: $ENV_BASE_URL/iam/staff
+body:
+  content: |-
+    {
+      "email": "newstaff@example.com",
+      "password": "newstaff1234",
+      "roleNames": ["warehouse-staff"]
+    }
+headers:
+- name: Authorization
+  value: Bearer $adminLoginAccessToken
+- name: Content-Type
+  value: application/json

@@ -17,9 +17,9 @@ human who logs into the back office) and a buyer identity (the customer
 who places an order). Its `roles: simple-array` column mixed two
 ontologies into one list of strings:
 
-| Value      | Ontology                       |
-| ---------- | ------------------------------ |
-| `admin`    | Workforce role (RBAC)          |
+| Value      | Ontology                         |
+|------------|----------------------------------|
+| `admin`    | Workforce role (RBAC)            |
 | `customer` | "This row is a buyer, not staff" |
 
 Two consequences follow:
@@ -46,17 +46,17 @@ guard, log line, and controller.
 ## 2. The new `staff_user` shape
 
 ```sql
-CREATE TABLE staff_user (
-  id                 CHAR(36)                    PRIMARY KEY,
-  email              VARCHAR(255)                NOT NULL UNIQUE,
-  password_hash      VARCHAR(255)                NOT NULL,
-  status             ENUM('active','suspended')  NOT NULL DEFAULT 'active',
-  last_login_at      TIMESTAMP                   NULL,
-  refresh_token_hash VARCHAR(255)                NULL,
-  created_at         TIMESTAMP                   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at         TIMESTAMP                   NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                                 ON UPDATE CURRENT_TIMESTAMP,
-  deleted_at         TIMESTAMP                   NULL
+CREATE TABLE staff_user
+(
+    id                 CHAR(36) PRIMARY KEY,
+    email              VARCHAR(255) NOT NULL UNIQUE,
+    password_hash      VARCHAR(255) NOT NULL,
+    status             ENUM('active','suspended')  NOT NULL DEFAULT 'active',
+    last_login_at      TIMESTAMP NULL,
+    refresh_token_hash VARCHAR(255) NULL,
+    created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at         TIMESTAMP NULL
 );
 ```
 
@@ -83,7 +83,12 @@ A few specific column choices to justify:
   2024 still need to resolve to a `staff_user.id` in 2026 even after
   the human leaves the company. Hard-deleting the row would either
   break the FK or force every audit-log row to denormalize the actor's
-  email, both worse than carrying a `deleted_at` tombstone.
+  email, both worse than carrying a `deleted_at` tombstone. *(Note: the
+  `deleted_at` column remains and `isActive` still reads it, but
+  [ADR-049](../../adr/049-the-port-methods-nothing-calls.md) removed the
+  `IStaffUserRepositoryPort.softDelete` method that once wrote it — no path
+  sets it today. Deactivation is `StaffUser.suspend()` + `save`, i.e. the
+  `status` column, which is what `existsActiveById` gates the JWT on.)*
 - **`refresh_token_hash` carries forward unchanged from the pre-existing
   table.** ADR-010's rotation-reuse protection is decoupled from the
   rename; the column moves verbatim from `user` to `staff_user` with
@@ -100,12 +105,13 @@ staff user with the `catalog-manager` role" without table-scanning.
 The replacement is the relational join `staff_user_roles`:
 
 ```sql
-CREATE TABLE staff_user_roles (
-  staff_user_id CHAR(36) NOT NULL,
-  role_id       CHAR(36) NOT NULL,
-  PRIMARY KEY (staff_user_id, role_id),
-  FOREIGN KEY (staff_user_id) REFERENCES staff_user (id) ON DELETE CASCADE,
-  FOREIGN KEY (role_id)       REFERENCES role       (id) ON DELETE CASCADE
+CREATE TABLE staff_user_roles
+(
+    staff_user_id CHAR(36) NOT NULL,
+    role_id       CHAR(36) NOT NULL,
+    PRIMARY KEY (staff_user_id, role_id),
+    FOREIGN KEY (staff_user_id) REFERENCES staff_user (id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES role (id) ON DELETE CASCADE
 );
 ```
 
@@ -139,10 +145,15 @@ The migration `1779901877394-RenameUserToStaffUserAndDropRolesArray`
 is destructive on the `user` table:
 
 ```ts
-public async up(queryRunner: QueryRunner): Promise<void> {
-  await queryRunner.query('DROP TABLE user;');
-  await queryRunner.query(`CREATE TABLE staff_user (...)`);
-  await queryRunner.query(`CREATE TABLE staff_user_roles (...)`);
+public async
+up(queryRunner
+:
+QueryRunner
+):
+Promise < void > {
+    await queryRunner.query('DROP TABLE user;');
+    await queryRunner.query(`CREATE TABLE staff_user (...)`);
+    await queryRunner.query(`CREATE TABLE staff_user_roles (...)`);
 }
 ```
 
@@ -216,19 +227,19 @@ all.
 ### 6.2 The new `customer` shape
 
 ```sql
-CREATE TABLE customer (
-  id                  CHAR(36)                                              PRIMARY KEY,
-  email               VARCHAR(255)                                          NOT NULL UNIQUE,
-  phone               VARCHAR(32)                                           NULL,
-  first_name          VARCHAR(128)                                          NULL,
-  last_name           VARCHAR(128)                                          NULL,
-  password_hash       VARCHAR(255)                                          NULL,
-  status              ENUM('active','suspended','guest','deleted')          NOT NULL DEFAULT 'active',
-  email_verified_at   TIMESTAMP                                             NULL,
-  refresh_token_hash  VARCHAR(255)                                          NULL,
-  created_at          TIMESTAMP                                             NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at          TIMESTAMP                                             NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                                                            ON UPDATE CURRENT_TIMESTAMP
+CREATE TABLE customer
+(
+    id                 CHAR(36) PRIMARY KEY,
+    email              VARCHAR(255) NOT NULL UNIQUE,
+    phone              VARCHAR(32) NULL,
+    first_name         VARCHAR(128) NULL,
+    last_name          VARCHAR(128) NULL,
+    password_hash      VARCHAR(255) NULL,
+    status             ENUM('active','suspended','guest','deleted')          NOT NULL DEFAULT 'active',
+    email_verified_at  TIMESTAMP NULL,
+    refresh_token_hash VARCHAR(255) NULL,
+    created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 ```
 
@@ -251,14 +262,20 @@ one accepts a future flow that this baseline does not implement:
   a future erasure tombstone (a soft-deleted row that the application treats
   as no longer present but the FK from `order.customer_id` can still
   resolve).
-- **No `deleted_at` column.** The staff side carries a `deleted_at`
-  tombstone alongside `status`; the customer side communicates the
-  same fact through `status='deleted'` only. The reason: the future
+- **No `deleted_at` column** *(as shipped in this baseline)*. The staff side
+  carries a `deleted_at` tombstone alongside `status`; the customer side
+  communicated the same fact through `status='deleted'` only. The reason: the
   GDPR-style erasure flow needs to null *every* PII column on the
   row anyway, and the simplest contract is "one column tells you the
   row is dead." Adding a redundant `deleted_at` would create two
-  sources of truth for the same fact. Soft-delete is therefore a
+  sources of truth for the same fact. Soft-delete was therefore a
   status transition, not a timestamp stamp.
+
+  **This no longer holds.** The consent-and-erasure work
+  ([ADR-037](../../adr/037-consent-record-and-tombstone-erasure.md)) added a
+  nullable `customer.deleted_at` in migration
+  `1783145019567-AddConsentAndTombstoneColumns`, stamped at the erase instant
+  alongside `status='deleted'`. The customer row now carries both markers.
 
 ### 6.3 Q7 — every order creates a Customer (forward reference)
 
@@ -268,16 +285,23 @@ row lands with `status='guest'`, `password_hash=NULL`, and only the PII
 the buyer agreed to share. The shape above already supports that on day
 one — no schema migration is needed when that work ships. The aggregate's
 `Customer.register(...)` is the only path used in this baseline and always
-produces `status='active'`; future work will add a `Customer.fromGuestOrder(...)`
-factory that produces `status='guest'` from the same constructor, and
-the constructor's invariant check already accepts it.
+produces `status='active'`. What actually shipped is simpler than the
+`Customer.fromGuestOrder(...)` factory anticipated here: guest rows reuse
+`Customer.register(...)` with `status='guest'` and a synthetic unique email (see
+`apps/api-gateway/src/modules/auth/application/use-cases/create-guest-session.use-case.ts:49`),
+precisely because the constructor's invariant check already accepts that
+combination — no new factory was needed.
 
 ### 6.4 Q6 — tombstone-friendliness (forward reference)
 
 Every PII column on `customer` is nullable. The tombstone use case is
-part of future consent-and-erasure work; the relevant property here is
-that *this baseline* does not need to do anything special for it. The migration's column list is the
-contract, and `Customer.suspend()` / a future `Customer.tombstone()`
+part of the consent-and-erasure work
+([ADR-037](../../adr/037-consent-record-and-tombstone-erasure.md)); the relevant
+property here is that *this baseline* does not need to do anything special for it.
+The migration's column list is the contract, and `Customer.suspend()` /
+`Customer.erase()` — the erasure mutator that work actually added, named `erase`
+rather than the `tombstone()` anticipated here
+(`apps/api-gateway/src/modules/auth/domain/customer.model.ts:171`) —
 flip the in-memory status while the repository writes the nulled-PII
 columns back. The row's `id` is the only field that survives, and
 that's the field every other table FKs against — so historical orders
