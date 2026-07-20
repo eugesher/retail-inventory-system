@@ -1,7 +1,7 @@
 # ADR-017: Architecture lint via `eslint-plugin-boundaries`
 
 - **Date**: 2026-05-14
-- **Status**: Accepted
+- **Status**: Accepted — the element taxonomy is **extended** by [ADR-041](041-nest-module-as-the-module-composition-root.md) (`nest-module`, `shared-module-barrel`, `no-unknown-files` as `error`, and §6's first exception `ARCH-LINT-EX-02`), whose `context-root` type is **retired** by [ADR-042](042-one-bounded-context-one-module.md); a `lib-database → lib-ddd` edge is **added** by [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md); and §6's `EntityManager`-downcast count is **superseded** by [ADR-054](054-the-entity-manager-downcast-is-an-idiom.md). The taxonomy, the denylists and the CI strategy stand.
 
 > **§6's claim that the `EntityManager` downcast "lives only in the two infrastructure-layer adapters"
 > is superseded by [ADR-054](054-the-entity-manager-downcast-is-an-idiom.md)** — it is 14 sites in 11

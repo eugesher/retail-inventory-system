@@ -1,7 +1,7 @@
 # ADR-031: Fulfillment aggregate and ship-triggered capture
 
 - **Date**: 2026-06-15
-- **Status**: Accepted
+- **Status**: Accepted — **amended on two points**: Cancel Line's `ordered − already-shipped` remainder and its "no optimistic-concurrency guard" stance are revised by [ADR-040](040-persisted-cancelled-quantity-on-order-line.md), and ship-triggered capture gains a durable `CAPTURING` claim in [ADR-052](052-claim-before-you-charge.md) — which makes this ADR's block-ship-until-payment rule true rather than reversing it.
 
 ---
 

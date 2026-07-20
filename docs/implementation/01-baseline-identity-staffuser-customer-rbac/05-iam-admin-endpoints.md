@@ -33,8 +33,13 @@ code (the global `PermissionsGuard` enforces both).
 Both permission codes were already in the registry
 (`libs/contracts/auth/permission.enum.ts`) and seeded into the
 `permission` table when the role/permission schema was seeded; the
-seeded `admin` role bundles all twelve codes, so the e2e fixture admin
-can hit every endpoint here.
+seeded `admin` role bundles every code in the registry, so the e2e
+fixture admin can hit every endpoint here.
+
+A sixth route, `POST /api/iam/staff` (`iam:staff-create`), landed later
+and is covered by
+[ADR-047](../../adr/047-staff-user-creation-over-http.md); it is not
+part of the five described below.
 
 ## 2. Request/response shapes
 
@@ -165,22 +170,21 @@ ships, the safest behavior at the domain boundary is
 that re-running the same `roleNames` payload always converges to the
 same state with no side-effects.
 
-## 6. Audit-log call sites — forward reference
+## 6. Audit-log call sites
 
 The five use cases each represent an auditable mutation. The
-`AUDIT_LOG_PUBLISHER` port (a no-op publisher today; the real publisher
-arrives with the audit-log delivery work) wraps the call sites these use
-cases add — `CreateRoleUseCase`, `UpdateRoleUseCase`,
-`AssignStaffRoleUseCase`, `RevokeStaffRoleUseCase` — in
-`AUDIT_LOG_PUBLISHER.publish(...)` calls. The use cases exist first so
-the publisher wiring has something to decorate.
+`AUDIT_LOG_PUBLISHER` port wraps the call sites these use cases add —
+`CreateRoleUseCase`, `UpdateRoleUseCase`, `AssignStaffRoleUseCase`,
+`RevokeStaffRoleUseCase` — in `AUDIT_LOG_PUBLISHER.publish(...)` calls.
+The port was bound to a log-only no-op when these use cases landed, so
+that the call sites existed before there was anything behind them; it is
+now bound to `AuditLogRabbitmqPublisher`, which mirrors each event onto
+the `ris.events` topic exchange under `audit.staff.action`.
 
-Until the publisher wiring lands, the two new domain events
+The two domain events these use cases raise
 (`StaffUserRolesAssignedEvent`, `StaffUserRoleRevokedEvent`, in
-`apps/api-gateway/src/modules/auth/domain/events/`) are the only audit
-surface — they're attached to the aggregate's pending events queue and
-drained by the repository on save. Today nothing dispatches them off
-the queue; the audit-log publisher will hand them on.
+`apps/api-gateway/src/modules/auth/domain/events/`) are attached to the
+aggregate's pending events queue and drained by the repository on save.
 
 ## 7. Why a separate `iam` module
 

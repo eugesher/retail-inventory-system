@@ -1,7 +1,7 @@
 # ADR-023: Post-commit cache invalidation enforced by the type system
 
 - **Date**: 2026-05-20
-- **Status**: Accepted
+- **Status**: Accepted — **amended** by [ADR-049](049-the-port-methods-nothing-calls.md): `get` / `set` were a second entrance to the very hole this ADR closed on `invalidate` (a pre-commit `set` is as permanently stale as a pre-commit invalidate), and are now private to `StockCache`; `IStockCachePort` offers only the composed `getOrLoad` and `withInvalidation`.
 
 ---
 
