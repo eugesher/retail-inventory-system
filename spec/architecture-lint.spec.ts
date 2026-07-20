@@ -98,7 +98,7 @@ beforeAll(() => {
 
   // **Fail loudly if the probe resolved to nothing.** A `PROBE_FILE` that matched no config block
   // would hand back an empty rule set, every fixture below would report no violation, and the suite
-  // would go green while guarding nothing — which is precisely the failure mode this whole task
+  // would go green while guarding nothing — which is precisely the failure mode this suite
   // exists to remove. Do not let it come back through the side door.
   if (resolved.settings?.['boundaries/elements'] === undefined) {
     throw new Error(

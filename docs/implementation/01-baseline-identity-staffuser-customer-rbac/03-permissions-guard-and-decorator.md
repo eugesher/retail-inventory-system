@@ -60,8 +60,8 @@ Three properties of this expression are load-bearing:
 
 - **Set-union dedupes.** Two roles sharing `catalog:read` produce one
   entry, not two. The wire size of the JWT stays bounded by the size of
-  `PermissionCodeEnum` (12 codes today), not by the number of roles
-  bound to the StaffUser.
+  `PermissionCodeEnum` (12 codes when the guard was introduced, 22
+  today), not by the number of roles bound to the StaffUser.
 - **`sort()` makes the array deterministic.** Same StaffUser + same
   role-permission bindings → byte-identical JSON payload. That matters
   for two reasons. Test assertions can rely on `toEqual(expected)`
@@ -183,7 +183,7 @@ content-type: application/json
 }
 ```
 
-The seeded `admin` role bundles all 12 codes (see
+The seeded `admin` role bundles every code in the registry (see
 [`02-role-and-permission-relational-model.md`](./02-role-and-permission-relational-model.md))
 and so admits the request with `200 {"ok":true}`. That asymmetry is the
 test fixture exercised by the two assertions in `test/auth.e2e-spec.ts`'s

@@ -69,7 +69,7 @@ CREATE TABLE permission (
 - **`code VARCHAR(64) UNIQUE`** matches the regex
   `^[a-z][a-z-]*:[a-z][a-z-]*$`. Sixty-four bytes is enough for any
   realistic `<resource>:<action>` pair (the longest seeded today is
-  `inventory:transfer`, 18 bytes). The code is the human-readable
+  `inventory:receive-return`, 24 bytes). The code is the human-readable
   identifier; the UUID is the join-table foreign key.
 
 ### `role_permissions`
@@ -115,8 +115,10 @@ CREATE TABLE role_permissions (
 | `iam:role-edit`       | Edit role-permission bindings              |
 | `audit:read`          | Read audit log                             |
 
-These are the values of `PermissionCodeEnum` in
-`libs/contracts/auth/permission.enum.ts`. The enum is the single source
+These are the twelve codes the baseline identity work introduced into
+`PermissionCodeEnum` (`libs/contracts/auth/permission.enum.ts`); the
+registry has since grown to twenty-two. The table above is that starting
+floor, not the current list. The enum is the single source
 of truth — the seed reads its values directly, the
 `@RequiresPermission(<code>)` decorator accepts the enum, and
 the IAM admin tooling validates against the enum keyset before
@@ -126,12 +128,15 @@ inserting into `role_permissions`.
 
 | Role (`role.name`) | Permission codes                                                                                                                                                                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin`            | every code in §3 (12 bindings)                                                                                                                                                                                                  |
+| `admin`            | every code in the registry — `Object.values(PermissionCodeEnum)`, so it grows with the enum                                                                                                                                      |
 | `catalog-manager`  | `catalog:read`, `catalog:write`, `catalog:publish`                                                                                                                                                                              |
 | `warehouse-staff`  | `inventory:read`, `inventory:adjust`, `inventory:transfer`                                                                                                                                                                      |
 | `order-support`    | `order:read`, `order:cancel`, `order:refund`                                                                                                                                                                                    |
 
-Twenty-four `role_permissions` rows total. The seed uses `INSERT IGNORE`
+The three narrow roles above are the bundles this baseline seeded; each
+has since gained codes as the registry grew, so read `ROLE_SEEDS` in
+`scripts/test-db-seed.ts` for the current sets. The seed emits
+thirty-eight `role_permissions` rows today. It uses `INSERT IGNORE`
 on every statement, so running `yarn test:seed` twice produces no
 duplicate-key errors and no duplicate rows.
 
