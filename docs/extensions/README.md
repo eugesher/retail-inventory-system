@@ -150,15 +150,15 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| brand-entity.md | |
-| configurable-products-option-dependencies.md | |
-| digital-good-entitlements.md | |
-| dynamic-attribute-schemas.md | |
-| multi-locale-translation-tables.md | |
-| product-bundles.md | |
-| product-relations-and-recommendations.md | |
-| subscriptions-and-selling-plans.md | |
-| supplier-and-vendor.md | |
+| [brand-entity.md](brand-entity.md) | Brand as an orthogonal facet, not a category-tree node; logo reuses the polymorphic `MediaAsset`. |
+| [configurable-products-option-dependencies.md](configurable-products-option-dependencies.md) | Cross-option rules above the flat variant axis — pre-generate variants or evaluate rules at add-to-cart. |
+| [digital-good-entitlements.md](digital-good-entitlements.md) | Shipment-less fulfilment for non-physical variants; the entitlement is delivered through the notification pipeline. |
+| [dynamic-attribute-schemas.md](dynamic-attribute-schemas.md) | Typed, per-category attributes replacing the untyped `optionValues` map; reshapes the contract views. |
+| [multi-locale-translation-tables.md](multi-locale-translation-tables.md) | Per-locale translation rows filling the `customerLocale: null` seam the notification producers already ship. |
+| [product-bundles.md](product-bundles.md) | Kits and bundles over the `variantId` backbone; the open call is when to explode a bundle into cart lines. |
+| [product-relations-and-recommendations.md](product-relations-and-recommendations.md) | Curated product-to-product graph on the reserved `catalogProduct*` cache builders; computed recommendations stay out. |
+| [subscriptions-and-selling-plans.md](subscriptions-and-selling-plans.md) | Owns the plan definition and its relationship to the `price` ledger; the recurrence engine lives in order management. |
+| [supplier-and-vendor.md](supplier-and-vendor.md) | Owns the Supplier / Vendor party in a new Procurement service; four later guides build on it. |
 
 ### Inventory
 
