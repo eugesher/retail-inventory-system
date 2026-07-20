@@ -1,7 +1,7 @@
 # ADR-011: NotifierPort and the notification microservice as the per-module template
 
 - **Date**: 2026-05-13
-- **Status**: Accepted
+- **Status**: Accepted — the reference layout is **amended on two points** (the module file moved to the module root by [ADR-041](041-nest-module-as-the-module-composition-root.md); the health controller moved to `app/` by [ADR-044](044-system-health-fan-out.md), which also built the gateway-side probe §6 anticipated), and the two throwing scaffold adapters of §3 are **deleted** by [ADR-048](048-two-scaffold-adapters-that-were-never-wired.md). `INotifierPort` (§2) is unaffected.
 
 ---
 

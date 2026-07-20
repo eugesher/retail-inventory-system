@@ -1,7 +1,7 @@
 # ADR-036: Idempotency-key store and enforced optimistic concurrency
 
 - **Date**: 2026-06-29
-- **Status**: Accepted
+- **Status**: Accepted — **amended on two points**: `OCC_RETRY_ATTEMPTS` moves from four per-module copies into `libs/common/concurrency/` by [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md), and the per-module-retry-helper convention is **superseded** by [ADR-045](045-one-occ-retry-protocol.md), which centralises the loop, the log levels and the message texts in `runWithOccRetry`.
 
 ---
 
