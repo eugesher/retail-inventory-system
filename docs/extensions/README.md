@@ -253,4 +253,4 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| physical-retail-pos-terminals.md | |
+| [physical-retail-pos-terminals.md](physical-retail-pos-terminals.md) | All seven pieces of the shop floor in one file, because they arrive as one decision; argues that a till sale is an `Order` reached by a second creation path. |
