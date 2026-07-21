@@ -241,13 +241,13 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| approval-workflows.md | |
-| dynamic-abac-policies.md | |
-| mfa-enforcement.md | |
-| scoped-tenant-aware-roles.md | |
-| session-device-management.md | |
-| sso-saml-oidc-federation.md | |
-| staff-scheduling-and-shifts.md | |
+| [approval-workflows.md](approval-workflows.md) | A state machine in front of a use case, not a stage in the guard chain — the guard says who may request, the approval says whether this attempt was agreed to. |
+| [dynamic-abac-policies.md](dynamic-abac-policies.md) | Replaces the decision procedure rather than the grant; splits enforcement by whether the resource has to be loaded, because the claim guard is synchronous and pure. |
+| [mfa-enforcement.md](mfa-enforcement.md) | The staff-side mandate — enforced by not minting a session, never by rejecting a request that is trying to reach the enrolment route. |
+| [scoped-tenant-aware-roles.md](scoped-tenant-aware-roles.md) | Adds a scope to the grant, not to the code string — the permission regex forbids the shortcut, and the cache-key convention already reserves the tenant segment. |
+| [session-device-management.md](session-device-management.md) | Replaces one `refresh_token_hash` column with rows; the `jti` a session would key on is already minted and thrown away. |
+| [sso-saml-oidc-federation.md](sso-saml-oidc-federation.md) | Owns the staff login-path split into establish-a-subject and mint-a-session; the assertion never becomes the session token. |
+| [staff-scheduling-and-shifts.md](staff-scheduling-and-shifts.md) | A neighbouring bounded context in its own deployable — it references the staff identity by id and deliberately does not extend it. |
 
 ### Physical Retail
 

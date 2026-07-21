@@ -224,15 +224,15 @@ the guide describes the capability — **neither restates the other**. Four guid
 | *Locale resolution* — producer events ship `customerLocale: null` | `ab-template-testing.md` | Locale is already part of the template registry key, so a variant that differs by locale would measure the gap rather than the copy. |
 | *Staff deactivation / password reset* | `live-customer-messaging.md` | A departing agent holding open conversations is where that gap bites. |
 
-**One row was deliberately not cited.** The task brief named a third row — the delivery-row purge
-knob, "validated but unread" — as a natural anchor. It is **stale**: `README.md` still says
-`RETENTION_DELIVERY_DAYS` is Joi-validated and nothing reads it, but the code has
+**One row was deliberately not cited.** The *delivery-row purge worker* row — the retention knob
+described as "validated but unread" — looks like a natural anchor and is **stale**. `README.md` still
+says `RETENTION_DELIVERY_DAYS` is Joi-validated and nothing reads it, but the code has
 `PurgeAgedDeliveriesUseCase`, `DeliveryRetentionScheduler` (`@Cron`, `EVERY_DAY_AT_3AM`) and the
 `RETENTION_DELIVERY_DAYS` DI token all wired in `notifications.module.ts`. The purge is built. So
 `in-app-inbox-feed.md` treats the 90-day horizon as a **live constraint on reusing the delivery
-table** — which is what it now is — rather than citing a gap that has closed. Correcting the row is
-out of this slice's scope; it is recorded in `carryover-08.md` so the task that adds the return links
-does not propagate it.
+table** — which is what it now is — rather than citing a gap that has closed. Correcting the row
+itself belongs with the next revision of `README.md` §14, not here; no guide links to it, so nothing
+propagates the claim.
 
 ## Cross-links and ownership, this cluster
 
@@ -242,8 +242,8 @@ does not propagate it.
 - **`in-app-inbox-feed.md` and `push-device-token-registration.md`** each carry exactly one sentence
   acknowledging that they are two channels behind the same `NOTIFIER` port — push carries a message
   *out* to a device, an inbox holds it *until* fetched — and neither re-derives the other's transport.
-- **The segment is inherited, not redefined.** `customer-segments-and-tiers.md` (05) had already
-  named a future marketing capability as a consumer; this cluster is the second guide to lift that
-  seam (pricing was the first, in task-07).
+- **The segment is inherited, not redefined.** `customer-segments-and-tiers.md` had already named a
+  future marketing capability as a consumer; this cluster is the second to lift that seam — the
+  Pricing & Promotions guides were the first.
 - Every link points **backward** — to a guide from an earlier session, to a guide written earlier in
   this one, or to the root `README.md` section. Nothing in this cluster links forward.
