@@ -192,13 +192,13 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| b2b-company-hierarchies.md | |
-| crm-tags.md | |
-| customer-segments-and-tiers.md | |
-| loyalty-programs.md | |
-| mfa-and-household-grouping.md | |
-| social-login-providers.md | |
-| wishlists.md | |
+| [b2b-company-hierarchies.md](b2b-company-hierarchies.md) | A materialized-path tree of account nodes (the `Category` shape) above the B2B party; credit limits and contract-price scope roll up the tree. |
+| [crm-tags.md](crm-tags.md) | Staff-applied controlled-vocabulary labels on a customer; the label stays PII-free so an audited or emitted tag never re-seeds the erase. |
+| [customer-segments-and-tiers.md](customer-segments-and-tiers.md) | Owns the segment/tier grouping — static and dynamic; a marketing send over a segment is gated on `ConsentRecord` opt-in. |
+| [loyalty-programs.md](loyalty-programs.md) | An append-only points ledger with a derived balance, accrued off `retail.order.placed`; tiers are segments, redemption is tender-or-discount. |
+| [mfa-and-household-grouping.md](mfa-and-household-grouping.md) | Owns customer-facing opt-in MFA wrapping the login use case, plus household grouping; draws the customer-vs-staff MFA line. |
+| [social-login-providers.md](social-login-providers.md) | OAuth/OIDC login replacing the password seam and reusing `TOKEN_SERVICE`; adds a `FederatedIdentity` link and the null-password invariant call. |
+| [wishlists.md](wishlists.md) | A durable cart-shaped list minus checkout — no price snapshot, no OCC, no TTL, no reservation; live-priced and dropped on erase. |
 
 ### Returns & Refunds
 
