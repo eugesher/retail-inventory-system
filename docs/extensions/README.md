@@ -228,14 +228,14 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| ab-template-testing.md | |
-| abandoned-cart-automation.md | |
-| in-app-inbox-feed.md | |
-| live-customer-messaging.md | |
-| marketing-campaigns-and-segmentation.md | |
-| push-device-token-registration.md | |
-| scheduled-batch-newsletters.md | |
-| webhook-subscription-management-ui.md | |
+| [ab-template-testing.md](ab-template-testing.md) | Varies the template, never the renderer binding — a variant dimension on a registry that already stores many rows per key and picks one. |
+| [abandoned-cart-automation.md](abandoned-cart-automation.md) | The one notification triggered by an absence; a bounded sweep on the reservation-sweep pattern, leaving the `ABANDONED` status to erasure, which already owns it. |
+| [in-app-inbox-feed.md](in-app-inbox-feed.md) | A channel whose delivery is a read, not a send — near-free over the delivery row, except that its 90-day purge horizon was designed for an audit log. |
+| [live-customer-messaging.md](live-customer-messaging.md) | The cluster's only new deployable: bidirectional, stateful and connection-oriented, where every existing notification path is one-way and fire-and-forget. |
+| [marketing-campaigns-and-segmentation.md](marketing-campaigns-and-segmentation.md) | Owns audience resolution; inherits the segment, and fans the existing one-recipient marketing send out over a dated, snapshotted list. |
+| [push-device-token-registration.md](push-device-token-registration.md) | The token registry, not the transport — customer-owned device data that erasure must delete rather than null, and the one channel with no consent flag yet. |
+| [scheduled-batch-newsletters.md](scheduled-batch-newsletters.md) | Owns scheduling and pacing, not audience; a due-work tick with CAS claiming, made resumable by the dedupe key that already forbids a double-send. |
+| [webhook-subscription-management-ui.md](webhook-subscription-management-ui.md) | Calling *outward*, to a URL somebody else controls — which is why it is not just another routing key on the internal bus. |
 
 ### Staff & Access Control
 
