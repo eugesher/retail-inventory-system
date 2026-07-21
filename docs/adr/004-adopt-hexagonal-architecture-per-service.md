@@ -1,7 +1,7 @@
 # ADR-004: Adopt Hexagonal Architecture Per Service
 
 - **Date**: 2026-05-09
-- **Status**: Accepted (ports-location wording superseded — ports live under `application/ports/`; see References)
+- **Status**: Accepted (ports-location wording superseded by [ADR-017](017-architecture-lint-via-eslint-boundaries.md) — ports live under `application/ports/`, which is the binding port-surface element type; a `domain/ports/**` file has no element type and fails the boundary rules)
 
 ---
 

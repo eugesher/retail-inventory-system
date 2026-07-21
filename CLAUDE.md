@@ -133,7 +133,8 @@ Non-obvious facts, each worth a debugging cycle.
   `OCC_RETRY_ATTEMPTS`, `RESERVATION_TTL_MINUTES`, `RESERVATION_SWEEP_BATCH_SIZE`,
   `RESERVATION_SWEEP_TRANSACTION_SIZE`, `RESERVATION_SWEEP_INTERVAL_SECONDS`,
   `RETURN_WINDOW_DAYS`,
-  `IDEMPOTENCY_KEY_TTL_HOURS`, `CAPTURE_CLAIM_STALE_MINUTES`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
+  `IDEMPOTENCY_KEY_TTL_HOURS`, `CAPTURE_CLAIM_STALE_MINUTES`, `MAX_DELIVERY_ATTEMPTS`,
+  `RETENTION_DELIVERY_DAYS`, `OPS_NOTIFICATIONS_EMAIL`,
   `CONSENT_CACHE_TTL_SECONDS`, `CATALOG_DEFAULT_CURRENCY`, `RETAIL_DEFAULT_CURRENCY`,
   `CATALOG_GATEWAY_DEFAULT_CURRENCY`, `HEALTH_PROBE_TIMEOUT_MS`. The sole exception is
   `NOTIFIER_TEST_FLAKY` (test-only).
@@ -402,7 +403,7 @@ Ports: `NOTIFIER` (`LogNotifierAdapter` by default; `FlakyLogNotifierAdapter` wh
 `handlebars` import), `NOTIFICATION_TEMPLATE_REPOSITORY`, `NOTIFICATION_DELIVERY_REPOSITORY`,
 `NOTIFICATION_EVENTS_PUBLISHER`, `CONSENT_READER` (raw SELECT over the shared
 `consent_record`), `CONSENT_CACHE`, `MAX_DELIVERY_ATTEMPTS`, `OPS_NOTIFICATIONS_EMAIL`,
-`CONSENT_CACHE_TTL_SECONDS`.
+`CONSENT_CACHE_TTL_SECONDS`, `RETENTION_DELIVERY_DAYS`.
 `RenderAndDispatchUseCase` is the single persist-then-send pipeline every consumer calls.
 
 **event-store** `modules/audit-and-events/` (ADR-034/035/039/042) — RMQ-only, no HTTP,
@@ -512,11 +513,14 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `055`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `056`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under
-[`docs/audits/`](docs/audits/).
+[`docs/audits/`](docs/audits/). One sketch per capability the system deliberately does **not**
+have lives under [`docs/extensions/`](docs/extensions/), clustered and indexed by its own
+`README.md`; `spec/extension-guides.spec.ts` asserts that folder's front matter, section shape,
+`attaches_to` paths and index bijection (ADR-055).
 
 **One architectural exception: `ARCH-LINT-EX-02`** (ADR-017 §6) — the gateway `auth` barrel is
 the sole cross-module-consumable barrel (`iam` / `customer-admin`).
@@ -531,5 +535,6 @@ and `spec/architecture-lint.spec.ts` guards.
 
 **An obligation queued behind a condition must be registered in `spec/transition-windows.spec.ts`**
 with an owner and a `reviewBy` date — the test goes red on that date (ADR-053). A *reserved surface*
-(an unused `CACHE_KEYS` builder, an unused `EXCHANGES` member) is **not** a window: nobody owes
-anything. The question is whether a future event is supposed to make somebody act.
+(an unused `CACHE_KEYS` builder, an unused `EXCHANGES` member) and a `docs/extensions/` guide are
+**not** windows: nobody owes anything. The question is whether a future event is supposed to make
+somebody act.
