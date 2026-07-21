@@ -17,9 +17,11 @@
 // sketch describes an architecture three refactors old passes every assertion here. Saying so is the
 // point — a reader who believes the folder is machine-verified will trust it further than it earns.
 //
-// There is deliberately **no assertion on the total number of guides** while the folder is being
-// filled in: a count that fails for eight consecutive sittings is a count everyone learns to skip.
-// It arrives once the folder is whole.
+// **The counts below were deliberately absent while the folder was being filled in** — a count that
+// fails for eight consecutive sittings is a count everyone learns to skip. They went in on the
+// change that completed the folder, and from here they are what notices a guide being added or
+// deleted without the index being touched. Changing a count is fine; changing it *without* touching
+// `README.md` in the same commit is the thing they exist to make impossible.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -41,6 +43,24 @@ const CLUSTERS = [
   'Staff & Access Control',
   'Physical Retail',
 ] as const;
+
+// The size of the finished folder, and how it is distributed. The per-cluster figures are the
+// assertion that earns its keep: a guide filed under the wrong `cluster` still has valid front
+// matter, six correct sections, live `attaches_to` paths and an index row — **every other check here
+// passes** — and it is simply absent from the section of the index a reader would look in.
+const EXPECTED_TOTAL = 64;
+
+const EXPECTED_PER_CLUSTER: Record<(typeof CLUSTERS)[number], number> = {
+  'Product Catalog': 9,
+  Inventory: 8,
+  'Order Management': 10,
+  'Customer & Identity': 7,
+  'Returns & Refunds': 6,
+  'Pricing & Promotions': 8,
+  'Notifications & Events': 8,
+  'Staff & Access Control': 7,
+  'Physical Retail': 1,
+};
 
 // The unit is `capability` — this repository's own word for a slice of work, the one
 // `docs/implementation/` is organised by. Note the en-dash in the middle value.
@@ -137,6 +157,38 @@ describe('extension guides (ADR-055)', () => {
   it('the folder and its index exist', () => {
     expect(existsSync(EXTENSIONS_DIR)).toBe(true);
     expect(existsSync(INDEX_FILE)).toBe(true);
+  });
+
+  it('holds exactly the guides the index is built around', () => {
+    const violations: string[] = [];
+
+    if (guideNames.length !== EXPECTED_TOTAL) {
+      violations.push(
+        `docs/extensions/ holds ${guideNames.length} guides, expected ${EXPECTED_TOTAL}. ` +
+          `A guide was added or deleted. Update EXPECTED_TOTAL and EXPECTED_PER_CLUSTER here AND ` +
+          `the matching cluster table in README.md in the same change — the point of this ` +
+          `assertion is that the two cannot drift apart quietly.`,
+      );
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('every cluster holds the number of guides it is expected to', () => {
+    const actual = new Map<string, number>(CLUSTERS.map((c) => [c, 0]));
+    for (const guide of guides) {
+      const cluster = guide.frontMatter.cluster;
+      if (cluster && actual.has(cluster)) actual.set(cluster, (actual.get(cluster) ?? 0) + 1);
+    }
+
+    const violations = CLUSTERS.filter((c) => actual.get(c) !== EXPECTED_PER_CLUSTER[c]).map(
+      (c) =>
+        `cluster '${c}' holds ${actual.get(c)} guides, expected ${EXPECTED_PER_CLUSTER[c]}. ` +
+        `Either a guide moved cluster (check its front matter against the index table it is ` +
+        `listed under) or one was added or removed.`,
+    );
+
+    expect(violations).toEqual([]);
   });
 
   it('every guide carries the four required front matter keys', () => {
@@ -288,6 +340,23 @@ describe('extension guides (ADR-055)', () => {
 
       // A guide not yet authored is absent from both sides, so this holds while the folder fills up.
       expect({ orphans, duplicates }).toEqual({ orphans: [], duplicates: [] });
+    });
+
+    // The bijection above holds for any size — including a half-filled folder, which is why it was
+    // safe to have from the start. Pinning the size is what turns it into "the index lists all of
+    // them": an orphan guide and a missing row are now two different failures, not one silence.
+    it('links exactly as many files as the folder holds', () => {
+      const unique = new Set(linkedGuides);
+      const violations: string[] = [];
+
+      if (unique.size !== EXPECTED_TOTAL) {
+        violations.push(
+          `README.md links ${unique.size} distinct guides, expected ${EXPECTED_TOTAL}. ` +
+            `A guide was authored without an index row, or a row was removed without its guide.`,
+        );
+      }
+
+      expect(violations).toEqual([]);
     });
 
     it('has no link pointing at a file that does not exist', () => {
