@@ -177,16 +177,16 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| b2b-quote-po-credit-terms.md | |
-| bnpl-state-machines.md | |
-| dropshipping-vendor-routing.md | |
-| fraud-and-risk-scoring.md | |
-| gift-cards-and-store-credit.md | |
-| marketplace-seller-payouts.md | |
-| replacement-orders-distinct-entity.md | |
-| shipping-rate-engine.md | |
-| subscriptions-recurring-orders.md | |
-| tax-computation-engine.md | |
+| [b2b-quote-po-credit-terms.md](b2b-quote-po-credit-terms.md) | Owns the B2B account, negotiable quote and net-terms model; a quote is a mutable pre-order, credit terms decouple capture from ship. |
+| [bnpl-state-machines.md](bnpl-state-machines.md) | Installment tender on the existing `PAYMENT_GATEWAY` seam; the async provider confirmation reuses ADR-052's `CAPTURING` capture claim. |
+| [dropshipping-vendor-routing.md](dropshipping-vendor-routing.md) | Routes a `Fulfillment` to a vendor-backed `dropship-virtual` location; builds on the supplier party, ships nothing from own stock. |
+| [fraud-and-risk-scoring.md](fraud-and-risk-scoring.md) | Owns the risk-scoring seam — an external `RISK_SCORING_GATEWAY` port at place-time that can allow, hold or block, carrying no PII. |
+| [gift-cards-and-store-credit.md](gift-cards-and-store-credit.md) | Owns the store-credit ledger (append-only, derived balance) and "a tender that is not a card" riding opaque `Payment.method`. |
+| [marketplace-seller-payouts.md](marketplace-seller-payouts.md) | One buyer capture fans out into an append-only per-seller `Payout` ledger minus commission; builds on the supplier-as-seller party. |
+| [replacement-orders-distinct-entity.md](replacement-orders-distinct-entity.md) | Owns the replacement-as-a-new-`Order` argument — a zero-value order linked by `replacesOrderId`, reusing the whole order subsystem. |
+| [shipping-rate-engine.md](shipping-rate-engine.md) | Fills the waiting `shippingTotalMinor` seam via a `SHIPPING_RATE_ENGINE` port rating the destination `Address` at checkout. |
+| [subscriptions-recurring-orders.md](subscriptions-recurring-orders.md) | The recurrence engine generating an `Order` per cycle and running the dunning ladder; quotes the plan/engine boundary from the catalog side. |
+| [tax-computation-engine.md](tax-computation-engine.md) | Owns the tax call-out seam — an external `TAX_ENGINE` writing the captured-not-computed `taxAmountMinor`; fills the `TaxCategory`-is-a-label gap. |
 
 ### Customer & Identity
 
