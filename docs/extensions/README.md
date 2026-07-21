@@ -204,12 +204,12 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| advance-replacement.md | |
-| exchanges-as-first-class-entity.md | |
-| refund-to-store-credit.md | |
-| repair-workflows.md | |
-| return-fraud-scoring.md | |
-| vendor-rmas.md | |
+| [advance-replacement.md](advance-replacement.md) | Ships the substitute before the return arrives — an exchange whose outbound leg fires first, gated by a payment hold a deadline sweep captures on non-arrival. |
+| [exchanges-as-first-class-entity.md](exchanges-as-first-class-entity.md) | Owns the exchange / replacement / advance-replacement split; one aggregate binding an inbound RMA to an outbound `Order` so the swap can't drift apart. |
+| [refund-to-store-credit.md](refund-to-store-credit.md) | A refund whose destination is the store-credit ledger, not the card gateway — a destination discriminator on `Refund`, inheriting the ledger wholesale. |
+| [repair-workflows.md](repair-workflows.md) | A `repair` disposition that leaves and comes back — non-terminal, deferring a line's final restock or return-to-customer until the repair closes. |
+| [return-fraud-scoring.md](return-fraud-scoring.md) | Scores a return at Open against the inherited `RISK_SCORING_GATEWAY` block/hold/allow seam; the score request and its events stay id-only. |
+| [vendor-rmas.md](vendor-rmas.md) | The outbound mirror of a customer return — units routed back to the supplier that supplied them, with a supplier-facing lifecycle and a ledger movement. |
 
 ### Pricing & Promotions
 
