@@ -38,7 +38,7 @@ Three rails bind every guide, and each was confirmed against source rather than 
 
 ## The seven guides
 
-### [customer-segments-and-tiers.md](../../extensions/customer-segments-and-tiers.md)
+### [customer-segments-and-tiers.md](../../extensions/customer-and-identity/customer-segments-and-tiers.md)
 
 - **Claim.** A named grouping of customers — static (curated list) or dynamic (rule over attributes and the
   order stream). **Owns the segment/tier concept** for the whole system; a tier is a ranked segment with
@@ -48,7 +48,7 @@ Three rails bind every guide, and each was confirmed against source rather than 
 - **Hardest to reverse.** Whether static and dynamic segments are one `kind`-discriminated aggregate or two.
   Everything downstream reads "membership", so a later reshape touches every consumer.
 
-### [loyalty-programs.md](../../extensions/loyalty-programs.md)
+### [loyalty-programs.md](../../extensions/customer-and-identity/loyalty-programs.md)
 
 - **Claim.** An append-only points **ledger** with a **derived balance** (the `stock_movement` /
   store-credit precedent), accrued off the order-placed event. Tiers are segments (linked, not re-modelled);
@@ -59,17 +59,17 @@ Three rails bind every guide, and each was confirmed against source rather than 
 - **Hardest to reverse.** Redemption as a `Payment` tender vs. an order discount — it decides whether
   loyalty plugs into `Payment` or into the discount total.
 
-### [b2b-company-hierarchies.md](../../extensions/b2b-company-hierarchies.md)
+### [b2b-company-hierarchies.md](../../extensions/customer-and-identity/b2b-company-hierarchies.md)
 
 - **Claim.** A tree of accounts above the B2B party, with credit/invoicing/pricing roll-up. **Inherits the
-  `BusinessAccount` party** from [b2b-quote-po-credit-terms.md](../../extensions/b2b-quote-po-credit-terms.md)
+  `BusinessAccount` party** from [b2b-quote-po-credit-terms.md](../../extensions/order-management/b2b-quote-po-credit-terms.md)
   — does not re-model it.
 - **Attaches to.** `Customer` (the individual buyer at a leaf) and
   [`category.model.ts`](../../../apps/catalog-microservice/src/modules/catalog/domain/category.model.ts) —
   the **materialized-path** shape precedent (ADR-029): a proven, cycle-safe hierarchy already in the code.
 - **Hardest to reverse.** Where the credit limit lives — one pool at the root, per-node sub-limits, or both.
 
-### [wishlists.md](../../extensions/wishlists.md)
+### [wishlists.md](../../extensions/customer-and-identity/wishlists.md)
 
 - **Claim.** A durable saved-items list — "a cart that never checks out", with the analogy's breaks named.
 - **Attaches to.**
@@ -79,7 +79,7 @@ Three rails bind every guide, and each was confirmed against source rather than 
   OCC-and-CAS checkout machinery (a wishlist never converts), the TTL (a wishlist is durable), and the fixed
   currency (a wishlist is currency-agnostic).
 
-### [social-login-providers.md](../../extensions/social-login-providers.md)
+### [social-login-providers.md](../../extensions/customer-and-identity/social-login-providers.md)
 
 - **Claim.** OAuth/OIDC login that **replaces the password seam** (`PASSWORD_HASHER`) and **reuses
   `TOKEN_SERVICE`** unchanged. Adds a `FederatedIdentity` link and a `LoginWithProvider` use case.
@@ -90,7 +90,7 @@ Three rails bind every guide, and each was confirmed against source rather than 
   so a social-only **active** customer needs the invariant relaxed (authenticatable via a federated identity)
   or a forced password. This is a real code constraint, not a hypothetical.
 
-### [mfa-and-household-grouping.md](../../extensions/mfa-and-household-grouping.md)
+### [mfa-and-household-grouping.md](../../extensions/customer-and-identity/mfa-and-household-grouping.md)
 
 - **Claim.** Customer-facing **opt-in** MFA wrapping the login use case, plus household grouping. **Owns the
   customer-facing MFA story** and draws the customer/staff line (below).
@@ -101,7 +101,7 @@ Three rails bind every guide, and each was confirmed against source rather than 
 - **Hardest to reverse.** MFA method priority (TOTP vs. SMS vs. both) — a telephony dependency and SIM-swap
   risk ride on the choice.
 
-### [crm-tags.md](../../extensions/crm-tags.md)
+### [crm-tags.md](../../extensions/customer-and-identity/crm-tags.md)
 
 - **Claim.** Staff-applied controlled-vocabulary labels on a customer. The label **must stay PII-free**
   because a tag is a staff-audited (and possibly emitted) action — a personal-data label would re-seed the
@@ -134,7 +134,7 @@ and its fate under `Customer.erase()`:
 
 Stated once here so the staff-side enforcement capability (Staff & Access Control) can be read against it:
 
-- **Customer MFA (owned by [mfa-and-household-grouping.md](../../extensions/mfa-and-household-grouping.md)) is
+- **Customer MFA (owned by [mfa-and-household-grouping.md](../../extensions/customer-and-identity/mfa-and-household-grouping.md)) is
   opt-in self-service.** The customer chooses to enrol, manages their own recovery codes, may
   "remember this device", and may disenrol. There is **no mandate** — declining still permits a password
   login. **Consent to enrol is the entire control model.**

@@ -10,17 +10,17 @@ been reworked more than once, and `docs/implementation/` describes the shape at 
 
 ## The ten guides
 
-### [subscriptions-recurring-orders.md](../../extensions/subscriptions-recurring-orders.md)
+### [subscriptions-recurring-orders.md](../../extensions/order-management/subscriptions-recurring-orders.md)
 
 - **Claim.** The recurrence engine — a scheduler that generates a new `Order` per cycle, resolves price
-  at charge time, and runs the dunning ladder. Links [subscriptions-and-selling-plans.md](../../extensions/subscriptions-and-selling-plans.md)
+  at charge time, and runs the dunning ladder. Links [subscriptions-and-selling-plans.md](../../extensions/product-catalog/subscriptions-and-selling-plans.md)
   and quotes its plan/engine boundary.
 - **Attaches to.** `Order` and the orders scheduling infrastructure at
   [`infrastructure/scheduling/`](../../../apps/retail-microservice/src/modules/orders/infrastructure/scheduling/).
 - **Hardest to reverse.** Whether a subscription *instance* is a new aggregate or order metadata. Modelled
   as a mutable `Subscription` aggregate that produces orders; unwinding that later is a data migration.
 
-### [gift-cards-and-store-credit.md](../../extensions/gift-cards-and-store-credit.md)
+### [gift-cards-and-store-credit.md](../../extensions/order-management/gift-cards-and-store-credit.md)
 
 - **Claim.** A tender that is not a card. **Owns the store-credit ledger** and the "opaque
   `Payment.method`" argument.
@@ -29,24 +29,24 @@ been reworked more than once, and `docs/implementation/` describes the shape at 
   number. This is the shape the returns cluster's refund-to-store-credit inherits; changing it after the
   fact rewrites every balance.
 
-### [dropshipping-vendor-routing.md](../../extensions/dropshipping-vendor-routing.md)
+### [dropshipping-vendor-routing.md](../../extensions/order-management/dropshipping-vendor-routing.md)
 
 - **Claim.** Route a `Fulfillment` to a vendor who ships directly, via a vendor-backed virtual location.
-  Links [supplier-and-vendor.md](../../extensions/supplier-and-vendor.md).
+  Links [supplier-and-vendor.md](../../extensions/product-catalog/supplier-and-vendor.md).
 - **Attaches to.** `Fulfillment` and `FulfillmentLine`.
 - **Hardest to reverse.** Whether dropship stock participates in availability at all — a "vendor has
   infinite stock" assumption removes no-oversell for those lines and is hard to retrofit a stock feed onto.
 
-### [marketplace-seller-payouts.md](../../extensions/marketplace-seller-payouts.md)
+### [marketplace-seller-payouts.md](../../extensions/order-management/marketplace-seller-payouts.md)
 
 - **Claim.** One buyer capture fans out into per-seller payouts minus commission. Links
-  [supplier-and-vendor.md](../../extensions/supplier-and-vendor.md) (the seller *is* the supplier party).
+  [supplier-and-vendor.md](../../extensions/product-catalog/supplier-and-vendor.md) (the seller *is* the supplier party).
 - **Attaches to.** `Payment` and `Refund`.
 - **Hardest to reverse.** Split capture vs. split settlement — whether the buyer's money is captured once
   and redistributed, or captured directly to each seller. The first keeps `Payment` a single row; the
   second needs a split-payment gateway. Everything downstream hangs off that choice.
 
-### [b2b-quote-po-credit-terms.md](../../extensions/b2b-quote-po-credit-terms.md)
+### [b2b-quote-po-credit-terms.md](../../extensions/order-management/b2b-quote-po-credit-terms.md)
 
 - **Claim.** A negotiable `Quote` (a mutable pre-order), a `BusinessAccount` party, and net-terms payment.
   **Owns the B2B account/quote/credit-terms model.**
@@ -54,7 +54,7 @@ been reworked more than once, and `docs/implementation/` describes the shape at 
 - **Hardest to reverse.** How immutable an accepted quote is before it converts — quoted price vs. live
   price at conversion. It fixes the negotiation's meaning and the whole B2B pricing story built on it.
 
-### [fraud-and-risk-scoring.md](../../extensions/fraud-and-risk-scoring.md)
+### [fraud-and-risk-scoring.md](../../extensions/order-management/fraud-and-risk-scoring.md)
 
 - **Claim.** A score requested at place-time that can allow, hold or block. **Owns the risk-scoring seam**,
   and states that scoring is external.
@@ -64,7 +64,7 @@ been reworked more than once, and `docs/implementation/` describes the shape at 
 - **Hardest to reverse.** Synchronous block vs. asynchronous review, and fail-open vs. fail-closed on a
   provider outage — latency and risk trade-offs baked into the place path.
 
-### [tax-computation-engine.md](../../extensions/tax-computation-engine.md)
+### [tax-computation-engine.md](../../extensions/order-management/tax-computation-engine.md)
 
 - **Claim.** An external engine called at place-time, writing the captured-not-computed `taxAmountMinor`.
   **Owns the tax call-out seam.** Points at the [`Not built yet` tax gap](../../../README.md#14-not-built-yet).
@@ -74,23 +74,23 @@ been reworked more than once, and `docs/implementation/` describes the shape at 
 - **Hardest to reverse.** Estimate-at-cart vs. commit-at-place, and tax-inclusive vs. tax-exclusive
   pricing — the second decides whether the engine adds or subtracts from the ledger price.
 
-### [shipping-rate-engine.md](../../extensions/shipping-rate-engine.md)
+### [shipping-rate-engine.md](../../extensions/order-management/shipping-rate-engine.md)
 
 - **Claim.** Rate the destination `Address` at checkout, writing the waiting `shippingTotalMinor` seam.
 - **Attaches to.** `Fulfillment` (the shipment origin) and `Address` (the destination).
 - **Hardest to reverse.** Where shippable weight/dimensions live — the catalog has no weight attribute
   today, so rating depends on a catalog extension it cannot supply itself.
 
-### [bnpl-state-machines.md](../../extensions/bnpl-state-machines.md)
+### [bnpl-state-machines.md](../../extensions/order-management/bnpl-state-machines.md)
 
 - **Claim.** An installment tender whose async confirmation reuses ADR-052's capture claim. Links
-  [gift-cards-and-store-credit.md](../../extensions/gift-cards-and-store-credit.md) for the non-card-tender
+  [gift-cards-and-store-credit.md](../../extensions/order-management/gift-cards-and-store-credit.md) for the non-card-tender
   argument.
 - **Attaches to.** `Payment` (the `CAPTURING` state) and the `PAYMENT_GATEWAY` port.
 - **Hardest to reverse.** Webhook trust and idempotency — a provider webhook is an untrusted at-least-once
   inbound, and making its handler non-double-settling is the core correctness problem.
 
-### [replacement-orders-distinct-entity.md](../../extensions/replacement-orders-distinct-entity.md)
+### [replacement-orders-distinct-entity.md](../../extensions/order-management/replacement-orders-distinct-entity.md)
 
 - **Claim.** A replacement is a new, zero-value `Order` linked to the original. **Owns the
   replacement-as-a-new-`Order` argument.**

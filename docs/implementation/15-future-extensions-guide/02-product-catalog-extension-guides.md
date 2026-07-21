@@ -105,7 +105,7 @@ switching is a full re-translation migration.
 ## Why `Supplier` is not a catalog entity
 
 The register places the Supplier / Vendor party in a **Procurement bounded context**, and the
-[supplier and vendor](../../extensions/supplier-and-vendor.md) guide makes that concrete: a new
+[supplier and vendor](../../extensions/product-catalog/supplier-and-vendor.md) guide makes that concrete: a new
 deployable, `apps/procurement-microservice/`, not a `supplier` column hung off `product_variant`.
 
 The reasoning is weight class. A party that owns purchase orders, goods-receipt records and payment
@@ -125,7 +125,7 @@ Four later guides build directly on this and must not re-model it: consigned / v
 inventory, dropshipping vendor routing, marketplace seller payouts, and vendor RMAs. What they inherit
 is fixed here — the party identity, the `variantId`-keyed supply relationship, and the event surface —
 so those guides link back rather than redefining a supplier three different ways. A brand is
-deliberately kept separate from a supplier: the [brand](../../extensions/brand-entity.md) guide owns
+deliberately kept separate from a supplier: the [brand](../../extensions/product-catalog/brand-entity.md) guide owns
 the marketing identity on the product, this one owns the party the goods were bought from, and one
 variant can carry one brand while being sourced from several suppliers.
 
@@ -135,7 +135,7 @@ The subscription story splits across two guides, and the line between them is dr
 not have to be renegotiated later.
 
 **Plan definition — the catalog side, owned by
-[subscriptions and selling plans](../../extensions/subscriptions-and-selling-plans.md).** A
+[subscriptions and selling plans](../../extensions/product-catalog/subscriptions-and-selling-plans.md).** A
 `SellingPlan` says which variants are subscribable, on which cadences, and how the recurring price
 relates to the one-off `price` ledger row for the same variant. It references `variantId` opaquely and
 states a *relationship* to the ledger — a discount off the resolved active price, or a plan-scoped row

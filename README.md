@@ -29,7 +29,8 @@ start at [`docs/adr/index.md`](docs/adr/index.md).
 12. [Caching](#12-caching)
 13. [Background jobs](#13-background-jobs)
 14. [Not built yet](#14-not-built-yet)
-15. [Documentation map](#15-documentation-map)
+15. [Extensions and future expansion](#15-extensions-and-future-expansion)
+16. [Documentation map](#16-documentation-map)
 
 ---
 
@@ -301,10 +302,13 @@ libs/
   observability/  # Pino config, correlation/, OTel tracer.ts (deep-import path)
 docs/adr/            # architecture decision records — the durable rationale
 docs/implementation/ # per-capability walkthroughs, numbered by delivery order
+docs/extensions/     # one sketch per capability the system deliberately does not have
+docs/audits/         # point-in-time review findings
 migrations/          # retail_db migrations + migrations/eventstore/
 http/                # Kulala + posting.sh request collections
 test/                # e2e suites (gateway HTTP in, public state out)
-spec/                # architecture-lint regression fixtures
+spec/                # repository-integrity specs: architecture-lint fixtures,
+                     #   transition windows, extension-guide contract
 ```
 
 ### Shared libraries
@@ -439,7 +443,8 @@ The colocated **`pricing`** module is *not* a separate deployable — a price at
 `(variantId, currency)`-scoped, time-bounded ledger: a change appends a row and closes the
 predecessor's `[validFrom, validTo)` interval, with at most one open row per scope
 (app close-in-transaction plus a generated-column UNIQUE backstop). `tax_category` is a
-classification **label only** — rates and jurisdictions are out of scope.
+classification **label only**; rates and jurisdictions attach to it rather than living in it, and
+what that would take is sketched in [`docs/extensions/tax-rate-tables.md`](docs/extensions/pricing-and-promotions/tax-rate-tables.md).
 `catalog.price.set` is one command for both Set and Schedule, distinguished by `validFrom`;
 `catalog.price.select` resolves `(variantId, currency, asOf)` to a single price,
 priority DESC then `validFrom` DESC.
@@ -1293,6 +1298,7 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 | --- | --- | --- |
 | `API_GATEWAY_PREFIX` | — | global route prefix (`api` in compose) |
 | `API_GATEWAY_USE_API_REFERENCE` | `NODE_ENV !== 'production'` | serve `/api/reference` |
+| `HEALTH_PROBE_TIMEOUT_MS` | `2000` | bounds **one** liveness probe, not the fan-out — the five run concurrently ([§6](#6-http-api)) |
 | `DATABASE_LOGGING` | `NODE_ENV !== 'production'` | TypeORM query log |
 | `DEFAULT_CURRENCY` | `USD` | ISO-4217 currency the catalog publish price gate resolves against |
 | `LOG_LEVEL` | `debug` dev / `info` prod | `trace` … `fatal` |
@@ -1305,9 +1311,10 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 | `RETURN_WINDOW_DAYS` | `30` | a `shipped` order is returnable only within this window; a `delivered` one always is |
 | `OCC_RETRY_ATTEMPTS` | `5` | bounded retry budget for version-checked writes |
 | `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows |
+| `CAPTURE_CLAIM_STALE_MINUTES` | `15` | how long a payment may sit `capturing` before the report names it; the report resolves nothing ([§13](#13-background-jobs)) |
 | `OPS_NOTIFICATIONS_EMAIL` | `ops@example.com` | mailbox for system-only notifications with no customer recipient |
 | `MAX_DELIVERY_ATTEMPTS` | `3` | attempts before a delivery is abandoned and `notifications.delivery.failed` is emitted |
-| `RETENTION_DELIVERY_DAYS` | `90` | delivery-row retention; Joi-validated, no reader — see [Not built yet](#14-not-built-yet) |
+| `RETENTION_DELIVERY_DAYS` | `90` | delivery-row retention horizon; the nightly purge hard-deletes rows older than this ([§13](#13-background-jobs)) |
 | `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300` | staleness safety net; the consent cache is kept fresh by events, not TTL |
 | `NOTIFIER_TEST_FLAKY` | `false` | **test-only** — swaps in a flaky notifier that fails the first dispatch of any `__FAIL_ONCE__`-marked body. Never set it outside the retry e2e suite. |
 | `AUTH_ARGON2_MEMORY_COST` | `19456` KiB | OWASP 2024 minimum for argon2id |
@@ -1747,33 +1754,58 @@ See [ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md).
 
 Deliberate gaps, each with the seam already in place:
 
+A row here names a **seam inside the core** that is built but unfilled — a port with one adapter, a
+column nothing reads, a mutator nothing calls. A capability that sits *outside* the core gets a
+sketch in [`docs/extensions/`](docs/extensions/) instead
+([§15](#15-extensions-and-future-expansion)). Where both apply, the row links the sketch and neither
+one restates the other.
+
 | Gap | Seam that exists |
 | --- | --- |
 | Free-text / JSON-path search over an event `payload` or an audit `before` / `after` | the columns are returned by `GET /api/audit/*` but no index can serve a predicate over them, so none is offered ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
 | Keyset (cursor) pagination for deep offsets over `domain_event` | `clampPageWindow` bounds the page, not the offset; `skip((page - 1) * size)` still walks the skipped rows ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
 | Reservation retention / purge of `expired` rows | the sweep flips a hold to `expired` and leaves the row; the `(status, expires_at)` index that finds the sweep's candidates would find a purge's, and `stock_movement` already carries the release trail ([ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md)) |
 | Event retention / purge / event-sourced replay | `ris_eventstore` is a separate, independently truncatable database ([ADR-034](docs/adr/034-isolated-eventstore-database.md)) and `domain_event` stores every `payload` verbatim — but `append` is the only mutating verb on either log's port, so nothing can delete a row |
-| Delivery-row purge worker | `RETENTION_DELIVERY_DAYS` is Joi-validated; nothing reads it yet |
-| Real payment processor, partial captures, a gateway `fail` outcome | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter` |
-| ESP webhook ingestion (signature verification, provider-payload mapping) | `notification.delivery.record-outcome` RPC, no HTTP route |
-| Email / webhook notifier transports | `NOTIFIER` port; `LogNotifierAdapter` is the default binding |
-| Locale resolution | producer events ship `customerLocale: null` |
-| Tax rates and jurisdictions | `TaxCategory` is a label only |
-| Staff deactivation / password reset | `StaffUser` carries a `status` and the aggregate can suspend; nothing calls it. The same shape of gap `POST /api/iam/staff` closed ([ADR-047](docs/adr/047-staff-user-creation-over-http.md)) |
+| Real payment processor, partial captures, a gateway `fail` outcome | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter`. Card-present is the sharper end of the same gap — [`physical-retail-pos-terminals.md`](docs/extensions/physical-retail/physical-retail-pos-terminals.md) |
+| ESP webhook ingestion (signature verification, provider-payload mapping) | `notification.delivery.record-outcome` RPC, no HTTP route. Sketched from the transport side in [`webhook-subscription-management-ui.md`](docs/extensions/notifications-and-events/webhook-subscription-management-ui.md); [`ab-template-testing.md`](docs/extensions/notifications-and-events/ab-template-testing.md) is blocked on it |
+| Email / webhook notifier transports | `NOTIFIER` port; `LogNotifierAdapter` is the default binding. Three sketches sit behind it unchanged — [`webhook-subscription-management-ui.md`](docs/extensions/notifications-and-events/webhook-subscription-management-ui.md), [`in-app-inbox-feed.md`](docs/extensions/notifications-and-events/in-app-inbox-feed.md), [`push-device-token-registration.md`](docs/extensions/notifications-and-events/push-device-token-registration.md) |
+| Locale resolution | producer events ship `customerLocale: null` — see [`ab-template-testing.md`](docs/extensions/notifications-and-events/ab-template-testing.md) for what the null blocks |
+| Tax rates and jurisdictions | `TaxCategory` is a label only — [`tax-rate-tables.md`](docs/extensions/pricing-and-promotions/tax-rate-tables.md) (the rates) and [`tax-computation-engine.md`](docs/extensions/order-management/tax-computation-engine.md) (the call) |
+| Staff deactivation / password reset | `StaffUser` carries a `status` and the aggregate can suspend; nothing calls it. The same shape of gap `POST /api/iam/staff` closed ([ADR-047](docs/adr/047-staff-user-creation-over-http.md)). Reached from two sides in [`session-device-management.md`](docs/extensions/staff-and-access-control/session-device-management.md) and [`sso-saml-oidc-federation.md`](docs/extensions/staff-and-access-control/sso-saml-oidc-federation.md) |
 | Media upload pipeline | `MediaAsset.uri` is an opaque, already-uploaded reference |
 | Category archive / rename endpoints, cached category tree | reserved `catalogCategory*` cache builders |
 | Catalog / pricing cache-aside | reserved key builders, no `CacheModule` import |
-| Multi-tenancy | `t:<tenantId>` cache-key segment, opt-in |
+| Multi-tenancy | `t:<tenantId>` cache-key segment, opt-in — the authorization side is sketched in [`scoped-tenant-aware-roles.md`](docs/extensions/staff-and-access-control/scoped-tenant-aware-roles.md) |
 | Transactional outbox | dual-publish is best-effort; the firehose absorbs redelivery idempotently |
 
 ---
 
-## 15. Documentation map
+## 15. Extensions and future expansion
+
+[`docs/extensions/`](docs/extensions/) holds one forward-looking sketch per capability this system
+deliberately does not have, each describing how it would attach to the code that exists today —
+which port it would bind, which aggregate it would extend, what it would cost. Start at
+[`docs/extensions/README.md`](docs/extensions/README.md), which indexes them by cluster.
+
+It is **not** a register of rejected features and **not** a backlog. Nothing in it is scheduled, and
+a sketch carries no commitment that the capability will ever be built. A guide is deleted when its
+capability lands, rather than annotated as done.
+
+The difference from [§14](#14-not-built-yet) directly above is what the entry is *about*: a ledger
+row names a seam that already exists in the code and has no filler, while a guide describes a
+capability that lives outside the core entirely. [ADR-055](docs/adr/055-where-deliberately-unbuilt-work-is-recorded.md)
+carries the admission question that routes a sentence to one or the other, and
+[`spec/extension-guides.spec.ts`](spec/extension-guides.spec.ts) enforces the folder's shape.
+
+---
+
+## 16. Documentation map
 
 | Where | What it holds |
 | --- | --- |
 | [`docs/adr/`](docs/adr/) | The durable rationale — one decision per file, Nygard hybrid (Status, Context, Decision, Alternatives, Consequences). Start at [`index.md`](docs/adr/index.md). Numbering and slug rules are themselves an ADR ([003](docs/adr/003-record-architecture-decisions.md)). |
 | [`docs/implementation/`](docs/implementation/) | Per-capability walkthroughs, numbered by delivery order — the "how and why this specific thing works" notes an ADR is too coarse for. |
+| [`docs/extensions/`](docs/extensions/) | One sketch per capability the system deliberately does not have, grouped into nine clusters — how each would attach if it were ever wanted. See [§15](#15-extensions-and-future-expansion). |
 | [`docs/audits/`](docs/audits/) | Point-in-time review findings. |
 | `eslint.config.mjs` | The authoritative answer to "where does this file belong". |
 | The `*RpcExceptionFilter` of each module | The authoritative error-code → HTTP-status tables. |

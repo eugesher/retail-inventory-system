@@ -1,7 +1,7 @@
 # The extensions index, and the checks that keep it in step
 
 [`docs/extensions/README.md`](../../extensions/README.md) is the front door to sixty-four capability
-sketches. This note covers the finished index: what it holds, the four mechanical checks that keep it
+sketches. This note covers the finished index: what it holds, the five mechanical checks that keep it
 honest against the folder beside it, and — the part that matters most — what those checks cannot
 reach.
 
@@ -51,37 +51,53 @@ and that file ever disagree, the file is right and the build is already red.
 
 ## 3. How the index stays in step with the folder
 
-Four assertions, each catching a different way the two can drift apart. The first two existed from
-the start; the last two landed once the folder was complete.
+Five assertions, each catching a different way the two can drift apart. The first two existed from
+the start; the two counts landed once the folder was complete, and the folder check followed when the
+guides moved into per-cluster directories.
 
 | Check | What it catches | What it misses on its own |
 | --- | --- | --- |
 | **Bijection** — every guide linked exactly once, no duplicates | An orphan guide: a file written and never listed. | Nothing, at a known size — but at an *unknown* size it is silent about a guide that was never written at all. |
 | **No dead index link** | A row pointing at a file that was renamed or deleted. | A guide that exists but has no row. |
 | **Total count** | A guide added or deleted without the index being touched. | Which one, and in which cluster. |
-| **Per-cluster counts** | A guide filed under the wrong cluster. | A guide whose cluster is right and whose content is wrong. |
+| **Per-cluster counts** | A guide whose **front matter** names the wrong cluster. | A guide whose front matter is right and whose *folder* is wrong — the counts are computed from the front matter. |
+| **Folder matches front matter** | A guide sitting in a directory its `cluster` key does not name, from either side. | A guide whose cluster is right and whose content is wrong. |
 
-The per-cluster check is the one that earns its keep, because the failure it catches is otherwise
+The last two are the ones that earn their keep, because the failure they catch is otherwise
 completely silent. A guide with `cluster: Physical Retail` in a customer-identity file has valid front
 matter, six correct sections, live `attaches_to` paths, a resolving title and an index row — **every
 other assertion in the file passes.** It is simply missing from the section a reader would look in,
-and present in one where it makes no sense. Nothing else notices.
+and present in one where it makes no sense. The `cluster` assertion does not see it either: that one
+checks the value is one of the nine literal names, which catches a *misspelled* cluster and not a
+*misfiled* one.
 
-That gap was real until this change: the existing `cluster` assertion checks the value is one of the
-nine literal names, which catches a *misspelled* cluster and not a *misfiled* one. The two counts
-together close it.
+**The cluster is written twice, and the two can disagree in either direction.** Once as the folder a
+guide sits in, once as its `cluster` key; the counts are computed from the second, the reader
+navigates by the first. So a file dragged into the wrong folder keeps a correct `cluster` and the
+counts still balance — only the folder check notices. A front matter edited in place without moving
+the file trips both. The message names the file, the folder it is in and the folder its cluster
+names, so a reader can decide which half was intended rather than guessing from a count.
+
+The spec joins the two through a map that spells all nine directory names out, rather than deriving
+one from the other. Every entry is what a slugify would produce — lower-case, ` & ` becoming
+`-and-` — so the derivation would pass today. **That is the argument against it, not for it.** A
+derived expectation compares the naming rule to itself: it cannot fail, and if the convention is ever
+changed wholesale it re-derives to the new answer and stays green. Writing the nine out makes the
+layout a fact the test pins, so renaming a directory goes red until somebody confirms the rename was
+meant.
 
 ## 4. Each assertion was seen red before it was trusted
 
 A count assertion that has never failed is a count nobody has verified — it may be comparing a
-constant to itself. All three were observed failing, in three separate perturbations chosen so that
-each one fails in isolation:
+constant to itself. Each was observed failing, in four separate perturbations chosen so that the
+assertion under test is the one that names the cause:
 
 | Perturbation | What went red |
 | --- | --- |
 | One guide file moved out of the folder | *"holds 63 guides, expected 64"* and *"cluster 'Customer & Identity' holds 6 guides, expected 7"*. The index-link count stayed **green** — correctly: the index still listed sixty-four, the folder had shrunk. |
 | One index row unlinked, guide untouched | *"README.md links 63 distinct guides, expected 64"*, alongside the pre-existing orphan check. The total stayed green — the folder was intact. |
-| One guide's `cluster` changed to a different valid name | *Only* the per-cluster check, naming both sides: the cluster that lost a guide and the one that gained it. The total and the index-link count both stayed green, which is exactly the blind spot this assertion exists to cover. |
+| One guide's `cluster` changed to a different valid name, file left where it was | The per-cluster check, naming both sides — the cluster that lost a guide and the one that gained it — **and** the folder check, naming the file. The total and the index-link count both stayed green, which is exactly the blind spot these assertions exist to cover. |
+| One guide moved into a different cluster's folder, front matter untouched | **Only the folder check** identifies the cause, and its message names both directories. The per-cluster counts stayed **green** — correctly, since they read the front matter, which was not edited. The link assertions also went red, but they report symptoms (a sibling link and an index row that no longer resolve), not the mistake. |
 
 Each message names the discrepancy and what to do about it. That is deliberate: a red build reading
 `expected true to be false` teaches the next reader to delete the test.

@@ -1,7 +1,7 @@
 # The physical-retail extension guide
 
 The ninth and last cluster in [`docs/extensions/`](../../extensions/) is a single file:
-[`physical-retail-pos-terminals.md`](../../extensions/physical-retail-pos-terminals.md). Every other
+[`physical-retail-pos-terminals.md`](../../extensions/physical-retail/physical-retail-pos-terminals.md). Every other
 cluster holds six to ten guides; this one holds one, covering a surface that would be seven
 aggregates. This note explains that shape, and records the one design question the guide exists to
 answer — because it is the question a reader will arrive with, and the answer is not the one the
@@ -171,7 +171,7 @@ grep -c "= '" libs/contracts/auth/permission.enum.ts
 
 ## 7. Related reading
 
-- [`docs/extensions/physical-retail-pos-terminals.md`](../../extensions/physical-retail-pos-terminals.md)
+- [`docs/extensions/physical-retail-pos-terminals.md`](../../extensions/physical-retail/physical-retail-pos-terminals.md)
   — the guide itself.
 - [`01-extension-guide-structure-and-template.md`](01-extension-guide-structure-and-template.md) —
   the template every guide follows and the argument for the six sections.

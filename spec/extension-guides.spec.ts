@@ -62,6 +62,28 @@ const EXPECTED_PER_CLUSTER: Record<(typeof CLUSTERS)[number], number> = {
   'Physical Retail': 1,
 };
 
+// A guide lives in the directory its cluster names, so the cluster now has **two** representations
+// that can disagree: the folder a file sits in and the `cluster` key in its front matter. This map is
+// the join between them.
+//
+// Every entry below happens to be what lower-casing the cluster name and replacing ` & ` with `-and-`
+// would produce, so a slugify would pass today. It is written out anyway, because a derived
+// expectation cannot fail: `slug(cluster)` compared against a folder named by the same rule asserts
+// that the rule equals itself, and the day the convention changes it re-derives to the new answer and
+// stays green. Spelling the nine names out makes the folder layout a *fact the test pins*, so renaming
+// a directory turns the suite red until someone confirms the rename was intended.
+const CLUSTER_DIRS: Record<(typeof CLUSTERS)[number], string> = {
+  'Product Catalog': 'product-catalog',
+  Inventory: 'inventory',
+  'Order Management': 'order-management',
+  'Customer & Identity': 'customer-and-identity',
+  'Returns & Refunds': 'returns-and-refunds',
+  'Pricing & Promotions': 'pricing-and-promotions',
+  'Notifications & Events': 'notifications-and-events',
+  'Staff & Access Control': 'staff-and-access-control',
+  'Physical Retail': 'physical-retail',
+};
+
 // The unit is `capability` — this repository's own word for a slice of work, the one
 // `docs/implementation/` is organised by. Note the en-dash in the middle value.
 const EFFORTS = ['1 capability', '2–3 capabilities', 'subsystem-scale (5+ capabilities)'] as const;
@@ -145,9 +167,18 @@ function relativeLinksIn(markdown: string): string[] {
   return links;
 }
 
+// Guides live one directory down, in a per-cluster folder; the index stays at the root beside them.
+// A `name` is therefore `<cluster-dir>/<file>.md` throughout this file — it is what every message
+// prints and what `join(EXTENSIONS_DIR, name)` resolves, so nothing below needs to know the split.
+// Read with `withFileTypes` so a stray file at the root is simply not a guide rather than a crash.
 const guideNames = existsSync(EXTENSIONS_DIR)
-  ? readdirSync(EXTENSIONS_DIR)
-      .filter((f) => f.endsWith('.md') && f !== 'README.md')
+  ? readdirSync(EXTENSIONS_DIR, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .flatMap((dir) =>
+        readdirSync(join(EXTENSIONS_DIR, dir.name))
+          .filter((f) => f.endsWith('.md') && f !== 'README.md')
+          .map((f) => `${dir.name}/${f}`),
+      )
       .sort()
   : [];
 
@@ -187,6 +218,32 @@ describe('extension guides (ADR-055)', () => {
         `Either a guide moved cluster (check its front matter against the index table it is ` +
         `listed under) or one was added or removed.`,
     );
+
+    expect(violations).toEqual([]);
+  });
+
+  // The cluster is written twice — once as the folder the file sits in, once as front matter — and
+  // the two are what the reader and the index respectively go by. A guide dragged into the wrong
+  // folder keeps a correct `cluster`, so the per-cluster **counts** above still balance and only this
+  // assertion notices; a guide whose front matter was edited without moving the file is the same
+  // failure seen from the other side. Both land here, and the message names which half to trust.
+  it('every guide sits in the directory its cluster names', () => {
+    const violations: string[] = [];
+
+    for (const guide of guides) {
+      const cluster = guide.frontMatter.cluster as (typeof CLUSTERS)[number] | undefined;
+      if (!cluster || !CLUSTERS.includes(cluster)) continue;
+
+      const expectedDir = CLUSTER_DIRS[cluster];
+      const actualDir = guide.name.split('/')[0];
+      if (actualDir !== expectedDir) {
+        violations.push(
+          `${guide.name}: front matter says cluster '${cluster}', which lives in ` +
+            `'${expectedDir}/', but the file is in '${actualDir}/'. Move the file or fix the ` +
+            `front matter — and whichever you change, its index row moves to the matching table.`,
+        );
+      }
+    }
 
     expect(violations).toEqual([]);
   });
@@ -323,10 +380,13 @@ describe('extension guides (ADR-055)', () => {
 
   describe('the index', () => {
     const indexBody = existsSync(INDEX_FILE) ? readFileSync(INDEX_FILE, 'utf8') : '';
-    // Only links to siblings in this folder count as index entries; the tier table links out to
-    // ADRs and the root README, and those are checked separately below.
+    // Only links *down* into a cluster folder count as index entries: exactly one slash, no `../`.
+    // The tier table links out to ADRs and the root README with `../../`, and those are checked
+    // separately below. Matching the shape rather than a directory whitelist is deliberate — a row
+    // pointing at `made-up-cluster/foo.md` should reach the dead-link assertion, not be filtered out
+    // of the count and disappear.
     const linkedGuides = relativeLinksIn(indexBody).filter(
-      (t) => t.endsWith('.md') && !t.includes('/') && t !== 'README.md',
+      (t) => t.endsWith('.md') && !t.startsWith('.') && t.split('/').length === 2,
     );
 
     it('links every guide that exists, exactly once', () => {
