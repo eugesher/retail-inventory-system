@@ -164,14 +164,14 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| abc-classification.md | |
-| bin-aisle-shelf.md | |
-| consigned-vendor-managed-inventory.md | |
-| demand-forecasting-and-safety-stock.md | |
-| expiry-fifo-rotation.md | |
-| in-transit-as-separate-location.md | |
-| lot-batch-serial-tracking.md | |
-| transfer-order-documents.md | |
+| [abc-classification.md](abc-classification.md) | Pareto A/B/C tiers scored off the `stock_movement` fact table; a read-side projection that touches no counter. |
+| [bin-aisle-shelf.md](bin-aisle-shelf.md) | Sub-location slotting below `StockLocation` — a bin is a pick detail, not a shipping origin, so it stays an axis under the level. |
+| [consigned-vendor-managed-inventory.md](consigned-vendor-managed-inventory.md) | Adds an ownership axis to stock so a supplier can own on-hand units; title transfers at sale. Builds on the supplier party. |
+| [demand-forecasting-and-safety-stock.md](demand-forecasting-and-safety-stock.md) | Owns the "ledger is the fact table" argument; forecasts demand and computes safety stock as a read model over `stock_movement`. |
+| [expiry-fifo-rotation.md](expiry-fifo-rotation.md) | Expiry dates on lots and a pluggable FEFO/FIFO allocation policy; a small delta on top of lot tracking. |
+| [in-transit-as-separate-location.md](in-transit-as-separate-location.md) | Models the dispatch-to-receipt gap as a virtual `StockLocation`, reusing the `dropship-virtual` precedent. |
+| [lot-batch-serial-tracking.md](lot-batch-serial-tracking.md) | Splits the running totals by a lot/batch/serial axis; re-keys reservations and widens the append-only ledger. |
+| [transfer-order-documents.md](transfer-order-documents.md) | Wraps the atomic two-`adjustment` transfer in a draft→dispatched→received document with an in-transit period. |
 
 ### Order Management
 
