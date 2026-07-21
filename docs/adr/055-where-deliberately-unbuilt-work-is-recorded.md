@@ -9,7 +9,7 @@
 
 This repository now keeps **three** written records of things that do not exist:
 
-- [`README.md` § Not built yet](../../README.md#14-not-built-yet) — sixteen rows, each a gap in the
+- [`README.md` § Not built yet](../../README.md#14-not-built-yet) — fifteen rows, each a gap in the
   core whose seam is already in the code.
 - [`spec/transition-windows.spec.ts`](../../spec/transition-windows.spec.ts) — the register
   [ADR-053](053-how-a-transition-window-closes.md) created, holding obligations somebody owes,
@@ -67,16 +67,16 @@ payment processor, and locale resolution — and in each the two halves answer d
 **Restatement is the thing to refuse**, not overlap. Two files describing the same seam in the same
 words is one file that will be updated and one that will not.
 
-### All sixteen current ledger rows pass the ledger's own test
+### The current ledger rows pass the ledger's own test
 
 This was verified against the code rather than assumed, because a classification rule that quietly
-evicts sixteen rows on the day it lands is a rule that was written to justify a deletion. Each of the
-sixteen names something that exists — `clampPageWindow`, `RETENTION_DELIVERY_DAYS`, `PAYMENT_GATEWAY`
+evicts a dozen rows on the day it lands is a rule that was written to justify a deletion. Each row
+names something that exists — `clampPageWindow`, `PAYMENT_GATEWAY`
 with its `FakePaymentGatewayAdapter`, the `notification.delivery.record-outcome` routing key, the
 `NOTIFIER` port and its `LogNotifierAdapter` default, `customerLocale`, `TaxCategory`,
 `StaffUser`'s `status` and its unreachable suspend, `MediaAsset.uri`, the reserved `catalogCategory*`
-builders, the `t:<tenantId>` key segment. **Nothing moves out of the ledger.** The tiers are a rule
-for what arrives next, not a reorganisation.
+builders, the `t:<tenantId>` key segment. **Nothing moves out of the ledger on tier grounds.** The
+tiers are a rule for what arrives next, not a reorganisation.
 
 ### The mechanism: a test, because ADR-053 says to prefer one
 
@@ -148,6 +148,21 @@ This rule lives here and in [`docs/extensions/README.md`](../extensions/README.m
   what ADR-046 did with its deferred-deletion rule, and ADR-053 exists because it did not work.
   Knowing costs nothing and forgetting costs nothing unless the rule is written where the next reader
   lands.
+
+## Editorial Correction (2026-07-21)
+
+The body above counted the ledger at **sixteen** rows and listed `RETENTION_DELIVERY_DAYS` among the
+seams it verified. The verification asked whether each *named token* existed — and that one does. It
+did not ask whether the row's *claim* still held, and that row read *"Joi-validated; nothing reads it
+yet"* while `PurgeAgedDeliveriesUseCase`, `DeliveryRetentionScheduler` and a value provider in
+`notifications.module.ts` had all been shipped. The row named a gap that was closed. It is deleted
+and the count corrected to **fifteen**; the same false annotation is gone from the environment-variable
+table, which is where it had been repeated.
+
+Corrected in place. **The decision this ADR records is untouched** — three records, one admission
+question each. What the correction shows is a limit of the check the decision chose: a row is
+verified by confirming its seam exists, and a seam that exists is compatible with the gap being
+filled. Nothing mechanical notices that; only reading the row against the code does.
 
 ## References
 

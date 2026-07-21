@@ -37,7 +37,7 @@ were confirmed against source:
 
 ## The six guides
 
-### [exchanges-as-first-class-entity.md](../../extensions/exchanges-as-first-class-entity.md)
+### [exchanges-as-first-class-entity.md](../../extensions/returns-and-refunds/exchanges-as-first-class-entity.md)
 
 - **Claim.** One aggregate spanning an inbound return and an outbound `Order`, so a swap cannot be closed
   half-done. **Owns the three-way split** (below).
@@ -47,7 +47,7 @@ were confirmed against source:
   `Order`: a thin coordinator referencing both sides by id, or a returns-owned entity reaching the order
   through a grown reader.
 
-### [repair-workflows.md](../../extensions/repair-workflows.md)
+### [repair-workflows.md](../../extensions/returns-and-refunds/repair-workflows.md)
 
 - **Claim.** A `repair` disposition that is **non-terminal** — the one disposition that leaves and comes
   back, deferring a line's final destination (restock-refurbished / return-to-customer) until the repair
@@ -57,7 +57,7 @@ were confirmed against source:
 - **Hardest to reverse.** A new disposition value vs. a `repairStatus` orthogonal to disposition — the
   former overloads a field the code treats as a final, single-write decision.
 
-### [advance-replacement.md](../../extensions/advance-replacement.md)
+### [advance-replacement.md](../../extensions/returns-and-refunds/advance-replacement.md)
 
 - **Claim.** Ship the substitute *before* the return arrives — an exchange whose outbound leg fires first.
   A credit-risk and stock-commitment problem, **not** a new modelling of the swap.
@@ -67,21 +67,21 @@ were confirmed against source:
 - **Hardest to reverse.** How much trust and gated by what — ship-first to everyone is a fraud magnet, so
   the gate ties to return-fraud-scoring or account standing.
 
-### [vendor-rmas.md](../../extensions/vendor-rmas.md)
+### [vendor-rmas.md](../../extensions/returns-and-refunds/vendor-rmas.md)
 
 - **Claim.** The **outbound mirror** of a customer return — units routed back to the supplier that
   supplied them, for credit / replacement / warranty repair. **Inherits the Supplier party** from
-  [supplier-and-vendor.md](../../extensions/supplier-and-vendor.md).
+  [supplier-and-vendor.md](../../extensions/product-catalog/supplier-and-vendor.md).
 - **Attaches to.** `return-request.model.ts` (a sibling RMA shape) and the restock gateway port (the
   *outbound* counterpart — a ship-to-supplier decrement in the same ledger).
 - **Hardest to reverse.** Which module owns `VendorReturn` — the returns trigger or the supplier
   counterparty; the supplier subsystem is the more natural owner once it exists.
 
-### [refund-to-store-credit.md](../../extensions/refund-to-store-credit.md)
+### [refund-to-store-credit.md](../../extensions/returns-and-refunds/refund-to-store-credit.md)
 
 - **Claim.** A refund whose *destination* is the store-credit ledger rather than the card gateway.
   **Inherits the ledger wholesale** from
-  [gift-cards-and-store-credit.md](../../extensions/gift-cards-and-store-credit.md); its own contribution is
+  [gift-cards-and-store-credit.md](../../extensions/order-management/gift-cards-and-store-credit.md); its own contribution is
   the refund-path attachment, nothing more.
 - **Attaches to.**
   [`refund.model.ts`](../../../apps/retail-microservice/src/modules/orders/domain/refund.model.ts) — on
@@ -90,11 +90,11 @@ were confirmed against source:
 - **Hardest to reverse.** Destination-on-`Refund` (one concept, two destinations, reuses the over-refund
   ceiling) vs. a separate credit action (keeps `Refund` strictly card-reversal).
 
-### [return-fraud-scoring.md](../../extensions/return-fraud-scoring.md)
+### [return-fraud-scoring.md](../../extensions/returns-and-refunds/return-fraud-scoring.md)
 
 - **Claim.** Score a return at Open — block / hold / allow — against wardrobing, serial returns, and
   empty-box fraud. **Inherits the `RISK_SCORING_GATEWAY` seam** from
-  [fraud-and-risk-scoring.md](../../extensions/fraud-and-risk-scoring.md), pointed at a `ReturnRequest`.
+  [fraud-and-risk-scoring.md](../../extensions/order-management/fraud-and-risk-scoring.md), pointed at a `ReturnRequest`.
 - **Attaches to.** `return-request.model.ts` (the verdict maps onto the existing
   `REQUESTED → AUTHORIZED`/`REJECTED` fork) and the returns `application/use-cases/` (the Open use case
   places the call).
@@ -105,7 +105,7 @@ were confirmed against source:
 
 The cluster's whole conceptual difficulty is one table. Three files circle *how a shop gives the customer a
 different thing*; the split is owned by
-[exchanges-as-first-class-entity.md](../../extensions/exchanges-as-first-class-entity.md) and the other two
+[exchanges-as-first-class-entity.md](../../extensions/returns-and-refunds/exchanges-as-first-class-entity.md) and the other two
 link it rather than re-arguing it:
 
 | | Replacement order | Exchange (entity) | Advance replacement |
@@ -115,7 +115,7 @@ link it rather than re-arguing it:
 | **Timing** | Outbound any time | Outbound after the return is received (default) | Outbound **before** the return arrives |
 | **Core problem** | Already expressible; how to link cleanly | Anti-drift + money reconciliation (even/up/down swap) | **Credit risk + stock commitment** — not a modelling problem |
 | **New machinery** | A link field on `Order` | An `Exchange` aggregate + line mapping + settlement | A payment hold + a deadline sweep on top of an exchange |
-| **Owned by** | [replacement-orders-distinct-entity.md](../../extensions/replacement-orders-distinct-entity.md) (Order Management) | [exchanges-as-first-class-entity.md](../../extensions/exchanges-as-first-class-entity.md) (this cluster) | [advance-replacement.md](../../extensions/advance-replacement.md) (this cluster) |
+| **Owned by** | [replacement-orders-distinct-entity.md](../../extensions/order-management/replacement-orders-distinct-entity.md) (Order Management) | [exchanges-as-first-class-entity.md](../../extensions/returns-and-refunds/exchanges-as-first-class-entity.md) (this cluster) | [advance-replacement.md](../../extensions/returns-and-refunds/advance-replacement.md) (this cluster) |
 
 The test the three guides had to pass: **distinguishable from their first paragraph.** Replacement = a new
 order, no timing rule. Exchange = one binding entity so the swap can't drift. Advance = the outbound ships

@@ -41,9 +41,16 @@ a glance, and it is the one rule that stops it accumulating into an archive.
 
 ## How these guides are written
 
-Every file in this folder except this one follows the contract below. It is enforced by
+A guide lives in the sub-folder its cluster names — `product-catalog/`, `inventory/`,
+`order-management/`, `customer-and-identity/`, `returns-and-refunds/`, `pricing-and-promotions/`,
+`notifications-and-events/`, `staff-and-access-control/`, `physical-retail/` — and this index is the
+only file at the root. Every guide follows the contract below, enforced by
 [`spec/extension-guides.spec.ts`](../../spec/extension-guides.spec.ts), which runs under
 `yarn test:unit`.
+
+The cluster is therefore written twice: as the folder and as the `cluster` key. **Changing one means
+changing the other**, plus the row in the matching table below — the check fails on any two of the
+three disagreeing, and names which file is in which folder rather than only that a count is off.
 
 ### Front matter
 
@@ -150,107 +157,107 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| [brand-entity.md](brand-entity.md) | Brand as an orthogonal facet, not a category-tree node; logo reuses the polymorphic `MediaAsset`. |
-| [configurable-products-option-dependencies.md](configurable-products-option-dependencies.md) | Cross-option rules above the flat variant axis — pre-generate variants or evaluate rules at add-to-cart. |
-| [digital-good-entitlements.md](digital-good-entitlements.md) | Shipment-less fulfilment for non-physical variants; the entitlement is delivered through the notification pipeline. |
-| [dynamic-attribute-schemas.md](dynamic-attribute-schemas.md) | Typed, per-category attributes replacing the untyped `optionValues` map; reshapes the contract views. |
-| [multi-locale-translation-tables.md](multi-locale-translation-tables.md) | Per-locale translation rows filling the `customerLocale: null` seam the notification producers already ship. |
-| [product-bundles.md](product-bundles.md) | Kits and bundles over the `variantId` backbone; the open call is when to explode a bundle into cart lines. |
-| [product-relations-and-recommendations.md](product-relations-and-recommendations.md) | Curated product-to-product graph on the reserved `catalogProduct*` cache builders; computed recommendations stay out. |
-| [subscriptions-and-selling-plans.md](subscriptions-and-selling-plans.md) | Owns the plan definition and its relationship to the `price` ledger; the recurrence engine lives in order management. |
-| [supplier-and-vendor.md](supplier-and-vendor.md) | Owns the Supplier / Vendor party in a new Procurement service; four later guides build on it. |
+| [brand-entity.md](product-catalog/brand-entity.md) | Brand as an orthogonal facet, not a category-tree node; logo reuses the polymorphic `MediaAsset`. |
+| [configurable-products-option-dependencies.md](product-catalog/configurable-products-option-dependencies.md) | Cross-option rules above the flat variant axis — pre-generate variants or evaluate rules at add-to-cart. |
+| [digital-good-entitlements.md](product-catalog/digital-good-entitlements.md) | Shipment-less fulfilment for non-physical variants; the entitlement is delivered through the notification pipeline. |
+| [dynamic-attribute-schemas.md](product-catalog/dynamic-attribute-schemas.md) | Typed, per-category attributes replacing the untyped `optionValues` map; reshapes the contract views. |
+| [multi-locale-translation-tables.md](product-catalog/multi-locale-translation-tables.md) | Per-locale translation rows filling the `customerLocale: null` seam the notification producers already ship. |
+| [product-bundles.md](product-catalog/product-bundles.md) | Kits and bundles over the `variantId` backbone; the open call is when to explode a bundle into cart lines. |
+| [product-relations-and-recommendations.md](product-catalog/product-relations-and-recommendations.md) | Curated product-to-product graph on the reserved `catalogProduct*` cache builders; computed recommendations stay out. |
+| [subscriptions-and-selling-plans.md](product-catalog/subscriptions-and-selling-plans.md) | Owns the plan definition and its relationship to the `price` ledger; the recurrence engine lives in order management. |
+| [supplier-and-vendor.md](product-catalog/supplier-and-vendor.md) | Owns the Supplier / Vendor party in a new Procurement service; four later guides build on it. |
 
 ### Inventory
 
 | Guide | Hook |
 | --- | --- |
-| [abc-classification.md](abc-classification.md) | Pareto A/B/C tiers scored off the `stock_movement` fact table; a read-side projection that touches no counter. |
-| [bin-aisle-shelf.md](bin-aisle-shelf.md) | Sub-location slotting below `StockLocation` — a bin is a pick detail, not a shipping origin, so it stays an axis under the level. |
-| [consigned-vendor-managed-inventory.md](consigned-vendor-managed-inventory.md) | Adds an ownership axis to stock so a supplier can own on-hand units; title transfers at sale. Builds on the supplier party. |
-| [demand-forecasting-and-safety-stock.md](demand-forecasting-and-safety-stock.md) | Owns the "ledger is the fact table" argument; forecasts demand and computes safety stock as a read model over `stock_movement`. |
-| [expiry-fifo-rotation.md](expiry-fifo-rotation.md) | Expiry dates on lots and a pluggable FEFO/FIFO allocation policy; a small delta on top of lot tracking. |
-| [in-transit-as-separate-location.md](in-transit-as-separate-location.md) | Models the dispatch-to-receipt gap as a virtual `StockLocation`, reusing the `dropship-virtual` precedent. |
-| [lot-batch-serial-tracking.md](lot-batch-serial-tracking.md) | Splits the running totals by a lot/batch/serial axis; re-keys reservations and widens the append-only ledger. |
-| [transfer-order-documents.md](transfer-order-documents.md) | Wraps the atomic two-`adjustment` transfer in a draft→dispatched→received document with an in-transit period. |
+| [abc-classification.md](inventory/abc-classification.md) | Pareto A/B/C tiers scored off the `stock_movement` fact table; a read-side projection that touches no counter. |
+| [bin-aisle-shelf.md](inventory/bin-aisle-shelf.md) | Sub-location slotting below `StockLocation` — a bin is a pick detail, not a shipping origin, so it stays an axis under the level. |
+| [consigned-vendor-managed-inventory.md](inventory/consigned-vendor-managed-inventory.md) | Adds an ownership axis to stock so a supplier can own on-hand units; title transfers at sale. Builds on the supplier party. |
+| [demand-forecasting-and-safety-stock.md](inventory/demand-forecasting-and-safety-stock.md) | Owns the "ledger is the fact table" argument; forecasts demand and computes safety stock as a read model over `stock_movement`. |
+| [expiry-fifo-rotation.md](inventory/expiry-fifo-rotation.md) | Expiry dates on lots and a pluggable FEFO/FIFO allocation policy; a small delta on top of lot tracking. |
+| [in-transit-as-separate-location.md](inventory/in-transit-as-separate-location.md) | Models the dispatch-to-receipt gap as a virtual `StockLocation`, reusing the `dropship-virtual` precedent. |
+| [lot-batch-serial-tracking.md](inventory/lot-batch-serial-tracking.md) | Splits the running totals by a lot/batch/serial axis; re-keys reservations and widens the append-only ledger. |
+| [transfer-order-documents.md](inventory/transfer-order-documents.md) | Wraps the atomic two-`adjustment` transfer in a draft→dispatched→received document with an in-transit period. |
 
 ### Order Management
 
 | Guide | Hook |
 | --- | --- |
-| [b2b-quote-po-credit-terms.md](b2b-quote-po-credit-terms.md) | Owns the B2B account, negotiable quote and net-terms model; a quote is a mutable pre-order, credit terms decouple capture from ship. |
-| [bnpl-state-machines.md](bnpl-state-machines.md) | Installment tender on the existing `PAYMENT_GATEWAY` seam; the async provider confirmation reuses ADR-052's `CAPTURING` capture claim. |
-| [dropshipping-vendor-routing.md](dropshipping-vendor-routing.md) | Routes a `Fulfillment` to a vendor-backed `dropship-virtual` location; builds on the supplier party, ships nothing from own stock. |
-| [fraud-and-risk-scoring.md](fraud-and-risk-scoring.md) | Owns the risk-scoring seam — an external `RISK_SCORING_GATEWAY` port at place-time that can allow, hold or block, carrying no PII. |
-| [gift-cards-and-store-credit.md](gift-cards-and-store-credit.md) | Owns the store-credit ledger (append-only, derived balance) and "a tender that is not a card" riding opaque `Payment.method`. |
-| [marketplace-seller-payouts.md](marketplace-seller-payouts.md) | One buyer capture fans out into an append-only per-seller `Payout` ledger minus commission; builds on the supplier-as-seller party. |
-| [replacement-orders-distinct-entity.md](replacement-orders-distinct-entity.md) | Owns the replacement-as-a-new-`Order` argument — a zero-value order linked by `replacesOrderId`, reusing the whole order subsystem. |
-| [shipping-rate-engine.md](shipping-rate-engine.md) | Fills the waiting `shippingTotalMinor` seam via a `SHIPPING_RATE_ENGINE` port rating the destination `Address` at checkout. |
-| [subscriptions-recurring-orders.md](subscriptions-recurring-orders.md) | The recurrence engine generating an `Order` per cycle and running the dunning ladder; quotes the plan/engine boundary from the catalog side. |
-| [tax-computation-engine.md](tax-computation-engine.md) | Owns the tax call-out seam — an external `TAX_ENGINE` writing the captured-not-computed `taxAmountMinor`; fills the `TaxCategory`-is-a-label gap. |
+| [b2b-quote-po-credit-terms.md](order-management/b2b-quote-po-credit-terms.md) | Owns the B2B account, negotiable quote and net-terms model; a quote is a mutable pre-order, credit terms decouple capture from ship. |
+| [bnpl-state-machines.md](order-management/bnpl-state-machines.md) | Installment tender on the existing `PAYMENT_GATEWAY` seam; the async provider confirmation reuses ADR-052's `CAPTURING` capture claim. |
+| [dropshipping-vendor-routing.md](order-management/dropshipping-vendor-routing.md) | Routes a `Fulfillment` to a vendor-backed `dropship-virtual` location; builds on the supplier party, ships nothing from own stock. |
+| [fraud-and-risk-scoring.md](order-management/fraud-and-risk-scoring.md) | Owns the risk-scoring seam — an external `RISK_SCORING_GATEWAY` port at place-time that can allow, hold or block, carrying no PII. |
+| [gift-cards-and-store-credit.md](order-management/gift-cards-and-store-credit.md) | Owns the store-credit ledger (append-only, derived balance) and "a tender that is not a card" riding opaque `Payment.method`. |
+| [marketplace-seller-payouts.md](order-management/marketplace-seller-payouts.md) | One buyer capture fans out into an append-only per-seller `Payout` ledger minus commission; builds on the supplier-as-seller party. |
+| [replacement-orders-distinct-entity.md](order-management/replacement-orders-distinct-entity.md) | Owns the replacement-as-a-new-`Order` argument — a zero-value order linked by `replacesOrderId`, reusing the whole order subsystem. |
+| [shipping-rate-engine.md](order-management/shipping-rate-engine.md) | Fills the waiting `shippingTotalMinor` seam via a `SHIPPING_RATE_ENGINE` port rating the destination `Address` at checkout. |
+| [subscriptions-recurring-orders.md](order-management/subscriptions-recurring-orders.md) | The recurrence engine generating an `Order` per cycle and running the dunning ladder; quotes the plan/engine boundary from the catalog side. |
+| [tax-computation-engine.md](order-management/tax-computation-engine.md) | Owns the tax call-out seam — an external `TAX_ENGINE` writing the captured-not-computed `taxAmountMinor`; fills the `TaxCategory`-is-a-label gap. |
 
 ### Customer & Identity
 
 | Guide | Hook |
 | --- | --- |
-| [b2b-company-hierarchies.md](b2b-company-hierarchies.md) | A materialized-path tree of account nodes (the `Category` shape) above the B2B party; credit limits and contract-price scope roll up the tree. |
-| [crm-tags.md](crm-tags.md) | Staff-applied controlled-vocabulary labels on a customer; the label stays PII-free so an audited or emitted tag never re-seeds the erase. |
-| [customer-segments-and-tiers.md](customer-segments-and-tiers.md) | Owns the segment/tier grouping — static and dynamic; a marketing send over a segment is gated on `ConsentRecord` opt-in. |
-| [loyalty-programs.md](loyalty-programs.md) | An append-only points ledger with a derived balance, accrued off `retail.order.placed`; tiers are segments, redemption is tender-or-discount. |
-| [mfa-and-household-grouping.md](mfa-and-household-grouping.md) | Owns customer-facing opt-in MFA wrapping the login use case, plus household grouping; draws the customer-vs-staff MFA line. |
-| [social-login-providers.md](social-login-providers.md) | OAuth/OIDC login replacing the password seam and reusing `TOKEN_SERVICE`; adds a `FederatedIdentity` link and the null-password invariant call. |
-| [wishlists.md](wishlists.md) | A durable cart-shaped list minus checkout — no price snapshot, no OCC, no TTL, no reservation; live-priced and dropped on erase. |
+| [b2b-company-hierarchies.md](customer-and-identity/b2b-company-hierarchies.md) | A materialized-path tree of account nodes (the `Category` shape) above the B2B party; credit limits and contract-price scope roll up the tree. |
+| [crm-tags.md](customer-and-identity/crm-tags.md) | Staff-applied controlled-vocabulary labels on a customer; the label stays PII-free so an audited or emitted tag never re-seeds the erase. |
+| [customer-segments-and-tiers.md](customer-and-identity/customer-segments-and-tiers.md) | Owns the segment/tier grouping — static and dynamic; a marketing send over a segment is gated on `ConsentRecord` opt-in. |
+| [loyalty-programs.md](customer-and-identity/loyalty-programs.md) | An append-only points ledger with a derived balance, accrued off `retail.order.placed`; tiers are segments, redemption is tender-or-discount. |
+| [mfa-and-household-grouping.md](customer-and-identity/mfa-and-household-grouping.md) | Owns customer-facing opt-in MFA wrapping the login use case, plus household grouping; draws the customer-vs-staff MFA line. |
+| [social-login-providers.md](customer-and-identity/social-login-providers.md) | OAuth/OIDC login replacing the password seam and reusing `TOKEN_SERVICE`; adds a `FederatedIdentity` link and the null-password invariant call. |
+| [wishlists.md](customer-and-identity/wishlists.md) | A durable cart-shaped list minus checkout — no price snapshot, no OCC, no TTL, no reservation; live-priced and dropped on erase. |
 
 ### Returns & Refunds
 
 | Guide | Hook |
 | --- | --- |
-| [advance-replacement.md](advance-replacement.md) | Ships the substitute before the return arrives — an exchange whose outbound leg fires first, gated by a payment hold a deadline sweep captures on non-arrival. |
-| [exchanges-as-first-class-entity.md](exchanges-as-first-class-entity.md) | Owns the exchange / replacement / advance-replacement split; one aggregate binding an inbound RMA to an outbound `Order` so the swap can't drift apart. |
-| [refund-to-store-credit.md](refund-to-store-credit.md) | A refund whose destination is the store-credit ledger, not the card gateway — a destination discriminator on `Refund`, inheriting the ledger wholesale. |
-| [repair-workflows.md](repair-workflows.md) | A `repair` disposition that leaves and comes back — non-terminal, deferring a line's final restock or return-to-customer until the repair closes. |
-| [return-fraud-scoring.md](return-fraud-scoring.md) | Scores a return at Open against the inherited `RISK_SCORING_GATEWAY` block/hold/allow seam; the score request and its events stay id-only. |
-| [vendor-rmas.md](vendor-rmas.md) | The outbound mirror of a customer return — units routed back to the supplier that supplied them, with a supplier-facing lifecycle and a ledger movement. |
+| [advance-replacement.md](returns-and-refunds/advance-replacement.md) | Ships the substitute before the return arrives — an exchange whose outbound leg fires first, gated by a payment hold a deadline sweep captures on non-arrival. |
+| [exchanges-as-first-class-entity.md](returns-and-refunds/exchanges-as-first-class-entity.md) | Owns the exchange / replacement / advance-replacement split; one aggregate binding an inbound RMA to an outbound `Order` so the swap can't drift apart. |
+| [refund-to-store-credit.md](returns-and-refunds/refund-to-store-credit.md) | A refund whose destination is the store-credit ledger, not the card gateway — a destination discriminator on `Refund`, inheriting the ledger wholesale. |
+| [repair-workflows.md](returns-and-refunds/repair-workflows.md) | A `repair` disposition that leaves and comes back — non-terminal, deferring a line's final restock or return-to-customer until the repair closes. |
+| [return-fraud-scoring.md](returns-and-refunds/return-fraud-scoring.md) | Scores a return at Open against the inherited `RISK_SCORING_GATEWAY` block/hold/allow seam; the score request and its events stay id-only. |
+| [vendor-rmas.md](returns-and-refunds/vendor-rmas.md) | The outbound mirror of a customer return — units routed back to the supplier that supplied them, with a supplier-facing lifecycle and a ledger movement. |
 
 ### Pricing & Promotions
 
 | Guide | Hook |
 | --- | --- |
-| [b2b-contract-pricing.md](b2b-contract-pricing.md) | Account-scoped, contract-term prices on the append-only ledger; inherits the B2B account and its tree, adds only the pricing attachment. |
-| [coupons-and-discount-codes.md](coupons-and-discount-codes.md) | A code that unlocks a promotion — a price adjustment, not a tender; inherits the discount engine and adds only the redemption caps. |
-| [currency-conversion.md](currency-conversion.md) | Sells per currency over the ledger's existing `(variantId, currency)` scope; FX is always an explicit step, never a silent conversion into an immutable order. |
-| [customer-group-and-tiered-pricing.md](customer-group-and-tiered-pricing.md) | The `priceScope` axis ADR-026 reserved — scopes a price to a customer group; inherits the segment, never re-models the grouping. |
-| [discounts-and-promotions.md](discounts-and-promotions.md) | Owns the promotion engine — a discount is not a `price` row; it computes at checkout and freezes into the order's existing `discountAmountMinor` seams. |
-| [dynamic-ai-pricing.md](dynamic-ai-pricing.md) | A repricing engine that writes append-only rows and never mutates them — automation driving the existing `SetPrice` path, auditable for free. |
-| [msrp-vs-sale-price.md](msrp-vs-sale-price.md) | The compare-at "was" price, derived from the ledger's `priority` ordering and closed-interval history; the reduction machinery stays with the discount engine. |
-| [tax-rate-tables.md](tax-rate-tables.md) | The internal-rate-table alternative to a tax engine — owns the `(jurisdiction × tax category)` rate data behind the same `TAX_ENGINE` port, keeps `TaxCategory` a label. |
+| [b2b-contract-pricing.md](pricing-and-promotions/b2b-contract-pricing.md) | Account-scoped, contract-term prices on the append-only ledger; inherits the B2B account and its tree, adds only the pricing attachment. |
+| [coupons-and-discount-codes.md](pricing-and-promotions/coupons-and-discount-codes.md) | A code that unlocks a promotion — a price adjustment, not a tender; inherits the discount engine and adds only the redemption caps. |
+| [currency-conversion.md](pricing-and-promotions/currency-conversion.md) | Sells per currency over the ledger's existing `(variantId, currency)` scope; FX is always an explicit step, never a silent conversion into an immutable order. |
+| [customer-group-and-tiered-pricing.md](pricing-and-promotions/customer-group-and-tiered-pricing.md) | The `priceScope` axis ADR-026 reserved — scopes a price to a customer group; inherits the segment, never re-models the grouping. |
+| [discounts-and-promotions.md](pricing-and-promotions/discounts-and-promotions.md) | Owns the promotion engine — a discount is not a `price` row; it computes at checkout and freezes into the order's existing `discountAmountMinor` seams. |
+| [dynamic-ai-pricing.md](pricing-and-promotions/dynamic-ai-pricing.md) | A repricing engine that writes append-only rows and never mutates them — automation driving the existing `SetPrice` path, auditable for free. |
+| [msrp-vs-sale-price.md](pricing-and-promotions/msrp-vs-sale-price.md) | The compare-at "was" price, derived from the ledger's `priority` ordering and closed-interval history; the reduction machinery stays with the discount engine. |
+| [tax-rate-tables.md](pricing-and-promotions/tax-rate-tables.md) | The internal-rate-table alternative to a tax engine — owns the `(jurisdiction × tax category)` rate data behind the same `TAX_ENGINE` port, keeps `TaxCategory` a label. |
 
 ### Notifications & Events
 
 | Guide | Hook |
 | --- | --- |
-| [ab-template-testing.md](ab-template-testing.md) | Varies the template, never the renderer binding — a variant dimension on a registry that already stores many rows per key and picks one. |
-| [abandoned-cart-automation.md](abandoned-cart-automation.md) | The one notification triggered by an absence; a bounded sweep on the reservation-sweep pattern, leaving the `ABANDONED` status to erasure, which already owns it. |
-| [in-app-inbox-feed.md](in-app-inbox-feed.md) | A channel whose delivery is a read, not a send — near-free over the delivery row, except that its 90-day purge horizon was designed for an audit log. |
-| [live-customer-messaging.md](live-customer-messaging.md) | The cluster's only new deployable: bidirectional, stateful and connection-oriented, where every existing notification path is one-way and fire-and-forget. |
-| [marketing-campaigns-and-segmentation.md](marketing-campaigns-and-segmentation.md) | Owns audience resolution; inherits the segment, and fans the existing one-recipient marketing send out over a dated, snapshotted list. |
-| [push-device-token-registration.md](push-device-token-registration.md) | The token registry, not the transport — customer-owned device data that erasure must delete rather than null, and the one channel with no consent flag yet. |
-| [scheduled-batch-newsletters.md](scheduled-batch-newsletters.md) | Owns scheduling and pacing, not audience; a due-work tick with CAS claiming, made resumable by the dedupe key that already forbids a double-send. |
-| [webhook-subscription-management-ui.md](webhook-subscription-management-ui.md) | Calling *outward*, to a URL somebody else controls — which is why it is not just another routing key on the internal bus. |
+| [ab-template-testing.md](notifications-and-events/ab-template-testing.md) | Varies the template, never the renderer binding — a variant dimension on a registry that already stores many rows per key and picks one. |
+| [abandoned-cart-automation.md](notifications-and-events/abandoned-cart-automation.md) | The one notification triggered by an absence; a bounded sweep on the reservation-sweep pattern, leaving the `ABANDONED` status to erasure, which already owns it. |
+| [in-app-inbox-feed.md](notifications-and-events/in-app-inbox-feed.md) | A channel whose delivery is a read, not a send — near-free over the delivery row, except that its 90-day purge horizon was designed for an audit log. |
+| [live-customer-messaging.md](notifications-and-events/live-customer-messaging.md) | The cluster's only new deployable: bidirectional, stateful and connection-oriented, where every existing notification path is one-way and fire-and-forget. |
+| [marketing-campaigns-and-segmentation.md](notifications-and-events/marketing-campaigns-and-segmentation.md) | Owns audience resolution; inherits the segment, and fans the existing one-recipient marketing send out over a dated, snapshotted list. |
+| [push-device-token-registration.md](notifications-and-events/push-device-token-registration.md) | The token registry, not the transport — customer-owned device data that erasure must delete rather than null, and the one channel with no consent flag yet. |
+| [scheduled-batch-newsletters.md](notifications-and-events/scheduled-batch-newsletters.md) | Owns scheduling and pacing, not audience; a due-work tick with CAS claiming, made resumable by the dedupe key that already forbids a double-send. |
+| [webhook-subscription-management-ui.md](notifications-and-events/webhook-subscription-management-ui.md) | Calling *outward*, to a URL somebody else controls — which is why it is not just another routing key on the internal bus. |
 
 ### Staff & Access Control
 
 | Guide | Hook |
 | --- | --- |
-| [approval-workflows.md](approval-workflows.md) | A state machine in front of a use case, not a stage in the guard chain — the guard says who may request, the approval says whether this attempt was agreed to. |
-| [dynamic-abac-policies.md](dynamic-abac-policies.md) | Replaces the decision procedure rather than the grant; splits enforcement by whether the resource has to be loaded, because the claim guard is synchronous and pure. |
-| [mfa-enforcement.md](mfa-enforcement.md) | The staff-side mandate — enforced by not minting a session, never by rejecting a request that is trying to reach the enrolment route. |
-| [scoped-tenant-aware-roles.md](scoped-tenant-aware-roles.md) | Adds a scope to the grant, not to the code string — the permission regex forbids the shortcut, and the cache-key convention already reserves the tenant segment. |
-| [session-device-management.md](session-device-management.md) | Replaces one `refresh_token_hash` column with rows; the `jti` a session would key on is already minted and thrown away. |
-| [sso-saml-oidc-federation.md](sso-saml-oidc-federation.md) | Owns the staff login-path split into establish-a-subject and mint-a-session; the assertion never becomes the session token. |
-| [staff-scheduling-and-shifts.md](staff-scheduling-and-shifts.md) | A neighbouring bounded context in its own deployable — it references the staff identity by id and deliberately does not extend it. |
+| [approval-workflows.md](staff-and-access-control/approval-workflows.md) | A state machine in front of a use case, not a stage in the guard chain — the guard says who may request, the approval says whether this attempt was agreed to. |
+| [dynamic-abac-policies.md](staff-and-access-control/dynamic-abac-policies.md) | Replaces the decision procedure rather than the grant; splits enforcement by whether the resource has to be loaded, because the claim guard is synchronous and pure. |
+| [mfa-enforcement.md](staff-and-access-control/mfa-enforcement.md) | The staff-side mandate — enforced by not minting a session, never by rejecting a request that is trying to reach the enrolment route. |
+| [scoped-tenant-aware-roles.md](staff-and-access-control/scoped-tenant-aware-roles.md) | Adds a scope to the grant, not to the code string — the permission regex forbids the shortcut, and the cache-key convention already reserves the tenant segment. |
+| [session-device-management.md](staff-and-access-control/session-device-management.md) | Replaces one `refresh_token_hash` column with rows; the `jti` a session would key on is already minted and thrown away. |
+| [sso-saml-oidc-federation.md](staff-and-access-control/sso-saml-oidc-federation.md) | Owns the staff login-path split into establish-a-subject and mint-a-session; the assertion never becomes the session token. |
+| [staff-scheduling-and-shifts.md](staff-and-access-control/staff-scheduling-and-shifts.md) | A neighbouring bounded context in its own deployable — it references the staff identity by id and deliberately does not extend it. |
 
 ### Physical Retail
 
 | Guide | Hook |
 | --- | --- |
-| [physical-retail-pos-terminals.md](physical-retail-pos-terminals.md) | All seven pieces of the shop floor in one file, because they arrive as one decision; argues that a till sale is an `Order` reached by a second creation path. |
+| [physical-retail-pos-terminals.md](physical-retail/physical-retail-pos-terminals.md) | All seven pieces of the shop floor in one file, because they arrive as one decision; argues that a till sale is an `Order` reached by a second creation path. |

@@ -9,7 +9,7 @@ read out of the source, not from prior notes.
 
 ## The eight guides
 
-### [lot-batch-serial-tracking.md](../../extensions/lot-batch-serial-tracking.md)
+### [lot-batch-serial-tracking.md](../../extensions/inventory/lot-batch-serial-tracking.md)
 
 - **Claim.** Adds a lot/batch/serial identity axis below the variant, with serial as the degenerate
   lot-of-one.
@@ -20,7 +20,7 @@ read out of the source, not from prior notes.
   `(variantId, stockLocationId, lotId)`. Once availability is computed per lot, un-splitting it is a
   data migration, not a refactor. It owns this decision for the two guides that build on it.
 
-### [expiry-fifo-rotation.md](../../extensions/expiry-fifo-rotation.md)
+### [expiry-fifo-rotation.md](../../extensions/inventory/expiry-fifo-rotation.md)
 
 - **Claim.** An `expiresAt` per lot plus a pluggable FEFO/FIFO allocation policy.
 - **Attaches to.** The same three domain models, and the lot axis from the guide above.
@@ -28,7 +28,7 @@ read out of the source, not from prior notes.
   FIFO or configurable propagates into every allocate path; hard-coding "any lot" now would block it
   later.
 
-### [bin-aisle-shelf.md](../../extensions/bin-aisle-shelf.md)
+### [bin-aisle-shelf.md](../../extensions/inventory/bin-aisle-shelf.md)
 
 - **Claim.** Sub-location slotting (aisle/rack/shelf/bin) for directed put-away and picking.
 - **Attaches to.** `StockLocation` and `StockLevel`.
@@ -36,7 +36,7 @@ read out of the source, not from prior notes.
   level (see the closing section). Modelling bins as peer locations would re-key reservations and the
   no-oversell guard onto bins — expensive to walk back.
 
-### [demand-forecasting-and-safety-stock.md](../../extensions/demand-forecasting-and-safety-stock.md)
+### [demand-forecasting-and-safety-stock.md](../../extensions/inventory/demand-forecasting-and-safety-stock.md)
 
 - **Claim.** A read-model forecast of demand and a computed safety stock / reorder point. **Owns the
   "the `stock_movement` ledger is the fact table" argument** the ABC guide then links.
@@ -46,7 +46,7 @@ read out of the source, not from prior notes.
   colocated in inventory. The seam (consume the event stream, expose a forecast port) is stable; the
   deployment boundary is not cheap to move later.
 
-### [transfer-order-documents.md](../../extensions/transfer-order-documents.md)
+### [transfer-order-documents.md](../../extensions/inventory/transfer-order-documents.md)
 
 - **Claim.** Wraps the core's atomic transfer in a draft→dispatched→received document with a lifecycle.
   Owns the transfer-document premise the in-transit guide links.
@@ -57,16 +57,16 @@ read out of the source, not from prior notes.
   introduces an in-transit period the core has never had, and every availability read at either
   endpoint must then account for it.
 
-### [consigned-vendor-managed-inventory.md](../../extensions/consigned-vendor-managed-inventory.md)
+### [consigned-vendor-managed-inventory.md](../../extensions/inventory/consigned-vendor-managed-inventory.md)
 
 - **Claim.** An ownership axis on stock so a supplier can own on-hand units; title transfers at
-  commit-sale. Links [supplier-and-vendor.md](../../extensions/supplier-and-vendor.md) and re-models
+  commit-sale. Links [supplier-and-vendor.md](../../extensions/product-catalog/supplier-and-vendor.md) and re-models
   the party in no way.
 - **Attaches to.** `StockLevel` (ownership is a new axis on a total that has none) and `StockMovement`.
 - **Hardest to reverse.** Deciding when title transfers — at sale, receipt or period boundary — because
   that is what fixes when a payable to the supplier is created, and the accounting hangs off it.
 
-### [abc-classification.md](../../extensions/abc-classification.md)
+### [abc-classification.md](../../extensions/inventory/abc-classification.md)
 
 - **Claim.** Pareto A/B/C tiers scored off the ledger by a periodic job. Reads the fact table the
   demand-forecasting guide establishes.
@@ -74,10 +74,10 @@ read out of the source, not from prior notes.
 - **Hardest to reverse.** The scoring dimension — value, volume or margin. It defines what an "A item"
   *is*, and everything downstream (cycle counting, purchasing policy) inherits it.
 
-### [in-transit-as-separate-location.md](../../extensions/in-transit-as-separate-location.md)
+### [in-transit-as-separate-location.md](../../extensions/inventory/in-transit-as-separate-location.md)
 
 - **Claim.** Models the dispatch-to-receipt gap as a virtual `StockLocation`, reusing the existing
-  `dropship-virtual` precedent. Links [transfer-order-documents.md](../../extensions/transfer-order-documents.md).
+  `dropship-virtual` precedent. Links [transfer-order-documents.md](../../extensions/inventory/transfer-order-documents.md).
 - **Attaches to.** `StockLocation`.
 - **Hardest to reverse.** Whether in-transit stock counts as available-to-promise at the destination.
   That decides if the `available` getter includes inbound units, and thus whether backorder-against-inbound
@@ -123,7 +123,7 @@ sketch, so each guide was checked against all four.
 
 ## Why a bin is not a `StockLocation`
 
-This is the call a reader will most want justified, and [bin-aisle-shelf.md](../../extensions/bin-aisle-shelf.md)
+This is the call a reader will most want justified, and [bin-aisle-shelf.md](../../extensions/inventory/bin-aisle-shelf.md)
 answers it: a bin is a **sub-axis under the level, not a peer location**.
 
 The reason is that `StockLocation` is the granularity of *fulfilment*. Reservations, the no-oversell

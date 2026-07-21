@@ -42,12 +42,12 @@ place to filter an audience. It is not — the audience is resolved early and co
 
 | Guide | Marketing? | Where the check happens | What each guide had to say |
 | --- | --- | --- | --- |
-| [marketing-campaigns-and-segmentation.md](../../extensions/marketing-campaigns-and-segmentation.md) | Always | Per recipient at dispatch, inside `RenderAndDispatchUseCase` — **not** at audience resolution | Pre-filtering the audience is an optimisation; the gate is what makes it *correct*, because consent can be withdrawn between resolution and send. The gate also writes the `skipped-no-consent` row that evidences the suppression. |
-| [scheduled-batch-newsletters.md](../../extensions/scheduled-batch-newsletters.md) | Always | Per recipient at dispatch, per slice — **not** once at schedule time | Hours can pass between scheduling and sending; only the gate sees the current snapshot. |
-| [abandoned-cart-automation.md](../../extensions/abandoned-cart-automation.md) | Yes — its `eventType` is outside `TRANSACTIONAL_EVENT_TYPES` | The same gate, via a consumer that maps to the shared pipeline | A reminder is *not* transactional despite feeling operational; it is gated on `marketingEmail`, which defaults to denied. |
-| [push-device-token-registration.md](../../extensions/push-device-token-registration.md) | Depends on `eventType` | The same gate — but **there is no `marketingPush` flag today** | The consent snapshot carries `transactionalEmail` / `marketingEmail` / `marketingSms` and nothing else. Push needs the model *extended*, not borrowed: reusing `marketingEmail` would mean an email opt-in silently became a push opt-in. |
-| [in-app-inbox-feed.md](../../extensions/in-app-inbox-feed.md) | Depends on `eventType` | The same gate, unchanged | Classification is by `eventType`, not channel, so a promotional inbox card is gated exactly like a promotional email — correct, and free. |
-| [ab-template-testing.md](../../extensions/ab-template-testing.md) | Inherited | Untouched — variant selection replaces the template *resolution* only | Everything downstream of step 1 (render, gate, delivery row, dedupe, retry) is unmodified by a test. |
+| [marketing-campaigns-and-segmentation.md](../../extensions/notifications-and-events/marketing-campaigns-and-segmentation.md) | Always | Per recipient at dispatch, inside `RenderAndDispatchUseCase` — **not** at audience resolution | Pre-filtering the audience is an optimisation; the gate is what makes it *correct*, because consent can be withdrawn between resolution and send. The gate also writes the `skipped-no-consent` row that evidences the suppression. |
+| [scheduled-batch-newsletters.md](../../extensions/notifications-and-events/scheduled-batch-newsletters.md) | Always | Per recipient at dispatch, per slice — **not** once at schedule time | Hours can pass between scheduling and sending; only the gate sees the current snapshot. |
+| [abandoned-cart-automation.md](../../extensions/notifications-and-events/abandoned-cart-automation.md) | Yes — its `eventType` is outside `TRANSACTIONAL_EVENT_TYPES` | The same gate, via a consumer that maps to the shared pipeline | A reminder is *not* transactional despite feeling operational; it is gated on `marketingEmail`, which defaults to denied. |
+| [push-device-token-registration.md](../../extensions/notifications-and-events/push-device-token-registration.md) | Depends on `eventType` | The same gate — but **there is no `marketingPush` flag today** | The consent snapshot carries `transactionalEmail` / `marketingEmail` / `marketingSms` and nothing else. Push needs the model *extended*, not borrowed: reusing `marketingEmail` would mean an email opt-in silently became a push opt-in. |
+| [in-app-inbox-feed.md](../../extensions/notifications-and-events/in-app-inbox-feed.md) | Depends on `eventType` | The same gate, unchanged | Classification is by `eventType`, not channel, so a promotional inbox card is gated exactly like a promotional email — correct, and free. |
+| [ab-template-testing.md](../../extensions/notifications-and-events/ab-template-testing.md) | Inherited | Untouched — variant selection replaces the template *resolution* only | Everything downstream of step 1 (render, gate, delivery row, dedupe, retry) is unmodified by a test. |
 
 Three further points the guides carry rather than assume. The consent read is cache-aside under
 `CACHE_KEYS.notificationsConsent(customerId)`, kept fresh by the write-through/evict consumer pair,
@@ -60,7 +60,7 @@ defaults, so an outage suppresses marketing rather than leaking it. And a **null
 ## Outbound webhooks versus the internal bus
 
 The distinction is the whole point of
-[webhook-subscription-management-ui.md](../../extensions/webhook-subscription-management-ui.md), and
+[webhook-subscription-management-ui.md](../../extensions/notifications-and-events/webhook-subscription-management-ui.md), and
 the guide leads with it because "outbound webhooks are just another consumer of `ris.events`" is both
 the obvious framing and wrong.
 
@@ -106,7 +106,7 @@ a hot loop.
 
 ## The eight guides
 
-### [marketing-campaigns-and-segmentation.md](../../extensions/marketing-campaigns-and-segmentation.md)
+### [marketing-campaigns-and-segmentation.md](../../extensions/notifications-and-events/marketing-campaigns-and-segmentation.md)
 
 - **Claim.** Owns **audience resolution** for the cluster. A `Campaign` aggregate over a *dated,
   snapshotted* recipient list — resolution is a snapshot rather than a live query, because a dynamic
@@ -119,7 +119,7 @@ a hot loop.
   existing single-recipient `SendMarketingUseCase`, which a campaign fans out.
 - **Links.** `customer-segments-and-tiers.md`, `scheduled-batch-newsletters.md`.
 
-### [scheduled-batch-newsletters.md](../../extensions/scheduled-batch-newsletters.md)
+### [scheduled-batch-newsletters.md](../../extensions/notifications-and-events/scheduled-batch-newsletters.md)
 
 - **Claim.** Owns **scheduling and pacing**, explicitly *not* audience. A due-work tick with
   compare-and-swap claiming and bounded paced slices; the schedule is data on the send, never a
@@ -132,7 +132,7 @@ a hot loop.
   send time is per-campaign data, so it is a due-work query, not a timer.
 - **Links.** `marketing-campaigns-and-segmentation.md`.
 
-### [abandoned-cart-automation.md](../../extensions/abandoned-cart-automation.md)
+### [abandoned-cart-automation.md](../../extensions/notifications-and-events/abandoned-cart-automation.md)
 
 - **Claim.** The one notification triggered by an **absence** — a bounded detection sweep over
   `active` carts stale by `updatedAt`, emitting an event the notification service consumes.
@@ -145,7 +145,7 @@ a hot loop.
   `active`-only candidate query excludes erased customers' carts for free.
 - **Links.** None.
 
-### [ab-template-testing.md](../../extensions/ab-template-testing.md)
+### [ab-template-testing.md](../../extensions/notifications-and-events/ab-template-testing.md)
 
 - **Claim.** A variant dimension on the template registry key, deterministic per-recipient assignment
   at the single resolution call site, and promotion via an ordinary registry edit.
@@ -158,7 +158,7 @@ a hot loop.
 - **Links.** The root `README.md`'s `Not built yet` section (twice — locale resolution, and the ESP
   webhook ingestion behind the outcome RPC).
 
-### [in-app-inbox-feed.md](../../extensions/in-app-inbox-feed.md)
+### [in-app-inbox-feed.md](../../extensions/notifications-and-events/in-app-inbox-feed.md)
 
 - **Claim.** A channel whose delivery is a **read**, not a send. An adapter behind `NOTIFIER` whose
   `send` writes a row and returns, plus read-state kept beside the message rather than in its status.
@@ -171,7 +171,7 @@ a hot loop.
 - **Links.** `push-device-token-registration.md`, `live-customer-messaging.md`, the `Not built yet`
   section.
 
-### [push-device-token-registration.md](../../extensions/push-device-token-registration.md)
+### [push-device-token-registration.md](../../extensions/notifications-and-events/push-device-token-registration.md)
 
 - **Claim.** The **token registry**, not the transport. A customer-owned `DeviceToken` with
   owner-checked registration, reassignment across accounts, and permanent-versus-transient failure
@@ -185,7 +185,7 @@ a hot loop.
   flag, and borrowing `marketingEmail` would turn an email opt-in into a push opt-in.
 - **Links.** `in-app-inbox-feed.md`, the `Not built yet` section.
 
-### [webhook-subscription-management-ui.md](../../extensions/webhook-subscription-management-ui.md)
+### [webhook-subscription-management-ui.md](../../extensions/notifications-and-events/webhook-subscription-management-ui.md)
 
 - **Claim.** Calling **outward**. A `#`-bound consumer matching routing keys against subscriptions,
   decoupled from a dispatch worker with its own long retry horizon, signing, SSRF defence, and replay
@@ -194,7 +194,7 @@ a hot loop.
 - **Links.** The `Not built yet` section (twice — the webhook notifier transport, and the ESP
   ingestion RPC that has no HTTP route).
 
-### [live-customer-messaging.md](../../extensions/live-customer-messaging.md)
+### [live-customer-messaging.md](../../extensions/notifications-and-events/live-customer-messaging.md)
 
 - **Claim.** The cluster's only **new deployable**. Everything the notification service does is
   fire-and-forget, one-way and stateless per message; live chat is bidirectional, stateful and
@@ -215,7 +215,7 @@ a hot loop.
 
 ADR-055's rule is that a row and a guide may cover the same ground, but the row names the seam and
 the guide describes the capability — **neither restates the other**. Four guides link the root
-[`README.md` § Not built yet](../../README.md#14-not-built-yet) section (never a row's text):
+[`README.md` § Not built yet](../../../README.md#14-not-built-yet) section (never a row's text):
 
 | Row | Cited by | Why |
 | --- | --- | --- |
