@@ -215,14 +215,14 @@ as a changelog or a scope negotiation.
 
 | Guide | Hook |
 | --- | --- |
-| b2b-contract-pricing.md | |
-| coupons-and-discount-codes.md | |
-| currency-conversion.md | |
-| customer-group-and-tiered-pricing.md | |
-| discounts-and-promotions.md | |
-| dynamic-ai-pricing.md | |
-| msrp-vs-sale-price.md | |
-| tax-rate-tables.md | |
+| [b2b-contract-pricing.md](b2b-contract-pricing.md) | Account-scoped, contract-term prices on the append-only ledger; inherits the B2B account and its tree, adds only the pricing attachment. |
+| [coupons-and-discount-codes.md](coupons-and-discount-codes.md) | A code that unlocks a promotion — a price adjustment, not a tender; inherits the discount engine and adds only the redemption caps. |
+| [currency-conversion.md](currency-conversion.md) | Sells per currency over the ledger's existing `(variantId, currency)` scope; FX is always an explicit step, never a silent conversion into an immutable order. |
+| [customer-group-and-tiered-pricing.md](customer-group-and-tiered-pricing.md) | The `priceScope` axis ADR-026 reserved — scopes a price to a customer group; inherits the segment, never re-models the grouping. |
+| [discounts-and-promotions.md](discounts-and-promotions.md) | Owns the promotion engine — a discount is not a `price` row; it computes at checkout and freezes into the order's existing `discountAmountMinor` seams. |
+| [dynamic-ai-pricing.md](dynamic-ai-pricing.md) | A repricing engine that writes append-only rows and never mutates them — automation driving the existing `SetPrice` path, auditable for free. |
+| [msrp-vs-sale-price.md](msrp-vs-sale-price.md) | The compare-at "was" price, derived from the ledger's `priority` ordering and closed-interval history; the reduction machinery stays with the discount engine. |
+| [tax-rate-tables.md](tax-rate-tables.md) | The internal-rate-table alternative to a tax engine — owns the `(jurisdiction × tax category)` rate data behind the same `TAX_ENGINE` port, keeps `TaxCategory` a label. |
 
 ### Notifications & Events
 
