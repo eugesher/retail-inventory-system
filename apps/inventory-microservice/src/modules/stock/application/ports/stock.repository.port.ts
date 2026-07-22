@@ -3,10 +3,9 @@ import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const STOCK_REPOSITORY = Symbol('STOCK_REPOSITORY');
 
-// Domain types only — no `typeorm` leak (ADR-017). Later capabilities consume
-// these methods (Query Availability, List Locations, Receive, Adjust, the
-// variant-created auto-init consumer); this foundation only needs them to
-// compile and to be covered by the repository spec.
+// Domain types only — no `typeorm` leak (ADR-017). These methods are consumed by
+// this module's own use cases: Query Availability, List Locations, Receive,
+// Adjust, and the variant-created auto-init consumer.
 export interface IStockRepositoryPort {
   findLocation(id: string): Promise<StockLocation | null>;
   listLocations(activeOnly?: boolean): Promise<StockLocation[]>;

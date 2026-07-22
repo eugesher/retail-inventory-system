@@ -34,9 +34,10 @@ export class StockLevelEntity extends BaseEntity {
 
   // Optimistic-concurrency token. TypeORM owns the persisted value via
   // `@VersionColumn` (incremented on each managed save); the no-oversell
-  // invariant it guards is enforced by the later inventory-reservation +
-  // concurrency-hardening capabilities. Shipping the column now keeps that
-  // retrofit non-destructive — no future `ALTER TABLE` on a populated table.
+  // invariant it guards is now enforced by the version-checked write in
+  // Receive/Adjust and the reservation capability (ADR-030). Shipping the
+  // column from the start kept that retrofit non-destructive — no `ALTER TABLE`
+  // on a populated table was ever needed.
   @VersionColumn()
   public version: number;
 }

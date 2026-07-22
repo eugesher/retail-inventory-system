@@ -31,12 +31,17 @@ needs only the two operations that move **on-hand**:
   would drive on-hand below zero is rejected.
 
 Allocation, reservation, commit-sale, cancel, restock-from-return, and transfer
-are **out of scope** here — they belong to the later inventory-reservation
-capability, together with the `version` optimistic-lock enforcement and the
-`StockMovement` audit ledger. Crucially, **no `StockMovement` row is written by
-either operation today**: the `reasonCode` is carried in the request, in the
-`inventory.stock.adjusted` event, and in the logs — that is the entire audit trail
-until the movement ledger lands.
+remain **out of scope of Receive/Adjust** — they arrived with the later
+inventory-reservation capability
+([ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md)). But
+that capability also reached back *into* these two operations, and this document was
+written before it did. **Since ADR-030, both Receive and Adjust go through the
+version-checked optimistic-lock write and each appends a `StockMovement` ledger row
+inside the same transaction as the counter change** (ADR-030 §2) — Receive a positive
+`receipt`, Adjust a signed `adjustment` carrying the `reasonCode`. At epic time neither
+wrote a movement row, and the `reasonCode` lived only in the request, the
+`inventory.stock.adjusted` event, and the logs; that original state is called out
+inline below where the narrative still describes it.
 
 ## The use cases
 
@@ -94,8 +99,9 @@ duplicate-row hazard.)
 
 ## Post-commit cache invalidation (`withInvalidation`)
 
-The cached availability is a per-variant `VariantStockView` under the `v2` key
-shape ([ADR-022](../../adr/022-cache-keys-tenant-and-schema-version.md) /
+The cached availability is a per-variant `VariantStockView` under the live-version key
+shape (`v2` at epic time, `v3` today —
+[ADR-022](../../adr/022-cache-keys-tenant-and-schema-version.md) /
 [ADR-016](../../adr/016-cache-aside-generalized.md)). A write must invalidate it
 **after** the commit, never before — invalidating before commit would let a
 concurrent read re-cache the pre-write value while the row is still being written
@@ -112,14 +118,28 @@ stockCache.withInvalidation(work, resolveItems, { correlationId })
 where `work` is the transactional read-modify-write and `resolveItems(result)`
 derives the `{ variantId, stockLocationId }[]` to wipe from the saved level. The
 helper awaits `work()` (so the commit is durable) and only then fires the private
-prefix delete. The receive/adjust use cases wrap their write exactly this way:
+prefix delete. Both use cases delegate to the shared `applyOnHandChange` mutator
+(`apps/inventory-microservice/src/modules/stock/application/use-cases/stock-mutation.ts:135`),
+which nests the write protocol as:
 
 ```text
-work    = transactionPort.runInTransaction(() => {
-            find-or-initialAt → changeOnHand → saveStockLevel
-          })
-resolve = (saved) => [{ variantId: saved.variantId, stockLocationId: saved.stockLocationId }]
+work    = runWithStockWriteRetry( bounded OCC — ADR-036/045 )
+            └─ runInTransaction:
+                 find-or-initialAt → changeOnHand
+                   → persistStockLevelChange(level, expectedVersion)   # version-checked CAS
+                   → movementRepository.append(buildMovement(saved))   # ledger row, ADR-030 §2
+resolve = (result) => [{ variantId: result.level.variantId,
+                         stockLocationId: result.level.stockLocationId }]
 ```
+
+> At epic time this was a plain `runInTransaction(find-or-initialAt → changeOnHand →
+> saveStockLevel)` with no version check and no ledger append. ADR-030 added the bounded
+> optimistic retry (`runWithStockWriteRetry`), the version-checked persist
+> (`persistStockLevelChange`), and the in-transaction `StockMovement` append. A domain
+> rejection (a below-zero Adjust) still propagates before any save and is **not** retried;
+> only a lost compare-and-swap (`StockWriteConflictError`) triggers a retry, and exactly
+> one movement row lands per successful mutation regardless of how many attempts the race
+> burned.
 
 The transaction goes through `ITransactionPort` (`TRANSACTION_PORT`), keeping the
 use case ORM-free — the `EntityManager` downcast lives only in the TypeORM
@@ -129,24 +149,28 @@ proof is `test/inventory-cache.e2e-spec.ts` — it primes the cache, receives st
 and asserts the next read reflects the post-commit figure rather than the stale
 primed one.
 
-> The cache fan-out wipes four prefixes per `variantId` (the current `v2` plus
-> three legacy families) during the transition window — see
-> [the cache-key bump](04-cache-key-bump-v1-to-v2.md). On a Redis outage the
-> invalidation is warn-logged and swallowed; correctness is preserved and the TTL
-> is the safety net.
+> The cache invalidate wipes **one** prefix per `variantId` — the live version's
+> (`v3` today) — see [the cache-key bump](04-cache-key-bump-v1-to-v2.md). (At epic time it
+> fanned out to four; that legacy sweep was removed by ISSUE-03.) On a Redis outage the
+> invalidation is warn-logged and swallowed; correctness is preserved and the TTL is the
+> safety net.
 
 ## Events
 
-All three events are framework-free wire interfaces in
+The events are framework-free wire interfaces in
 `libs/contracts/inventory/events/` — a `DomainEvent` subclass is never serialized
 across services ([ADR-011](../../adr/011-notifier-port-and-adapters.md)); the
-publisher maps the in-process domain event to the wire shape.
+publisher maps the in-process domain event to the wire shape. At epic time Receive
+emitted one event and Adjust two; since the ledger landed (ADR-030 §2) each also emits
+`inventory.stock-movement.recorded` on the successful-write path, so Receive emits **two**
+and Adjust **three** (the low-stock one only on a depleting delta):
 
-| Event | Routing key | Destination queue | Consumer |
-| --- | --- | --- | --- |
-| `inventory.stock.received` | `inventory.stock.received` | `inventory_queue` | none yet (reserved) |
-| `inventory.stock.adjusted` | `inventory.stock.adjusted` | `inventory_queue` | none yet (reserved) |
-| `inventory.stock.low` | `inventory.stock.low` | `notification_events` | notification service |
+| Event                               | Routing key                         | Destination queue     | Consumer             |
+|-------------------------------------|-------------------------------------|-----------------------|----------------------|
+| `inventory.stock.received`          | `inventory.stock.received`          | `inventory_queue`     | none yet (reserved)  |
+| `inventory.stock.adjusted`          | `inventory.stock.adjusted`          | `inventory_queue`     | none yet (reserved)  |
+| `inventory.stock-movement.recorded` | `inventory.stock-movement.recorded` | `inventory_queue`     | none yet (reserved)  |
+| `inventory.stock.low`               | `inventory.stock.low`               | `notification_events` | notification service |
 
 The destination queue is fixed by **which client the publisher emits through**
 ([ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md) /
@@ -184,10 +208,10 @@ boundary.
 
 The gateway `inventory` module fronts the two writes over HTTP:
 
-| Route | Permission | Body |
-| --- | --- | --- |
-| `POST /api/inventory/variants/:variantId/stock/receive` | `inventory:adjust` | `{ stockLocationId?, quantity }` |
-| `POST /api/inventory/variants/:variantId/stock/adjust` | `inventory:adjust` | `{ stockLocationId?, quantityDelta, reasonCode }` |
+| Route                                                   | Permission         | Body                                              |
+|---------------------------------------------------------|--------------------|---------------------------------------------------|
+| `POST /api/inventory/variants/:variantId/stock/receive` | `inventory:adjust` | `{ stockLocationId?, quantity }`                  |
+| `POST /api/inventory/variants/:variantId/stock/adjust`  | `inventory:adjust` | `{ stockLocationId?, quantityDelta, reasonCode }` |
 
 Both are gated with `@RequiresPermission(PermissionCodeEnum.INVENTORY_ADJUST)`
 ([ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)). Because
@@ -213,10 +237,19 @@ codes to `400`. This mirrors the catalog
 ([ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md)) filters
 exactly. The e2e asserts the `409` on `Adjust -100`.
 
-## What is deferred
+## What is deferred — and what has since landed
 
-- **`StockMovement` persistence** — no movement/audit row is written; `reasonCode`
-  lives only in the event + logs until the audit-log capability lands.
+Both bullets below described the state *at epic time*. The later inventory-reservation
+capability ([ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md))
+has since delivered them; they are kept in past tense so the foundation's original scope
+stays legible.
+
+- **`StockMovement` persistence** — *at epic time* no movement/audit row was written and
+  the `reasonCode` lived only in the event + logs. **Since ADR-030 §2** both Receive and
+  Adjust append a `StockMovement` row inside the counter transaction (a `receipt` and a
+  signed `adjustment` respectively), so the ledger is now the durable audit trail.
 - **Reservation / allocation / commit-sale / cancel / restock / transfer** and the
-  no-oversell **`version`** enforcement — the later inventory-reservation
-  capability. `StockLevel` deliberately exposes only `changeOnHand` today.
+  no-oversell **`version`** enforcement — deferred to the inventory-reservation capability
+  at epic time; **all have since landed** (ADR-030/031/032). `StockLevel` today exposes the
+  full mutator set, and Receive/Adjust themselves now run the version-checked optimistic
+  write.

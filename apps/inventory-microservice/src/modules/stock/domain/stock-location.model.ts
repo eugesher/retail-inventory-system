@@ -1,7 +1,9 @@
 // The physical (or virtual) place stock is held. Framework-free per ADR-004:
 // no `@nestjs/*`, no `typeorm`, no `class-validator` on the model — invariants
-// throw a plain `Error`, matching the pre-existing stock domain style (the
-// inventory context has no `DomainException` subclass yet).
+// throw a plain `Error`. That is deliberate, not an absence: the context does
+// have an `InventoryDomainException` (introduced with Receive/Adjust), but it is
+// reserved for caller-reachable states; a `StockLocation` construction breach is
+// internal drift, so it stays a plain `Error` (see `stock-level.model.ts`).
 
 export enum StockLocationTypeEnum {
   WAREHOUSE = 'warehouse',
