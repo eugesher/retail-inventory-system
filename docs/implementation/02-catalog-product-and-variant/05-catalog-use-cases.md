@@ -107,13 +107,16 @@ optionValues, weightG?, dimensionsMm?, correlationId }` and returns a
 
 ### Why re-read the id instead of trusting the in-process event
 
-`VariantCreatedEvent` is recorded in step 3, **before** the row exists, so its
-`variantId` is `null`. The wire event consumers need the concrete id, so the use
-case re-reads it from the saved aggregate after step 4 and constructs the wire
-event then (ADR-025 / ADR-013). The drained domain event still supplies the
-`sku` (to match the right saved variant) and the `occurredAt` timestamp; only
-the id comes from persistence. A `DomainEvent` subclass is **never serialized**
-across services — the use case maps it to a plain wire interface first.
+`VariantCreatedEvent` is recorded in step 3, **before** the row exists, so no
+variant id is knowable at that point — which is why the in-process event carries
+**no `variantId` field at all**, only the `sku` and the `occurredAt` timestamp
+(see [03](./03-product-and-variant-domain.md) §5). The wire event consumers do
+need the concrete id, so the use case finds the matching variant in the *saved*
+aggregate by its globally unique `sku` after step 4 and stamps the id onto the
+wire payload then (ADR-025 / ADR-013). Only the id comes from persistence; the
+timestamp still comes from the drained domain event. A `DomainEvent` subclass is
+**never serialized** across services — the use case maps it to a plain wire
+interface first.
 
 ## 4. Publish Product
 
@@ -138,7 +141,20 @@ transition timestamp.
 5. **Emit after commit.** Drain `product.pullDomainEvents()`, map the
    `ProductPublishedEvent` to `ICatalogProductPublishedEvent`, and publish it
    through the events port (best-effort — see §7).
-6. **Return** the `ProductView` with `status: 'active'` and `publishedAt`.
+6. **Collect soft warnings.** Since
+   [ADR-029](../../adr/029-category-materialized-path-and-polymorphic-media.md)
+   §7 the use case ends with a **non-blocking** recommendation check: if neither
+   the product nor any of its variants owns an active `MediaAsset`, the response
+   carries a `warnings[]` entry
+   (`CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA`). It runs **after** the save, on
+   the already-active product, so it is structurally unable to change the
+   outcome, and the probe is wrapped in `try`/`catch` — a probe failure is
+   warn-logged and swallowed. This is the deliberate contrast with the price
+   gate: a price-less product breaks checkout (block, 409), a media-less product
+   only looks bare (warn, 200).
+7. **Return** the `ProductView` with `status: 'active'` and `publishedAt` (plus
+   `warnings` when step 6 produced one — **absent**, never an empty `[]`, on a
+   clean publish).
 
 ### The active-Price publish precondition — enforced via a probe
 
@@ -203,17 +219,18 @@ class for the catalog context, carrying a `CatalogErrorCodeEnum` code. The
 presentation/gateway layer maps the code to an HTTP status (the gateway module is
 later work); nothing string-matches an exception message (ADR-025).
 
-| Condition | Code | Raised by |
-|---|---|---|
-| Duplicate `slug` | `PRODUCT_SLUG_TAKEN` | Register Product |
-| Parent product missing | `PRODUCT_NOT_FOUND` | Add Variant |
-| Duplicate `sku` | `VARIANT_SKU_TAKEN` | Add Variant |
-| Product missing | `PRODUCT_NOT_FOUND` | Publish / Archive Product |
-| Publishing a non-draft product | `PRODUCT_INVALID_STATE_TRANSITION` | Publish Product |
-| Publishing a variant-less product | `PRODUCT_PUBLISH_REQUIRES_VARIANT` | Publish Product |
-| Archiving a non-active product | `PRODUCT_INVALID_STATE_TRANSITION` | Archive Product |
-| Unknown slug | `PRODUCT_NOT_FOUND` | Get Product By Slug |
-| Unknown variant id | `VARIANT_NOT_FOUND` | Get Variant |
+| Condition                                                         | Code                               | Raised by                 |
+|-------------------------------------------------------------------|------------------------------------|---------------------------|
+| Duplicate `slug`                                                  | `PRODUCT_SLUG_TAKEN`               | Register Product          |
+| Parent product missing                                            | `PRODUCT_NOT_FOUND`                | Add Variant               |
+| Duplicate `sku`                                                   | `VARIANT_SKU_TAKEN`                | Add Variant               |
+| Product missing                                                   | `PRODUCT_NOT_FOUND`                | Publish / Archive Product |
+| Publishing a non-draft product                                    | `PRODUCT_INVALID_STATE_TRANSITION` | Publish Product           |
+| Publishing a variant-less product                                 | `PRODUCT_PUBLISH_REQUIRES_VARIANT` | Publish Product           |
+| Publishing when a variant has no in-effect default-currency Price | `PRODUCT_PUBLISH_REQUIRES_PRICE`   | Publish Product (§4)      |
+| Archiving a non-active product                                    | `PRODUCT_INVALID_STATE_TRANSITION` | Archive Product           |
+| Unknown slug                                                      | `PRODUCT_NOT_FOUND`                | Get Product By Slug       |
+| Unknown variant id                                                | `VARIANT_NOT_FOUND`                | Get Variant               |
 
 The state-transition and variant-count codes are raised **by the domain** inside
 `Product.publish()` / `Product.archive()`; the `*_TAKEN` and `PRODUCT_NOT_FOUND`
@@ -248,11 +265,18 @@ the wire contracts are described in [06 — Catalog events](./06-catalog-events.
   `findById`, `existsBySlug`, `existsBySku`, and the read helpers `findBySlug`,
   `findVariantById`, and `listActive(query)` used by the read path (§9). Returns
   domain types only; no TypeORM type leaks into the application layer (ADR-017).
-  Detailed in [04](./04-product-and-variant-persistence.md).
+  Detailed in [04](./04-product-and-variant-persistence.md). *(ADR-029 later added
+  an eighth method, `listActiveByCategoryIds`, for the category-scoped browse.)*
 - `ICatalogEventsPublisherPort` (`CATALOG_EVENTS_PUBLISHER`) —
   `publishVariantCreated`, `publishProductPublished`, `publishProductArchived`
   (each `(event, correlationId?)`). The use case builds the wire event; the
   adapter emits it. Detailed in [06](./06-catalog-events.md).
+
+`PublishProductUseCase` injects three more, all added by later work and all
+covered above: `IActivePriceProbePort` (`ACTIVE_PRICE_PROBE`) +
+`CATALOG_DEFAULT_CURRENCY` for the price gate (§4), and
+`IMediaAssetRepositoryPort` (`MEDIA_ASSET_REPOSITORY`) for the media soft warning
+(§4 step 6).
 
 ### Note on `ProductView` and the transition timestamps
 
@@ -263,6 +287,12 @@ archive sets `archivedAt`); a plain register response carries neither. The
 timestamp value is the drained domain event's `occurredAt` rendered as an ISO-8601
 string — the same instant the wire event carries (see
 [06](./06-catalog-events.md) §2).
+
+It later gained a third optional field, `warnings?: PublishWarningView[]`, set
+only by publish and only when a *recommended* precondition is unmet (§4 step 6).
+Absent means `undefined`, **never** an empty `[]` — a present-but-empty array
+would read as "we checked and found none" on a register or archive response that
+never ran the probe at all (ADR-029 §7).
 
 ## 9. The read path
 
@@ -308,8 +338,11 @@ all — it is the explicit "resolve this exact variant" path.
 
 - **`ListProductsUseCase`** — takes `IListProductsQuery` (`{ status?, page?,
   pageSize?, search?, correlationId }`) and returns `IPage<ProductWithVariantsView>`.
-  It normalizes the page request (1-based `page`, default page size 20, capped at
-  100 so an oversized `pageSize` cannot ask for an unbounded result set), then
+  It normalizes the page request through the shared
+  `clampPageWindow(page, pageSize)` helper (`libs/common/pagination/`) — 1-based
+  `page`, default page size 20, capped at 100 so an oversized `pageSize` cannot
+  ask for an unbounded result set, and a fractional page floored *before* the
+  positivity guard so it can never become a negative `skip` — then
   calls `repository.listActive({ page, size, search })`. The `status` field
   defaults to `active` on the contract and is reserved for a future non-active
   browse — today the path serves the active catalogue only. The optional `search`
@@ -322,9 +355,13 @@ all — it is the explicit "resolve this exact variant" path.
   correlationId }`) and returns `ProductVariantView & { product: ProductView }`
   (the `VariantWithProductView`). `findVariantById` resolves the variant
   regardless of status; an unknown id rejects with `VARIANT_NOT_FOUND` (§6). It
-  then loads the parent product header via `findById(variant.productId)` — the
+  then loads the parent product header via `findById(variant.productId)`. The
   variant carries a non-null FK to its product (`ON DELETE RESTRICT`), so a
-  missing parent is treated as a data-integrity breach, not a not-found.
+  missing parent is a data-integrity breach rather than an ordinary miss — the
+  use case still surfaces it as a typed `PRODUCT_NOT_FOUND` (→ 404) so a broken
+  row cannot collapse the request into an untyped 500. A `null` `productId` (the
+  column is `NOT NULL`, so this is unreachable) throws a plain `Error` instead,
+  which the exception filter deliberately does **not** catch: it stays a 500.
 
 ### 9.3 The pagination shape
 
@@ -372,24 +409,28 @@ the catalog service still does not import `CacheModule`.
 - `yarn lint` (`--max-warnings 0`) is clean: the use cases import only the
   domain, the ports, and contracts — no `@nestjs/microservices`, no `typeorm`.
 - `yarn test:unit` covers, per operation:
-  - **Register** — happy path + duplicate-slug rejection.
-  - **Add Variant** — happy path (the emitted `catalog.variant.created` carries
-    the **persisted** `variantId`), parent-not-found and duplicate-sku
-    rejections, and the best-effort publish (the variant is still returned when
-    the publisher rejects).
-  - **Publish** — happy path (`draft` + ≥1 variant → `active`, emits
-    `catalog.product.published` with the right `variantIds`), the no-variants
-    rejection, the not-found rejection, and the best-effort publish.
-  - **Archive** — happy path (`active → archived`, emits
-    `catalog.product.archived`), the non-active rejection, the not-found
-    rejection, and the best-effort publish.
-  - **List Products** — returns only `active` products with their `active`
-    variants; the pagination shape (`total` vs page slice); default page/size;
-    the `search` filter passed through.
-  - **Get Product By Slug** — happy path; an archived product still resolves by
-    slug; unknown slug → `PRODUCT_NOT_FOUND`.
-  - **Get Variant** — happy path (variant + parent header); an archived variant
-    on an archived product still resolves; unknown id → `VARIANT_NOT_FOUND`.
+    - **Register** — happy path + duplicate-slug rejection.
+    - **Add Variant** — happy path (the emitted `catalog.variant.created` carries
+      the **persisted** `variantId`), parent-not-found and duplicate-sku
+      rejections, and the best-effort publish (the variant is still returned when
+      the publisher rejects).
+    - **Publish** — happy path (`draft` + ≥1 **priced** variant → `active`, emits
+      `catalog.product.published` with the right `variantIds`), the no-variants
+      rejection, the not-found rejection, and the best-effort publish. Plus the
+      price gate (`PRODUCT_PUBLISH_REQUIRES_PRICE`, and that a variant-less product
+      still fails on the *variant* rule rather than the probe) and, since ADR-029,
+      four media-soft-warning cases — including that a probe rejection is swallowed
+      and the publish still succeeds.
+    - **Archive** — happy path (`active → archived`, emits
+      `catalog.product.archived`), the non-active rejection, the not-found
+      rejection, and the best-effort publish.
+    - **List Products** — returns only `active` products with their `active`
+      variants; the pagination shape (`total` vs page slice); default page/size;
+      the `search` filter passed through.
+    - **Get Product By Slug** — happy path; an archived product still resolves by
+      slug; unknown slug → `PRODUCT_NOT_FOUND`.
+    - **Get Variant** — happy path (variant + parent header); an archived variant
+      on an archived product still resolves; unknown id → `VARIANT_NOT_FOUND`.
 
   The repository and publisher are in-memory test doubles; the repository double
   mimics the real adapter's post-commit id assignment and its `listActive`
@@ -397,10 +438,13 @@ the catalog service still does not import `CacheModule`.
 
 ## What this does not do
 
-The "≥1 active Price" publish precondition is **not** part of this use case (§4):
-`PublishProductUseCase` enforces only the ≥1-variant rule, and the active-Price
-check is owned by the pricing capability and enforced where pricing joins the
-publish path. The read path is **not cached** (§9.4 reserves the key builder but
-the service does not import `CacheModule`). The API gateway catalog module — the HTTP surface that
-exposes these RPCs and maps `CatalogErrorCodeEnum` → HTTP status — is later work,
-described in its own document as it lands.
+The read path is **not cached** (§9.4 reserves the key builder but the service
+does not import `CacheModule`). The API gateway catalog module — the HTTP surface
+that exposes these RPCs and maps `CatalogErrorCodeEnum` → HTTP status — is later
+work, described in
+[07 — API-gateway catalog module](./07-api-gateway-catalog-module.md).
+
+(An earlier revision of this section said the "≥1 active Price" publish
+precondition was *not* part of `PublishProductUseCase`. It is — see §4: the
+use case probes the `price` table through `ACTIVE_PRICE_PROBE` and hard-fails
+with `PRODUCT_PUBLISH_REQUIRES_PRICE` → 409. Only the *domain* stays out of it.)

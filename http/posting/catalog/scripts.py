@@ -12,6 +12,15 @@ def capture_add_variant_black(response, posting) -> None:
     data = response.json()
     posting.set_variable("variantId", data["id"])
 
+def capture_add_variant_graphite(response, posting) -> None:
+    """addVariantGraphite -> $variantIdGraphite.
+
+    Needed only because publish requires a price on EVERY variant, so
+    set-price-graphite has to address the second variant by id.
+    """
+    data = response.json()
+    posting.set_variable("variantIdGraphite", data["id"])
+
 def capture_login(response, posting) -> None:
     """login -> $accessToken."""
     data = response.json()

@@ -17,8 +17,13 @@ import { ProductMapper } from './product.mapper';
 import { ProductVariantEntity } from './product-variant.entity';
 import { ProductVariantMapper } from './product-variant.mapper';
 
-// The single `InjectRepository` site for the catalog context. Extends
-// `BaseTypeormRepository` for the `toDomain`/`toEntity` seam; `save` is
+// The `Product` aggregate's persistence adapter. `@InjectRepository` appears
+// ONLY under `infrastructure/persistence/`, one adapter per aggregate seam — this
+// one holds both the product and variant repositories because a variant is a
+// child of the root, never a seam of its own (ADR-025). `Category`, `MediaAsset`
+// and the active-price probe each own a sibling adapter here (ADR-029 / ADR-026).
+//
+// Extends `BaseTypeormRepository` for the `toDomain`/`toEntity` seam; `save` is
 // overridden because the root and its variants persist explicitly (cascade is
 // off) and must commit atomically (ADR-019).
 @Injectable()

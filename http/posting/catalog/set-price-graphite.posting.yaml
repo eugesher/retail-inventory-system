@@ -1,0 +1,20 @@
+name: set-price-graphite
+description: |-
+  POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+  The second variant's price. One unpriced variant is enough to fail the whole
+  publish — the probe reports every variant that lacks a price, and a non-empty
+  result blocks the transition.
+method: POST
+url: $ENV_BASE_URL/catalog/variants/$variantIdGraphite/prices
+body:
+  content: |-
+    {
+      "currency": "USD",
+      "amountMinor": 134900,
+      "priority": 0
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

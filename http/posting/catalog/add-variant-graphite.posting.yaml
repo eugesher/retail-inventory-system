@@ -20,3 +20,5 @@ headers:
   value: Bearer $accessToken
 - name: Content-Type
   value: application/json
+scripts:
+  on_response: catalog/scripts.py:capture_add_variant_graphite

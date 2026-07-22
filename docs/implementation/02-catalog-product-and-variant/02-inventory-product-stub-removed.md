@@ -15,7 +15,10 @@ All services in this system share a single MySQL schema, `retail_db` (one
 database, one migration history — see
 [ADR-019](../../adr/019-typeorm-and-mysql-for-persistence.md)). In that shared
 schema a table name is a global resource: only one table may be called
-`product`.
+`product`. (Since [ADR-034](../../adr/034-isolated-eventstore-database.md) the
+event store owns a **second** logical database, `ris_eventstore`, with its own
+migration ledger; every *operational* context still shares `retail_db`, so the
+one-table-name-per-schema argument below is unchanged.)
 
 The inventory service carried a `product` table that existed for one reason
 only — to be the foreign-key target for `product_stock.product_id` (and,
@@ -41,22 +44,30 @@ seed:
 - **The `product` table** — dropped by the forward migration
   `1780392162294-DropInventoryProductStub`.
 - **Both foreign keys onto `product (id)`** — there were *two*, not one:
-  - `FK_PRODUCT_STOCK_PRODUCT` on `product_stock.product_id` (inventory side).
-  - `FK_ORDER_PRODUCT_PRODUCT` on `order_product.product_id` (retail side).
-  `DROP TABLE product` fails while either constraint still references the table,
-  so the migration drops both FKs first, then the table.
+    - `FK_PRODUCT_STOCK_PRODUCT` on `product_stock.product_id` (inventory side).
+    - `FK_ORDER_PRODUCT_PRODUCT` on `order_product.product_id` (retail side).
+      `DROP TABLE product` fails while either constraint still references the table,
+      so the migration drops both FKs first, then the table.
 - **The `Product` entity** — `product.entity.ts` is deleted, along with its
   barrel re-export and its entry in the `stockEntities` array
   (`apps/inventory-microservice/src/modules/stock/infrastructure/persistence/index.ts`)
   and its `DatabaseModule.forFeature([...])` registration in `stock.module.ts`.
-  The surviving stock entities — `ProductStock`, `ProductStockAction`, `Storage`
-  — are untouched (see [ADR-012](../../adr/012-stock-aggregate-and-port-adapter.md);
-  note the `product_stock` table keeps its name).
+  The stock entities that survived this change — `ProductStock`,
+  `ProductStockAction`, `Storage` — were untouched (see
+  [ADR-012](../../adr/012-stock-aggregate-and-port-adapter.md); the
+  `product_stock` table kept its name). *Since
+  [ADR-027](../../adr/027-stocklevel-running-totals-and-stocklocation.md) none of
+  those three exists: `product_stock` / `storage` were replaced by per-location
+  `StockLevel` running totals + `StockLocation`, keyed on the catalog
+  `variantId`.*
 - **The `product.sql` seed** — deleted, and removed from the ordered
   `TestDbSeedUtil.seedFiles` list. The `product-stock.sql` and
-  `order-product.sql` seeds keep their integer `product_id` values; with the FKs
-  gone those columns are plain integers and the `INSERT IGNORE` rows still load
-  without a parent `product` row to satisfy.
+  `order-product.sql` seeds kept their integer `product_id` values; with the FKs
+  gone those columns were plain integers and the `INSERT IGNORE` rows still
+  loaded without a parent `product` row to satisfy. (Both of those seed files
+  have since been replaced too — `scripts/seeds/` now carries `stock-level.sql` /
+  `stock-location.sql` on the inventory side and `catalog-product.sql` /
+  `catalog-product-variant.sql` on the catalog side.)
 - **The retail order-create product-existence check** — the only runtime reader
   of the `product` table outside the migration was the retail repository method
   `findExistingProductIds`, which ran `SELECT id FROM product` to reject an
@@ -64,7 +75,12 @@ seed:
   it to read, so the method, its port declaration, and the `OrderCreatePipe`
   that called it are removed. `POST /api/order` no longer validates product
   existence before persisting an order. See §4 for why this is the right state
-  now and what restores the guarantee later.
+  now and what restores the guarantee later. (*That restoration has since
+  landed, and the route itself is gone: order creation moved to the
+  `Cart → Order` chain of
+  [ADR-028](../../adr/028-cart-order-payment-and-address-chain.md), where a cart
+  line is validated against a catalog **variant** through
+  `CART_CATALOG_GATEWAY` before it can be added.*)
 
 ## 3. Why `product_id` stays a plain integer
 
@@ -85,6 +101,15 @@ Keeping the columns (rather than dropping them) avoids a destructive,
 hard-to-reverse schema change for data the model still needs; converting an
 unconstrained integer into a typed reference later is a forward step, not a
 rework.
+
+**That reshape has since happened**, exactly as anticipated: neither
+`product_stock` nor `order_product` survives. Inventory keys on
+`stock_level.variant_id` ([ADR-027](../../adr/027-stocklevel-running-totals-and-stocklocation.md))
+and retail on `order_line.variant_id` / `cart_line.variant_id`
+([ADR-028](../../adr/028-cart-order-payment-and-address-chain.md)) — both real
+FKs onto the catalog-owned `product_variant (id)`. The "deliberately
+unconstrained integer" state described here was the intended intermediate step,
+not the end state.
 
 ## 4. The order-create existence check, and what restores it
 
@@ -117,7 +142,7 @@ ever moves through migration files.
 
 ```sql
 ALTER TABLE product_stock DROP FOREIGN KEY FK_PRODUCT_STOCK_PRODUCT;
-ALTER TABLE order_product  DROP FOREIGN KEY FK_ORDER_PRODUCT_PRODUCT;
+ALTER TABLE order_product DROP FOREIGN KEY FK_ORDER_PRODUCT_PRODUCT;
 DROP TABLE product;
 ```
 
@@ -126,11 +151,18 @@ migration defined it, then re-adding both FKs (the table must exist before a
 constraint can target it):
 
 ```sql
-CREATE TABLE product ( id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, ... );
-ALTER TABLE product_stock ADD CONSTRAINT FK_PRODUCT_STOCK_PRODUCT
-  FOREIGN KEY (product_id) REFERENCES product (id);
-ALTER TABLE order_product  ADD CONSTRAINT FK_ORDER_PRODUCT_PRODUCT
-  FOREIGN KEY (product_id) REFERENCES product (id);
+CREATE TABLE product
+(
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, .
+    .
+    .
+);
+ALTER TABLE product_stock
+    ADD CONSTRAINT FK_PRODUCT_STOCK_PRODUCT
+        FOREIGN KEY (product_id) REFERENCES product (id);
+ALTER TABLE order_product
+    ADD CONSTRAINT FK_ORDER_PRODUCT_PRODUCT
+        FOREIGN KEY (product_id) REFERENCES product (id);
 ```
 
 The migration is reversible against the **schema**: on a freshly migrated

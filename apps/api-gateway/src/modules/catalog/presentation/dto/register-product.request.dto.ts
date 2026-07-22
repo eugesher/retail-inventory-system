@@ -1,8 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
-// Kebab-case slug: lowercase alphanumeric segments joined by single hyphens.
-const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+import { SLUG_PATTERN, SLUG_REGEX } from './validation.constants';
 
 // Request body for `POST /api/catalog/products`. The catalog domain has the
 // final say on name/slug non-emptiness and the repository owns slug uniqueness;
@@ -20,6 +19,7 @@ export class RegisterProductRequestDto {
     description: 'Globally-unique, URL-safe kebab-case identifier',
     minLength: 1,
     maxLength: 255,
+    pattern: SLUG_PATTERN,
   })
   @IsString()
   @MinLength(1)
