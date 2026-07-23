@@ -29,11 +29,11 @@ A storefront order tracks **three concerns that progress on their own clocks**:
 `Order` models these as **three independent status fields** rather than one combined
 lifecycle enum:
 
-| Field | State set |
-| --- | --- |
-| `status` | `pending` · `confirmed` · `cancelled` · `shipped` · `delivered` |
-| `paymentStatus` | `none` · `authorized` · `captured` · `refunded` · `failed` |
-| `fulfillmentStatus` | `unfulfilled` · `partially-shipped` · `shipped` · `delivered` |
+| Field               | State set                                                       |
+|---------------------|-----------------------------------------------------------------|
+| `status`            | `pending` · `confirmed` · `cancelled` · `shipped` · `delivered` |
+| `paymentStatus`     | `none` · `authorized` · `captured` · `refunded` · `failed`      |
+| `fulfillmentStatus` | `unfulfilled` · `partially-shipped` · `shipped` · `delivered`   |
 
 ### Why three, not one
 
@@ -56,15 +56,24 @@ The unit spec asserts this directly: it constructs an order with
 `status` still `pending`, and it checks that advancing payment
 (`none → authorized → captured`) never moves the lifecycle or fulfillment axes.
 
-This capability only ever writes the place-time defaults —
-`status = pending`, `paymentStatus = none`, `fulfillmentStatus = unfulfilled` — plus
-the two payment-axis transitions below. The lifecycle and fulfillment transitions
-arrive with the confirmation and fulfillment capabilities that drive them; adding
-ship/deliver/cancel mutators now would be dead, untested code.
+This capability writes the place-time defaults — `status = pending`,
+`paymentStatus = none`, `fulfillmentStatus = unfulfilled` — plus the two payment-axis
+transitions below. At the walking-skeleton stage the lifecycle and fulfillment
+transitions had no driver, so adding them then would have been dead, untested code.
 
-### The payment axis is the only one with mutators here
+> **Since then those drivers landed, and the mutator set has grown well past two.**
+> Fulfillment adds `advanceFulfillment` (Ship) and `markDelivered` (Deliver,
+> [ADR-031](../../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)); Cancel
+> adds `cancel` (whole order) and `cancelLineQuantity` (one line's unshipped units,
+> [ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md)); and the
+> declined-authorization path adds `markPaymentFailed`
+> ([ADR-052](../../adr/052-claim-before-you-charge.md)). Read the current mutator list
+> off `order.model.ts`, not off this section.
 
-`Order` exposes exactly two state mutators, both on the payment axis:
+### The payment axis is the only one with mutators *at this stage*
+
+At the walking-skeleton stage `Order` exposed exactly two state mutators, both on the
+payment axis:
 
 - `markPaymentAuthorized()` — `none → authorized` (the authorize-on-place
   capability)
@@ -72,8 +81,18 @@ ship/deliver/cancel mutators now would be dead, untested code.
   capability)
 
 Each rejects an invalid starting state with a typed `OrderDomainException` and
-**bumps the `version`** optimistic-concurrency token. `refunded` / `failed` ship in
-the enum for later refund/decline capabilities but have no producer yet.
+**bumps the `version`** optimistic-concurrency token.
+
+`refunded` and `failed` shipped in the `OrderPaymentStatusEnum` for later
+refund/decline capabilities. **`failed` now has a producer** —
+`markPaymentFailed()` (`none → failed`), which the declined-authorization
+compensation path drives (ISSUE-06 /
+[ADR-052](../../adr/052-claim-before-you-charge.md)). **`refunded` still has no
+producer on this axis**, deliberately: a refund is recorded on the `Payment`
+aggregate (`refundedAmountMinor` + the payment's own status), and a fully-refunded
+order goes on reading `paymentStatus = captured`
+([ADR-032](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)) — never
+read `OrderView.paymentStatus` to learn whether an order was refunded.
 
 ## The immutable Order and money-minor line snapshots
 
@@ -94,12 +113,23 @@ Each `OrderLine` is a **fully immutable snapshot**:
   later pricing change.
 - `quantity`, `taxAmountMinor`, `discountAmountMinor`, `lineTotalMinor`, `status`.
 
-The line carries **no setters** and is `Object.freeze`-d at construction, so the
-immutability is real at runtime, not merely a compile-time `readonly` hint — any
-write throws. (`OrderLine extends Entity`, not `AggregateRoot`, so there is no
-`pullDomainEvents()` reassignment that freezing would break — unlike `Order` and
-`Address`.) The unit spec asserts a write to `sku` / `nameSnapshot` /
-`unitPriceMinor` throws.
+Every **money/identity** field — `sku`, `nameSnapshot`, `unitPriceMinor`,
+`quantity`, the money columns — is `readonly` and carries **no setter**, so the
+buyer's contract cannot drift after placement.
+
+> **The line is no longer `Object.freeze`-d, and it has two mutators now.** At
+> the walking-skeleton stage it *was* frozen at construction (any write threw). Later
+> capabilities gave the line a mutable fulfillment-progress `status` — Ship walks it
+> `allocated → partially-shipped → shipped` via `markFulfillment`
+> ([ADR-031](../../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)) — and
+> a mutable `cancelledQuantity` — Cancel-line adds to it via `cancelQuantity`, with
+> `activeQuantity = quantity − cancelledQuantity`
+> ([ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md)). Freezing
+> the instance would freeze those too, so the freeze was dropped; the money/identity
+> snapshot fields stay `readonly` and setter-less, which is the immutability that
+> actually matters. The unit spec's `snapshot immutability` case now asserts that the
+> safe way — after a `markFulfillment(SHIPPED)`, `sku` / `nameSnapshot` /
+> `unitPriceMinor` / `lineTotalMinor` are all unchanged.
 
 All money lives in **minor units** (integer cents) — never a float. A line's
 `lineTotalMinor = unitPriceMinor × quantity + taxAmountMinor − discountAmountMinor`;
@@ -131,13 +161,18 @@ invariant on the load path.
 
 ## The `version` optimistic-concurrency token
 
-`Order` carries a `version` column **now**, even though no concurrency guard
-consumes it yet. The aggregate advances it on every mutation; TypeORM's
-`@VersionColumn` owns the *persisted* value (it increments on each managed write).
-Shipping the column up front keeps a later concurrency-hardening retrofit
+`Order` carries a `version` column from the start. The aggregate advances it on every
+mutation; TypeORM's `@VersionColumn` owns the *persisted* value (it increments on each
+managed write). Shipping the column up front kept a later concurrency-hardening retrofit
 non-destructive — adding an optimistic-lock column to a populated table is an
 `ALTER TABLE` on live data — the same forward-provisioning the inventory
 `stock_level.version` used.
+
+> **Since [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) /
+> [ADR-045](../../adr/045-one-occ-retry-protocol.md), the guard is live** — no longer
+> just provisioned. Every order write runs under `runWithOrderWriteRetry`, which
+> re-reads under a fresh transaction on a lost compare-and-swap and surfaces a `409`
+> once the OCC budget is spent.
 
 > The domain's in-memory `version` (which makes "version bumps on each mutation"
 > observable in a unit test) and TypeORM's persisted `@VersionColumn` are
@@ -191,10 +226,10 @@ One migration creates both tables alongside the `address` table (`synchronize` s
 off — [ADR-019](../../adr/019-typeorm-and-mysql-for-persistence.md); FK-dependency
 order is `address` → `order` → `order_line`):
 
-| Table | Key columns | Notes |
-| --- | --- | --- |
-| `order` | `id BIGINT UNSIGNED` PK, `order_number VARCHAR(20)`, `customer_id CHAR(36)` NULL, `currency CHAR(3)`, three status `ENUM`s, five `BIGINT` money totals, `billing_address_id` / `shipping_address_id` / `source_cart_id CHAR(36)` NULL, `placed_at`, `version INT`, timestamps + inert `deleted_at` | `UC_ORDER_NUMBER` UNIQUE; `FK_ORDER_CUSTOMER → customer(id) ON DELETE SET NULL` (a deleted customer leaves an order tombstone, [ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)); `FK_ORDER_BILLING_ADDRESS` / `FK_ORDER_SHIPPING_ADDRESS → address(id)`; `FK_ORDER_SOURCE_CART → cart(id) ON DELETE SET NULL`; index on `(customer_id, placed_at)` |
-| `order_line` | `id BIGINT UNSIGNED` PK, `order_id BIGINT UNSIGNED`, `variant_id BIGINT UNSIGNED`, `sku VARCHAR(64)`, `name_snapshot VARCHAR(255)`, `quantity INT`, four `BIGINT` money columns, `status ENUM`, timestamps + inert `deleted_at` | `FK_ORDER_LINE_ORDER → order(id) ON DELETE RESTRICT` (orders are append-only — a line is never orphaned); `FK_ORDER_LINE_VARIANT → product_variant(id) ON DELETE RESTRICT`; index on `order_id` |
+| Table        | Key columns                                                                                                                                                                                                                                                                                        | Notes                                                                                                                                                                                                                                                                                                                                                                     |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `order`      | `id BIGINT UNSIGNED` PK, `order_number VARCHAR(20)`, `customer_id CHAR(36)` NULL, `currency CHAR(3)`, three status `ENUM`s, five `BIGINT` money totals, `billing_address_id` / `shipping_address_id` / `source_cart_id CHAR(36)` NULL, `placed_at`, `version INT`, timestamps + inert `deleted_at` | `UC_ORDER_NUMBER` UNIQUE; `FK_ORDER_CUSTOMER → customer(id) ON DELETE SET NULL` (a deleted customer leaves an order tombstone, [ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)); `FK_ORDER_BILLING_ADDRESS` / `FK_ORDER_SHIPPING_ADDRESS → address(id)`; `FK_ORDER_SOURCE_CART → cart(id) ON DELETE SET NULL`; index on `(customer_id, placed_at)` |
+| `order_line` | `id BIGINT UNSIGNED` PK, `order_id BIGINT UNSIGNED`, `variant_id BIGINT UNSIGNED`, `sku VARCHAR(64)`, `name_snapshot VARCHAR(255)`, `quantity INT`, four `BIGINT` money columns, `status ENUM`, timestamps + inert `deleted_at`                                                                    | `FK_ORDER_LINE_ORDER → order(id) ON DELETE RESTRICT` (orders are append-only — a line is never orphaned); `FK_ORDER_LINE_VARIANT → product_variant(id) ON DELETE RESTRICT`; index on `order_id`                                                                                                                                                                           |
 
 All four bounded contexts share the one MySQL database, so `order.customer_id`,
 `order.source_cart_id`, and `order_line.variant_id` are **real cross-context foreign

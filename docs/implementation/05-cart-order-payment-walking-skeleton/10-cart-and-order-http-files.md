@@ -97,11 +97,15 @@ Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{$guid}}
 ```
 
-The header is **accepted, forwarded to the retail service, and logged — but not
-deduped**. It is in the files to document the contract a future
-idempotency-persistence capability will honor, not to provide dedupe today. The
-safety that *does* exist is **state-driven**, which is why `placeOrderAgain`
-demonstrates it with a brand-new key:
+The header started out **accepted, forwarded, and logged but not deduped** — a contract
+placeholder. **It is now required and enforced**
+([ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md)): a missing key is a
+`400`, and the same key + same body **replays** the stored response (`200` +
+`Idempotent-Replay: true`), which is why each request mints a fresh `{{$guid}}` — sending
+the *same* key twice would replay rather than re-run. Underneath the key store, the
+**state-driven** safety still holds, and `placeOrderAgain` demonstrates it precisely by
+using a **brand-new key** (so the key-store replay does *not* fire and the cart-state
+backstop does):
 
 - **Repeat place** is safe because a placed cart is `converted`; re-placing it
   returns the order it already converted into (resolved via `order.source_cart_id`),
@@ -115,17 +119,17 @@ walking skeleton.
 
 ## The cart flow (`http/kulala/cart.http`)
 
-| Request | Method + path | Notes |
-|---|---|---|
-| `login` | `POST /api/auth/customer/login` | captures `@accessToken` |
-| `createCart` | `POST /api/cart` | `{ currency? }`; captures `@cartId` |
-| `getCart` | `GET /api/cart/:cartId` | owner-checked read |
-| `addLine` | `POST /api/cart/:cartId/lines` | `{ variantId, quantity }`; price snapshotted retail-side; captures `@lineId` |
-| `changeLineQuantity` | `PATCH /api/cart/:cartId/lines/:lineId` | `{ quantity }` (`0` rejected) |
-| `removeLine` | `DELETE /api/cart/:cartId/lines/:lineId` | back to an empty cart |
-| `guestSession` | `POST /api/auth/customer/guest-session` | `@Public()`; captures `@guestAccessToken` + `@guestCustomerId` |
-| `guestCreateCart` | `POST /api/cart` | with the guest token; captures `@guestCartId` |
-| `claimCart` | `POST /api/cart/:cartId/claim` | registered token + `{ fromCustomerId }` proof |
+| Request              | Method + path                            | Notes                                                                        |
+|----------------------|------------------------------------------|------------------------------------------------------------------------------|
+| `login`              | `POST /api/auth/customer/login`          | captures `@accessToken`                                                      |
+| `createCart`         | `POST /api/cart`                         | `{ currency? }`; captures `@cartId`                                          |
+| `getCart`            | `GET /api/cart/:cartId`                  | owner-checked read                                                           |
+| `addLine`            | `POST /api/cart/:cartId/lines`           | `{ variantId, quantity }`; price snapshotted retail-side; captures `@lineId` |
+| `changeLineQuantity` | `PATCH /api/cart/:cartId/lines/:lineId`  | `{ quantity }` (`0` rejected)                                                |
+| `removeLine`         | `DELETE /api/cart/:cartId/lines/:lineId` | back to an empty cart                                                        |
+| `guestSession`       | `POST /api/auth/customer/guest-session`  | `@Public()`; captures `@guestAccessToken` + `@guestCustomerId`               |
+| `guestCreateCart`    | `POST /api/cart`                         | with the guest token; captures `@guestCartId`                                |
+| `claimCart`          | `POST /api/cart/:cartId/claim`           | registered token + `{ fromCustomerId }` proof                                |
 
 The price is **never sent** on `addLine` — it is snapshotted retail-side from
 `catalog.price.select` in the cart's currency, and an unknown / unpriced variant
@@ -137,17 +141,17 @@ The order lifecycle spans both gateway controllers: **Place Order** is a cart
 action (`cart.controller.ts`, since it acts on the cart) but produces an `Order`;
 **read + capture** are order actions (`orders.controller.ts`).
 
-| Request | Method + path | Notes |
-|---|---|---|
-| `login` | `POST /api/auth/customer/login` | captures `@accessToken` |
-| `createCart` | `POST /api/cart` | captures `@cartId` |
-| `addLineOne` | `POST /api/cart/:cartId/lines` | variant 1 @ `4999`, qty 2 |
-| `addLineTwo` | `POST /api/cart/:cartId/lines` | variant 3 @ `19999`, qty 1 |
-| `placeOrder` | `POST /api/cart/:cartId/place` | addresses + `paymentMethod?`; `Idempotency-Key`; captures `@orderId` |
-| `getOrder` | `GET /api/orders/:orderId` | owner or staff `order:read` |
-| `listMyOrders` | `GET /api/orders?page=1&pageSize=10` | own-only, newest-first |
-| `capturePayment` | `POST /api/orders/:orderId/payments/capture` | `{ amountMinor? }`; `Idempotency-Key` |
-| `placeOrderAgain` | `POST /api/cart/:cartId/place` | new key, same converted cart → same order |
+| Request           | Method + path                                | Notes                                                                |
+|-------------------|----------------------------------------------|----------------------------------------------------------------------|
+| `login`           | `POST /api/auth/customer/login`              | captures `@accessToken`                                              |
+| `createCart`      | `POST /api/cart`                             | captures `@cartId`                                                   |
+| `addLineOne`      | `POST /api/cart/:cartId/lines`               | variant 1 @ `4999`, qty 2                                            |
+| `addLineTwo`      | `POST /api/cart/:cartId/lines`               | variant 3 @ `19999`, qty 1                                           |
+| `placeOrder`      | `POST /api/cart/:cartId/place`               | addresses + `paymentMethod?`; `Idempotency-Key`; captures `@orderId` |
+| `getOrder`        | `GET /api/orders/:orderId`                   | owner or staff `order:read`                                          |
+| `listMyOrders`    | `GET /api/orders?page=1&pageSize=10`         | own-only, newest-first                                               |
+| `capturePayment`  | `POST /api/orders/:orderId/payments/capture` | `{ amountMinor? }`; `Idempotency-Key`                                |
+| `placeOrderAgain` | `POST /api/cart/:cartId/place`               | new key, same converted cart → same order                            |
 
 `placeOrder` converts the cart one-shot: it snapshots each line from the catalog
 (`sku` / `nameSnapshot` via `catalog.variant.get`, `unitPriceMinor` via
@@ -171,12 +175,21 @@ variables; they never hard-code an id that a migration or seed might not produce
 
 ## Related documents
 
-- [01 — Retail rebuild, old tables dropped](01-retail-rebuild-and-old-tables-dropped.md) — where the legacy `http/kulala/order.http` was removed before this rebuild re-created it.
-- [02 — Cart aggregate and the Q1/Q3 decisions](02-cart-aggregate-and-q1-q3-decisions.md) — the cart operations + guest-promotion the cart file exercises.
-- [03 — Order three status axes (Q4)](03-order-three-status-and-q4-decision.md) — the `OrderView` axes the order file asserts.
-- [05 — Payment gateway port and the fake adapter](05-payment-gateway-port-and-fake-adapter.md) — the always-approve fake behind `placeOrder` / `capturePayment`.
-- [07 — Authorize on place, capture explicit (Q5)](07-authorize-on-place-capture-explicit-q5.md) — the place + capture flow the order file drives.
-- [08 — The `Idempotency-Key` header (Q10)](08-idempotency-key-header-q10.md) — why the header is accepted but not deduped.
-- [09 — Routing keys retired and added](09-routing-keys-retired-and-added.md) — the RPC + event surface behind these HTTP routes.
-- [ADR-024 — RBAC v2: StaffUser / Customer split](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md) — why customer routes are owner-checked, not permission-gated.
-- [ADR-028 — Cart / Order / Payment / Address chain](../../adr/028-cart-order-payment-and-address-chain.md) — the governing decision for the whole capability.
+- [01 — Retail rebuild, old tables dropped](01-retail-rebuild-and-old-tables-dropped.md) — where the legacy
+  `http/kulala/order.http` was removed before this rebuild re-created it.
+- [02 — Cart aggregate and the Q1/Q3 decisions](02-cart-aggregate-and-q1-q3-decisions.md) — the cart operations +
+  guest-promotion the cart file exercises.
+- [03 — Order three status axes (Q4)](03-order-three-status-and-q4-decision.md) — the `OrderView` axes the order file
+  asserts.
+- [05 — Payment gateway port and the fake adapter](05-payment-gateway-port-and-fake-adapter.md) — the always-approve
+  fake behind `placeOrder` / `capturePayment`.
+- [07 — Authorize on place, capture explicit (Q5)](07-authorize-on-place-capture-explicit-q5.md) — the place + capture
+  flow the order file drives.
+- [08 — The `Idempotency-Key` header (Q10)](08-idempotency-key-header-q10.md) — why the header started out
+  accepted-but-not-deduped, and how ADR-036 later made it required + enforced.
+- [09 — Routing keys retired and added](09-routing-keys-retired-and-added.md) — the RPC + event surface behind these
+  HTTP routes.
+- [ADR-024 — RBAC v2: StaffUser / Customer split](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md) — why
+  customer routes are owner-checked, not permission-gated.
+- [ADR-028 — Cart / Order / Payment / Address chain](../../adr/028-cart-order-payment-and-address-chain.md) — the
+  governing decision for the whole capability.
