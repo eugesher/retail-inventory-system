@@ -153,11 +153,13 @@ export interface IListMediaCommand {
   ownerId: number;
 }
 
-// The gateway-side seam onto the catalog microservice's seven RPCs. The
-// concrete implementation (`CatalogRabbitmqAdapter`) is the only holder of a
-// `ClientProxy`; use cases and the controller depend on this interface
-// (ADR-009). Methods return the wire response DTOs from `lib-contracts` so the
-// HTTP layer surfaces the catalog's own view shapes unchanged.
+// The gateway-side seam onto the catalog microservice's RPCs — products,
+// pricing, tax categories, categories and media (one method per RPC, declared
+// below). The concrete implementation (`CatalogRabbitmqAdapter`) is the only
+// holder of a `ClientProxy`; use cases and the controller depend on this
+// interface (ADR-009). Methods return the wire response DTOs from
+// `lib-contracts` so the HTTP layer surfaces the catalog's own view shapes
+// unchanged.
 export interface ICatalogGatewayPort {
   registerProduct(command: IRegisterProductCommand, correlationId: string): Promise<ProductView>;
   createVariant(command: ICreateVariantCommand, correlationId: string): Promise<ProductVariantView>;
