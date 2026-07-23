@@ -210,9 +210,11 @@ export enum OrderErrorCodeEnum {
   REFUND_PAYMENT_NOT_CAPTURED = 'REFUND_PAYMENT_NOT_CAPTURED',
   // Distinct from `ORDER_ACCESS_FORBIDDEN` so the refund surface can say why in its own words.
   //
-  // **Note the asymmetry with returns:** a non-owner reading someone else's refunds is REFUSED here,
-  // while `list-returns` returns an empty list for the same shape of request. One confirms the
-  // order exists; the other does not. Nothing records which was intended.
+  // **There is no asymmetry with returns any more.** A non-owner reading someone else's refunds is
+  // refused here, and `list-returns` refuses the same shape of request the same way — it used to
+  // hand back a filtered empty list instead, which ADR-051 settled in favour of the refusal every
+  // other ownership check in `apps/` already made. Only the code differs, so each surface can word
+  // its own message.
   REFUND_ACCESS_FORBIDDEN = 'REFUND_ACCESS_FORBIDDEN',
 }
 

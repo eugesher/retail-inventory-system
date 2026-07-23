@@ -51,12 +51,18 @@ import { retryThenLogForReplay } from './retry-then-log-for-replay';
 // How many times Commit Sale is attempted after the local ship commit before the failure is logged
 // for operator replay. Retries are immediate — no backoff.
 //
-// **The retry is safe only because the first attempt has finished failing.** Inventory's idempotency
-// on `fulfillmentId` is sequential-only: its probe reads outside its transaction and no UNIQUE backs
-// it, so two commit-sales *in flight at once* can both decrement. A retry that fires while the
-// original request is still travelling — which is exactly what a **timeout** produces, since a
-// timeout does not cancel the RPC — is that case. Raising this count, or adding a shorter timeout in
-// front of it, widens the exposure rather than the resilience.
+// **The bound is a latency budget, not a correctness one — and it did not start that way.** This
+// count used to be justified by a hazard: inventory's `fulfillmentId` idempotency was a probe read
+// outside its write transaction with no UNIQUE behind it, so a retry fired while the original was
+// still travelling — which is exactly what a **timeout** produces, since a timeout does not cancel
+// the RPC — could decrement twice. `UC_STOCK_MOVEMENT_DEDUPE` (migration `1783872387242`) closed
+// that: the probe is now the fast path and the ledger UNIQUE is the guarantee, so a concurrent
+// redelivery is as safe as a sequential one.
+//
+// What still bounds this number is that the retries are immediate and **awaited inside the HTTP
+// request** — `ship` does not return until `commitSaleWithRetry` does. Three attempts ride out a
+// broker blip; more would only hold the caller open against a broker that is already down, and buy
+// nothing, because the poison-record log plus the idempotent replay already cover the rest.
 const COMMIT_SALE_MAX_ATTEMPTS = 3;
 
 // The outcome of the ship-triggered capture decision (Q5). A non-null `capturedAt` says
@@ -79,25 +85,33 @@ interface ICaptureOutcome {
 // customer *can* reach the path that captures its own payment.
 //
 // **Ship-triggered automatic capture (Q5).** Before any local write, the ship inspects
-// the payment: an `authorized` payment is captured **inline, out-of-process, before
-// the local commit** (the `CapturePaymentUseCase` template — the gateway call is
-// outside the DB transaction); an already-`captured` payment skips the gateway. The
-// compensation on a capture decline is **block-ship-until-payment-succeeds**: a decline
-// aborts the ship (`ORDER_PAYMENT_NOT_CAPTURED`, 409) with nothing written — no
-// fulfillment transition, no Commit Sale. There is no partial saga and no
-// `pending-with-payment-failure` state to reconcile (ADR-031).
+// the payment: an `authorized` payment is claimed and then captured **out-of-process,
+// before the local commit** (the `CapturePaymentUseCase` template, claim protocol and
+// all — the gateway call is outside the DB transaction); an already-`captured` payment
+// skips the gateway. The compensation on a capture decline is
+// **block-ship-until-payment-succeeds**: a decline releases the claim and aborts the ship
+// (`ORDER_PAYMENT_NOT_CAPTURED`, 409) with no fulfillment transition and no Commit Sale.
+// There is no partial saga and no `pending-with-payment-failure` state to reconcile
+// (ADR-031).
 //
-// **Ordering, and the hazard it carries.** Capture runs **before** the local commit; Commit Sale
-// runs **after** it.
+// **Ordering.** Capture runs **before** the local commit; Commit Sale runs **after** it.
 //
-// The capture-first half is **not** the safe arrangement its shape suggests. The gateway call is
-// out-of-process and the fulfillment's `pending` status is only knowable under the lock — which is
-// taken *after* the capture. `trackingNumber` is hoisted above the capture for exactly this reason,
-// but status cannot be: a concurrent cancel landing between the unlocked status read and the lock
-// takes the customer's money and then rolls the ship back, and **a rollback cannot un-call a
-// payment processor**. The window is as wide as the gateway's latency, because the gateway call is
-// what sits inside it. **A known, unfixed defect — do not write a comment anywhere claiming this
-// path cannot take money for a ship that does not happen.**
+// The capture-first half is safe because of a durable claim, not because of its shape (ADR-052).
+// The gateway call is out-of-process and the fulfillment's `pending` status is only knowable under
+// the lock, which is taken *after* the charge — so the unlocked status check could never have made
+// this safe, and for a while nothing else did: a concurrent cancel landing in that window took the
+// customer's money and then rolled the ship back, and **a rollback cannot un-call a payment
+// processor**. What closes it is `captureIfNeeded` committing a `CAPTURING` claim *before* it
+// charges, plus Cancel Order refusing to settle a claimed payment. The `pending` check therefore
+// stays true across the gateway round-trip — exactly what it could not do before.
+//
+// The residual risk is named, not removed: a crash between the claim and its resolution strands the
+// payment in `CAPTURING`, and nothing resolves that automatically because no safe guess exists
+// (`ReportStaleCaptureClaimsUseCase` reports it and writes nothing).
+//
+// **The standing rule, which outlives whatever this file currently does: a check performed on an
+// unlocked read is not a guard, and no comment may describe one as making an operation safe**
+// (ADR-052).
 //
 // The commit-sale-after half is deliberate and sound: the money is taken and the box has left, so
 // the local ship is **never** rolled back for an inventory failure. A transient failure is retried;
@@ -106,9 +120,11 @@ interface ICaptureOutcome {
 // **The order's fulfillment roll-up is derived from the order's fulfillments' shipped
 // line quantities** — the authority is the `fulfillment` graph, not `order_line.status`
 // (the latter is the denormalized convenience this op flips). A line is `shipped` once
-// its cumulative shipped quantity (across `shipped`/`delivered` fulfillments) reaches
-// the ordered quantity, else `partially-shipped`; the order axis is `shipped` iff every
-// line is fully shipped, else `partially-shipped`.
+// its cumulative shipped quantity (across `shipped`/`delivered` fulfillments) reaches its
+// **active** quantity — `quantity − cancelled_quantity` (ADR-040), not the place-time
+// ordered quantity — else `partially-shipped`; a line whose active quantity is `0` is
+// skipped outright. The order axis is `shipped` iff every line that still owes units is
+// fully shipped, else `partially-shipped`.
 //
 // **Two idempotency layers (ADR-036).** First the request-level `Idempotency-Key`:
 // `execute` fingerprints the canonical body (`bodyFingerprint`), looks the
@@ -119,10 +135,11 @@ interface ICaptureOutcome {
 // body hit → `422`; a missing key → `400` backstop. Second, the natural idempotency is the
 // backstop: a non-`pending` re-ship is a `409`.
 //
-// **Commit Sale's `fulfillmentId` idempotency is SEQUENTIAL-only.** Inventory probes the ledger
-// outside its transaction and the index behind that probe is not UNIQUE, so two *concurrent*
-// deliveries of one `fulfillmentId` can both decrement. A retry after a timeout is safe; a
-// concurrent one is not.
+// **Commit Sale's `fulfillmentId` idempotency covers a CONCURRENT redelivery too**, which is what
+// makes the post-commit retry below safe: a timeout does not cancel the RPC, so a retry can travel
+// alongside the original. Inventory's `existsByReference` probe short-circuits the sequential
+// replay, and `UC_STOCK_MOVEMENT_DEDUPE` — the ledger UNIQUE — is what holds when two deliveries
+// are in flight at once. The probe is an optimisation; the constraint is the guarantee.
 @Injectable()
 export class ShipFulfillmentUseCase {
   constructor(
@@ -279,12 +296,12 @@ export class ShipFulfillmentUseCase {
     // ship after the money has moved. The domain `ship` re-checks it under the lock; this is the
     // same check, hoisted.
     //
-    // **It narrows the capture-then-fail window. It does not close it.** The other precondition —
-    // that the fulfillment is still `pending` — cannot be hoisted, because it is only true under
-    // the lock, and the lock is taken *after* the capture below. A concurrent cancel landing in
-    // that window captures the customer's money and then rolls the ship back; the rollback cannot
-    // un-call the gateway. **Do not read this hoist as a guarantee that the ship cannot fail after
-    // taking money.** It cannot fail *on tracking*. That is all it means.
+    // **The hoist was necessary and never sufficient, and that is why the claim exists.** The other
+    // precondition — that the fulfillment is still `pending` — cannot be hoisted, because it is only
+    // true under the lock, and the lock is taken *after* the capture below. What holds it across the
+    // gateway round-trip is the committed `CAPTURING` claim, which a concurrent cancel refuses to
+    // step over (ADR-052) — not this hoist. Read this one for exactly what it is: the ship cannot
+    // fail *on tracking* after the money has moved. That is all it means, and all it ever meant.
     if (typeof trackingNumber !== 'string' || trackingNumber.trim().length === 0) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.FULFILLMENT_TRACKING_REQUIRED,

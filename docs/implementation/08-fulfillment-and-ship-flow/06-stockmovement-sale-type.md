@@ -13,14 +13,14 @@ fixed the complete six-type vocabulary up front, so a new kind of stock movement
 never needs a schema change. Each type has a **fixed sign**; `sale` is one of the
 strictly-negative ones:
 
-| Type         | Sign           | Reading                                          | First producer                |
-| ------------ | -------------- | ------------------------------------------------ | ----------------------------- |
-| `receipt`    | strictly **+** | a goods-in raised on-hand                        | Receive Stock                 |
-| `return`     | strictly **+** | a customer return re-entered on-hand             | *(returns capability)*        |
-| `sale`       | strictly **−** | stock physically shipped on a fulfilled order    | **Commit Sale (this change)** |
-| `allocation` | strictly **−** | stock committed firm to a placed order           | Allocate                      |
-| `release`    | strictly **−** | a hold / allocation torn down                    | Release, Cancel-Allocation    |
-| `adjustment` | either, non-0  | an operator's signed correction                  | Adjust, Transfer (paired)     |
+| Type         | Sign           | Reading                                       | First producer                |
+|--------------|----------------|-----------------------------------------------|-------------------------------|
+| `receipt`    | strictly **+** | a goods-in raised on-hand                     | Receive Stock                 |
+| `return`     | strictly **+** | a customer return re-entered on-hand          | Restock From Return (ADR-032) |
+| `sale`       | strictly **−** | stock physically shipped on a fulfilled order | **Commit Sale (this change)** |
+| `allocation` | strictly **−** | stock committed firm to a placed order        | Allocate                      |
+| `release`    | strictly **−** | a hold / allocation torn down                 | Release, Cancel-Allocation    |
+| `adjustment` | either, non-0  | an operator's signed correction               | Adjust, Transfer (paired)     |
 
 A `sale` movement is always **strictly negative** — the constructor enforces it,
 and re-asserts it on the load path, so a corrupted stored sign is rejected on read
@@ -28,13 +28,13 @@ and re-asserts it on the load path, so a corrupted stored sign is rejected on re
 
 ```ts
 StockMovement.record({
-  variantId, stockLocationId,
-  type: StockMovementTypeEnum.SALE,
-  quantity: -line.quantity,          // strictly negative
-  reasonCode: null,
-  referenceType: 'fulfillment',      // the polymorphic reference …
-  referenceId: fulfillmentId,        // … back to the shipment that caused it
-  actorId,                           // the staff who shipped, or null = system
+    variantId, stockLocationId,
+    type: StockMovementTypeEnum.SALE,
+    quantity: -line.quantity,          // strictly negative
+    reasonCode: null,
+    referenceType: 'fulfillment',      // the polymorphic reference …
+    referenceId: fulfillmentId,        // … back to the shipment that caused it
+    actorId,                           // the staff who shipped, or null = system
 });
 ```
 
@@ -44,6 +44,17 @@ movement both **traceable** ("which shipment shipped these units?") and the
 backs the `existsByReference('fulfillment', fulfillmentId)` replay guard
 ([04 §2](04-commit-sale-cross-service-rpc.md)). One `sale` row is appended per
 shipped line, in the same transaction as the counter change it records.
+
+> Those two columns have since acquired a second, enforcing role. Migration
+> `1783872387242` added the STORED generated column `movement_dedupe_key` —
+> `CONCAT(type, reference_type, reference_id, variant_id, stock_location_id)`, non-`NULL`
+> **only** for `sale` and `return` rows — under the UNIQUE `UC_STOCK_MOVEMENT_DEDUPE`. It
+> turns the reference pair from a hint the probe reads into a constraint the database
+> refuses to break, which is what makes the RPC idempotent against *concurrent*
+> redeliveries and not merely sequential ones. Note the key reaches down to
+> `(variant_id, stock_location_id)`: a `sale` row is written **per line**, all sharing one
+> `fulfillmentId`, so a key stopping at the reference would reject the second line of
+> every ordinary multi-item shipment.
 
 ## 2. Why a commit decrements **both** on-hand **and** allocated
 
@@ -110,9 +121,8 @@ rows deliberately do **not** net against the original receipt.)
 ## 4. Reserved downstream surfaces
 
 Each committed line emits two events onto the inventory service's own
-`inventory_queue`, both **reserved surfaces** with no cross-service consumer yet —
-the intended consumer is a future audit / event-store capability (the
-`inventory.stock.{reserved,allocated,released}` precedent):
+`inventory_queue`, both **reserved surfaces** with no *business* consumer — the
+`inventory.stock.{reserved,allocated,released}` precedent:
 
 - **`inventory.stock.committed`** (`IInventoryStockCommittedEvent`) — the
   past-tense ship notification: `{ variantId, stockLocationId, quantity, orderId,
@@ -125,6 +135,16 @@ counter and ledger row already committed inside the transaction, so failing the
 RPC over a publish glitch would mislead the caller into thinking the ship did not
 record.
 
+> **The "future audit / event-store capability" named here has since arrived.**
+> [ADR-034](../../adr/034-isolated-eventstore-database.md) /
+> [ADR-035](../../adr/035-event-store-firehose-topic-exchange.md) built the event-store
+> microservice on its own `ris_eventstore` database, and every producer — including
+> `StockRabbitmqPublisher` — now **dual-publishes** each event onto the `ris.events` topic
+> exchange through the shared `RisEventsMirrorPublisher`, after the primary `emit` and
+> best-effort. So both events above are ingested by the firehose into `domain_event` and
+> are queryable over `audit.event.query`. "Reserved surface" now means precisely *no
+> business consumer reacts to it* — not *nothing observes it*.
+
 ## See also
 
 - [04 — Commit Sale, the cross-service ship RPC](04-commit-sale-cross-service-rpc.md)
@@ -132,7 +152,9 @@ record.
 - [ADR-031 — Fulfillment aggregate and ship-triggered capture](../../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)
 - [ADR-030 — Reservation TTL aggregate and the stock-movement ledger](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md)
   (the six-type ledger and its sign rule)
-- [ADR-027 — `StockLevel` running totals and `StockLocation`](../../adr/027-stocklevel-running-totals-and-stocklocation.md)
+- [ADR-027 — `StockLevel` running totals and
+  `StockLocation`](../../adr/027-stocklevel-running-totals-and-stocklocation.md)
   (running totals are the balance authority)
-- [The `StockMovement` append-only typed ledger](../07-inventory-reservation-and-stock-movement/03-stock-movement-typed-ledger.md)
+- [The
+  `StockMovement` append-only typed ledger](../07-inventory-reservation-and-stock-movement/03-stock-movement-typed-ledger.md)
   (the type set, sign invariant, and append-only enforcement)

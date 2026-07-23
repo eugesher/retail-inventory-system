@@ -20,7 +20,8 @@ manual step the operator must remember.
 
 This is the natural default — you take the customer's money at the moment you actually
 send them their goods. An explicit, standalone capture
-([`CapturePaymentUseCase`](../../../apps/retail-microservice/src/modules/orders/application/use-cases/capture-payment.use-case.ts),
+([
+`CapturePaymentUseCase`](../../../apps/retail-microservice/src/modules/orders/application/use-cases/capture-payment.use-case.ts),
 `retail.payment.capture`) still exists for the cases that need it (capturing before
 shipment, or capturing an order that ships in a channel the system does not drive), which
 is exactly why the place flow deliberately stops at *authorize* and leaves capture to a
@@ -34,33 +35,54 @@ When a ship runs, it inspects the order's single `Payment` row and branches on i
 
 - **`authorized` → capture inline.** The ship calls `PAYMENT_GATEWAY.capture(payment.
   gatewayReference, correlationId)`. On approval it records the capture: in the ship's
-  local transaction it walks the `Payment` `authorized → captured` (`payment.capture(at)`)
-  and the order's payment axis `authorized → captured`
-  (`order.markPaymentCaptured()`), and after the commit it emits
-  `retail.payment.captured` (reusing the explicit-capture event — a ship-triggered capture
-  is still a capture).
+  local transaction it walks the `Payment` `authorized → captured` and the order's payment
+  axis `authorized → captured` (`order.markPaymentCaptured()`), and after the commit it
+  emits `retail.payment.captured` (reusing the explicit-capture event — a ship-triggered
+  capture is still a capture).
+
+  > **Since [ADR-052](../../adr/052-claim-before-you-charge.md) this branch is a
+  > three-phase claim, not a bare call.** The check that gates the charge is only true
+  > under a row lock, and the lock came *after* the charge — so a concurrent explicit
+  > capture, or a concurrent Cancel, could take the money for a ship that then rolled
+  > back, and a rollback cannot un-call a payment processor. The branch now (1) **claims**
+  > in a short committed transaction (`findByOrderIdForUpdate` → `payment.beginCapture()`
+  > → `CAPTURING`, commit), (2) **charges** out of process holding no lock, and (3)
+  > **resolves** — `payment.completeCapture(at)` → `CAPTURED` inside the ship's own
+  > transaction (so the payment reaching `CAPTURED` and the fulfillment reaching `SHIPPED`
+  > commit together), or `payment.releaseCapture()` → `AUTHORIZED` on a decline, the one
+  > case where we know no money moved. The single-mutator `payment.capture(at)` this
+  > document originally named no longer exists; `beginCapture` / `completeCapture` /
+  > `releaseCapture` replaced it. **ADR-052 makes ADR-031's block-ship rule true rather
+  > than reversing it.**
 - **`captured` → skip the gateway.** An explicit capture already happened earlier, so the
   money is already taken. The ship makes **no** second gateway call and emits no captured
   event; it just commits the fulfillment and moves the stock.
-- **any other status** (`voided` / `refunded` / `failed`) **→ reject `409`**
-  (`PAYMENT_INVALID_STATUS_TRANSITION`). There is nothing capturable, so the ship cannot
-  proceed.
+- **any other status** (`voided` / `refunded` / `failed` — and, since ADR-052, a
+  `capturing` claim already held by a racing capture) **→ reject `409`**. There is nothing
+  capturable, so the ship cannot proceed. The rejection is raised by `beginCapture()`
+  *under the claim lock*, which is the point: the loser of a race blocks on the payment
+  row, wakes to `CAPTURING`, and is turned away **before it reaches the processor**.
 
 ### The exact ordering
 
 The sequence is the consistency-critical part of the whole operation:
 
 ```
+0. IDEMPOTENCY LOOKUP        (scope='ship-fulfillment', key) — a hit replays and returns here
 1. authorize + load          (order, fulfillment, payment) — no writes
 2. validate preconditions    (fulfillment pending, tracking present)   ← before any side effect
-3. CAPTURE  (if authorized)  PAYMENT_GATEWAY.capture — out-of-process, BEFORE the local commit
-4. LOCAL TRANSACTION         fulfillment.ship + payment.capture(at) + order.markPaymentCaptured
+3a. CLAIM (if authorized)    short tx: findByOrderIdForUpdate + payment.beginCapture() → CAPTURING, COMMIT
+3b. CHARGE                   PAYMENT_GATEWAY.capture — out-of-process, holding NO lock
+4. LOCAL TRANSACTION         fulfillment.ship + payment.completeCapture(at) + order.markPaymentCaptured
                              + each OrderLine.markFulfillment + order.advanceFulfillment
 5. COMMIT SALE               inventory.stock.commit-sale — cross-service, AFTER the local commit
 6. EMIT                      retail.fulfillment.shipped (+ retail.payment.captured when captured)
+7. STORE the response        under the idempotency key, so an identical retry replays step 0
 ```
 
-Two ordering rules carry the design:
+Steps 0 / 7 arrived with [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md)
+and step 3's split with [ADR-052](../../adr/052-claim-before-you-charge.md); steps 1–6 are
+as this capability shipped. Two ordering rules carry the design:
 
 - **Capture runs _before_ the local commit** (step 3 before step 4). The gateway call is
   an out-of-process side effect, so it must not sit inside the database transaction (a
@@ -69,6 +91,15 @@ Two ordering rules carry the design:
   the rows in a short follow-up transaction. It is also why the tracking-number
   precondition (step 2) is hoisted *before* the capture — a ship that would fail its own
   precondition must fail before any money moves, never after.
+
+  > **The hoist was necessary and not sufficient, and ADR-052 is the record of why.**
+  > `trackingNumber` is a payload check and hoists cleanly. The *other* precondition — that
+  > the fulfillment is still `pending` — cannot be hoisted, because it is only true under a
+  > lock, and the lock came after the charge. That is what the committed `CAPTURING` claim
+  > fixes: a Cancel refuses to touch a claimed payment, so it cannot cancel the fulfillment
+  > out from under a charge in flight, and the `pending` check therefore **stays true across
+  > the gateway round-trip**. This is also why `Fulfillment` needs no `shipping` claim status
+  > of its own — the payment claim already buys it.
 - **Commit Sale runs _after_ the local commit** (step 5 after step 4). The physical stock
   decrement is a second service's write; making it part of the retail transaction would
   require a distributed transaction. Instead the retail ship commits first, then calls
@@ -78,9 +109,20 @@ Two ordering rules carry the design:
 
 If the gateway **declines** the capture (step 3), the ship **aborts** with
 `ORDER_PAYMENT_NOT_CAPTURED` (`409`). Because the capture runs *before* the local
-transaction, nothing has been written: the fulfillment is still `pending`, the order's
-axes are untouched, no Commit Sale fires, no event is emitted. The order is left exactly
-as it was, and an operator retries the ship once the payment problem is resolved.
+transaction, nothing of the *ship* has been written: the fulfillment is still `pending`,
+the order's axes are untouched, no Commit Sale fires, no event is emitted. The order is
+left exactly as it was, and an operator retries the ship once the payment problem is
+resolved.
+
+> One nuance the claim protocol added: a decline is no longer literally "zero writes". The
+> `CAPTURING` claim was committed before the charge, so the decline path opens a second
+> short transaction and `releaseCapture()`s the payment back to `AUTHORIZED` — the one
+> outcome under which releasing is safe, because a decline is the only answer that *proves*
+> no money moved (ADR-052). A **crash** between claim and resolution leaves the row
+> `CAPTURING`; nothing auto-resolves it, because neither guess is safe.
+> `ReportStaleCaptureClaimsUseCase` surfaces such rows at `error` with the
+> `gatewayReference` an operator needs and **writes nothing** — it is named `Report…`, not
+> `Sweep…`, on purpose.
 
 This is the **block-ship-until-payment-succeeds** compensation — deliberately the
 *simpler* stance:
@@ -119,12 +161,20 @@ inventory decrement must **not** roll the ship back. The handling is:
   replay by hand — and returns normally. The ship is **not** rolled back.
 
 What makes this safe is that **Commit Sale is idempotent on `fulfillmentId`**: inventory
-records one strictly-negative `sale` `StockMovement` per shipment keyed by
+records one strictly-negative `sale` `StockMovement` per shipped line keyed by
 `(reference_type='fulfillment', reference_id=fulfillmentId)`, and a replay that finds an
 existing row decrements nothing and re-returns the prior result (see
 [04-commit-sale-cross-service-rpc.md](04-commit-sale-cross-service-rpc.md) and
 [06-stockmovement-sale-type.md](06-stockmovement-sale-type.md)). So a retry — automatic or
 a manual operator replay hours later — can never double-decrement stock.
+
+> **That was true only of a *sequential* replay when this shipped.** The guard was a `SELECT`
+> outside the write transaction, so two deliveries genuinely *in flight at once* both read
+> "not yet committed" and both decremented — and a retry fired after a **timeout** is exactly
+> that case, because a timeout does not cancel the RPC. The `UC_STOCK_MOVEMENT_DEDUPE` UNIQUE
+> (migration `1783872387242`) has since closed it: the probe is now the fast path and the
+> constraint is the guarantee. `COMMIT_SALE_MAX_ATTEMPTS` is deliberately small (`3`) for the
+> same reason — see [04 §2](04-commit-sale-cross-service-rpc.md).
 
 ### Why not roll the ship back on a Commit Sale failure?
 
