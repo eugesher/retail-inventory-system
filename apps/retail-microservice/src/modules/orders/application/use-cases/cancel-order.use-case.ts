@@ -280,7 +280,7 @@ export class CancelOrderUseCase {
     order: Order,
     actorId: string,
     correlationId: string,
-  ): IAllocationCancelPayload {
+  ): Omit<IAllocationCancelPayload, 'operationKey'> {
     return {
       orderId: order.id!,
       lines: order.lines

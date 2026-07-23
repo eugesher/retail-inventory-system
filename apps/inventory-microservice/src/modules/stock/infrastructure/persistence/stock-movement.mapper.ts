@@ -18,6 +18,7 @@ export class StockMovementMapper {
       referenceType: entity.referenceType ?? null,
       referenceId: entity.referenceId ?? null,
       actorId: entity.actorId ?? null,
+      operationKey: entity.operationKey ?? null,
       occurredAt: entity.occurredAt,
     });
   }
@@ -35,6 +36,7 @@ export class StockMovementMapper {
       referenceType: domain.referenceType,
       referenceId: domain.referenceId,
       actorId: domain.actorId,
+      operationKey: domain.operationKey,
       occurredAt: domain.occurredAt,
     };
   }

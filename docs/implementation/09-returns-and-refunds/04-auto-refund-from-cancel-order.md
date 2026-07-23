@@ -47,7 +47,10 @@ producer-targets-consumer-queue routing of
 - **`true`** → resolve the order's captured `Payment` (`PAYMENT_REPOSITORY.findByOrderId`),
   compute its still-refundable remainder `amountMinor − refundedAmountMinor`, and — if that
   is `> 0` — issue a **full** refund for the remainder by calling `IssueRefundUseCase`
-  with `reason: 'order-cancelled'` and `actorId: null` (system-initiated; see §3).
+  with `reason: 'order-cancelled'` and `actorId: null` (system-initiated; see §3). It also
+  passes a **deterministic** `idempotencyKey` — `order-cancelled:<orderId>:<paymentId>` —
+  because ADR-036 made the key mandatory on Issue Refund and the system path has no client
+  header to forward (§3).
 
 So the two halves never share a transaction or a process call: Cancel Order writes the flag
 and the event; the consumer reads them and moves the money. If the consumer's refund fails,
@@ -107,9 +110,26 @@ self-describing:
   `0`. The consumer's `> 0` guard makes it a **no-op** — no gateway call, no new refund row.
 
 No new state is needed; the idempotency is a direct consequence of the payment-row counter
-that the [shared Issue Refund accounting](./05-fake-gateway-refund-method.md) maintains. (`IssueRefundUseCase` carries its own already-issued short-circuit too — an
+that the [shared Issue Refund accounting](./05-fake-gateway-refund-method.md) maintains. (`IssueRefundUseCase` carries
+its own already-issued short-circuit too — an
 `issued` refund for the same `(paymentId, amountMinor, reason)` returns without a second
 gateway call — so even a near-simultaneous duplicate is safe.)
+
+> **A third layer arrived with [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md), and it is the one
+that handles a
+> genuinely *concurrent* redelivery.** The two guards above are both check-then-act reads:
+> they close the sequential replay, but two deliveries in flight at once can each read
+> `refundable > 0` and each find no issued duplicate. The request-level store closes that.
+> Issue Refund now **requires** an `Idempotency-Key` and claims `(scope, key)` with an atomic
+> INSERT of a *pending* row **before** the gateway call, so the loser is turned away with
+> `409 ORDER_IDEMPOTENCY_KEY_IN_PROGRESS` rather than refunding a second time. The consumer
+> has no client header to forward, so it **synthesizes** the key deterministically from
+> `(orderId, paymentId)` — there is at most one auto-refund per cancelled order, so a
+> redelivered `retail.order.cancelled` collapses to a store replay. That `409` is a **throw**,
+> and the best-effort `catch` below swallows it: for this consumer, being turned away *is* the
+> correct outcome. The refundable-remainder guard remains the cheapest short-circuit and still
+> runs first — the sentence above is still true of what it does, just no longer the whole story
+> about what makes a redelivery safe.
 
 ### System actor and best-effort posture
 
@@ -128,10 +148,12 @@ guard above makes any redelivery a no-op.
 
 ## 4. Related decisions and documents
 
-- [`docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md`](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)
+- [
+  `docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md`](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)
   — the returns-and-refunds capability, including the auto-refund-from-cancel design
   (inline-in-retail, not a separate microservice) and the always-audit rule.
-- [`docs/adr/031-fulfillment-aggregate-and-ship-triggered-capture.md`](../../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)
+- [
+  `docs/adr/031-fulfillment-aggregate-and-ship-triggered-capture.md`](../../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)
   — Cancel Order, the `flagged_for_refund` writer, and the `retail.order.cancelled` event
   carrying `paymentFlaggedForRefund` (the handshake's writer half).
 - [`05-fake-gateway-refund-method.md`](./05-fake-gateway-refund-method.md) — the shared
@@ -139,4 +161,3 @@ guard above makes any redelivery a no-op.
   accounting, the audit, and the natural idempotency.
 - [`03-refund-as-distinct-entity.md`](./03-refund-as-distinct-entity.md) — the `Refund`
   aggregate and why a refund is its own entity, separate from a return.
-</content>

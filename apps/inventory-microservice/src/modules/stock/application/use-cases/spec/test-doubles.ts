@@ -425,6 +425,7 @@ export class InMemoryStockMovementRepository implements IStockMovementRepository
       referenceType: movement.referenceType,
       referenceId: movement.referenceId,
       actorId: movement.actorId,
+      operationKey: movement.operationKey,
       occurredAt: movement.occurredAt,
     });
     this.appended.push(persisted);

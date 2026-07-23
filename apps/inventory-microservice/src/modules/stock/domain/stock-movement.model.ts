@@ -26,6 +26,10 @@ export interface IStockMovementProps {
   referenceType: string | null;
   referenceId: string | null;
   actorId: string | null;
+  // The caller-minted identity of the operation that produced this row, when the operation
+  // has no natural key of its own (ADR-057). Only Cancel-Allocation sets it today; every
+  // other producer leaves it null, which keeps those rows out of the dedupe UNIQUE entirely.
+  operationKey: string | null;
   occurredAt: Date;
 }
 
@@ -38,6 +42,8 @@ export interface IRecordStockMovementProps {
   referenceType?: string | null;
   referenceId?: string | null;
   actorId?: string | null;
+  // Optional: only an operation with no natural key supplies it (ADR-057).
+  operationKey?: string | null;
   // Defaults to `new Date()` (now) on the write path; the load path always
   // supplies the stored instant.
   occurredAt?: Date;
@@ -67,6 +73,7 @@ export class StockMovement {
   public readonly referenceType: string | null;
   public readonly referenceId: string | null;
   public readonly actorId: string | null;
+  public readonly operationKey: string | null;
   public readonly occurredAt: Date;
 
   private constructor(props: IStockMovementProps) {
@@ -84,6 +91,7 @@ export class StockMovement {
     this.referenceType = props.referenceType;
     this.referenceId = props.referenceId;
     this.actorId = props.actorId;
+    this.operationKey = props.operationKey;
     this.occurredAt = props.occurredAt;
 
     // `readonly` is compile-time only. Freezing makes it real: a write throws at runtime rather
@@ -103,6 +111,7 @@ export class StockMovement {
       referenceType: props.referenceType ?? null,
       referenceId: props.referenceId ?? null,
       actorId: props.actorId ?? null,
+      operationKey: props.operationKey ?? null,
       occurredAt: props.occurredAt ?? new Date(),
     });
   }

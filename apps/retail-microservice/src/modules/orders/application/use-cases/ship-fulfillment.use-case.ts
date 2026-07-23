@@ -1,7 +1,7 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { bodyFingerprint } from '@retail-inventory-system/common';
+import { bodyFingerprint, retryThenLogForReplay } from '@retail-inventory-system/common';
 import {
   FulfillmentStatusEnum,
   FulfillmentView,
@@ -46,7 +46,6 @@ import { loadAuthorizedOrder } from './order-access';
 import { runWithOrderWriteRetry } from './order-write';
 import { toFulfillmentView } from './fulfillment-view.factory';
 import { resolveCustomerEmail } from './resolve-customer-email';
-import { retryThenLogForReplay } from './retry-then-log-for-replay';
 
 // How many times Commit Sale is attempted after the local ship commit before the failure is logged
 // for operator replay. Retries are immediate — no backoff.

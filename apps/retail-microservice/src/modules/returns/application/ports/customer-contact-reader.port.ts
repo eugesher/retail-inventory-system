@@ -13,8 +13,13 @@ export interface IReturnCustomerContact {
 // The returns context's read seam onto the gateway-owned `customer` table. It is a **local
 // copy** of the orders module's port, not a shared import: returns is a sibling bounded
 // context behind the boundaries-lint isolation line (ADR-017), so it owns its own port +
-// adapter rather than reaching across to the orders module (the `retry-then-log-for-replay`
-// per-module-copy precedent, ADR-032). The adapter reads `customer` with PARAMETERIZED SQL
+// adapter rather than reaching across to the orders module (ADR-032).
+//
+// **This one cannot be lifted into a lib the way `retryThenLogForReplay` was** (ADR-056), and
+// the difference is the test worth remembering: that helper's signature named no module type
+// — primitives and a structural logger — so a lib could hold it. A port *is* the module's
+// type. Lifting this would mean lifting the seam itself, which is ADR-043's question, not a
+// deduplication. The adapter reads `customer` with PARAMETERIZED SQL
 // through the injected `EntityManager`, exactly as `RETURN_ORDER_READER` reaches the order
 // tables. The opaque shared FK (`return_request.customer_id` → `customer.id`) is the only
 // coupling.

@@ -152,8 +152,13 @@ export class StockController {
     return this.allocateStock.execute(payload);
   }
 
-  // **Idempotency here is quantity-guarded, not key-guarded.** There is no idempotency key — a
-  // replayed cancel simply finds nothing left to release and an over-cancel is refused. Resolves
+  // **Idempotency here is key-guarded** (ADR-057). It used to be quantity-guarded, and the claim
+  // that went with it — *"a replayed cancel simply finds nothing left to release"* — was false:
+  // `quantity_allocated` is shared per `(variant, location)`, so a redelivered cancel arriving
+  // after ANOTHER order allocated the same level passes the quantity check and releases that
+  // order's units, overstating `available` and overselling. The caller now mints an
+  // `operationKey` per cancellation and `UC_STOCK_MOVEMENT_DEDUPE` refuses the second write.
+  // An over-cancel is still refused on its own terms (`STOCK_RESULT_NEGATIVE`, 409). Resolves
   // `{ cancelled }`, the line count, not the unit count.
   @MessagePattern(ROUTING_KEYS.INVENTORY_ALLOCATION_CANCEL)
   public handleCancelAllocation(

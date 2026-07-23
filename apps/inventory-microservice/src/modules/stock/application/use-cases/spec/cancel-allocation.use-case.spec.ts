@@ -26,6 +26,7 @@ import {
 const VARIANT_ID = 42;
 const ORDER_ID = 7001;
 const CORRELATION_ID = 'corr-cancel-1';
+const OPERATION_KEY = 'op-cancel-1';
 const LOCATION = INVENTORY_DEFAULT_STOCK_LOCATION;
 
 const futureDate = (): Date => new Date(Date.now() + 60 * 60_000);
@@ -76,12 +77,20 @@ describe('CancelAllocationUseCase', () => {
 
   const cancel = (
     lines: { variantId: number; stockLocationId?: string; quantity: number }[],
-    overrides: Partial<{ orderId: number; reason: string; actorId: string }> = {},
+    overrides: Partial<{
+      orderId: number;
+      reason: string;
+      actorId: string;
+      operationKey: string;
+    }> = {},
   ): Promise<{ cancelled: number }> =>
     useCase.execute({
       orderId: ORDER_ID,
       lines,
       correlationId: CORRELATION_ID,
+      // The identity retail mints per cancellation (ADR-057). Defaulted here so the
+      // existing cases read unchanged; the cases that care override or clear it.
+      operationKey: OPERATION_KEY,
       ...overrides,
     });
 
@@ -239,6 +248,47 @@ describe('CancelAllocationUseCase', () => {
   it('rejects an empty lines array', async () => {
     await expect(cancel([])).rejects.toMatchObject({
       code: InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
+    });
+  });
+
+  // ADR-057. `releaseAllocated` guards by QUANTITY, and on a counter several orders share
+  // that cannot tell "already done" from "still enough to subtract" — a redelivered cancel
+  // arriving after another order allocated the same level would release THAT order's units.
+  // The operation key is what makes the second delivery recognisable.
+  describe('the caller-minted operation key', () => {
+    it('rides the release movement so the ledger can dedupe on it', async () => {
+      seedLevel({ onHand: 10, allocated: 4 });
+
+      await cancel([{ variantId: VARIANT_ID, quantity: 4 }]);
+
+      expect(movements.appended[0].operationKey).toBe(OPERATION_KEY);
+      // The order stays the ledger REFERENCE — an auditor still asks "what released
+      // order X?" — the key only carries identity.
+      expect(movements.appended[0].referenceId).toBe(String(ORDER_ID));
+    });
+
+    it('translates the ledger duplicate-key error into a successful no-op replay', async () => {
+      seedLevel({ onHand: 10, allocated: 4 });
+      movements.failNextAppendWithDuplicateEntry();
+
+      const result = await cancel([{ variantId: VARIANT_ID, quantity: 4 }]);
+
+      // A replay must NOT throw: an exception out of an `@MessagePattern` is blind-
+      // redelivered by the broker in a hot loop.
+      expect(result).toEqual({ cancelled: 1 });
+      expect(movements.appended).toHaveLength(0);
+    });
+
+    it.each([undefined, '', '   '])('refuses a missing or blank key (%p)', async (key) => {
+      seedLevel({ onHand: 10, allocated: 4 });
+
+      await expect(
+        cancel([{ variantId: VARIANT_ID, quantity: 4 }], { operationKey: key! }),
+      ).rejects.toMatchObject({ code: InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID });
+      // Refused BEFORE any write: an unkeyed release generates a NULL dedupe key, which
+      // silently falls out of the UNIQUE — accepting it would lose the only guard.
+      expect(movements.appended).toHaveLength(0);
+      expect(cache.invalidations).toHaveLength(0);
     });
   });
 });

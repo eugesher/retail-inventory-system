@@ -12,7 +12,9 @@
 // not leak to the caller unchanged and must not be mapped directly by the presentation
 // filter (the cart `CartWriteConflictError` / order `OrderWriteConflictError`
 // precedent). Returns cannot import the orders module (ADR-017), so this is a local
-// copy — the `retry-then-log-for-replay` per-module-copy precedent.
+// copy — and it stays one: it carries `rmaId`, a module-owned identity, so a shared lib
+// could not hold it without erasing the field that makes the trace useful.
+// `retryThenLogForReplay` named no module type and was lifted instead (ADR-056).
 export class ReturnWriteConflictError extends Error {
   constructor(
     public readonly rmaId: number,

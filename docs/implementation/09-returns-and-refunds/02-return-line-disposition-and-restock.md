@@ -21,7 +21,8 @@ capability) and reuses the entire stock-movement machinery
 [ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md) put in
 place — see also the sibling
 [`03-stock-movement-typed-ledger.md`](../07-inventory-reservation-and-stock-movement/03-stock-movement-typed-ledger.md)
-and [`08-receive-adjust-now-write-movements.md`](../07-inventory-reservation-and-stock-movement/08-receive-adjust-now-write-movements.md).
+and [
+`08-receive-adjust-now-write-movements.md`](../07-inventory-reservation-and-stock-movement/08-receive-adjust-now-write-movements.md).
 
 ## 1. The `inventory.stock.restock-from-return` RPC
 
@@ -32,18 +33,18 @@ ADR-008 wire agreement):
 ```ts
 // inventory.stock.restock-from-return  (RPC, Retail → Inventory)
 interface IRestockFromReturnPayload extends ICorrelationPayload {
-  returnRequestId: number;
-  lines: {
-    returnLineId: number;     // the ReturnLine each restocked unit satisfies
-    variantId: number;        // the catalog variant (opaque cross-service key)
-    stockLocationId: string;  // the receiving location (resolved by the caller)
-    quantity: number;         // strictly positive — units going back on-hand
-  }[];
-  actorId?: string | null;    // the warehouse staff who inspected; null = system
+    returnRequestId: number;
+    lines: {
+        returnLineId: number;     // the ReturnLine each restocked unit satisfies
+        variantId: number;        // the catalog variant (opaque cross-service key)
+        stockLocationId: string;  // the receiving location (resolved by the caller)
+        quantity: number;         // strictly positive — units going back on-hand
+    }[];
+    actorId?: string | null;    // the warehouse staff who inspected; null = system
 }
 
 interface IRestockFromReturnResult {
-  restocked: { returnLineId; variantId; stockLocationId; quantity }[];
+    restocked: { returnLineId; variantId; stockLocationId; quantity }[];
 }
 ```
 
@@ -116,6 +117,25 @@ and simply re-returns the request's lines mapped to result entries. This rides t
 `IDX_STOCK_MOVEMENT_REFERENCE (reference_type, reference_id)` index — a `SELECT 1 … LIMIT 1`,
 not a scan — and is a pure read, so the ledger's append-only invariant is untouched.
 
+> **That probe closes the *sequential* replay only, and a database constraint now closes the
+> concurrent one.** A check-then-act read outside the write transaction cannot serialize two
+> deliveries that are in flight at the same time: both read "not yet restocked", both credit the
+> stock. And a broker never promises the redelivery waits for the original — a timeout does not
+> cancel an RPC, so the retry travels *alongside* it. Migration `1783872387242` added
+> **`UC_STOCK_MOVEMENT_DEDUPE`**, a UNIQUE over the STORED generated column
+> `movement_dedupe_key`, non-`NULL` only for `sale` and `return` movements and keyed
+> `(type, reference_type, reference_id, variant_id, stock_location_id)` — the partial-unique-index
+> emulation `price.open_scope_key` established ([ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md)).
+> The loser's INSERT breaks it, its
+> transaction rolls back having incremented nothing, and the use case catches the duplicate-entry
+> error and returns the replay result. **The probe is an optimisation; the constraint is the
+> guarantee** — and it is the guarantee for Commit Sale's `sale` rows too, under the same UNIQUE.
+> Two consequences worth carrying: the use case calls `requireDistinctLevels(lines, …)` up front,
+> because two payload lines on one `(variant, location)` would collide on that UNIQUE and be
+> misread as a replay; and it re-probes **under the write scope** in phase 0, throwing
+> `LedgerReplayError` to unwind a loser *before* it performs a level write that is only going to
+> roll back.
+
 **Why per-request grain.** One Inspect → one restock RPC for the whole return. There is no
 partial restock that would later need a *second* restock RPC for the same return, so the
 right idempotency grain is the **return request**, not the line. (Contrast Commit Sale,
@@ -123,7 +143,10 @@ whose grain is the `fulfillmentId` because an order ships in multiple fulfillmen
 line-level `returnLineId` is carried for naming (§1), not deduping.
 
 This makes the cross-service retry safe: a redelivered restock is a no-op that re-returns
-the same result, so the retail caller can retry on a timeout without fear of double-credit.
+the same result, so the retail caller can retry on a timeout without fear of double-credit —
+sequentially through the probe, concurrently through the UNIQUE. The stakes are the mirror
+image of Commit Sale's: an uncaught double-credit invents stock that never came back, and
+phantom inventory **oversells**.
 
 ## 4. All-lines-atomic, the bounded write protocol, and no low-stock re-fire
 
@@ -135,9 +158,14 @@ Restock reuses the inventory module's shared write machinery rather than re-impl
   **post-commit** so the next availability read reflects the restock. On a rejection,
   `work` never resolves and nothing is invalidated.
 - Inside it, `runWithStockWriteRetry` opens a fresh transaction per attempt and retries a
-  lost optimistic compare-and-swap up to the shared 5-attempt budget (ADR-030 §3) — exactly
-  the no-oversell protocol Reserve/Allocate/Commit-Sale share, consuming the
-  `stock_level.version` column ADR-027 shipped.
+  lost optimistic compare-and-swap — exactly the no-oversell protocol
+  Reserve/Allocate/Commit-Sale share, consuming the `stock_level.version` column ADR-027
+  shipped. The budget was a hardcoded `MAX_WRITE_ATTEMPTS = 5` when this shipped; since
+  [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) it is the injected
+  **`OCC_RETRY_ATTEMPTS`** token (`Joi` default still **5**, so the live behaviour is
+  unchanged), and since [ADR-045](../../adr/045-one-occ-retry-protocol.md) the loop, the log
+  levels and the exhaustion message all live in the one shared `runWithOccRetry`
+  (`libs/common/concurrency/`) that `runWithStockWriteRetry` now merely binds to.
 - Each attempt is **all-lines-atomic**: it loads each distinct level once (lazy-initializing
   a missing one — a returned variant may have no level yet at the receiving location, e.g. a
   fresh warehouse, the Receive precedent), applies every `changeOnHand` and builds every
@@ -157,8 +185,15 @@ best-effort events per line (ADR-020 — warn-and-swallow, never failing the com
 `inventory.stock.returned` (carrying `variantId`, `stockLocationId`, `quantity`,
 `returnRequestId`, `returnLineId`) **and** the per-insert `inventory.stock-movement.recorded`
 that every ledger append emits. Both land on `inventory_queue` as **reserved surfaces** (no
-cross-service consumer bound yet; the intended consumer is a future event-store/audit
-capability — the `inventory.stock.{allocated,committed}` precedent). The dedicated
+cross-service *business* consumer binds them — the `inventory.stock.{allocated,committed}`
+precedent). The event-store/audit capability named here as future has since shipped
+([ADR-034](../../adr/034-isolated-eventstore-database.md) / [ADR-035](../../adr/035-event-store-firehose-topic-exchange.md)),
+and it did not
+subscribe to these keys individually: every producer instead **dual-publishes** onto the
+`ris.events` topic exchange through `RisEventsMirrorPublisher`, and the event store's single
+firehose queue — bound to a lone `#` — ingests the lot into `domain_event` in its own
+`ris_eventstore` database. So both keys are captured and queryable via `audit.event.query`
+today; "reserved" now means only that no service acts on them. The dedicated
 `inventory.stock.returned` key is the **typed alias** for the positive `return` movement: it
 lets a downstream consumer subscribe to returned-stock events specifically, without
 filtering every high-volume `inventory.stock-movement.recorded`. It is the mirror of
@@ -183,11 +218,11 @@ Inspect records two enums plus a refund amount per `ReturnLine`. The **condition
 (`restock` / `scrap` / `quarantine`) decides what happens to them. Only the disposition
 drives inventory:
 
-| Disposition  | Meaning                          | Inventory effect                          |
-| ------------ | -------------------------------- | ----------------------------------------- |
-| `restock`    | Fit for resale                   | Back to `StockLevel` (`+quantity_on_hand`, one positive `return` movement) |
-| `scrap`      | Discard (destroyed)              | **None** — no stock movement              |
-| `quarantine` | Hold aside for review            | **None** — no stock movement today        |
+| Disposition  | Meaning               | Inventory effect                                                           |
+|--------------|-----------------------|----------------------------------------------------------------------------|
+| `restock`    | Fit for resale        | Back to `StockLevel` (`+quantity_on_hand`, one positive `return` movement) |
+| `scrap`      | Discard (destroyed)   | **None** — no stock movement                                               |
+| `quarantine` | Hold aside for review | **None** — no stock movement today                                         |
 
 So the inspect step partitions the lines: the `restock`-disposition lines are gathered into
 **one** restock RPC; `scrap` and `quarantine` lines are recorded on the RMA (their
@@ -208,7 +243,12 @@ established ([ADR-031](../../adr/031-fulfillment-aggregate-and-ship-triggered-ca
    has a half-inspected line. The use case requires the payload to cover **every** RMA line
    (an unknown line is `RETURN_LINE_NOT_FOUND` 404, an incomplete set
    `RETURN_INSPECTION_INVALID` 400), so a complete inspection is the only thing that
-   commits.
+   commits. That completeness check is **pure** and runs on the pre-loaded aggregate before
+   any transaction opens — the RMA's line-id set is immutable across its life, so it does not
+   need the fresh version. Since ADR-036 the transaction itself sits inside
+   `runWithReturnWriteRetry`, and the RMA is **re-loaded fresh inside each attempt**:
+   `ReturnLine.inspect` is inspect-once, so a retry has to start from an un-inspected re-read
+   rather than replay a mutated in-memory graph.
 2. **After that commit**, for the `restock`-disposition lines, the use case resolves each
    line's `variantId` (a `ReturnLine` carries only `orderLineId`, so the variant comes from
    the order through the raw-SQL `RETURN_ORDER_READER` — the returns module never imports
@@ -257,5 +297,6 @@ the shelf.
   `received → inspected` transition this disposition step drives.
 - [`03-refund-as-distinct-entity.md`](03-refund-as-distinct-entity.md) — the `Refund`
   aggregate that consumes the per-line `lineRefundAmountMinor` recorded here.
-- [`03-stock-movement-typed-ledger.md`](../07-inventory-reservation-and-stock-movement/03-stock-movement-typed-ledger.md)
+- [
+  `03-stock-movement-typed-ledger.md`](../07-inventory-reservation-and-stock-movement/03-stock-movement-typed-ledger.md)
   — the ledger that gained the `return` producer here.
