@@ -26,12 +26,12 @@ other ledger writers), and
 
 ## The four suites
 
-| Suite | Boots | What it locks |
-| --- | --- | --- |
-| `test/cart-reserve-release.e2e-spec.ts` | gateway + retail + inventory + catalog | Reserve on add, absolute re-reserve on change, release on remove, per-variant release isolation, and the out-of-stock `409` that leaves the cart line-less. |
-| `test/place-order-allocates.e2e-spec.ts` | gateway + retail + inventory + catalog | Place converts each line's hold reserved → allocated (on-hand unchanged), writes exactly one negative `allocation` movement per order line referencing the order, and a repeat-place appends none. |
-| `test/concurrent-oversell.e2e-spec.ts` | gateway + retail + inventory + catalog | The canonical race (below), plus a second act proving the release path frees the unit for the loser under the same contention. |
-| `test/inventory-movements-audit.e2e-spec.ts` | gateway + retail + inventory + catalog | The full ledger timeline (types, signs, reason codes, reference pairs, actor ids), the `?type` / `?from` / `?to` filters, paging, and the `inventory:read` permission gates. |
+| Suite                                        | Boots                                  | What it locks                                                                                                                                                                                      |
+|----------------------------------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `test/cart-reserve-release.e2e-spec.ts`      | gateway + retail + inventory + catalog | Reserve on add, absolute re-reserve on change, release on remove, per-variant release isolation, and the out-of-stock `409` that leaves the cart line-less.                                        |
+| `test/place-order-allocates.e2e-spec.ts`     | gateway + retail + inventory + catalog | Place converts each line's hold reserved → allocated (on-hand unchanged), writes exactly one negative `allocation` movement per order line referencing the order, and a repeat-place appends none. |
+| `test/concurrent-oversell.e2e-spec.ts`       | gateway + retail + inventory + catalog | The canonical race (below), plus a second act proving the release path frees the unit for the loser under the same contention.                                                                     |
+| `test/inventory-movements-audit.e2e-spec.ts` | gateway + retail + inventory + catalog | The full ledger timeline (types, signs, reason codes, reference pairs, actor ids), the `?type` / `?from` / `?to` filters, paging, and the `inventory:read` permission gates.                       |
 
 Every suite that consumes stock **self-provisions disjoint fixtures**: it
 registers its own product + variant + price, publishes it, and `receive`s exactly
@@ -76,7 +76,10 @@ green across repeated runs against the same DB without a reload between them —
 reload above is only to start from the canonical seeded baseline.
 
 It is also covered by the full pass: `yarn test:e2e` reloads infra, migrates,
-seeds, then runs all 21 suites sequentially (`jest -i`) against the one shared DB.
+seeds, then runs every suite sequentially (`jest -i`) against the one shared DB.
+(At epic time that was 21 suites; the root `test/` directory has grown well past
+that as later capabilities landed, so treat the count as whatever
+`ls test/*.e2e-spec.ts` reports rather than a fixed number.)
 
 ## How to read the concurrency assertions
 
@@ -154,12 +157,15 @@ After the winner places, the suite asserts the state in two complementary terms:
 
 ## What the suites deliberately do NOT cover
 
-- **TTL-expiry by a sweeper.** No sweeper exists — `Reservation.expire()` has no
-  caller yet. Only the *inline* expiry policy is observable (Allocate refreshes a
-  wall-clock-stale-but-still-held hold and commits it, never surfacing
-  `RESERVATION_EXPIRED` — see
-  [06-allocate-on-place.md](06-allocate-on-place.md)). A sweeper-driven expiry
-  scenario waits for the sweeper capability.
+- **TTL-expiry by a sweeper.** No sweeper existed when these suites were written —
+  `Reservation.expire()` had no caller at all — so only the *inline* expiry policy
+  is observable here (Allocate refreshes a wall-clock-stale-but-still-held hold and
+  commits it, never surfacing `RESERVATION_EXPIRED` — see
+  [06-allocate-on-place.md](06-allocate-on-place.md)). The sweeper has since landed
+  ([ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md)) and
+  `expire()` now has a caller, but **these four suites still do not exercise it** —
+  sweeper-driven expiry is locked by that capability's own specs, not by the
+  reservation suites described here.
 - **Cart abandonment (release-all-by-cart over HTTP).** There is no abandonment
   producer in the system — the purge flow that flips a cart `active → abandoned`
   belongs to a later capability, so there is no end-to-end vehicle to trigger a

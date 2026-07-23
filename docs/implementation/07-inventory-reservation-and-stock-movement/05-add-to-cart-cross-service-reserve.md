@@ -36,10 +36,10 @@ inventory reservation" seam lands as **two** module-prefixed ports, each followi
 the established `<MODULE>_<DOWNSTREAM>_GATEWAY` convention (the
 `CART_CATALOG_GATEWAY` / `ORDER_CATALOG_GATEWAY` precedent):
 
-| Port | Module | Methods | Backed by |
-|---|---|---|---|
-| `CART_INVENTORY_GATEWAY` | `modules/cart/` | `reserveStock(payload) → ReservationView`, `releaseStock(payload) → IReservationReleaseResult` | `CartInventoryRabbitmqAdapter` |
-| `ORDER_INVENTORY_GATEWAY` | `modules/orders/` | `allocateStock(payload) → IAllocationResult`, `cancelAllocation(payload) → void` | `OrderInventoryRabbitmqAdapter` |
+| Port                      | Module            | Methods                                                                                        | Backed by                       |
+|---------------------------|-------------------|------------------------------------------------------------------------------------------------|---------------------------------|
+| `CART_INVENTORY_GATEWAY`  | `modules/cart/`   | `reserveStock(payload) → ReservationView`, `releaseStock(payload) → IReservationReleaseResult` | `CartInventoryRabbitmqAdapter`  |
+| `ORDER_INVENTORY_GATEWAY` | `modules/orders/` | `allocateStock(payload) → IAllocationResult`, `cancelAllocation(payload) → void`               | `OrderInventoryRabbitmqAdapter` |
 
 Each adapter injects the `INVENTORY_MICROSERVICE` client and `send`s on the
 `ROUTING_KEYS.INVENTORY_RESERVATION_*` / `INVENTORY_ALLOCATION_CANCEL` keys, so the
@@ -121,7 +121,9 @@ drops it, then — **after a successful save** — calls
 `releaseStock({ cartId, variantId, reason: 'cart-removed', correlationId })` as a
 **best-effort** try/warn/swallow (the event-emit style). The cart write is the
 primary outcome: a failed release merely over-holds stock until the manual release
-endpoint or a later TTL sweep frees it, and must never fail the remove. (A failed
+endpoint or the TTL sweep frees it (that sweep was still future when this shipped;
+[ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md) has since
+delivered it), and must never fail the remove. (A failed
 line lookup throws `CART_LINE_NOT_FOUND` before the release is reached, so a missing
 line is never released.)
 
@@ -140,10 +142,10 @@ succeeds**:
 
 ```ts
 allocateStock({
-  cartId,
-  orderId: persisted.id!,
-  lines: lines.map(l => ({ variantId: l.variantId, quantity: l.quantity })),
-  correlationId,
+    cartId,
+    orderId: persisted.id!,
+    lines: lines.map(l => ({variantId: l.variantId, quantity: l.quantity})),
+    correlationId,
 })
 ```
 
@@ -243,8 +245,12 @@ absolute `available === 100` assertions (the disjoint-fixtures convention).
 ## 6. Known gaps
 
 - A failed best-effort release (Remove) or a failed compensation (Place) **over-
-  holds stock** until the manual release endpoint or a later TTL sweeper reclaims
-  it. The hold is never lost, only delayed in returning to `available`.
+  holds stock** until the manual release endpoint or the TTL sweeper reclaims it.
+  The hold is never lost, only delayed in returning to `available`. (The sweeper
+  was a *later* capability when this shipped and has since arrived —
+  [ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md) — so an
+  over-held hold is now reclaimed automatically once its TTL lapses, rather than
+  waiting for an operator.)
 - `CartView` carries **no reservation state** — the holds are an inventory-side
   concern not surfaced in the cart's HTTP contract by this capability.
 - The reservation RPCs still have **no gateway HTTP route** of their own; they are

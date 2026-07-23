@@ -82,9 +82,14 @@ takes.
 
 ## 3. The inline TTL policy: refresh-then-commit
 
-A hold has a wall-clock `expiresAt`. There is no background sweeper yet, so a hold
-can be **wall-clock-expired but still `active`** — its `quantity` is still sitting
-in `quantityReserved`, occupying the counter. `Reservation.commit(now)` refuses an
+A hold has a wall-clock `expiresAt`, and expiry is a **wall-clock fact, not a
+stored transition** — nothing flips the status by itself. So a hold can be
+**wall-clock-expired but still `active`**, its `quantity` still sitting in
+`quantityReserved`, occupying the counter. When this shipped there was no
+background sweeper at all, so such a hold stayed that way indefinitely; since
+[ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md) a sweeper
+reclaims it, but only on its next tick — so the expired-but-still-`active` window
+still exists, and everything below still applies to it. `Reservation.commit(now)` refuses an
 expired hold (`RESERVATION_EXPIRED`), precisely so nothing silently converts a
 lapsed hold.
 
@@ -95,11 +100,17 @@ Honoring a stale-but-still-held hold is **oversell-safe**: the units it represen
 were never returned to `available`, so committing them takes nothing from anyone
 else. The use case therefore never surfaces `RESERVATION_EXPIRED`.
 
-What changes when a sweeper capability lands: a swept hold flips to `expired`
-(status), its counter is returned to `available`, and the row stops being on the
-common path — allocate would then see a non-`active` row and take the fallback
-(re-checking `available`). The refresh-then-commit shortcut is a deliberate
-stop-gap for the sweeper-less present, documented as such in ADR-030 §4.
+What changed when the sweeper capability landed
+([ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md)): a swept
+hold flips to `expired` (status), its counter is returned to `available`, and the
+row stops being on the common path — allocate then sees a non-`active` row and
+takes the fallback (re-checking `available`). **The refresh-then-commit shortcut
+was not removed by that, and is not dead code.** It was written as a stop-gap for
+the sweeper-less present (documented as such in ADR-030 §4), but a sweep runs on a
+cadence rather than at the instant a hold lapses, so a hold that expires between
+two ticks still reaches Allocate as expired-but-still-`active` — and honouring it
+is still oversell-safe for the same reason: its units were never returned to
+`available`.
 
 ## 4. Cancel Allocation
 
@@ -119,11 +130,16 @@ hold. The free-form `reason` lands in the movement's `reason_code` (an ops note
 like `fraud-review` is allowed), while the typed event `reason` stays the
 `order-cancelled` member of the release-reason union.
 
-**Who calls it.** Two future callers: the order-cancel capability, and the
-place-failure compensation in the retail-wiring capability (a rare post-allocate
-commit failure best-effort cancels what allocate committed). The handler ships now
-— callable over RMQ and fully tested — with **no in-repo caller**: a deliberate
-reserved surface, not dead domain logic.
+**Who calls it.** The handler shipped here with **no in-repo caller at all** — a
+deliberate reserved surface, not dead domain logic — against two named future
+callers: the place-failure compensation, and the order-cancel capability. Both
+have since arrived, so the surface is no longer reserved. The place-failure
+compensation landed in this same epic
+([05](05-add-to-cart-cross-service-reserve.md)): `PlaceOrderUseCase` fires
+`cancelAllocation` best-effort when the place transaction fails *after* allocate
+committed. Order cancellation followed with the cancellation capability, which
+calls it from `cancel-order.use-case.ts` and `cancel-line.use-case.ts` through the
+shared `cancel-allocation-retry.ts` helper.
 
 **Idempotency posture.** Cancel is **quantity-guarded, not state-tracked**. There
 is no per-order "already cancelled" flag; an over-cancel (more than is allocated)
