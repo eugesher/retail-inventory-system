@@ -9,7 +9,7 @@ import { AUDIT_LOG_REPOSITORY, IAuditLogRepositoryPort } from '../ports';
 // The ingest path for the staff audit trail: maps one `audit.staff.action` wire event
 // (the cross-cutting staff-action stream the firehose consumer routes here, ADR-035) 1:1
 // to an append-only `audit_log_entry` row. Distinct from the raw event firehose the
-// sibling `domain-events/` module sinks — an audit action lands ONLY in `audit_log_entry`,
+// sibling `domain_event` log sinks — an audit action lands ONLY in `audit_log_entry`,
 // never also in `domain_event`.
 //
 // Unlike the firehose log there is no composite idempotency key (every staff action is

@@ -1,12 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, FindOptionsWhere, LessThan, Repository } from 'typeorm';
+import { FindOptionsWhere, LessThan, Repository } from 'typeorm';
 
 import {
   NotificationChannelEnum,
   NotificationDeliveryStatusEnum,
 } from '@retail-inventory-system/contracts';
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import {
   INotificationDeliveryListFilter,
@@ -23,25 +22,26 @@ import { NotificationDeliveryMapper } from './notification-delivery.mapper';
 // `NotificationDelivery` aggregate. A single-row upsert (no owned children), re-reading
 // by id so the returned aggregate carries the generated BIGINT id + committed
 // timestamps. Returns domain types only — no TypeORM leak (ADR-017).
+//
+// **It implements the port DIRECTLY, without `BaseTypeormRepository`** — the convention the
+// append-only repositories already follow (`stock_movement`, `domain_event`,
+// `audit_log_entry`, `idempotency_key`). It used to extend the base, and the extension bought
+// nothing: this class overrides `save`, and every other method reaches for
+// `this.deliveryRepository.*` rather than the inherited `find`/`save`/`softDelete`. All the
+// base contributed was an obligation to implement `toDomain`/`toEntity`, two `protected`
+// methods **nothing ever called** — the ADR-049 shape, where an unreachable member is a claim
+// the code does not honour. The mapper is called at each site instead, which is where it was
+// being called from anyway.
+//
+// `softDelete` going away with it is a feature, not a loss: `deletedAt` on this table is inert
+// **by design** (the row is the dedupe anchor), so inheriting a soft-delete verb this
+// repository must never use was the wrong shape twice over.
 @Injectable()
-export class NotificationDeliveryTypeormRepository
-  extends BaseTypeormRepository<NotificationDeliveryEntity, NotificationDelivery>
-  implements INotificationDeliveryRepositoryPort
-{
+export class NotificationDeliveryTypeormRepository implements INotificationDeliveryRepositoryPort {
   constructor(
     @InjectRepository(NotificationDeliveryEntity)
     private readonly deliveryRepository: Repository<NotificationDeliveryEntity>,
-  ) {
-    super(deliveryRepository);
-  }
-
-  protected toDomain(entity: NotificationDeliveryEntity): NotificationDelivery {
-    return NotificationDeliveryMapper.toDomain(entity);
-  }
-
-  protected toEntity(domain: NotificationDelivery): DeepPartial<NotificationDeliveryEntity> {
-    return NotificationDeliveryMapper.toEntity(domain);
-  }
+  ) {}
 
   public async save(delivery: NotificationDelivery): Promise<NotificationDelivery> {
     try {
@@ -139,17 +139,38 @@ export class NotificationDeliveryTypeormRepository
     };
   }
 
-  // The retry sweeper's scan: `failed` rows that have not yet exhausted their attempt
-  // budget (`attempt_count < maxAttempts`), oldest-attempt-first so the longest-waiting
-  // delivery retries next. Served by the `(status, last_attempt_at)` index. A plain
-  // `find` (not `findAndCount`) — the sweeper only iterates the batch, so it never pays
-  // for a `COUNT(*)` it would discard.
-  public async listRetryable(maxAttempts: number, limit: number): Promise<NotificationDelivery[]> {
+  // The retry sweeper's scan, in two arms (see the port for the full argument):
+  //
+  //  1. `failed` rows under their attempt budget (`attempt_count < maxAttempts`) — the
+  //     ordinary recorded failure the sweeper drains.
+  //  2. `queued` rows older than `queuedStaleBefore` — a delivery ORPHANED between the
+  //     persist and the dispatch. Nothing else in the service scans `queued`, so without
+  //     this arm such a row is unreachable forever, which is what ADR-033 §3 says must not
+  //     happen. The `created_at` bound is what keeps the sweeper off a row that is being
+  //     dispatched right now.
+  //
+  // An ARRAY of `where` objects is TypeORM's OR: the two arms are ORed, and the conditions
+  // inside each object are ANDed. Ordered oldest-attempt-first; a queued row's
+  // `last_attempt_at` is NULL and MySQL sorts NULLs first ascending, so orphans lead the
+  // batch — correct, since a `failed` row was at least attempted and an orphan may never
+  // have been sent. A plain `find` (not `findAndCount`) — the sweeper only iterates the
+  // batch, so it never pays for a `COUNT(*)` it would discard.
+  public async listRetryable(
+    maxAttempts: number,
+    limit: number,
+    queuedStaleBefore: Date,
+  ): Promise<NotificationDelivery[]> {
     const entities = await this.deliveryRepository.find({
-      where: {
-        status: NotificationDeliveryStatusEnum.FAILED,
-        attemptCount: LessThan(maxAttempts),
-      },
+      where: [
+        {
+          status: NotificationDeliveryStatusEnum.FAILED,
+          attemptCount: LessThan(maxAttempts),
+        },
+        {
+          status: NotificationDeliveryStatusEnum.QUEUED,
+          createdAt: LessThan(queuedStaleBefore),
+        },
+      ],
       order: { lastAttemptAt: 'ASC', id: 'ASC' },
       take: limit,
     });

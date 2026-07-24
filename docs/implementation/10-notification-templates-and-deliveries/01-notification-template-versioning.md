@@ -126,11 +126,16 @@ shape — `id`, `eventType`, `channel`, `locale`, `subject` (nullable), `body`, 
 `active`, `createdAt`, `updatedAt`.
 
 The `notificationsTemplate(eventType, channel, locale)` cache-key builder (`v1`) is added
-to `CACHE_KEYS` **unconsumed** (the notification service does not yet import
-`CacheModule`) — the registry resolution is the natural future caching candidate, and the
-builder lets a future cached read path adopt the `ris:notifications:template:v1:…` key
-shape without re-keying ([ADR-016](../../adr/016-cache-aside-generalized.md) /
-[ADR-022](../../adr/022-cache-keys-tenant-and-schema-version.md)).
+to `CACHE_KEYS` **unconsumed** — the registry resolution is the natural future caching
+candidate, and the builder lets a future cached read path adopt the
+`ris:notifications:template:v1:…` key shape without re-keying
+([ADR-016](../../adr/016-cache-aside-generalized.md) /
+[ADR-022](../../adr/022-cache-keys-tenant-and-schema-version.md)). It was originally
+unconsumed *because* the notification service imported no `CacheModule` at all; that is
+no longer the reason. Since [ADR-037](../../adr/037-consent-record-and-tombstone-erasure.md)
+the service registers `CacheModule` at its `app.module.ts` for the consent cache — the
+builder is still uncalled, but only because the compile cache that would have used it
+landed **in-process** instead (see the [renderer document](05-handlebars-renderer-choice.md) §4).
 
 ## 7. The operations: Author, Activate/Deactivate, List
 
@@ -220,8 +225,8 @@ HttpStatus>` — 400 for the shape codes + `DELIVERY_RECIPIENT_REQUIRED`, 404 fo
 `DELIVERY_INVALID_STATUS_TRANSITION`), the
 [ADR-025](../../adr/025-catalog-product-and-variant-aggregate.md)
 `CatalogRpcExceptionFilter` / `OrdersRpcExceptionFilter` precedent. The gateway HTTP
-routes that call these RPCs (under `notifications:write`) arrive with the gateway
-notifications module.
+routes that call these RPCs (under `notifications:write`) **landed** with the gateway
+notifications module — see the [gateway API document](07-notifications-api-and-http-file.md).
 
 See the [sibling delivery document](02-notification-delivery-as-audit-trail.md) for the
 delivery audit trail, and

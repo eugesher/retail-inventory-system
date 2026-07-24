@@ -1,9 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 
 import { NotificationChannelEnum } from '@retail-inventory-system/contracts';
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
 
 import {
   INotificationTemplateListFilter,
@@ -23,25 +22,18 @@ import { NotificationTemplateMapper } from './notification-template.mapper';
 // `@VersionColumn`), re-reading by id so the returned aggregate carries the generated
 // BIGINT id + committed timestamps (the "re-read the saved graph" idiom the
 // payment/refund repos follow). Returns domain types only — no TypeORM leak (ADR-017).
+//
+// **It implements the port DIRECTLY, without `BaseTypeormRepository`**, for the same reason its
+// delivery sibling does: this class overrides `save` and reaches for `this.templateRepository.*`
+// everywhere else, so the base's only contribution was two `protected` hooks nothing called.
+// A registry whose rows are never deleted at all — retirement is the `active` flag — has no use
+// for an inherited `softDelete` either.
 @Injectable()
-export class NotificationTemplateTypeormRepository
-  extends BaseTypeormRepository<NotificationTemplateEntity, NotificationTemplate>
-  implements INotificationTemplateRepositoryPort
-{
+export class NotificationTemplateTypeormRepository implements INotificationTemplateRepositoryPort {
   constructor(
     @InjectRepository(NotificationTemplateEntity)
     private readonly templateRepository: Repository<NotificationTemplateEntity>,
-  ) {
-    super(templateRepository);
-  }
-
-  protected toDomain(entity: NotificationTemplateEntity): NotificationTemplate {
-    return NotificationTemplateMapper.toDomain(entity);
-  }
-
-  protected toEntity(domain: NotificationTemplate): DeepPartial<NotificationTemplateEntity> {
-    return NotificationTemplateMapper.toEntity(domain);
-  }
+  ) {}
 
   public async save(template: NotificationTemplate): Promise<NotificationTemplate> {
     let saved: NotificationTemplateEntity;

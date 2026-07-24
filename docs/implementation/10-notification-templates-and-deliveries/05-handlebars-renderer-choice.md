@@ -4,7 +4,7 @@ This document explains the **template renderer** — the component that turns a 
 template's subject/body source into the final string a notification carries. It covers why
 Handlebars was chosen, why the engine import is confined to one adapter behind a port, the
 security posture that governs how template source and render context are treated
-differently, and the caching optimization deferred to a later stage.
+differently, and the compile cache (deferred when this shipped, since landed — §4).
 
 The renderer is one half of the outgoing-notification pipeline: the
 [versioned template registry](01-notification-template-versioning.md) supplies the source
@@ -106,22 +106,40 @@ un-sanitized data must never be emitted unescaped. A template that genuinely nee
 markup should keep that markup in the (trusted) source, not pull it from the (untrusted)
 context.
 
-## 4. Compilation cost and the deferred cache
+## 4. Compilation cost, and the compile cache that landed in-process
 
-The adapter **compiles the template source on every call** (`Handlebars.compile(source)`
-then invoke). At the current volume this is perfectly acceptable — compilation of a
-short body is microseconds, and correctness does not depend on caching.
-
-A **compiled-template cache keyed by template id + version** is a noted future
-optimization. The natural home already exists: the unconsumed
+This capability shipped the adapter **compiling the template source on every call**
+(`Handlebars.compile(source)` then invoke), on the reasoning that compilation of a short
+body is microseconds and correctness does not depend on caching. It also recorded a
+**compiled-template cache keyed by template id + version** as the natural future
+optimization, to be built on the reserved
 `CACHE_KEYS.notificationsTemplate(eventType, channel, locale)` builder
-(`NOTIFICATIONS_TEMPLATE_KEY_VERSION = 'v1'` in `libs/cache`) was reserved for a cached
-template-resolve read path. Because a template's `(eventType, channel, locale, version)` is
-immutable once written (an edit appends a *new* version rather than mutating in place — see
-the [versioning document](01-notification-template-versioning.md)), a compiled
-`delegate` keyed by id+version can be cached indefinitely with no invalidation concern. That
-optimization is out of scope until the notification service wires a `CacheModule`; it is
-recorded here so the reserved cache key's purpose is not lost.
+(`NOTIFICATIONS_TEMPLATE_KEY_VERSION = 'v1'` in `libs/cache`) once the notification service
+wired a `CacheModule`.
+
+**The cache has since landed — but not there.** `HandlebarsTemplateRendererAdapter` now
+memoizes the compiled delegate in a plain in-process `Map<string, Handlebars.TemplateDelegate>`
+**keyed by the source string itself**, so the same active template is compiled once rather
+than on every dispatch (the hottest path in the service). The reasoning for why that is
+safe is the one this document already gave: a template's
+`(eventType, channel, locale, version)` is immutable once written — an edit appends a *new*
+version rather than mutating in place (see the
+[versioning document](01-notification-template-versioning.md)) — so a new version is a new
+source string and gets its own entry, and no invalidation is ever needed. The live registry
+is tiny, so the map stays bounded.
+
+Two consequences worth being explicit about, since they diverge from the plan above:
+
+- **The key is the source, not `id + version`.** That is strictly *stronger* for this
+  purpose (two versions with identical bodies share one compiled delegate) and it costs the
+  adapter no knowledge of the registry at all — the port signature is still
+  `render(source, context)`.
+- **`CACHE_KEYS.notificationsTemplate(...)` is still uncalled**, and no longer for the
+  reason recorded here. The service *does* wire `CacheModule` now — since
+  [ADR-037](../../adr/037-consent-record-and-tombstone-erasure.md), for the consent cache —
+  but a compiled function is not serializable into Redis, so a distributed cache was never
+  the right home for this. The builder remains reserved for a cached *template-resolve* read
+  (`findLatestActive`), which is a different optimization and is still unbuilt.
 
 ## 5. Custom helpers are deliberately absent
 

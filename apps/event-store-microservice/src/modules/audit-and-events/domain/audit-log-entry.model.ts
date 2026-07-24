@@ -1,8 +1,8 @@
 // One immutable row of the staff audit trail: WHO did WHAT, WHEN
-// (docs/adr/035-event-store-firehose-topic-exchange.md). The `audit-log` module sinks
-// the cross-cutting `audit.staff.action` stream — distinct from the raw event firehose
-// the sibling `domain-events/` module captures — into the append-only
-// `audit_log_entry` table. This model is the persisted shape of the wire
+// (docs/adr/035-event-store-firehose-topic-exchange.md). The `audit-and-events` module's
+// `audit_log_entry` log sinks the cross-cutting `audit.staff.action` stream — distinct
+// from the raw event firehose its sibling `domain_event` log captures — into the
+// append-only `audit_log_entry` table. This model is the persisted shape of the wire
 // `IAuditStaffActionEvent` (libs/contracts/auth), plus the DB-assigned `id`.
 //
 // Framework-free per ADR-004, and a fully **immutable** record in the `StockMovement`

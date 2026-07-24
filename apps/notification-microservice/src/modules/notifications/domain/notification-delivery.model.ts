@@ -17,7 +17,7 @@ export interface INotificationDeliveryProps {
   recipientAddress: string;
   channel: NotificationChannelEnum;
   // The business event that triggered this delivery —
-  // `order`/`return-request`/`stock-low`/`fulfillment`/`refund` + its id.
+  // `order`/`return-request`/`stock-low`/`fulfillment`/`refund`/`marketing` + its id.
   eventReferenceType: string;
   eventReferenceId: string;
   status: NotificationDeliveryStatusEnum;

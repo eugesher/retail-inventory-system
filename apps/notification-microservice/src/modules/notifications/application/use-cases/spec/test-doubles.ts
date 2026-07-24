@@ -1,4 +1,7 @@
-import { NotificationChannelEnum } from '@retail-inventory-system/contracts';
+import {
+  NotificationChannelEnum,
+  NotificationDeliveryStatusEnum,
+} from '@retail-inventory-system/contracts';
 
 import { NotificationDelivery, NotificationTemplate } from '../../../domain';
 import {
@@ -9,6 +12,21 @@ import {
   INotificationTemplateListFilter,
   INotificationTemplateRepositoryPort,
 } from '../../ports';
+
+// Rejects with a value that is NOT an `Error`.
+//
+// Production code must never do this, and `@typescript-eslint/prefer-promise-reject-errors`
+// enforces that — correctly. But a third-party driver is not production code we control:
+// `mysql2` and `amqplib` can both reject with a bare string or a response object, which is why
+// every `catch` in this module reads `err instanceof Error ? err.message : String(err)`. Those
+// defensive arms are unreachable from any double that obeys the rule, so a fault injector that
+// simulates a hostile driver has to step outside it.
+//
+// The exception is confined HERE, stated once, and routed to by every fault-injection site —
+// rather than a disable comment at each of them. It is the second `eslint-disable` in the
+// repository, and it should stay that rare.
+// eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+export const rejectWithNonError = (value: unknown): Promise<never> => Promise.reject(value);
 
 export class FakeLogger {
   public readonly assignments: Record<string, unknown>[] = [];
@@ -142,9 +160,26 @@ export class InMemoryTemplateRepo implements INotificationTemplateRepositoryPort
 // over an id-DESC (newest-first) sort, so a spec can prove a filter narrows the page.
 export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort {
   public readonly rows: NotificationDelivery[] = [];
+  // Makes `save` reject, standing in for a database fault at the moment a use case persists.
+  // The retry sweeper isolates each row precisely so one of these cannot abort the whole sweep.
+  public failSave = false;
+  // As `failSave`, but rejecting with a value that is not an `Error` — the other arm of the
+  // sweep loop's defensive stringify.
+  public failSaveWith: unknown = undefined;
+  // Drops `failureReason` on the way back out, standing in for a `failed` row whose
+  // `failure_reason` column is NULL. Unreachable through the domain (`markFailed` always sets
+  // one), which is exactly why the `?? 'unknown'` default on the emitted event needs a double to
+  // reach it — a defensive branch with no way in is a branch nobody has checked.
+  public stripFailureReasonOnSave = false;
   private seq = 0;
 
   public save(delivery: NotificationDelivery): Promise<NotificationDelivery> {
+    if (this.failSaveWith !== undefined) {
+      return rejectWithNonError(this.failSaveWith);
+    }
+    if (this.failSave) {
+      return Promise.reject(new Error('deadlock found when trying to get lock'));
+    }
     const id = delivery.id ?? ++this.seq;
     const persisted = NotificationDelivery.reconstitute({
       id,
@@ -163,6 +198,7 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
       correlationId: delivery.correlationId,
       createdAt: delivery.createdAt ?? new Date(),
       updatedAt: new Date(),
+      ...(this.stripFailureReasonOnSave ? { failureReason: null } : {}),
     });
     const idx = this.rows.findIndex((r) => r.id === id);
     if (idx >= 0) {
@@ -224,9 +260,35 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
     });
   }
 
-  public listRetryable(maxAttempts: number, limit: number): Promise<NotificationDelivery[]> {
-    const matched = this.rows.filter((r) => r.attemptCount < maxAttempts);
-    return Promise.resolve(matched.slice(0, limit));
+  // Both arms of the real scan, and the status predicates matter: this double used to filter on
+  // `attemptCount` ALONE, which quietly made every `sent` row look retryable to a sweeper spec. A
+  // double that is laxer than the query it stands in for does not fail — it just stops asserting.
+  //
+  //  1. `failed` under the attempt budget — the ordinary recorded failure;
+  //  2. `queued` older than `queuedStaleBefore` — the row orphaned between the persist and the
+  //     dispatch. A null `createdAt` (a domain object that never round-tripped a mapper) is treated
+  //     as NOT stale, the same conservative direction `deleteOlderThan` takes below.
+  //
+  // Ordered oldest-attempt-first with NULLs leading, mirroring MySQL's ASC ordering — so an orphan
+  // (which has no `lastAttemptAt` at all) leads the batch, exactly as it does in production.
+  public listRetryable(
+    maxAttempts: number,
+    limit: number,
+    queuedStaleBefore: Date,
+  ): Promise<NotificationDelivery[]> {
+    const matched = this.rows.filter(
+      (r) =>
+        (r.status === NotificationDeliveryStatusEnum.FAILED && r.attemptCount < maxAttempts) ||
+        (r.status === NotificationDeliveryStatusEnum.QUEUED &&
+          r.createdAt !== null &&
+          r.createdAt.getTime() < queuedStaleBefore.getTime()),
+    );
+    const ordered = [...matched].sort((a, b) => {
+      const at = a.lastAttemptAt?.getTime() ?? -Infinity;
+      const bt = b.lastAttemptAt?.getTime() ?? -Infinity;
+      return at === bt ? (a.id ?? 0) - (b.id ?? 0) : at - bt;
+    });
+    return Promise.resolve(ordered.slice(0, limit));
   }
 
   // The retention sweep's HARD delete (ISSUE-08). It really removes the rows — a double that merely

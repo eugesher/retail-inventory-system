@@ -42,7 +42,8 @@ const DEFAULT_LOCALE = 'en-US';
 //   the ops mailbox) — a null recipient is NOT deduped (ADR-033).
 // - `recipientAddress` is the resolved destination (a customer email or the ops mailbox).
 // - `eventReferenceType` / `eventReferenceId` link the delivery back to the business
-//   event (`order`/`return-request`/`stock-low`/`fulfillment`/`refund` + its id) and form
+//   event (`order`/`return-request`/`stock-low`/`fulfillment`/`refund`/`marketing` + its id)
+//   and form
 //   the dedupe scope together with the resolved template id + `channel` +
 //   `recipientCustomerId` (the template id keeps distinct event types that share one
 //   reference — the `retail.return.*` family on one `rmaId` — from collapsing).

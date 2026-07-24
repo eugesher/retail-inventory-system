@@ -5,9 +5,11 @@ The notification microservice has no HTTP surface of its own — it is RMQ-only
 [template authoring](01-notification-template-versioning.md) and
 [delivery audit](02-notification-delivery-as-audit-trail.md) RPCs become reachable
 to an operator only when the API gateway fronts them over HTTP. This document
-describes that gateway surface: a new `modules/notifications/` proxy that fronts six
-of the notification RPCs at `/api/notifications`, and the `http/kulala/notifications.http`
-file that exercises them.
+describes that gateway surface: a new `modules/notifications/` proxy at
+`/api/notifications`, and the `http/kulala/notifications.http` file that exercises it. The
+module shipped with **six** routes; a seventh — the marketing send — arrived with
+[ADR-037](../../adr/037-consent-record-and-tombstone-erasure.md) and is included in the
+tables below.
 
 The module honors [ADR-009](../../adr/009-port-adapter-at-the-gateway.md) (the
 gateway port→adapter split — `ClientProxy` only inside the messaging adapter; modules
@@ -16,13 +18,13 @@ named after the downstream service, not the URL prefix) and
 [ADR-010](../../adr/010-jwt-rbac-at-the-gateway.md) (`@RequiresPermission` is the
 default route gate; every route here is staff-only).
 
-## 1. The six routes
+## 1. The routes
 
 The gateway fronts the template authoring trio + the delivery `list`/`get`/`retry`
-reads — six of the notification service's seven non-health RPCs. Each route is a thin
-pass-through to a single RPC; the notification microservice owns all the logic
-(version derivation, the channel-specific subject rule, paging/filtering, the
-retryable-status guard).
+reads — and, since ADR-037, the marketing send. That is **seven of the notification
+service's eight** non-health RPCs. Each route is a thin pass-through to a single RPC; the
+notification microservice owns all the logic (version derivation, the channel-specific
+subject rule, paging/filtering, the retryable-status guard, the consent gate).
 
 | Method | Path | Permission | RPC | Returns |
 |---|---|---|---|---|
@@ -32,6 +34,7 @@ retryable-status guard).
 | `GET` | `/api/notifications/deliveries` | `notifications:read` | `notification.delivery.list` | `IPage<NotificationDeliveryView>` |
 | `GET` | `/api/notifications/deliveries/:id` | `notifications:read` | `notification.delivery.get` | `NotificationDeliveryView` |
 | `POST` | `/api/notifications/deliveries/:id/retry` | `notifications:write` | `notification.delivery.retry` | `NotificationDeliveryView` |
+| `POST` | `/api/notifications/marketing/send` | `notifications:write` | `notification.marketing.send` | `NotificationDeliveryView \| null` (200) |
 
 Notes on each:
 
@@ -52,6 +55,18 @@ Notes on each:
   it re-dispatches one **`failed`** delivery's already-rendered content, forcing past
   the scheduled sweeper's backoff. A non-`failed` source is a `409`, an unknown id a
   `404`.
+- **Send marketing** (ADR-037) is the one route here that *causes* a notification rather
+  than administering one. The controller resolves the two defaults at the edge —
+  `eventType` → `ROUTING_KEYS.MARKETING_EMAIL_PROMO` (`marketing.email.promo`) and a fresh
+  `randomUUID()` `campaignId` per request — then passes the command down. The
+  **notification service's consent gate**, not the gateway, decides the outcome: a customer
+  who has not opted into `marketingEmail` yields a `skipped-no-consent` delivery row, still
+  a `200`. A `null` body is also a `200` and means **no active marketing template
+  resolved** — in practice, that the seed did not run (the marketing template ships in
+  `scripts/seeds/notification-template.sql`, i.e. `yarn test:seed`, not in a migration).
+  Minting a fresh `campaignId` per request is what makes repeated operator sends distinct
+  delivery rows rather than one deduped row; an operator-supplied `campaignId` is honored,
+  so an at-least-once redelivery of the *same* request still dedupes.
 
 ### Why `notifications:write` gates the template *list*
 
@@ -88,10 +103,9 @@ codes gate.
 
 ## 3. The record-outcome RPC has no gateway route
 
-The notification service exposes a seventh non-health RPC,
-`notification.delivery.record-outcome` — the seam an ESP (email service provider)
-webhook would call to mark a `sent` delivery `delivered` or `bounced`. It is
-**intentionally not fronted here.**
+One non-health RPC — `notification.delivery.record-outcome`, the seam an ESP (email service
+provider) webhook would call to mark a `sent` delivery `delivered` or `bounced` — is
+**intentionally not fronted here.** It is the only one of the eight without a gateway route.
 
 That RPC is the [documented stub](02-notification-delivery-as-audit-trail.md) for a
 real webhook bridge: a production ESP integration needs an HTTP endpoint with
@@ -111,12 +125,12 @@ The module mirrors the gateway's other DB-free proxy, `modules/inventory/`
 apps/api-gateway/src/modules/notifications/
   application/
     ports/notifications-gateway.port.ts   # NOTIFICATIONS_GATEWAY_PORT + INotificationsGatewayPort
-    use-cases/                             # one thin use case per route (6)
+    use-cases/                             # one thin use case per route (7)
   infrastructure/
     messaging/notifications-rabbitmq.adapter.ts   # the SOLE ClientProxy holder
   presentation/
-    notifications.controller.ts            # the six routes
-    dto/                                   # request body + query DTOs
+    notifications.controller.ts            # the seven routes
+    dto/                                   # request body + query DTOs (5)
   notifications.module.ts
 ```
 
@@ -147,9 +161,10 @@ other gateway modules.
 
 ## 5. The `http/kulala/notifications.http` flow
 
-[`http/kulala/notifications.http`](../../../http/kulala/notifications.http) documents all six routes
-as runnable [Kulala](https://github.com/mistweaverco/kulala.nvim) requests, following
-the conventions of the sibling `.http` files. The happy-path flow it captures:
+[`http/kulala/notifications.http`](../../../http/kulala/notifications.http) documents all
+seven routes as runnable [Kulala](https://github.com/mistweaverco/kulala.nvim) requests —
+thirteen named blocks in all, counting the rejection cases — following the conventions of
+the sibling `.http` files. The happy-path flow it captures:
 
 1. **`login`** — a seeded staff login (`admin@example.com`, which holds both
    `notifications:read` and `notifications:write`). The response's `accessToken` is
@@ -164,10 +179,20 @@ the conventions of the sibling `.http` files. The happy-path flow it captures:
    (by reference type, then by `failed` status).
 6. **`getDelivery` / `retryDelivery`** — drill into one delivery row and manually
    retry a `failed` one.
+7. **`sendMarketing`** — the ADR-037 marketing dispatch. The block documents the
+   consent-gated outcome explicitly: the seeded customer starts with
+   `marketingEmail = false`, so the send yields a `skipped-no-consent` row; opting in first
+   (`PUT /auth/customer/me/consent`, see `http/kulala/consent.http`) and re-sending with a
+   fresh `campaignId` yields a `sent` one.
 
 The file also includes the rejection cases (a subject-less email author → `400`, an
 unknown template id → `404`, an unknown delivery id → `404`) so the typed error codes
 are visible end-to-end.
+
+A subset of the same flow is mirrored as [Posting](https://posting.sh) requests under
+`http/posting/notifications/` — seven `*.posting.yaml` files covering login, the two
+authoring cases, the template list, the two delivery list reads and the single-row get. The
+retry and marketing blocks live only in the Kulala file.
 
 One sequencing note the file documents: a **delivery row only exists once a producing
 event has flowed against an active template** (a consumer writes the row — see the

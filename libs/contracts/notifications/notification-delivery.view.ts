@@ -11,7 +11,8 @@ import { NotificationChannelEnum, NotificationDeliveryStatusEnum } from './enums
 // `recipientCustomerId` is null for system/ops notifications (e.g. a low-stock alert
 // to the ops mailbox); `recipientAddress` is the concrete email/phone/url the message
 // went to. `eventReferenceType` / `eventReferenceId` link the delivery to the business
-// event that triggered it (`order`/`return-request`/`stock-low`/`fulfillment`/`refund`).
+// event that triggered it
+// (`order`/`return-request`/`stock-low`/`fulfillment`/`refund`/`marketing`).
 // `status` is the lifecycle axis; `attemptCount` is monotonic (climbs on each
 // send/fail); `failureReason` carries the last error; `renderedSubject` (nullable) /
 // `renderedBody` are the materialized content; `correlationId` ties it to the trace.
