@@ -53,22 +53,26 @@ is touched here — an audit adapter anywhere else would be dead code.
 
 ## 2. The real adapter and the `IAuditLogEvent → IAuditStaffActionEvent` mapping
 
-The no-op is replaced by `RmqAuditLogPublisher` in each of the two services
-([auth](../../../apps/api-gateway/src/modules/auth/infrastructure/audit/rmq-audit-log.publisher.ts),
-[orders](../../../apps/retail-microservice/src/modules/orders/infrastructure/audit/rmq-audit-log.publisher.ts)).
+The no-op is replaced by `AuditLogRabbitmqPublisher` in each of the two services
+([auth](../../../apps/api-gateway/src/modules/auth/infrastructure/audit/audit-log.rabbitmq.publisher.ts),
+[orders](../../../apps/retail-microservice/src/modules/orders/infrastructure/audit/audit-log.rabbitmq.publisher.ts)).
 The retail copy is a deliberate duplicate of the gateway's — the two deployables cannot
 import each other across the service boundary
 ([ADR-004](../../adr/004-adopt-hexagonal-architecture-per-service.md) /
 [ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md)), the same reason the
-no-ops were duplicated.
+no-ops were duplicated. That duplication is now only this **thin adapter shell**: the wire
+mapping and the best-effort emit were both lifted into shared library code
+([ADR-043](../../adr/043-lifting-forced-duplicates-into-shared-libs.md)), so each copy is a
+one-line `map-then-mirror`.
 
-Each adapter injects the `RIS_EVENTS_PUBLISHER` topic-exchange `ClientProxy` (lives only
-in `infrastructure/`, [ADR-009](../../adr/009-port-adapter-at-the-gateway.md)) and maps
-the in-process event onto the wire contract
-[`IAuditStaffActionEvent`](../../../libs/contracts/auth/audit-staff-action.event.ts) — a
-transport-flattened projection so the event store never imports a producer's internal
-types. **Call sites are unchanged**; they still build the same `IAuditLogEvent`. Only the
-binding moved from logging to RMQ.
+Each adapter injects the shared `RisEventsMirrorPublisher` (which itself holds the
+`RIS_EVENTS_PUBLISHER` topic-exchange `ClientProxy` — a `ClientProxy` lives only in
+`infrastructure/messaging/`, [ADR-009](../../adr/009-port-adapter-at-the-gateway.md)) and
+maps the in-process event onto the wire contract
+[`IAuditStaffActionEvent`](../../../libs/contracts/auth/audit-staff-action.event.ts)
+through the shared `toAuditStaffActionEvent` mapper — a transport-flattened projection so
+the event store never imports a producer's internal types. **Call sites are unchanged**;
+they still build the same `IAuditLogEvent`. Only the binding moved from logging to RMQ.
 
 | Wire field (`IAuditStaffActionEvent`) | Source (`IAuditLogEvent`) |
 | --- | --- |
@@ -96,19 +100,20 @@ them verbatim.
 
 ### The emit
 
-The mapped event is published best-effort:
+The mapped event is published best-effort through the shared mirror helper:
 
 ```ts
-await firstValueFrom(
-  risEventsClient.emit(ROUTING_KEYS.AUDIT_STAFF_ACTION, wire),
+await this.risEvents.mirror(
+  ROUTING_KEYS.AUDIT_STAFF_ACTION,
+  toAuditStaffActionEvent(event),
 );
 ```
 
-Per [ADR-020](../../adr/020-rabbitmq-as-inter-service-bus.md), a rejected `emit` is
-warn-logged and **swallowed** — audit is post-commit fan-out and must never block the
-mutation that already happened. The retail refund use case `await`s the audit call (the
-money-movement is always audited), which is safe precisely because the adapter never
-rethrows its own broker failures.
+Per [ADR-020](../../adr/020-rabbitmq-as-inter-service-bus.md), a rejected (or timed-out)
+`emit` is warn-logged and **swallowed** inside `RisEventsMirrorPublisher` — audit is
+post-commit fan-out and must never block the mutation that already happened. The retail
+refund use case `await`s the audit call (the money-movement is always audited), which is
+safe precisely because the mirror helper never rethrows its own broker failures.
 
 The actual `action` values on the wire are the event-name strings the call sites already
 emit — `UserLoggedIn`, `LoginFailed`, `LogoutPerformed`, `RefreshTokenRotated`,
@@ -127,11 +132,11 @@ not renamed or kept beside the new ones:
   — deleted.
 
 Every dangling reference is updated in the same change: the two `audit/index.ts`
-re-exports now point at `rmq-audit-log.publisher`; both module providers
+re-exports now point at `audit-log.rabbitmq.publisher`; both module providers
 ([auth.module.ts](../../../apps/api-gateway/src/modules/auth/auth.module.ts),
-[orders.module.ts](../../../apps/retail-microservice/src/modules/orders/infrastructure/orders.module.ts))
+[orders.module.ts](../../../apps/retail-microservice/src/modules/orders/orders.module.ts))
 import `MicroserviceClientRisEventsModule` and rebind `{ provide: AUDIT_LOG_PUBLISHER,
-useExisting: RmqAuditLogPublisher }`. Crucially, the **`AUDIT_LOG_PUBLISHER` export** in
+useExisting: AuditLogRabbitmqPublisher }`. Crucially, the **`AUDIT_LOG_PUBLISHER` export** in
 `auth.module.ts` is preserved — the `iam` use cases consume the port through that export
 and have no binding of their own. The existing use-case specs were already injecting
 their own `IAuditLogPublisher` fakes (not the no-op class), so they stay green with the
@@ -149,7 +154,7 @@ known, documented gap, not an oversight.
 ## 5. The ingestion side: routing `audit.staff.action` into `audit_log_entry`
 
 The other end of the wire now exists. The event store's single
-[`FirehoseConsumer`](../../../apps/event-store-microservice/src/modules/firehose.consumer.ts)
+[`FirehoseConsumer`](../../../apps/event-store-microservice/src/modules/audit-and-events/presentation/firehose.consumer.ts)
 (see [03-domainevent-ingestion-and-idempotency.md](03-domainevent-ingestion-and-idempotency.md)
 §1) reads each message's concrete routing key and dispatches:
 
@@ -167,7 +172,7 @@ everything else is a raw firehose event. An audit action lands **only** in
 
 ### The 1:1 map
 
-[`IngestAuditLogUseCase`](../../../apps/event-store-microservice/src/modules/audit-log/application/use-cases/ingest-audit-log.use-case.ts)
+[`IngestAuditLogUseCase`](../../../apps/event-store-microservice/src/modules/audit-and-events/application/use-cases/ingest-audit-log.use-case.ts)
 maps the wire `IAuditStaffActionEvent` straight onto an `AuditLogEntry` — the inverse of
 the publisher mapping in §2. The wire is already a transport-flattened projection, so the
 ingest does no inference: `actorId`, `actorType`, `action`, `entityType`, `entityId`,

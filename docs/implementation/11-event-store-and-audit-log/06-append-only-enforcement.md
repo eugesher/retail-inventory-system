@@ -43,8 +43,8 @@ single guard or on developer discipline:
 
 ### 2.1 The domain models are frozen value objects
 
-`DomainEvent` (`modules/domain-events/domain/domain-event.model.ts`) and `AuditLogEntry`
-(`modules/audit-log/domain/audit-log-entry.model.ts`) are immutable, read-only value
+`DomainEvent` (`modules/audit-and-events/domain/domain-event.model.ts`) and `AuditLogEntry`
+(`modules/audit-and-events/domain/audit-log-entry.model.ts`) are immutable, read-only value
 objects in the `StockMovement` style:
 
 - every field is `public readonly`;
@@ -75,8 +75,8 @@ public `save` / `softDelete` surface would contradict append-only. There is **no
 TypeORM's `insert` (never `save`-with-id semantics), so there is not even a preload-by-id
 round trip that could turn into an update.
 
-The ports later grew read methods — a filtered, paginated `query` on each, plus a
-correlation-scoped `listByCorrelationId` on the audit port
+The ports later grew read methods — a filtered, paginated `query` **and** a
+correlation-scoped `listByCorrelationId`, on each
 ([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)). A read cannot mutate, so
 the invariant this section states is untouched: what the type surface forbids is *writing* a
 row that already exists. This is the `stock_movement` ledger precedent
@@ -97,15 +97,17 @@ shape itself. Each table has its own BIGINT auto-increment PK and an ingest time
 `received_at` (DB-defaulted to `CURRENT_TIMESTAMP(3)`) beside `occurred_at` (the
 producer's emit time threaded from the wire). The two differ by bus + ingest latency.
 
-### 2.4 (Forward note) An architecture-lint fixture will guard the shape
+### 2.4 An architecture-lint fixture guards the shape
 
 The repository shape above — append-only adapters that implement the port directly and
 expose no `save`/`update`/`delete` — is the kind of structural rule the project pins
-with an `eslint-plugin-boundaries` fixture so a regression fails CI rather than slipping
-through review (the
+with an architecture-lint fixture so a regression fails CI rather than slipping through
+review (the
 [ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md) bumper-fixture
-approach). That lint fixture is added with the documentation/lint pass for this
-capability; this note records the intent so the guarantee is not left implicit.
+approach). That fixture shipped: `spec/architecture-lint.spec.ts` (the `event-store
+repositories are append-only (structural)` block) asserts each repository implements its
+port directly, never `extends BaseTypeormRepository`, and exposes no UPDATE/DELETE
+mutator — so the guarantee is enforced in CI, not merely documented here.
 
 ## 3. The `domain_event` idempotency key and `correlation_id` coalescing
 
@@ -149,14 +151,22 @@ signature.
 **Ships:** the `DomainEvent` / `AuditLogEntry` models (+ specs), the
 `DomainEventEntity` / `AuditLogEntryEntity` + mappers, the
 `DOMAIN_EVENT_REPOSITORY` / `AUDIT_LOG_REPOSITORY` ports and their append-only
-TypeORM adapters, the two ports bound + `DatabaseModule.forFeature(...)` wired in each
+TypeORM adapters, the two ports bound + `DatabaseModule.forFeature(...)` wired in the
 context module, the entity list registered on the eventstore connection in
 `app.module.ts`, and the two `ris_eventstore` migrations
 (`CreateDomainEventTable`, `CreateAuditLogEntryTable`).
 
-**Defers (later capabilities):** the firehose consumer + the in-consumer dispatch by
-routing key, the ingest use cases (including the `correlation_id = ''` coalescing in §3)
-and their idempotency proof, any read/query path over the two logs — the ports shipped with
-no read, and the query surface designed its own from scratch
-([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)) — and the producer
-dual-publish fan-out across the domain-event publishers.
+> When this sub-capability shipped there were **two** sibling modules, so the ports were
+> bound in each; [ADR-042](../../adr/042-one-bounded-context-one-module.md) later collapsed
+> them into the single `modules/audit-and-events/` module, where one
+> `DatabaseModule.forFeature` registers both entities.
+
+**Deferred here, since delivered:** the firehose consumer + the in-consumer dispatch by
+routing key and the ingest use cases (including the `correlation_id = ''` coalescing in §3)
+landed with the ingestion work
+([03](03-domainevent-ingestion-and-idempotency.md) /
+[04](04-auditlog-ingestion-and-publisher-swap.md)); the read/query path over the two logs
+— the ports each grew a `query` + `listByCorrelationId` — arrived with the query surface
+([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)); and the producer
+dual-publish fan-out across the domain-event publishers switched the firehose on for every
+event ([02 §6](02-topic-exchange-ris-events-and-dual-publish.md)).

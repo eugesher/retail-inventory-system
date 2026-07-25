@@ -89,7 +89,8 @@ a later capability; the topology it binds to is fixed here.)
 Two new pieces in [`libs/messaging`](../../../libs/messaging) carry the producer side:
 
 - **`MicroserviceClientRisEventsModule`**
-  ([`microservice-client-ris-events.module.ts`](../../../libs/messaging/microservice-client-ris-events.module.ts))
+  ([
+  `microservice-client-ris-events.module.ts`](../../../libs/messaging/clients/microservice-client-ris-events.module.ts))
   registers a `ClientProxy` under the new token
   `MicroserviceClientTokenEnum.RIS_EVENTS_PUBLISHER`, configured for the topic exchange:
 
@@ -115,10 +116,12 @@ Two new pieces in [`libs/messaging`](../../../libs/messaging) carry the producer
 - **`RisEventsMirrorPublisher`**
   ([`ris-events-mirror.publisher.ts`](../../../libs/messaging/ris-events-mirror.publisher.ts))
   is the **single** place the mirror `emit` boilerplate lives. It injects the
-  `RIS_EVENTS_PUBLISHER` client and exposes one method,
-  `mirror(routingKey, payload)`, which `await firstValueFrom(client.emit(routingKey,
-  payload))`. The domain-event publishers reuse this helper for the bulk fan-out (a later
-  capability); nothing else should hand-roll a second mirror emitter.
+  `RIS_EVENTS_PUBLISHER` client and exposes one method, `mirror(routingKey, payload)`,
+  which delegates to the shared `emitBestEffort` helper (same file): it `await`s
+  `firstValueFrom(client.emit(routingKey, payload))` bounded by an rxjs `timeout`
+  (`BEST_EFFORT_EMIT_TIMEOUT_MS`) and swallows any rejection or time-out (warn-log, never
+  throw — see §6). The domain-event publishers reuse this helper for the bulk fan-out
+  (delivered in §6); nothing else should hand-roll a second mirror emitter.
 
 A new routing key, `ROUTING_KEYS.AUDIT_STAFF_ACTION = 'audit.staff.action'`
 ([`routing-keys.constants.ts`](../../../libs/messaging/routing-keys.constants.ts)),
@@ -134,8 +137,10 @@ Rather than wire the bulk domain-event fan-out immediately, the topology is prov
 end-to-end by its smallest real producer: the `AUDIT_LOG_PUBLISHER` seam. Until now both
 of its bindings — the api-gateway `auth` module and the retail `orders` module, the
 **only two** audit call sites in the system — used a log-only `NoOpAuditLogPublisher`.
-They now bind a real `RmqAuditLogPublisher` that maps the in-process audit event to the
-`audit.staff.action` wire shape and emits it onto `ris.events`.
+They now bind a real `AuditLogRabbitmqPublisher` that maps the in-process audit event to
+the `audit.staff.action` wire shape (through the shared `toAuditStaffActionEvent` mapper,
+[ADR-043](../../adr/043-lifting-forced-duplicates-into-shared-libs.md)) and mirrors it
+onto `ris.events` via `RisEventsMirrorPublisher`.
 
 A live check confirms the path: a real staff login (`POST /api/auth/staff/login`)
 publishes one message to `ris.events` with routing key `audit.staff.action`, which a
@@ -153,15 +158,15 @@ adapters — the only files in their services permitted to hold a `ClientProxy`
 [ADR-004](../../adr/004-adopt-hexagonal-architecture-per-service.md)) — keeps its existing
 default-exchange `emit` **and** mirrors the same routing key + wire onto `ris.events`:
 
-| Publisher | Service / module | Events mirrored |
-| --- | --- | --- |
-| `StockRabbitmqPublisher` | inventory `stock` | `inventory.stock.{low,received,adjusted,reserved,allocated,released,committed,returned}`, `inventory.stock-level.initialized`, `inventory.stock-movement.recorded` (10) |
-| `CatalogRabbitmqPublisher` | catalog `catalog` | `catalog.variant.created`, `catalog.product.published`/`.archived` (3) |
-| `PricingRabbitmqPublisher` | catalog `pricing` | `catalog.price.changed`/`.scheduled` (2) |
-| `CartRabbitmqPublisher` | retail `cart` | `retail.cart.created`/`.line-added`/`.line-removed`/`.line-quantity-changed` (4) |
-| `OrderRabbitmqPublisher` | retail `orders` | `retail.order.placed`/`.cancelled`, `retail.payment.authorized`/`.captured`, `retail.fulfillment.created`/`.shipped`/`.delivered`, `retail.refund.issued`/`.failed` (9) |
-| `ReturnRabbitmqPublisher` | retail `returns` | `retail.return.requested`/`.authorized`/`.received`/`.inspected`/`.rejected`/`.closed` (6) |
-| `NotificationRabbitmqPublisher` | notification `notifications` | `notifications.delivery.failed` (1) |
+| Publisher                       | Service / module             | Events mirrored                                                                                                                                                         |
+|---------------------------------|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `StockRabbitmqPublisher`        | inventory `stock`            | `inventory.stock.{low,received,adjusted,reserved,allocated,released,committed,returned}`, `inventory.stock-level.initialized`, `inventory.stock-movement.recorded` (10) |
+| `CatalogRabbitmqPublisher`      | catalog `catalog`            | `catalog.variant.created`, `catalog.product.published`/`.archived` (3)                                                                                                  |
+| `PricingRabbitmqPublisher`      | catalog `pricing`            | `catalog.price.changed`/`.scheduled` (2)                                                                                                                                |
+| `CartRabbitmqPublisher`         | retail `cart`                | `retail.cart.created`/`.line-added`/`.line-removed`/`.line-quantity-changed` (4)                                                                                        |
+| `OrderRabbitmqPublisher`        | retail `orders`              | `retail.order.placed`/`.cancelled`, `retail.payment.authorized`/`.captured`, `retail.fulfillment.created`/`.shipped`/`.delivered`, `retail.refund.issued`/`.failed` (9) |
+| `ReturnRabbitmqPublisher`       | retail `returns`             | `retail.return.requested`/`.authorized`/`.received`/`.inspected`/`.rejected`/`.closed` (6)                                                                              |
+| `NotificationRabbitmqPublisher` | notification `notifications` | `notifications.delivery.failed` (1)                                                                                                                                     |
 
 The mirror is one line after each primary emit, through the shared helper from §4:
 
@@ -205,7 +210,10 @@ The producer side and both ingest paths are now complete. The remaining capabili
 read-side and operational:
 
 - **Reads / queries** over the captured firehose — a `domain_event` / `audit_log_entry`
-  query surface (by correlation id, by actor, by aggregate) has no HTTP/RPC endpoint yet.
+  query surface (by correlation id, by actor, by aggregate) shipped later
+  ([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)): the event store now
+  answers three `audit.*` RPCs on a second `event_store_query_queue`
+  (`AuditQueryController`), fronted by the gateway `modules/audit/` HTTP routes.
 - **A transactional outbox** — the dual-publish is best-effort, not exactly-once; a
   durable outbox that guarantees every committed mutation is mirrored is future work.
 - **Threading the request IP** — `audit_log_entry.ip_address` is always null; no call
