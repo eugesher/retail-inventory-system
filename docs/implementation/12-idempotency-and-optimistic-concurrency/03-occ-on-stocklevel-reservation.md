@@ -59,10 +59,16 @@ into a `StockWriteConflictError` so the retry re-reads the now-present row and c
 
 ## The bounded retry protocol
 
-The retry lives in one place — `runWithStockWriteRetry` in
-`apps/inventory-microservice/src/modules/stock/application/use-cases/stock-mutation.ts` —
-and every counter-changing use case routes through it (directly, or via `applyOnHandChange`
-for the on-hand mutations Receive and Adjust). The contract:
+Every counter-changing use case routes through `runWithStockWriteRetry` in
+`apps/inventory-microservice/src/modules/stock/application/use-cases/stock-mutation.ts`
+(directly, or via `applyOnHandChange` for the on-hand mutations Receive and Adjust). Since
+[ADR-045](../../adr/045-one-occ-retry-protocol.md) the retry *loop* itself — the bounded
+budget, the `info`/`warn` levels, and both message texts — no longer lives here but once in
+the shared `runWithOccRetry` (`libs/common/concurrency/occ-retry.ts`); `runWithStockWriteRetry`
+is now inventory's thin **binding** of it, adding only what a lib cannot know (the
+fresh-transaction-per-attempt wrapper, the `StockWriteConflictError` type guard, the losing
+row's identity on the trace, and the terminal `STOCK_WRITE_CONFLICT`). The contract the
+binding + core uphold together:
 
 - **A fresh transaction per attempt.** Each attempt calls
   `transactionPort.runInTransaction(...)`, so a retried attempt re-reads the **now-current**
@@ -157,6 +163,7 @@ not added by this change. What this change did is make the retry budget a config
 DI-injected value (`OCC_RETRY_ATTEMPTS`) instead of a hardcoded constant, and raise the retry
 trace to `info`. The same `OCC_RETRY_ATTEMPTS` budget and the `409`-on-exhaustion shape are
 the template the operational aggregates (`Cart`, `Order`, `Fulfillment`, `ReturnRequest`)
-adopt as their version-checked writes come online, where the exhaustion error is named
-`VERSION_MISMATCH` rather than `STOCK_WRITE_CONFLICT`
+adopted for their version-checked writes (now shipped — see
+[04-occ-on-cart-order-fulfillment-returnrequest.md](04-occ-on-cart-order-fulfillment-returnrequest.md)),
+where the exhaustion error is named `VERSION_MISMATCH` rather than `STOCK_WRITE_CONFLICT`
 ([ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md)).

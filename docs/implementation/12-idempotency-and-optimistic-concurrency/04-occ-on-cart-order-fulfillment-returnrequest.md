@@ -67,6 +67,16 @@ The whole read-reserve-mutate-persist sequence runs inside a shared bounded-retr
 domain rejection (a bad line id, a stale `If-Match`, an out-of-stock reserve) propagates
 immediately and is **never** retried; only a `CartWriteConflictError` triggers a retry.
 
+Since [ADR-045](../../adr/045-one-occ-retry-protocol.md), the four `runWith*WriteRetry` helpers
+named across this document (`runWithCartWriteRetry` / `runWithOrderWriteRetry` /
+`runWithReturnWriteRetry` / inventory's `runWithStockWriteRetry`) are no longer four
+independent copies of the loop: the retry *loop*, the bounded budget, the `info`/`warn` levels
+and both message texts live once in the shared `runWithOccRetry`
+(`libs/common/concurrency/occ-retry.ts`). Each `runWith*WriteRetry` is now a thin **binding**
+that supplies only its module's half — its `*WriteConflictError` type guard, the fields on its
+trace, and the terminal `*_VERSION_MISMATCH` its `onExhausted` throws. The behavior described
+below is unchanged; only its single source moved.
+
 Because the CAS and its unit of work live inside `CartTypeormRepository.save(cart,
 expectedVersion)`, the cart helper needs no transaction port — an attempt is a plain
 `async () => …` the helper re-invokes. The repository translates a zero-rows CAS into the
@@ -216,7 +226,7 @@ Two ordering rules are preserved unchanged around the retried transaction:
   `ship`) sees a valid pre-state. This is why the CAS conflict is retryable rather than
   poisoning the in-memory graph.
 
-**Two order paths deliberately keep the plain managed save (no CAS):**
+**One order path deliberately keeps the plain managed save (no CAS):**
 
 - **Place Order.** The order is *created* (an insert — no live row to race), and the concurrent
   double-place guard is the **cart-conversion compare-and-swap** (`markConverted`'s
@@ -225,10 +235,21 @@ Two ordering rules are preserved unchanged around the retried transaction:
   a cart. The inline `AuthorizePaymentUseCase` write that follows runs on that brand-new order
   before any second actor can reach it, so it too takes the plain managed save (the version
   still advances via `@VersionColumn`).
-- **Cancel Line.** It performs **no** order-state write at all — it reads the order to validate
-  the unshipped remainder and releases the inventory allocation via a cross-service RPC. With no
-  local aggregate write there is no lost update to guard against, so it takes no CAS; the
-  remainder is recomputed from the live `fulfillment` rows on every call.
+
+**Cancel Line — since changed.** When this document shipped, Cancel Line performed **no**
+order-state write: it recomputed the unshipped remainder from the live `fulfillment` rows on
+every call and only released the inventory allocation over a cross-service RPC, so with no local
+aggregate write there was no lost update to guard against and it took no CAS. That is no longer
+true. [ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md) persisted the
+cancelled units onto `order_line.cancelled_quantity`, making the cancelled count **durable
+aggregate state** — so two concurrent Cancel Line calls could each read `cancelled_quantity = 0`
+and both commit their own increment, losing an update (an over-release of the shared
+`quantity_allocated`, the exact failure [ADR-057](../../adr/057-cancel-allocation-needs-an-operation-identity.md)
+also guards on the inventory side). `CancelLineUseCase` therefore **also** wraps its write in
+`runWithOrderWriteRetry` now and persists the order root through the version-checked CAS
+(`orderRepository.save(order, scope, versionAtLoad)`), re-reading the order and its fulfillments
+inside each retried attempt so a lost race recomputes the remainder against fresh committed
+state. So the plain-managed-save exception is Place Order alone.
 
 ## Fulfillment: pessimistic lock kept, with the version still participating
 
