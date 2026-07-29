@@ -22,8 +22,8 @@ not delivered until it exists in both. [`http/posting/README.md`](../../../http/
 carries the mapping table between them, plus the per-folder request counts — which are
 re-derived from `ls`, never incremented by hand, so a drifted count is a real signal.
 
-Both libraries now hold 17 areas and 198 requests. The new `audit` area contributes 11 of them,
-and `inventory` grew by 2 for the sweep.
+Both libraries now hold the same 17 areas. The new `audit` area contributes 11 requests, and
+`inventory` grew by 2 for the sweep.
 
 ## 2. The audit collection
 
@@ -212,7 +212,7 @@ the TUI, load it directly:
 python -c "
 from posting.collection import Collection
 c = Collection.from_directory('http/posting')
-print(sum(len(x.requests) for x in [c, *c.children]))"   # → 198
+print(sum(len(x.requests) for x in [c, *c.children]))"   # → 200
 ```
 
 **The seeded credentials** both libraries use come from

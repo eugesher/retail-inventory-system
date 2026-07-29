@@ -31,13 +31,13 @@ Kulala chains requests **declaratively** — a later block interpolates an
 earlier response inline: `{{staffLogin.response.body.$.accessToken}}`. Posting
 has no such reference. Instead:
 
-| Kulala                                  | Posting                                                                                                               |
-|-----------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
-| `{{ENV_BASE_URL}}` / `@baseUrl`         | `$ENV_BASE_URL` from `dev.env` (`--env`)                                                                              |
-| `# @name foo` block                     | `foo.posting.yaml` (the `name:` field)                                                                                |
-| block comment                           | the request's `description:` field                                                                                    |
+| Kulala | Posting |
+| --- | --- |
+| `{{ENV_BASE_URL}}` / `@baseUrl` | `$ENV_BASE_URL` from `dev.env` (`--env`) |
+| `# @name foo` block | `foo.posting.yaml` (the `name:` field) |
+| block comment | the request's `description:` field |
 | `{{login.response.body.$.accessToken}}` | an `on_response` script on the producer calls `posting.set_variable("accessToken", …)`; consumers read `$accessToken` |
-| `{{$guid}}`                             | a `setup` script sets a fresh UUID variable (used in later subcollections that need idempotency keys)                 |
+| `{{$guid}}` | a `setup` script sets a fresh UUID variable (used in later subcollections that need idempotency keys) |
 
 The capture scripts live in a `scripts.py` beside each subcollection's requests
 (e.g. [`auth/scripts.py`](auth/scripts.py)) and are wired via the request's
@@ -66,20 +66,20 @@ The Kulala `{{$guid}}` maps to a `setup` script. Two shapes exist:
 
 ## Subcollections
 
-All 17 Kulala files are ported (199 requests). Each folder mirrors the
+All 17 Kulala files are ported (200 requests). Each folder mirrors the
 same-named `../kulala/<name>.http` and carries its own `scripts.py`.
 
-| Folder                | Requests | Folder           | Requests |
-|-----------------------|---------:|------------------|---------:|
-| `audit/`              |       11 | `iam/`           |        8 |
-| `auth/`               |        9 | `inventory/`     |       15 |
-| `cart/`               |       10 | `notifications/` |       13 |
-| `catalog/`            |       12 | `order/`         |       12 |
-| `catalog-categories/` |       18 | `order-cancel/`  |       13 |
-| `catalog-media/`      |       17 | `pricing/`       |        8 |
-| `consent/`            |        5 | `refunds/`       |       16 |
-| `customer-admin/`     |        5 | `returns/`       |       16 |
-| `fulfillment/`        |       13 |                  |          |
+| Folder | Requests | Folder | Requests |
+| --- | ---: | --- | ---: |
+| `audit/` | 11 | `iam/` | 8 |
+| `auth/` | 8 | `inventory/` | 15 |
+| `cart/` | 10 | `notifications/` | 13 |
+| `catalog/` | 12 | `order/` | 12 |
+| `catalog-categories/` | 18 | `order-cancel/` | 13 |
+| `catalog-media/` | 17 | `pricing/` | 8 |
+| `consent/` | 5 | `refunds/` | 16 |
+| `customer-admin/` | 5 | `returns/` | 16 |
+| `fulfillment/` | 13 | | |
 
 > Note: `notifications/author-template` authors a Handlebars notification
 > template whose body contains `{{orderId}}` / `{{grandTotalMinor}}`. Those are

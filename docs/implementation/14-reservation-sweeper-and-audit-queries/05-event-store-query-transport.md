@@ -1,9 +1,9 @@
 # A second queue: giving the event store a reply path
 
 The event store now answers questions. This note describes the transport that carries them —
-a dedicated `event_store_query_queue` on the default exchange, three `audit.*` RPCs, a
-context-root controller, and the hybrid boot that connects two RabbitMQ transports to one
-Nest application without ever opening a TCP port.
+a dedicated `event_store_query_queue` on the default exchange, three `audit.*` RPCs, an
+ordinary `presentation/` controller, and the hybrid boot that connects two RabbitMQ transports
+to one Nest application without ever opening a TCP port.
 
 The three application use cases it exposes were built in the sibling note
 [`04-audit-query-read-seams-and-indexes.md`](04-audit-query-read-seams-and-indexes.md), which
@@ -60,13 +60,23 @@ So the event store gets a second queue.
 | Who publishes | every producer's `RisEventsMirrorPublisher` mirror | the API gateway's `EVENT_STORE_MICROSERVICE` client |
 | Served by | `FirehoseConsumer` | `AuditQueryController` |
 
-Both live at the **context root** of `modules/`, beside `audit-and-events.module.ts`, and both
-are registered as controllers on it. Neither can live inside a sibling module's own layer:
-each injects use cases from *both* `domain-events/` and `audit-log/`, and
+Both are ordinary `presentation/` members of the single `audit-and-events` module, registered as
+its controllers (`audit-and-events.module.ts`,
+`controllers: [FirehoseConsumer, AuditQueryController]`). Each injects use cases that are all
+aggregates of that one module, so `presentation/` is exactly where each belongs and
 `eslint-plugin-boundaries` ([ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md))
-only lets a module's `infrastructure/` or `presentation/` reach its own module. The context
-root matches no element-type pattern at all, which is the honest home for a concern that spans
-the whole bounded context.
+— which only lets a module's `infrastructure/` or `presentation/` reach its own module — is
+satisfied.
+
+> **Since [ADR-042](../../adr/042-one-bounded-context-one-module.md).**
+> [ADR-039](../../adr/039-audit-and-event-store-query-surface.md) originally put both controllers
+> at a bespoke **context root** (`modules/` itself, beside `audit-and-events.module.ts`), because
+> the event store was then two modules — `domain-events/` and `audit-log/` — and each controller
+> injected use cases from *both*, so it could live in neither module's own `presentation/`; the
+> context root (which matches no element-type pattern at all) was the honest home for a concern
+> spanning the whole context. ADR-042 collapsed the context to one module, dissolving that reason:
+> a single module has a single `presentation/`. ADR-039 carries the amendment banner recording
+> this.
 
 The three routing keys follow the dotted `<service>.<aggregate>.<action>` shape of
 [ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md), and each is a one-line delegation:
