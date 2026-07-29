@@ -175,7 +175,8 @@ To keep the boundary explicit, these pieces are **not** in this foundation and
 arrive in follow-up consent work:
 
 - The `Customer.erase()` mutator, the Erase use case, and the cross-context
-  raw-SQL erasure writer that nulls the `address` / `cart` PII in one transaction.
+  raw-SQL erasure writer that nulls the `address` / `cart` PII (and deletes the
+  `consent_record` row) in one transaction.
 - The consent Record/Read use cases and their gateway endpoints, and the
   `customer.consent.updated` / `customer.erased` events.
 - The notification-side consent reader, its cache-aside gate, and the

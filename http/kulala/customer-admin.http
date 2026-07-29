@@ -121,7 +121,8 @@ Content-Type: application/json
 # POST /api/admin/customers/:id/erase   (Bearer staff — customer:erase)
 # IRREVERSIBLE. confirmEmail MATCHES the throwaway's current email, so the erase
 # proceeds: PII nulled (email/phone/name/password hash/refresh-token hash + the
-# customer's addresses), active carts abandoned, status='deleted', deleted_at set;
+# customer's addresses), active carts abandoned, consent record deleted,
+# status='deleted', deleted_at set;
 # a subsequent /auth/refresh with that customer's old refresh token now 401s. Emits
 # customer.erased (NO PII — ids + erasedAt only). Returns
 # { status: 'deleted', erasedAt: '<iso>' }. Re-running this exact block is an

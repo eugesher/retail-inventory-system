@@ -17,8 +17,10 @@ export const CUSTOMER_ERASURE_WRITER = Symbol('CUSTOMER_ERASURE_WRITER');
 export interface ICustomerErasureWriterPort {
   // Persist an already-`erase()`-d `Customer` aggregate (null PII, `status='deleted'`,
   // `deletedAt`, null `refreshTokenHash`) AND, in the same transaction, null the
-  // customer's `owner_type='customer'` `address` PII and abandon the customer's
-  // active `cart` rows. The `owner_type='order'` address snapshots are immutable
-  // and never touched (ADR-028 §5).
+  // customer's `owner_type='customer'` `address` PII, abandon the customer's active
+  // `cart` rows, and delete the customer's `consent_record` row (consent is PII, and
+  // the tombstone never hard-deletes `customer`, so the FK `ON DELETE CASCADE` never
+  // fires). The `owner_type='order'` address snapshots are immutable and never
+  // touched (ADR-028 §5).
   persistErasure(customer: Customer): Promise<void>;
 }
