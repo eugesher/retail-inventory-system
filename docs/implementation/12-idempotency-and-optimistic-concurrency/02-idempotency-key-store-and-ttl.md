@@ -62,8 +62,8 @@ the cross-context shared-table coupling the bounded contexts avoid
 | `scope` | `VARCHAR(64)` | part of the composite PK — the operation namespace (`place-order`, `capture-payment`, `ship-fulfillment`, `issue-refund`). |
 | `key` | `VARCHAR(64)` | part of the composite PK — the client `Idempotency-Key`. A MySQL reserved word, so it is backticked in the DDL and in generated SQL. |
 | `request_fingerprint` | `CHAR(64)` | SHA-256 hex of the canonicalized request body. A replay must match it; a mismatch is a key-reuse error. |
-| `response_status` | `INT` | the HTTP-equivalent status of the stored response. |
-| `response_body` | `JSON` | the cached response payload, returned verbatim on a replay. |
+| `response_status` | `INT` **NULL** | the HTTP-equivalent status of the stored response. Nullable: a reserve-first *pending* row (see below) has it NULL until `finalize`. |
+| `response_body` | `JSON` **NULL** | the cached response payload, returned verbatim on a replay. Nullable for the same reason; a NULL `response_body` **is** the pending marker. |
 | `created_at` | `TIMESTAMP` | row creation instant (`DEFAULT CURRENT_TIMESTAMP`). |
 | `expires_at` | `TIMESTAMP` | `created_at + IDEMPOTENCY_KEY_TTL_HOURS`; the purge sweep deletes rows past this. |
 
@@ -106,14 +106,33 @@ domain-typed only — no TypeORM type leaks past the adapter
   caller fall back to `find` and serve the race-winner's stored response. The optional
   transaction scope lets a use case persist the record **in the same transaction** as its
   write when an operation wants the record and the side effect to commit atomically.
+- `reserve(input, scope?)` / `finalize(input, scope?)` / `release(scope, key)` — the
+  **reserve-first** trio ([ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) §1),
+  used by **Issue Refund only**. `find → work → save` is safe for a *retry* but not for a truly
+  *concurrent* same-key double-submit: two racers both `find` a miss and both execute before
+  either `save`s. Place / capture / ship each have a *second* serializing guard (the
+  cart-conversion CAS / the payment-state + order OCC / the ship `SELECT … FOR UPDATE`), so a
+  redundant concurrent run is at worst a benign idempotent gateway op — but refund has none and
+  the gateway refund is not naturally idempotent, so it claims the key **before** the side
+  effect. `reserve` does an atomic INSERT of a *pending* row (`response_*` NULL) and returns one
+  of four outcomes — `reserved` (this caller won the INSERT and owns the execution), `replay`
+  (a completed row with a matching fingerprint exists — its stored response rides back on
+  `record`), `in-progress` (a pending row is mid-execution — a concurrent submit, a `409`), or
+  `mismatch` (a row with a different fingerprint — one key, two bodies, a `422`). On success the
+  caller `finalize`s (a guarded UPDATE that fills the response onto its pending row, flipping it
+  to a completed, replayable record); on failure it `release`s (a guarded DELETE of *only* the
+  still-pending row, so a legitimate retry can re-run).
 
 The repository implements the port **directly** — deliberately *not* via
-`BaseTypeormRepository`, whose public `save` / `softDelete` would contradict the append-only
-record (the `DomainEventTypeormRepository` precedent). Its only mutating verb is `save`, which
-uses `insert` (never `save`-with-id semantics), so there is no UPDATE or DELETE expression at
-the persistence layer. The retention horizon reaches it through DI (a
-`ConfigService`-backed value-provider token), never `process.env` inside the application
-layer.
+`BaseTypeormRepository`, whose public `save` / `softDelete` would let a caller rewrite a stored
+response (the `DomainEventTypeormRepository` precedent). It never uses `save`-with-id semantics:
+`save` / `reserve` **INSERT**, `finalize` **UPDATE**s only a still-`pending` row (it fills a
+reserved claim in — it never rewrites a completed answer), and `release` / `deleteExpired`
+**DELETE** only a still-pending row / an already-expired row respectively. Every mutating
+statement is guarded by *which* row it may touch, so a stored response — once written — can
+never be changed or lost while it is still the answer. The retention horizon reaches the
+repository through DI (a `ConfigService`-backed value-provider token), never `process.env`
+inside the application layer.
 
 ## Replay vs reuse-with-a-different-body
 
@@ -128,6 +147,10 @@ retry from a key collision. The semantics the mutating use cases enforce against
   response.
 - **Missing key on an operation that requires one → `400`.** A required-idempotency write
   refuses to run un-keyed.
+- **A concurrent same-key submit that races an in-flight one → `409`** (the reserve-first
+  refund path only, `ORDER_IDEMPOTENCY_KEY_IN_PROGRESS`). The pending row a concurrent caller
+  already reserved turns the second submit away *before* it can run the gateway refund; the
+  client retries once the winner finalizes and then gets the `replay`.
 
 The body fingerprint is a **canonical JSON + SHA-256** digest: the body is serialized with
 recursively sorted object keys, so field order never changes the digest, and the hex digest is
