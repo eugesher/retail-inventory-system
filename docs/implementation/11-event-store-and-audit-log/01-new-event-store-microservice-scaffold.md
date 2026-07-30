@@ -20,15 +20,15 @@ already produces:
   seam already emits from the money-touching flows (refunds) and the auth/IAM
   mutations.
 
-It is **ingestion-only** for now: persisting the streams is the live path; querying the
-stored history back out is a later capability. The bounded context is
-`audit-and-events`, split into two empty sibling modules that later work fills in:
-
-- `modules/domain-events/` — the firehose sink (the future `domain_event` table); and
-- `modules/audit-log/` — the staff audit trail (the future `audit_log_entry` table).
-
-A context-level `AuditAndEventsModule` aggregates the two so the composition root
-imports one module.
+It is **ingestion-only** at scaffold time: persisting the streams is the live path;
+querying the stored history back out arrived later
+([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)). The bounded context is
+`audit-and-events`. It was first sketched as two empty sibling modules — a
+`domain-events/` firehose sink and an `audit-log/` staff trail — but that split was
+**collapsed into one module** before it grew any behaviour
+([ADR-042](../../adr/042-one-bounded-context-one-module.md)): today
+`modules/audit-and-events/` holds the two logs as two aggregates (one repository port
+each) side by side, and the diagram below shows the original two-module sketch.
 
 ## 2. Topology
 
@@ -53,22 +53,28 @@ HTTP surface of its own:
                           ris_eventstore  (its own schema)
 ```
 
-`main.ts` boots a `NestFactory.createMicroservice` RMQ listener on
-`event_store_firehose_queue`, bound to the **default exchange** with a durable queue —
-the same bootstrap shape the notification microservice uses. It registers **no**
-`@MessagePattern` / `@EventPattern` handlers yet, so the service connects to RabbitMQ
-and its database and then idles, logging that it is listening. (A later capability
-re-points this connection at the `ris.events` topic exchange with the catch-all `#` so the
-queue receives the whole firehose.)
+At scaffold time, `main.ts` booted a single `NestFactory.createMicroservice` RMQ listener
+on `event_store_firehose_queue`, bound to the **default exchange** with a durable queue,
+and registered **no** `@MessagePattern` / `@EventPattern` handlers — so the service
+connected to RabbitMQ and its database and then idled, logging that it was listening.
+Since then the firehose connection was re-pointed at the `ris.events` **topic** exchange
+with the catch-all `#` ([ADR-035](../../adr/035-event-store-firehose-topic-exchange.md)),
+and a **second** transport — a default-exchange `event_store_query_queue` — was added for
+the audit-query RPCs ([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)).
+Two connected transports mean `createMicroservice` (which returns an `INestMicroservice`
+that cannot `connectMicroservice`) no longer fits, so `main.ts` is now the repo's **only
+hybrid `NestFactory.create` boot**: it `connectMicroservice`s both transports,
+`await app.init()`s before `startAllMicroservices()`, and still never calls `listen()` (no
+HTTP port). See `apps/event-store-microservice/src/main.ts`.
 
 The service identity:
 
-| Property                | Value                                                  |
-| ----------------------- | ------------------------------------------------------ |
-| App / OTel service name | `event-store-microservice`                             |
-| Consumer queue          | `event_store_firehose_queue`                           |
-| Logical database        | `ris_eventstore` (same MySQL instance as `retail_db`)  |
-| Runtime DB env var      | `EVENTSTORE_DATABASE_URL`                              |
+| Property                | Value                                                 |
+|-------------------------|-------------------------------------------------------|
+| App / OTel service name | `event-store-microservice`                            |
+| Consumer queue          | `event_store_firehose_queue`                          |
+| Logical database        | `ris_eventstore` (same MySQL instance as `retail_db`) |
+| Runtime DB env var      | `EVENTSTORE_DATABASE_URL`                             |
 
 As with every app, `main.ts`'s first executable import is the observability tracer
 (`@retail-inventory-system/observability/tracer`) so OpenTelemetry auto-instrumentation
@@ -148,12 +154,15 @@ docker compose up -d mysql redis rabbitmq
 
 # 2. Apply both migration histories
 yarn migration:run               # retail_db
-yarn migration:run:eventstore    # ris_eventstore  (currently: "No migrations are pending")
+yarn migration:run:eventstore    # ris_eventstore (at scaffold time: "No migrations are
+                                 #   pending"; the two CreateDomainEvent/AuditLogEntry
+                                 #   table migrations landed with later work)
 
-# 3. Boot the event store — it connects to RabbitMQ + ris_eventstore and idles
+# 3. Boot the event store — it connects to RabbitMQ + ris_eventstore and starts listening
 yarn start:dev:event-store-microservice
 # → logs: "Event Store Microservice is listening for messages"
-#   the event_store_firehose_queue now exists in RabbitMQ with no bound handlers
+#   (at scaffold time the queue had no bound handlers; it now runs the FirehoseConsumer
+#    ingest and the AuditQueryController RPCs)
 ```
 
 Quality gates:

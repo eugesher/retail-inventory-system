@@ -22,7 +22,8 @@ covers the other branch of the same dispatch — the `audit.staff.action` stream
 The event store binds a **single** durable queue — `event_store_firehose_queue` — to the
 `ris.events` topic exchange with the catch-all binding `#`, so the queue receives
 **every** event any producer mirrors onto the firehose. A single `@EventPattern('#')`
-handler — the [`FirehoseConsumer`](../../../apps/event-store-microservice/src/modules/firehose.consumer.ts)
+handler — the [
+`FirehoseConsumer`](../../../apps/event-store-microservice/src/modules/audit-and-events/presentation/firehose.consumer.ts)
 — consumes that queue and dispatches each message by its concrete routing key:
 
 - `audit.staff.action` → the audit-log ingest (`audit_log_entry`);
@@ -55,21 +56,22 @@ AMQP (which also routes every key). So the handler is `@EventPattern('#')`.
 
 ### Where the consumer lives, and why
 
-The consumer sits at the **bounded-context root**
-(`apps/event-store-microservice/src/modules/firehose.consumer.ts`), beside the
-`AuditAndEventsModule` aggregator — **not** inside either sibling module's
-`infrastructure/consumers/`. That placement is deliberate and load-bearing:
+Under the **original two-module split**, the consumer could belong to neither module: it
+fans out into **both** ingest use cases, and the architecture's import boundaries
+([ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md), enforced by
+`eslint-plugin-boundaries`) only let a module's `infrastructure/` inject that **same**
+module's use cases — so a cross-module dispatcher physically could not live in one
+module's `infrastructure/` without violating that rule. It therefore sat at a bespoke
+**bounded-context root**, beside the `AuditAndEventsModule` aggregator, matching no
+element-type pattern.
 
-- The consumer fans out into **both** sibling modules' ingest use cases (`domain-events`
-  *and* `audit-log`), so it belongs to neither.
-- The architecture's import boundaries ([ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md),
-  enforced by `eslint-plugin-boundaries`) only let a module's `infrastructure/` inject
-  that **same** module's use cases. A cross-module dispatcher physically cannot live in
-  one module's `infrastructure/` without violating that rule.
-- The context root matches no element-type pattern (exactly like the aggregator module
-  itself), so it is the honest home for a concern that spans the whole context. Each
-  sibling module **exports** its ingest use case; the aggregator imports both modules and
-  registers the consumer, so DI resolves both injections.
+[ADR-042](../../adr/042-one-bounded-context-one-module.md) then collapsed the two sibling
+modules into one, and that whole exception dissolved. Both ingest use cases are now
+aggregates of the **same** module, so the consumer is an ordinary `presentation/` member
+of it —
+[
+`apps/event-store-microservice/src/modules/audit-and-events/presentation/firehose.consumer.ts`](../../../apps/event-store-microservice/src/modules/audit-and-events/presentation/firehose.consumer.ts)
+— injecting both use cases directly, with no cross-module hop left to justify.
 
 The consumer is a thin adapter ([ADR-011](../../adr/011-notifier-port-and-adapters.md)
 §4): read the routing key, pick the use case, log. All real logic is in the use cases.
@@ -96,13 +98,14 @@ cannot import any producer's internal event types (cross-service isolation, ADR-
 the events carry no uniform `aggregateId` field. So the three indexed columns are
 recovered heuristically from what *is* reliable — the dotted routing key and a documented
 payload precedence — by the pure helpers in
-[`firehose-extractors.ts`](../../../apps/event-store-microservice/src/modules/domain-events/application/use-cases/firehose-extractors.ts):
+[
+`firehose-extractors.ts`](../../../apps/event-store-microservice/src/modules/audit-and-events/application/use-cases/firehose-extractors.ts):
 
-| Column           | Source                                                                  | Fallback |
-| ---------------- | ----------------------------------------------------------------------- | -------- |
-| `producer`       | first routing-key token → canonical service name                        | raw token |
-| `aggregate_type` | second routing-key token (`retail.order.placed` → `order`)              | `''` |
-| `aggregate_id`   | first present of a documented payload key precedence (below)           | `''` |
+| Column           | Source                                                       | Fallback  |
+|------------------|--------------------------------------------------------------|-----------|
+| `producer`       | first routing-key token → canonical service name             | raw token |
+| `aggregate_type` | second routing-key token (`retail.order.placed` → `order`)   | `''`      |
+| `aggregate_id`   | first present of a documented payload key precedence (below) | `''`      |
 
 **Producer mapping.** The first token of `<service>.<aggregate>.<action>` (ADR-008) is
 the producing service; it is mapped to the canonical microservice name so the stored
@@ -144,7 +147,8 @@ UC_DOMAIN_EVENT_IDEMPOTENCY (producer, event_type, aggregate_id, occurred_at, co
 The repository (`DOMAIN_EVENT_REPOSITORY`) swallows the duplicate-key driver error and
 reports `{ inserted: false }` instead of throwing, so a redelivery is a silent no-op — no
 second row, no exception. The
-[`IngestDomainEventUseCase`](../../../apps/event-store-microservice/src/modules/domain-events/application/use-cases/ingest-domain-event.use-case.ts)
+[
+`IngestDomainEventUseCase`](../../../apps/event-store-microservice/src/modules/audit-and-events/application/use-cases/ingest-domain-event.use-case.ts)
 logs the two outcomes at `debug`: an insert, or "duplicate dropped — idempotent no-op".
 
 **Why coalesce `correlation_id` to `''`.** The column is nullable (some events genuinely
@@ -180,14 +184,17 @@ nothing escapes the handler.
 > (`CURRENT_TIMESTAMP(3)`). Keeping both lets a later read distinguish when an event
 > happened from when the store saw it (a redelivery gap, a backlog drain).
 
-## What is deliberately deferred
+## What was deferred here, and has since shipped
 
-- **Live domain-event producers.** Today the only live producer on `ris.events` is the
-  audit publisher (`audit.staff.action`). The seven domain-event publishers do not mirror
-  onto the firehose yet, so the `domain_event` path is exercised by unit tests and a
-  manual republish here; its end-to-end proof arrives with the producer dual-publish
-  fan-out and the event-store e2e suite.
-- **Read / query paths.** `IDomainEventRepositoryPort` declares `append` and nothing
-  else, so nothing reads the firehose back — today you inspect `ris_eventstore` with
-  SQL. A cross-service-trace query is a later capability that designs its own read
-  surface.
+- **Live domain-event producers.** When this ingest path first landed, the only live
+  producer on `ris.events` was the audit publisher (`audit.staff.action`), so the
+  `domain_event` path was exercised by unit tests and a manual republish. The producer
+  dual-publish fan-out then switched the firehose on for **every** business event — all
+  seven `*-rabbitmq.publisher.ts` adapters now mirror
+  (see [02 §6](02-topic-exchange-ris-events-and-dual-publish.md)) — and the event-store
+  e2e suite proves it end to end.
+- **Read / query paths.** `IDomainEventRepositoryPort` shipped with `append` and nothing
+  else. It later grew a paginated `query` and a correlation-scoped `listByCorrelationId`
+  ([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)), read back through the
+  `AuditQueryController` RPCs and the gateway `modules/audit/` routes — so the firehose is
+  now queryable, not only inspectable with SQL.
