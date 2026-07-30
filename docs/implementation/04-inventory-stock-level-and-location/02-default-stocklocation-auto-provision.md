@@ -20,7 +20,7 @@ can refer to it by a known constant
 library):
 
 | Column   | Value               |
-| -------- | ------------------- |
+|----------|---------------------|
 | `id`     | `default-warehouse` |
 | `name`   | `Default Warehouse` |
 | `code`   | `default-warehouse` |
@@ -34,8 +34,8 @@ and its one guaranteed row arrive together. The insert is idempotent:
 
 ```sql
 INSERT INTO stock_location (id, name, code, type, active)
-VALUES ('default-warehouse', 'Default Warehouse', 'default-warehouse', 'warehouse', TRUE)
-ON DUPLICATE KEY UPDATE id = id;
+VALUES ('default-warehouse', 'Default Warehouse', 'default-warehouse', 'warehouse', TRUE) ON DUPLICATE KEY
+UPDATE id = id;
 ```
 
 `ON DUPLICATE KEY UPDATE id = id` makes a re-run a no-op rather than an error:

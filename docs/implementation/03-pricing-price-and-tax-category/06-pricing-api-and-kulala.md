@@ -134,7 +134,9 @@ compiler refuse a read path that dispatches without resolving.
 Files added under `apps/api-gateway/src/modules/catalog/`:
 
 -
+
 `application/use-cases/{set-price,list-prices,get-applicable-price,create-tax-category,list-tax-categories,attach-variant-tax-category}.use-case.ts`
+
 - `presentation/dto/{set-price.request,price-query,create-tax-category.request,attach-tax-category.request}.dto.ts`
 
 and the port/adapter/controller/module/barrels were extended.

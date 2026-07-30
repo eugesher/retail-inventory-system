@@ -44,16 +44,17 @@ but translate the wire payload into a use-case call.
 `apps/inventory-microservice/src/modules/stock/infrastructure/consumers/catalog-events.consumer.ts`:
 
 ```ts
+
 @Controller()
 export class CatalogEventsConsumer {
-  @EventPattern(ROUTING_KEYS.CATALOG_VARIANT_CREATED)
-  public async onVariantCreated(@Payload() event: ICatalogVariantCreatedEvent): Promise<void> {
-    this.logger.info(
-      { correlationId: event.correlationId, variantId: event.variantId, sku: event.sku },
-      'Consuming catalog.variant.created',
-    );
-    await this.autoInitStockLevel.execute(event);
-  }
+    @EventPattern(ROUTING_KEYS.CATALOG_VARIANT_CREATED)
+    public async onVariantCreated(@Payload() event: ICatalogVariantCreatedEvent): Promise<void> {
+        this.logger.info(
+            {correlationId: event.correlationId, variantId: event.variantId, sku: event.sku},
+            'Consuming catalog.variant.created',
+        );
+        await this.autoInitStockLevel.execute(event);
+    }
 }
 ```
 
@@ -178,10 +179,10 @@ through the `STOCK_EVENTS_PUBLISHER` port. The wire contract is
 
 ```ts
 interface IInventoryStockLevelInitializedEvent extends ICorrelationPayload {
-  variantId: number;
-  stockLocationId: string;
-  eventVersion: 'v1';
-  occurredAt: string;
+    variantId: number;
+    stockLocationId: string;
+    eventVersion: 'v1';
+    occurredAt: string;
 }
 ```
 
@@ -222,5 +223,6 @@ microservices and the gateway, creates a variant over the catalog HTTP flow,
 polls until the `stock_level` row exists, asserts the public read shows the zeroed
 `default-warehouse` entry, and re-emits a synthetic duplicate
 `catalog.variant.created` to prove the consumer does not duplicate the row.
+
 ```
 

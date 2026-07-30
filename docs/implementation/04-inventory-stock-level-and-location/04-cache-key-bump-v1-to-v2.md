@@ -8,8 +8,22 @@ the **shape of the cached value changed**. Under the per-aggregate cache-key
 schema-version rule ([ADR-022](../../adr/022-cache-keys-tenant-and-schema-version.md)),
 a breaking change to a cached value's shape is recorded by bumping that
 aggregate's version constant. This document explains the bump from `v1` to `v2`,
-the new key shape, the four key families that briefly coexist, and what happens
-to the old entries.
+the new key shape, the key families that coexist (four at epic time, five today), and
+what happens to the old entries.
+
+> **Since this epic, the live version has moved again — it is `v3` today, not `v2`.**
+> The reservation-and-movement capability
+> ([ADR-030 §7](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md))
+> bumped `v2 → v3` when reservations began moving `quantityReserved`: the cached
+> `VariantStockView` changed *semantically* even though its field set did not (the
+> ADR-022 rule covers value semantics, not only shape). And the legacy-prefix **sweep**
+> this document describes has since been **removed** (ISSUE-03 / commit `79b111a`;
+> [ADR-053](../../adr/053-how-a-transition-window-closes.md)): the write path now wipes
+> **exactly one** prefix — the live version's — and the retired shapes are read by
+> nothing, written by nothing, and swept by nothing. The `v1 → v2` narrative below is
+> the bump *as it shipped in this epic* and remains a faithful worked example of the
+> version-bump mechanism; the paragraphs that assert `v2` is live or that the fan-out
+> sweeps the old prefixes are corrected inline where they occur.
 
 ## Why a shape change forces a version bump
 
@@ -33,23 +47,28 @@ The value shape genuinely changed here:
 
 Both the **value shape** and the **id axis** moved (product → variant). Either
 alone would justify a bump; together they make the old and new entries entirely
-incompatible. So `INVENTORY_STOCK_KEY_VERSION` goes `'v1' → 'v2'` in
+incompatible. So `INVENTORY_STOCK_KEY_VERSION` went `'v1' → 'v2'` in
 [`libs/cache/cache-keys.ts`](../../../libs/cache/cache-keys.ts) — a one-line edit,
 because the version segment is a **constant next to the builder**, never a builder
 argument (ADR-022). That keeps the live version greppable and makes the bump a
-single reviewable line.
+single reviewable line. (The same one-line mechanism carried the later `'v2' → 'v3'`
+bump; the constant reads `'v3'` today — see the note at the top.)
 
 ## The new key shape
 
+(The version segment was `v2` when this epic shipped and is `v3` today — the shape is
+otherwise identical, only the token differs. It is shown below as `v3`, the value a reader
+actually finds in Redis.)
+
 ```
-ris:[t:<tenantId>:]inventory:stock:v2:<variantId>:<facet>
+ris:[t:<tenantId>:]inventory:stock:v3:<variantId>:<facet>
 ```
 
 - `ris:` is the global root; `t:<tenantId>:` is the **opt-in** tenant segment —
   omitted entirely in single-tenant mode, never defaulted to `t:default:`
   (ADR-022).
 - `inventory:stock` is `<service>:<aggregate>`.
-- `v2` is the schema version.
+- `v3` is the schema version (it was `v2` at epic time).
 - `<variantId>` is the id axis — the catalog variant, the downstream backbone key
   ([ADR-025](../../adr/025-catalog-product-and-variant-aggregate.md) /
   [ADR-027](../../adr/027-stocklevel-running-totals-and-stocklocation.md)).
@@ -60,42 +79,46 @@ ris:[t:<tenantId>:]inventory:stock:v2:<variantId>:<facet>
 Examples:
 
 ```
-ris:inventory:stock:v2:42:__all__                          # variant 42, every location
-ris:inventory:stock:v2:42:head-warehouse,west-warehouse    # a two-location subset
-ris:t:store-7:inventory:stock:v2:42:__all__                # tenant store-7
+ris:inventory:stock:v3:42:__all__                          # variant 42, every location
+ris:inventory:stock:v3:42:head-warehouse,west-warehouse    # a two-location subset
+ris:t:store-7:inventory:stock:v3:42:__all__                # tenant store-7
 ```
 
 The `inventoryStockPrefix(variantId)` builder returns everything up to and
 including the trailing `:` before the facet, so a prefix delete wipes **every**
 facet (all-locations and any subset) for one variant in a single call.
 
-## The four coexisting key families
+## The coexisting key families
 
-Because all services deploy together and no production data exists, this is a
-clean cut — but the invalidate path is still written to wipe the historical
-shapes during the rolling-deploy transition window, so a stale in-flight entry
-from any prior shape cannot survive the first post-deploy write. There are now
-**four** families the invalidate fan-out covers, one current and three
-invalidate-only:
+At epic time this shipped as **four** families the invalidate fan-out covered — one
+current (`v2`) and three invalidate-only — on the reasoning that a rolling deploy across
+the bump must not serve an entry a previous key version had written. **That is no longer
+how it works** (ISSUE-03; see the top note): there is now a fifth retired shape (`v2`
+itself, demoted when `v3` went live), and the fan-out sweep has been **removed entirely**
+— the write path deletes only the live version's prefix. The table below is kept as the
+registry of every shape this aggregate's key has ever had, with each row's *current* role:
 
-| Family | Prefix builder | Shape | Role |
-| --- | --- | --- | --- |
-| Current (`v2`) | `inventoryStockPrefix` | `ris:[t:…:]inventory:stock:v2:<variantId>:` | read + write |
-| Pre-`v2` (`v1`) | `inventoryStockLegacyPrefixV1` | `ris:inventory:stock:v1:<id>:` | invalidate-only |
-| Pre-`v1` (post-ADR-016) | `inventoryStockLegacyPrefix` | `ris:inventory:stock:<id>:` | invalidate-only |
-| Pre-ADR-016 legacy | `productStockPrefix` | `stock:<productId>:` | invalidate-only |
+| Family                  | Prefix builder                 | Shape                                       | Role today                                     |
+|-------------------------|--------------------------------|---------------------------------------------|------------------------------------------------|
+| Current (`v3`)          | `inventoryStockPrefix`         | `ris:[t:…:]inventory:stock:v3:<variantId>:` | read + write + the one prefix wiped on a write |
+| Pre-`v3` (`v2`)         | `inventoryStockLegacyPrefixV2` | `ris:inventory:stock:v2:<id>:`              | retired — no caller                            |
+| Pre-`v2` (`v1`)         | `inventoryStockLegacyPrefixV1` | `ris:inventory:stock:v1:<id>:`              | retired — no caller                            |
+| Pre-`v1` (post-ADR-016) | `inventoryStockLegacyPrefix`   | `ris:inventory:stock:<id>:`                 | retired — no caller                            |
+| Pre-ADR-016 legacy      | `productStockPrefix`           | `stock:<productId>:`                        | retired — no caller                            |
 
-Only the current `v2` builder is used for reads and writes. The three legacy
-builders exist **solely** so the write path's invalidate fan-out
-(`StockCache.withInvalidation` → the private `invalidatePrefixes`) can `delByPrefix`
-each of them per affected `variantId`. The `v1` family keyed the **old**
-`productId` axis; we wipe it by the now-`variantId` numeric id, which is
-sufficient for the transition window precisely because there is no production data
-whose product/variant id spaces would diverge in a way that matters.
-
-The three legacy wipes are unconditionally **single-tenant**: the `v1`, pre-`v1`,
-and pre-ADR-016 shapes never carried a tenant segment, so there is nothing to
-scope. Only the current `v2` wipe threads the supplied `tenantId`.
+Only the current `v3` builder is used for reads and writes, **and it is the only prefix
+the write path wipes** (`StockCache.withInvalidation` → the private `invalidatePrefixes`,
+one `delByPrefix` per affected `variantId`, threading the supplied `tenantId` — ADR-022).
+The four retired builders survive in
+[`libs/cache/cache-keys.ts`](../../../libs/cache/cache-keys.ts) as a **registry** of what
+each bump changed — read by nothing, written by nothing, swept by nothing
+([ADR-046](../../adr/046-libs-layout-and-dead-export-removal.md): *"one line in a registry,
+where being a complete registry is the point"*). They could never have mattered even while
+the sweep ran: there is deliberately no full-key builder for a retired shape, so an entry
+under one is unreachable garbage that ages out on its own TTL. The `v1` family keyed the
+**old** `productId` axis and the builders take the now-`variantId` numeric id — a mismatch
+that never mattered, because the project has never deployed and no Redis holds a key in any
+retired shape.
 
 > The write/invalidate path itself (`withInvalidation`) ships in this change so it
 > is ready for the Receive / Adjust write operations that consume it; this read
@@ -109,17 +132,19 @@ scope. Only the current `v2` wipe threads the supplied `tenantId`.
 Nothing is bulk-deleted at deploy time. After the bump:
 
 - Any `v1`-prefixed entry already on Redis (`ris:inventory:stock:v1:<id>:…`)
-  becomes **unreachable on the read path** — the new code only ever computes `v2`
-  keys, so it never looks the `v1` key up again.
+  becomes **unreachable on the read path** — the live code only ever computes the
+  current version's keys (`v2` at epic time, `v3` today), so it never looks the `v1`
+  key up again.
 - Those orphaned entries **age out via their TTL** (the safety-net TTL is the
   backstop; ADR-002). They occupy memory until expiry but are never served.
-- During the transition window, the first write that touches a given `variantId`
-  also wipes the `v1` (and pre-`v1`, pre-ADR-016) prefixes for that id via the
-  invalidate fan-out, so correlated stale entries are cleared early rather than
-  waiting for TTL.
+- At epic time, the first write touching a given `variantId` also swept the `v1`
+  (and pre-`v1`, pre-ADR-016) prefixes via the invalidate fan-out. **That sweep has
+  since been removed** (ISSUE-03): the write path now wipes only the live prefix, and
+  every retired shape ages out purely on its TTL. Because the project has never
+  deployed, no such entry has ever actually existed to age out.
 
-This is the designed behaviour of a version bump: re-key, let the old slots
-expire, optionally sweep them on the next write. No cache migration job runs.
+This is the designed behaviour of a version bump: re-key and let the old slots
+expire. No cache migration job runs.
 
 ## What did *not* change: the cache mechanism
 
