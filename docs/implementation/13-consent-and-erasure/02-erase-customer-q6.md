@@ -31,7 +31,8 @@ personal data. What is preserved is a bare identity marker — `id`, `status`,
 
 ## What is nulled, and what is not
 
-The erase nulls PII in two places and abandons a third, all in one transaction.
+The erase nulls PII in two places, abandons a third, and deletes the consent
+record, all in one transaction.
 
 **The `customer` row** — every PII column is nulled and the row is flipped to the
 tombstone state:
@@ -94,7 +95,7 @@ gateway `auth` module owns the `customer` table, while the retail modules own
 `address` and `cart`. The erase nulls all of it in **one transaction** through a
 gateway-owned raw-SQL writer, `CUSTOMER_ERASURE_WRITER`.
 
-The writer runs three statements inside a single `manager.transaction(...)`:
+The writer runs four statements inside a single `manager.transaction(...)`:
 
 1. Persist the erased `customer` aggregate (through the auth module's own mapper —
    the `customer` table is the module's own, so its column mapping stays in one
@@ -103,6 +104,18 @@ The writer runs three statements inside a single `manager.transaction(...)`:
    address-book PII.
 3. `UPDATE cart SET status = 'abandoned' … WHERE customer_id = ? AND status =
    'active'` — abandon the active carts.
+4. `DELETE FROM consent_record WHERE customer_id = ?` — remove the customer's
+   channel-consent record. Consent preferences are themselves personal data, so a
+   right-to-erasure must clear them; and because the customer row is tombstoned
+   (never hard-deleted), the `consent_record` FK's `ON DELETE CASCADE` never fires,
+   so the row would otherwise survive the erase. Deleting it (rather than resetting
+   the flags) is what makes a later consent read fall through to the absent-row
+   defaults (transactional on, marketing **off**) — exactly what the
+   `customer.erased` cache-eviction consumer relies on to stop an erased customer's
+   marketing sends. `consent_record` is the `auth` module's own table, so — like
+   statement 1 — it is reached through its repository, not raw SQL. (This statement
+   was added in the same-epic review pass after the first erase slice shipped, which
+   is why some sibling prose still describes only the customer/address/cart writes.)
 
 Statements 2 and 3 reach tables the `auth` module does **not** own. Rather than
 import the retail `AddressEntity` / `CartEntity` — which the architecture
