@@ -46,11 +46,11 @@ The alternatives were weighed in
 [ADR-029 §2](../../adr/029-category-materialized-path-and-polymorphic-media.md)
 and rejected:
 
-| Approach | Why not |
-| --- | --- |
+| Approach                                               | Why not                                                                                                                                       |
+|--------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
 | **Closure table** (`ancestor, descendant, depth` rows) | A second table plus a write fan-out — one row per ancestor×descendant — on every insert/move, for a tree that is read-shallow and write-rare. |
-| **Nested sets** (left/right boundary numbers) | Every insert rebalances a large span of boundary numbers; the write cost is wrong for a hand-edited tree. |
-| **Per-query recursive CTE** (no stored hierarchy) | Pushes the tree walk into every read and stores nothing to index or inspect. |
+| **Nested sets** (left/right boundary numbers)          | Every insert rebalances a large span of boundary numbers; the write cost is wrong for a hand-edited tree.                                     |
+| **Per-query recursive CTE** (no stored hierarchy)      | Pushes the tree walk into every read and stores nothing to index or inspect.                                                                  |
 
 The materialized path gets the O(1)-ish subtree read of a closure table from one
 column, with no fan-out write and a hierarchy you can read straight off the row.
@@ -101,16 +101,16 @@ Two tables ship in
 
 `category`:
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `BIGINT UNSIGNED AUTO_INCREMENT` | The catalog-table convention (`product` is the same); a narrower `INT` would also mismatch `product_categories.category_id`. |
-| `name` | `VARCHAR(255)` | |
-| `slug` | `VARCHAR(255)` | `UNIQUE` (`UC_CATEGORY_SLUG`) — global uniqueness is repository-level (§5). |
-| `parent_id` | `BIGINT UNSIGNED NULL` | Self-FK; `NULL` = a root. |
-| `path` | `VARCHAR(512)` | The materialized path; indexed (`IDX_CATEGORY_PATH`). |
-| `sort_order` | `INT NOT NULL DEFAULT 0` | Sibling display order. |
-| `status` | `ENUM('active','archived')` | Lifecycle (§7). |
-| `created_at` / `updated_at` / `deleted_at` | `TIMESTAMP` | `deleted_at` inherited from `BaseEntity`, left **inert**. |
+| Column                                     | Type                             | Notes                                                                                                                        |
+|--------------------------------------------|----------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `id`                                       | `BIGINT UNSIGNED AUTO_INCREMENT` | The catalog-table convention (`product` is the same); a narrower `INT` would also mismatch `product_categories.category_id`. |
+| `name`                                     | `VARCHAR(255)`                   |                                                                                                                              |
+| `slug`                                     | `VARCHAR(255)`                   | `UNIQUE` (`UC_CATEGORY_SLUG`) — global uniqueness is repository-level (§5).                                                  |
+| `parent_id`                                | `BIGINT UNSIGNED NULL`           | Self-FK; `NULL` = a root.                                                                                                    |
+| `path`                                     | `VARCHAR(512)`                   | The materialized path; indexed (`IDX_CATEGORY_PATH`).                                                                        |
+| `sort_order`                               | `INT NOT NULL DEFAULT 0`         | Sibling display order.                                                                                                       |
+| `status`                                   | `ENUM('active','archived')`      | Lifecycle (§7).                                                                                                              |
+| `created_at` / `updated_at` / `deleted_at` | `TIMESTAMP`                      | `deleted_at` inherited from `BaseEntity`, left **inert**.                                                                    |
 
 The self-FK `FK_CATEGORY_PARENT` is `ON DELETE SET NULL` — a **schema-level safety
 net only.** No hard-delete operation exists (archival is the path), but if a row
@@ -137,14 +137,49 @@ The port returns **domain types only**; no `typeorm` type leaks across it
 (ADR-017). Its surface:
 
 ```ts
-save(category: Category): Promise<Category>;        // insert/update one row; re-reads for the concrete id
-findById(id: number): Promise<Category | null>;
-findBySlug(slug: string): Promise<Category | null>;
-existsBySlug(slug: string): Promise<boolean>;       // the create-use-case duplicate pre-check
-listAll(opts: { rootOnly?: boolean; activeOnly?: boolean }): Promise<Category[]>;
-listSubtree(pathPrefix: string, opts?: { activeOnly?: boolean }): Promise<Category[]>;
-reparentSubtree(category: Category, oldPath: string): Promise<number>;
+save(category
+:
+Category
+):
+Promise<Category>;        // insert/update one row; re-reads for the concrete id
+findBySlug(slug
+:
+string
+):
+Promise<Category | null>;
+existsBySlug(slug
+:
+string
+):
+Promise<boolean>;       // the create-use-case duplicate pre-check
+listAll(opts
+:
+{
+    rootOnly ? : boolean;
+    activeOnly ? : boolean
+}
+):
+Promise<Category[]>;
+listSubtree(pathPrefix
+:
+string, opts ? : {activeOnly? : boolean}
+):
+Promise<Category[]>;
+reparentSubtree(category
+:
+Category, oldPath
+:
+string
+):
+Promise<number>;
 ```
+
+There is **no `findById` on the port**. A category is addressed by `slug` everywhere a
+caller names one, and by `path` for the subtree reads; the by-id load survives only as a
+**private** detail of the adapter's `save` re-read. (The port originally exposed a public
+`findById`; [ADR-049](../../adr/049-the-port-methods-nothing-calls.md) pruned it as a port
+method with no application-layer caller and made it private on
+`CategoryTypeormRepository`.)
 
 Global `slug` uniqueness is **repository-level** (the `UNIQUE` constraint is the
 hard guard; `existsBySlug` gives the later create use case a clean pre-check), the
@@ -237,12 +272,15 @@ tree internally inconsistent, so the two statements commit together:
 
 ```sql
 -- 1. the moved row: write its already-recomputed parent_id + path
-UPDATE category SET parent_id = ?, path = ? WHERE id = ?;
+UPDATE category
+SET parent_id = ?,
+    path      = ?
+WHERE id = ?;
 
 -- 2. every strict descendant: swap the old path prefix for the new one in bulk
 UPDATE category
-   SET path = CONCAT(?, SUBSTRING(path, ? + 1))
- WHERE path LIKE ?;
+SET path = CONCAT(?, SUBSTRING(path, ? + 1))
+WHERE path LIKE ?;
 ```
 
 The bulk statement is the heart of the rebase. `SUBSTRING(path, LENGTH(oldPath) + 1)`
@@ -269,8 +307,11 @@ Two edges fall out of the same mechanism for free, neither special-cased:
   normal move.
 - **Same-parent reparent is an idempotent success** — moving a category under the
   parent it already has recomputes its path to the identical value, and the cycle
-  guard does **not** fire (a node is not its own descendant). The rebase rewrites
-  the descendants to the same paths they already held. This is deliberately **not**
+  guard does **not** fire (a node is not its own descendant). The repository detects
+  this zero-delta move (`newPath === oldPath`) and **short-circuits**: it skips the
+  rebase transaction entirely and reports `rewrittenDescendantCount: 0`, so no
+  descendant row is touched — and no spurious `updated_at` bump ripples across the
+  subtree. This is deliberately **not**
   rejected: a no-op move returning the unchanged tree is the least surprising
   behaviour for a caller that re-issues a move.
 
@@ -287,10 +328,10 @@ request scope (ADR-001 / ADR-011). The `APP_FILTER`-registered
 emits no events** (§6), so there are no past-tense `catalog.category.*` surfaces to
 pair with these commands.
 
-| RPC key | Use case | Payload | Response |
-| --- | --- | --- | --- |
-| `catalog.category.create` | `CreateCategoryUseCase` | `ICreateCategoryPayload` (`name`, `slug`, `parentSlug?`, `sortOrder?`) | `CategoryView` |
-| `catalog.category.reparent` | `ReparentCategoryUseCase` | `IReparentCategoryPayload` (`slug`, `newParentSlug?`) | `CategoryReparentView` |
+| RPC key                     | Use case                  | Payload                                                                | Response               |
+|-----------------------------|---------------------------|------------------------------------------------------------------------|------------------------|
+| `catalog.category.create`   | `CreateCategoryUseCase`   | `ICreateCategoryPayload` (`name`, `slug`, `parentSlug?`, `sortOrder?`) | `CategoryView`         |
+| `catalog.category.reparent` | `ReparentCategoryUseCase` | `IReparentCategoryPayload` (`slug`, `newParentSlug?`)                  | `CategoryReparentView` |
 
 **Create** inserts an `active` category: it pre-checks slug uniqueness through the
 repository (`existsBySlug` → `CATEGORY_SLUG_TAKEN`, the UNIQUE constraint staying
@@ -313,14 +354,14 @@ both ends (ADR-005). The dotted RPC keys are mirrored value-for-value into
 Every category rejection is a typed `CatalogErrorCodeEnum` code the filter maps to
 an HTTP status:
 
-| Code | HTTP | Raised when |
-| --- | --- | --- |
-| `CATEGORY_NAME_REQUIRED` / `CATEGORY_SLUG_INVALID` / `CATEGORY_SORT_ORDER_INVALID` | 400 | `Category.create` invariant violation (malformed input). |
-| `CATEGORY_NOT_FOUND` | 404 | Reparent target slug resolves to nothing. |
-| `CATEGORY_PARENT_NOT_FOUND` | 404 | Create/reparent parent slug resolves to nothing. |
-| `CATEGORY_SLUG_TAKEN` | 409 | Create slug already exists. |
-| `CATEGORY_ARCHIVED` | 409 | Create/reparent under an archived parent. |
-| `CATEGORY_CYCLE` | 409 | Reparent under self or a descendant. |
+| Code                                                                               | HTTP | Raised when                                              |
+|------------------------------------------------------------------------------------|------|----------------------------------------------------------|
+| `CATEGORY_NAME_REQUIRED` / `CATEGORY_SLUG_INVALID` / `CATEGORY_SORT_ORDER_INVALID` | 400  | `Category.create` invariant violation (malformed input). |
+| `CATEGORY_NOT_FOUND`                                                               | 404  | Reparent target slug resolves to nothing.                |
+| `CATEGORY_PARENT_NOT_FOUND`                                                        | 404  | Create/reparent parent slug resolves to nothing.         |
+| `CATEGORY_SLUG_TAKEN`                                                              | 409  | Create slug already exists.                              |
+| `CATEGORY_ARCHIVED`                                                                | 409  | Create/reparent under an archived parent.                |
+| `CATEGORY_CYCLE`                                                                   | 409  | Reparent under self or a descendant.                     |
 
 **No gateway HTTP route ships yet** — the RPCs are reachable through an RMQ client
 and exercised by the use-case unit specs; the gateway `modules/catalog/` route

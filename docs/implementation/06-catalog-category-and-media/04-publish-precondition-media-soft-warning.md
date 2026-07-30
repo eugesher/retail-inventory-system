@@ -45,10 +45,10 @@ publish fails with `409 PRODUCT_PUBLISH_REQUIRES_PRICE` and the product stays
 `draft`. Media is handled the opposite way. The difference is not arbitrary — it
 tracks what *breaks* if the precondition is unmet:
 
-| Precondition | Unmet consequence | Treatment |
-| --- | --- | --- |
-| ≥1 active price per variant | **Checkout breaks** — there is no amount to charge; an order line cannot be priced | **Hard 409, blocks publish** |
-| ≥1 active media asset | **The page looks bare** — every downstream flow still works | **Soft `warnings[]`, publish proceeds** |
+| Precondition                | Unmet consequence                                                                  | Treatment                               |
+|-----------------------------|------------------------------------------------------------------------------------|-----------------------------------------|
+| ≥1 active price per variant | **Checkout breaks** — there is no amount to charge; an order line cannot be priced | **Hard 409, blocks publish**            |
+| ≥1 active media asset       | **The page looks bare** — every downstream flow still works                        | **Soft `warnings[]`, publish proceeds** |
 
 A price-less active product is a latent production incident: a shopper can reach a
 buy button that cannot complete. A media-less active product is a cosmetic gap. The
@@ -89,8 +89,8 @@ The warning is not a bare string. It is a `PublishWarningView`:
 
 ```ts
 class PublishWarningView {
-  code: string;     // 'CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA'
-  message: string;  // human-displayable sentence
+    code: string;     // 'CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA'
+    message: string;  // human-displayable sentence
 }
 ```
 
@@ -130,7 +130,15 @@ gains:
 
 ```ts
 // True when ANY of the (ownerType, ownerId) pairs has an active media asset.
-hasActiveForOwners(owners: { ownerType: MediaOwnerTypeEnum; ownerId: number }[]): Promise<boolean>;
+hasActiveForOwners(owners
+:
+{
+    ownerType: MediaOwnerTypeEnum;
+    ownerId: number
+}
+[]
+):
+Promise<boolean>;
 ```
 
 The publish use case builds the owner set as **the product owner plus one
@@ -138,8 +146,8 @@ The publish use case builds the owner set as **the product owner plus one
 
 ```ts
 const owners = [
-  { ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: productId },
-  ...saved.variants.map((v) => ({ ownerType: MediaOwnerTypeEnum.PRODUCT_VARIANT, ownerId: v.id })),
+    {ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: productId},
+    ...saved.variants.map((v) => ({ownerType: MediaOwnerTypeEnum.PRODUCT_VARIANT, ownerId: v.id})),
 ];
 const hasActiveMedia = await this.mediaRepository.hasActiveForOwners(owners);
 ```
@@ -152,10 +160,10 @@ per-variant `listByOwner` calls:
 
 ```sql
 SELECT 1 AS present
-  FROM media_asset
- WHERE (owner_type, owner_id) IN ((?, ?), (?, ?), …)
-   AND status = 'active'
- LIMIT 1
+FROM media_asset
+WHERE (owner_type, owner_id) IN ((?, ?), (?, ?), …)
+                                 AND status = 'active'
+                                 LIMIT 1
 ```
 
 The placeholder string is generated from the owner *count* (never from a value), and
@@ -171,11 +179,12 @@ publish is unaffected, and the use case returns the normal active-product view:
 
 ```ts
 try {
-  const hasActiveMedia = await this.mediaRepository.hasActiveForOwners(owners);
-  if (!hasActiveMedia) { /* attach the warning, warn-log */ }
+    const hasActiveMedia = await this.mediaRepository.hasActiveForOwners(owners);
+    if (!hasActiveMedia) { /* attach the warning, warn-log */
+    }
 } catch (err) {
-  this.logger.warn({ err, correlationId, productId }, 'Media soft-warning probe failed; …');
-  // no warning, publish unaffected
+    this.logger.warn({err, correlationId, productId}, 'Media soft-warning probe failed; …');
+    // no warning, publish unaffected
 }
 ```
 

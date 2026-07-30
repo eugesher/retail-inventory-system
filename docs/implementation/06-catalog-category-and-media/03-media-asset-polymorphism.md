@@ -17,12 +17,12 @@ All four operations are RPCs on `catalog_queue`, served by a new catalog
 **no gateway HTTP surface yet** — these RPCs are reachable from an RMQ client and
 the unit suite; the HTTP edge is a later catalog capability.
 
-| RPC key | Use case | Response |
-| --- | --- | --- |
-| `catalog.media.attach` | `AttachMediaUseCase` | `MediaAssetView` |
+| RPC key                 | Use case              | Response           |
+|-------------------------|-----------------------|--------------------|
+| `catalog.media.attach`  | `AttachMediaUseCase`  | `MediaAssetView`   |
 | `catalog.media.reorder` | `ReorderMediaUseCase` | `MediaAssetView[]` |
-| `catalog.media.detach` | `DetachMediaUseCase` | `MediaAssetView` |
-| `catalog.media.list` | `ListMediaUseCase` | `MediaAssetView[]` |
+| `catalog.media.detach`  | `DetachMediaUseCase`  | `MediaAssetView`   |
+| `catalog.media.list`    | `ListMediaUseCase`    | `MediaAssetView[]` |
 
 Like the category surface, the media capability emits **no events** — attach,
 reorder, and detach are state changes with no cross-service consumer today, and
@@ -48,18 +48,19 @@ do for us: a foreign key cannot target two tables, so `owner_id` carries **no FK
 That trade-off and its compensation are the subject of the next section.
 
 ```sql
-CREATE TABLE media_asset (
-  id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  owner_type ENUM('product','product-variant') NOT NULL,
-  owner_id   BIGINT UNSIGNED NOT NULL,            -- no FK: polymorphic owner
-  uri        VARCHAR(1024) NOT NULL,
-  type       ENUM('image','video','document') NOT NULL,
-  alt_text   VARCHAR(255) NULL,
-  sort_order INT NOT NULL DEFAULT 0,
-  status     ENUM('active','archived') NOT NULL DEFAULT 'active',
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_at TIMESTAMP NULL
+CREATE TABLE media_asset
+(
+    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    owner_type ENUM('product','product-variant') NOT NULL,
+    owner_id   BIGINT UNSIGNED NOT NULL, -- no FK: polymorphic owner
+    uri        VARCHAR(1024) NOT NULL,
+    type       ENUM('image','video','document') NOT NULL,
+    alt_text   VARCHAR(255) NULL,
+    sort_order INT           NOT NULL DEFAULT 0,
+    status     ENUM('active','archived') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
 );
 CREATE INDEX IDX_MEDIA_ASSET_OWNER ON media_asset (owner_type, owner_id, sort_order);
 ```
@@ -237,17 +238,17 @@ The capability follows the per-module hexagonal layout
 
 ### The `MEDIA_*` rejection matrix
 
-| Code | HTTP | Raised by | When |
-| --- | --- | --- | --- |
-| `MEDIA_URI_REQUIRED` | 400 | model | empty uri |
-| `MEDIA_TYPE_INVALID` | 400 | model | type outside the enum |
-| `MEDIA_OWNER_TYPE_INVALID` | 400 | model | ownerType outside the enum |
-| `MEDIA_OWNER_ID_INVALID` | 400 | model | non-positive / non-integer ownerId |
-| `MEDIA_SORT_ORDER_INVALID` | 400 | model | negative / non-integer slot |
-| `MEDIA_NOT_FOUND` | 404 | detach UC | detach target id missing |
-| `MEDIA_OWNER_NOT_FOUND` | 404 | attach UC | attach owner missing in its table |
-| `MEDIA_INVALID_STATE_TRANSITION` | 409 | model (`archive`) | second detach |
-| `MEDIA_REORDER_SET_MISMATCH` | 409 | reorder UC | id set is not an exact permutation |
+| Code                             | HTTP | Raised by         | When                               |
+|----------------------------------|------|-------------------|------------------------------------|
+| `MEDIA_URI_REQUIRED`             | 400  | model             | empty uri                          |
+| `MEDIA_TYPE_INVALID`             | 400  | model             | type outside the enum              |
+| `MEDIA_OWNER_TYPE_INVALID`       | 400  | model             | ownerType outside the enum         |
+| `MEDIA_OWNER_ID_INVALID`         | 400  | model             | non-positive / non-integer ownerId |
+| `MEDIA_SORT_ORDER_INVALID`       | 400  | model             | negative / non-integer slot        |
+| `MEDIA_NOT_FOUND`                | 404  | detach UC         | detach target id missing           |
+| `MEDIA_OWNER_NOT_FOUND`          | 404  | attach UC         | attach owner missing in its table  |
+| `MEDIA_INVALID_STATE_TRANSITION` | 409  | model (`archive`) | second detach                      |
+| `MEDIA_REORDER_SET_MISMATCH`     | 409  | reorder UC        | id set is not an exact permutation |
 
 ## 8. What is deliberately deferred
 

@@ -48,25 +48,25 @@ means `@RequiresPermission(PermissionCodeEnum.CATALOG_WRITE)` + `@ApiBearerAuth(
 
 ### Category routes (`category.controller.ts`)
 
-| # | Method & path | Body / query | Auth | Response (status) |
-|---|---|---|---|---|
-| 1 | `POST /catalog/categories` | `CreateCategoryRequestDto` `{ name, slug, parentSlug?, sortOrder? }` | `catalog:write` | `CategoryView` (201) |
-| 2 | `PATCH /catalog/categories/:slug/parent` | `ReparentCategoryRequestDto` `{ newParentSlug?: string \| null }` | `catalog:write` | `CategoryReparentView` (200) |
-| 3 | `GET /catalog/categories` | `?root=true\|false` | public | `CategoryView[]` (200) |
-| 4 | `GET /catalog/categories/:slug/tree` | — | public | `CategoryTreeNodeView` (200) |
-| 5 | `GET /catalog/categories/:slug/products` | `?includeDescendants`, `?page`, `?pageSize` | public | `IPage<ProductWithVariantsView>` (200) |
-| 6 | `POST /catalog/products/:productId/categories` | `AttachProductCategoriesRequestDto` `{ categorySlugs: string[] }` | `catalog:write` | `ProductCategoriesView` (200) |
-| 7 | `DELETE /catalog/products/:productId/categories/:categorySlug` | — | `catalog:write` | `ProductCategoriesView` (200) |
+| # | Method & path                                                  | Body / query                                                         | Auth            | Response (status)                      |
+|---|----------------------------------------------------------------|----------------------------------------------------------------------|-----------------|----------------------------------------|
+| 1 | `POST /catalog/categories`                                     | `CreateCategoryRequestDto` `{ name, slug, parentSlug?, sortOrder? }` | `catalog:write` | `CategoryView` (201)                   |
+| 2 | `PATCH /catalog/categories/:slug/parent`                       | `ReparentCategoryRequestDto` `{ newParentSlug?: string \| null }`    | `catalog:write` | `CategoryReparentView` (200)           |
+| 3 | `GET /catalog/categories`                                      | `?root=true\|false`                                                  | public          | `CategoryView[]` (200)                 |
+| 4 | `GET /catalog/categories/:slug/tree`                           | —                                                                    | public          | `CategoryTreeNodeView` (200)           |
+| 5 | `GET /catalog/categories/:slug/products`                       | `?includeDescendants`, `?page`, `?pageSize`                          | public          | `IPage<ProductWithVariantsView>` (200) |
+| 6 | `POST /catalog/products/:productId/categories`                 | `AttachProductCategoriesRequestDto` `{ categorySlugs: string[] }`    | `catalog:write` | `ProductCategoriesView` (200)          |
+| 7 | `DELETE /catalog/products/:productId/categories/:categorySlug` | —                                                                    | `catalog:write` | `ProductCategoriesView` (200)          |
 
 ### Media routes (`media.controller.ts`)
 
-| # | Method & path | Body / query | Auth | Response (status) |
-|---|---|---|---|---|
-| 8 | `POST /catalog/media` | `AttachMediaRequestDto` `{ ownerType, ownerId, uri, type, altText? }` | `catalog:write` | `MediaAssetView` (201) |
-| 9 | `PATCH /catalog/media/reorder` | `ReorderMediaRequestDto` `{ ownerType, ownerId, mediaIdsInOrder: number[] }` | `catalog:write` | `MediaAssetView[]` (200) |
-| 10 | `DELETE /catalog/media/:id` | — | `catalog:write` | `MediaAssetView` (200) |
-| 11 | `GET /catalog/products/:productId/media` | — | public | `MediaAssetView[]` (200) |
-| 12 | `GET /catalog/variants/:variantId/media` | — | public | `MediaAssetView[]` (200) |
+| #  | Method & path                            | Body / query                                                                 | Auth            | Response (status)        |
+|----|------------------------------------------|------------------------------------------------------------------------------|-----------------|--------------------------|
+| 8  | `POST /catalog/media`                    | `AttachMediaRequestDto` `{ ownerType, ownerId, uri, type, altText? }`        | `catalog:write` | `MediaAssetView` (201)   |
+| 9  | `PATCH /catalog/media/reorder`           | `ReorderMediaRequestDto` `{ ownerType, ownerId, mediaIdsInOrder: number[] }` | `catalog:write` | `MediaAssetView[]` (200) |
+| 10 | `DELETE /catalog/media/:id`              | —                                                                            | `catalog:write` | `MediaAssetView` (200)   |
+| 11 | `GET /catalog/products/:productId/media` | —                                                                            | public          | `MediaAssetView[]` (200) |
+| 12 | `GET /catalog/variants/:variantId/media` | —                                                                            | public          | `MediaAssetView[]` (200) |
 
 ## Decisions worth the ink
 
