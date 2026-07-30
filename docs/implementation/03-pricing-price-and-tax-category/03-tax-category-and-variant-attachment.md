@@ -8,12 +8,15 @@ category. It is the companion to
 both realize
 [ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md).
 
-> **Status:** complete through the microservice RPC surface. The domain model,
-> the `tax_category` table, the `product_variant.tax_category_id` FK, the
-> repository read/write methods, the three tax use cases, and their three
-> `catalog_queue` RPC handlers all exist (§4–§6). The **gateway HTTP endpoints**
-> that front these RPCs over `/api/...` (permission-gated by `pricing:write`) are
-> the remaining surface and land with the gateway pricing endpoints.
+> **Status:** complete. The domain model, the `tax_category` table, the
+> `product_variant.tax_category_id` FK, the repository read/write methods, the
+> three tax use cases, and their three `catalog_queue` RPC handlers all exist
+> (§4–§6). The **gateway HTTP endpoints** that front these RPCs over `/api/...`
+> (permission-gated by `pricing:write`) were the remaining surface when this was
+> written; they landed in
+> [06 — Pricing API at the gateway](06-pricing-api-and-kulala.md) as
+> `POST /api/catalog/tax-categories`, `GET /api/catalog/tax-categories` and
+> `PATCH /api/catalog/variants/:variantId/tax-category`.
 
 ## 1. Classification-only semantics
 
@@ -64,15 +67,16 @@ future use case runs.
 `BaseEntity` (ADR-019). The migration `…-CreatePricingTables` creates:
 
 ```sql
-CREATE TABLE tax_category (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  code        VARCHAR(50)   NOT NULL,
-  name        VARCHAR(255)  NOT NULL,
-  description VARCHAR(1000) NULL,
-  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_at  TIMESTAMP NULL,
-  CONSTRAINT UC_TAX_CATEGORY_CODE UNIQUE (code)
+CREATE TABLE tax_category
+(
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    code        VARCHAR(50)  NOT NULL,
+    name        VARCHAR(255) NOT NULL,
+    description VARCHAR(1000) NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at  TIMESTAMP NULL,
+    CONSTRAINT UC_TAX_CATEGORY_CODE UNIQUE (code)
 );
 ```
 
@@ -94,9 +98,11 @@ adds to the catalog `product_variant` table:
 
 ```sql
 ALTER TABLE product_variant
-  ADD COLUMN tax_category_id INT UNSIGNED NULL,
+    ADD COLUMN tax_category_id INT UNSIGNED NULL,
   ADD CONSTRAINT FK_PRODUCT_VARIANT_TAX_CATEGORY FOREIGN KEY (tax_category_id)
-    REFERENCES tax_category (id) ON DELETE SET NULL;
+    REFERENCES tax_category (id) ON
+DELETE
+SET NULL;
 ```
 
 Two deliberate choices:
@@ -183,13 +189,15 @@ SQL** through its injected TypeORM manager:
 
 ```sql
 -- attachTaxCategoryToVariant
-UPDATE product_variant SET tax_category_id = ? WHERE id = ?
+UPDATE product_variant
+SET tax_category_id = ?
+WHERE id = ?
 
 -- findVariantTaxHeader
 SELECT pv.id, pv.sku, pv.tax_category_id, tc.code
-  FROM product_variant pv
-  LEFT JOIN tax_category tc ON tc.id = pv.tax_category_id
- WHERE pv.id = ?
+FROM product_variant pv
+         LEFT JOIN tax_category tc ON tc.id = pv.tax_category_id
+WHERE pv.id = ?
 ```
 
 The `?` placeholders are bound by the driver, so the ids are never
@@ -209,10 +217,10 @@ variant's tax classification *after* the write:
 
 ```ts
 class VariantTaxHeaderView {
-  variantId: number;
-  sku: string;
-  taxCategoryId: number | null;   // null when unclassified
-  taxCategoryCode: string | null; // the joined code, null when unclassified
+    variantId: number;
+    sku: string;
+    taxCategoryId: number | null;   // null when unclassified
+    taxCategoryCode: string | null; // the joined code, null when unclassified
 }
 ```
 
@@ -228,10 +236,10 @@ Three routing keys join `catalog_queue`, registered lock-step in both
 (`libs/contracts`) — the alignment is asserted by `routing-keys.constants.spec.ts`
 (ADR-008):
 
-| Routing key | RPC | Use case |
-| --- | --- | --- |
-| `catalog.tax-category.create` | Create a tax category | `CreateTaxCategoryUseCase` |
-| `catalog.tax-category.list` | List all tax categories | `ListTaxCategoriesUseCase` |
+| Routing key                        | RPC                            | Use case                            |
+|------------------------------------|--------------------------------|-------------------------------------|
+| `catalog.tax-category.create`      | Create a tax category          | `CreateTaxCategoryUseCase`          |
+| `catalog.tax-category.list`        | List all tax categories        | `ListTaxCategoriesUseCase`          |
 | `catalog.variant.set-tax-category` | Attach a category to a variant | `AttachTaxCategoryToVariantUseCase` |
 
 `PricingController` (`presentation/pricing.controller.ts`) carries the three thin
@@ -250,7 +258,11 @@ classification label, and computing tax —
 `(category, jurisdiction) → rate`, rounded and converted — is a separate future
 tax-computation capability that maps over this label set without reshaping it.
 
-The only remaining piece of *this* capability is the **gateway HTTP surface** that
-fronts the three RPCs over `/api/...` (permission-gated by `pricing:write`) and its
-`http/*.http` entries. Those build directly on the use cases and contracts recorded
-here — none of which they reshape.
+The only piece of *this* capability outstanding when this was written was the
+**gateway HTTP surface** fronting the three RPCs over `/api/...` (permission-gated
+by `pricing:write`) and its `http/*.http` entries. It landed in
+[06 — Pricing API at the gateway](06-pricing-api-and-kulala.md), building directly
+on the use cases and contracts recorded here and reshaping none of them: the
+`PATCH` returns the `VariantTaxHeaderView` verbatim, and
+[`http/kulala/pricing.http`](../../../http/kulala/pricing.http) exercises the
+create / list / attach trio by hand.

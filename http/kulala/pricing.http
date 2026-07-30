@@ -23,12 +23,23 @@
 #      into @accessToken, which every write request below substitutes into its
 #      Authorization header. The three GETs send no token, proving the @Public()
 #      read routes work unauthenticated (and the writes 401 without the bearer).
-#   3. This file is self-contained on a freshly-seeded stack — it assumes NO
-#      price/tax seed rows. It Creates a tax category before it lists/attaches
-#      one, and it Sets a price before it lists/resolves one. It targets the
-#      seeded catalog variants: 1 (AURORA-WARM), 2 (AURORA-COOL) under product
-#      aurora-desk-lamp; 3 (NIMBUS-BLACK), 4 (NIMBUS-GREY) under
+#   3. This file is self-contained on a freshly-seeded stack: it Creates a tax
+#      category before it lists/attaches one, and Sets a price before it
+#      lists/resolves one, so it never DEPENDS on a seeded price or label. It
+#      targets the seeded catalog variants: 1 (AURORA-WARM), 2 (AURORA-COOL)
+#      under product aurora-desk-lamp; 3 (NIMBUS-BLACK), 4 (NIMBUS-GREY) under
 #      nimbus-office-chair. The flow drives variant 1.
+#      Those seed rows DO exist now — `yarn test:seed` applies
+#      scripts/seeds/tax-category.sql (STANDARD / REDUCED / EXEMPT) and
+#      scripts/seeds/price.sql (one open USD row per variant 1-4, valid_from
+#      2020-01-01). Not depending on them is what keeps this file running
+#      anyway, and it changes two expectations, not the block order:
+#        * listTaxCategories returns FOUR rows (the three seeded + LUXURY);
+#        * getApplicablePriceVariant1 answers with the block-4 price, not the
+#          seeded 4999 — same priority 0, later validFrom wins the tiebreak.
+#      setPriceVariant1 still succeeds because the seeded row opened in 2020,
+#      strictly before the new validFrom, so it is CLOSED and superseded rather
+#      than conflicting on the single-open-row invariant.
 #   4. A second top-to-bottom run wants a fresh database. The tax-category `code`
 #      is unique (a repeat LUXURY → 409 TAX_CATEGORY_CODE_TAKEN), and a variant's
 #      open price row is stateful (after the future price is scheduled, a fresh
@@ -89,9 +100,10 @@ Content-Type: application/json
 # @name listTaxCategories
 # GET /api/catalog/tax-categories  (public)
 # Lists every tax category, ordered by code. No Authorization header — the
-# @Public() route serves an unauthenticated caller. On a freshly-seeded stack the
-# only row is the LUXURY category just created; any later-seeded labels would
-# appear here too. Response is TaxCategoryView[].
+# @Public() route serves an unauthenticated caller. On a freshly-seeded stack
+# that is FOUR rows: EXEMPT, LUXURY (just created), REDUCED, STANDARD — the
+# three from scripts/seeds/tax-category.sql plus this file's own. Response is
+# TaxCategoryView[].
 GET {{baseUrl}}/catalog/tax-categories
 
 ###
@@ -124,9 +136,10 @@ Content-Type: application/json
 # @name listPricesVariant1
 # GET /api/catalog/variants/:variantId/prices?currency=USD  (public)
 # Lists EVERY price row in effect for (variant 1, USD) at `asOf` (omitted => now).
-# Query (PriceQueryDto): currency (default USD), asOf (default now, ISO-8601). The
-# immediate price just set is in effect, so it appears here. Response is
-# PriceView[].
+# Query (PriceQueryDto): currency (optional — an omitted one is resolved by the
+# gateway use case from the deployment's DEFAULT_CURRENCY, NOT from a literal
+# USD), asOf (field default = now, ISO-8601). The immediate price just set is in
+# effect, so it appears here. Response is PriceView[].
 GET {{baseUrl}}/catalog/variants/1/prices?currency=USD
 
 ###

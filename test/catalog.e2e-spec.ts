@@ -166,9 +166,19 @@ describe('Catalog gateway endpoints (e2e)', () => {
 
     it('gives each variant an active USD price so the publish precondition is met', async () => {
       // Publish hard-fails (409 `PRODUCT_PUBLISH_REQUIRES_PRICE`) unless every
-      // variant has an in-effect Price in the default currency. The gateway has
-      // no pricing route yet, so the prices are seeded directly via SQL — the
-      // open row (`valid_to NULL`) the catalog publish probe reads back.
+      // variant has an in-effect Price in the default currency. The prices are
+      // seeded directly via SQL — the open row (`valid_to NULL`) the catalog
+      // publish probe reads back.
+      //
+      // The gateway pricing routes exist now, and this spec still does NOT use
+      // them, deliberately. `insertActivePrice` writes `valid_from =
+      // UTC_TIMESTAMP()`, which is already whole-second and already in the past;
+      // going through `POST .../prices` would write the domain's sub-second
+      // instant into a `TIMESTAMP(0)` column, MySQL could round it UP, and the
+      // publish probe (`valid_from <= UTC_TIMESTAMP()`) would then read "no
+      // active price" for a variant that was just priced. `test/pricing.e2e-spec.ts`
+      // pays for the realistic path with a >1s wait; this spec is about catalog,
+      // so it takes the shortcut instead.
       for (const variantId of variantIds) {
         const result = (await dataSource.insertActivePrice(variantId, 'USD', 1999)) as {
           affectedRows: number;

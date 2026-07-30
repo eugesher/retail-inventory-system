@@ -153,9 +153,12 @@ Non-obvious facts, each worth a debugging cycle.
 
 **Repo**
 
-- `.env.local` **is git-tracked** (CI reads it), but `.env.example` is **not** — `.gitignore`'s
-  `.env.*` glob swallows it and only `.env.local` is force-tracked. An edit to `.env.example`
-  never shows up in `git status`; do not conclude it was missed.
+- `.env.example` is the **tracked** template (`.gitignore`'s `.env.*` glob swallows every env
+  file; `!.env.example` force-tracks that one) and `.env.local` **is not in the repo at all** —
+  an edit to `.env.example` *does* show in `git status`. This is the reverse of what it was
+  before `dddf733`; carryover notes saying `.env.local` is tracked are wrong. CI reads no env
+  file (inline `env:` in `.github/workflows/ci-cd.yml`), and `envFilePath` is
+  `['.env.local', '.env']` — so a host run needs `cp .env.example .env.local` first.
 - Bare `npx jest` fails with a Babel TypeScript parse error (not a code bug). Always pass
   `--config jest.unit.config.js`.
 - `yarn lint` is the **source of truth for where a file belongs**. Never weaken a
