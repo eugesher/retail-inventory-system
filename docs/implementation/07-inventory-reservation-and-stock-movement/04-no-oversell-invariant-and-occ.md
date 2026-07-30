@@ -106,14 +106,14 @@ Reserve is **idempotent on the triple**. The request carries the *absolute* targ
 quantity, not a delta. Inside the transaction the use case reads the existing hold
 (`findByKey`, any status) and branches:
 
-| Existing row | Counter change | Hold change |
-|---|---|---|
-| none | `reserve(quantity)` | `Reservation.create(...)` |
-| `active`, new qty > old | `reserve(delta)` | `refresh(quantity, expiresAt)` |
-| `active`, new qty < old | `releaseReserved(−delta)` | `refresh(quantity, expiresAt)` |
-| `active`, new qty == old | *(none)* | `refresh(quantity, expiresAt)` — TTL only |
-| `released` / `expired` | `reserve(quantity)` | `reactivate(quantity, expiresAt)` |
-| `committed` | — | `RESERVATION_INVALID_STATE` (409) |
+| Existing row             | Counter change            | Hold change                               |
+|--------------------------|---------------------------|-------------------------------------------|
+| none                     | `reserve(quantity)`       | `Reservation.create(...)`                 |
+| `active`, new qty > old  | `reserve(delta)`          | `refresh(quantity, expiresAt)`            |
+| `active`, new qty < old  | `releaseReserved(−delta)` | `refresh(quantity, expiresAt)`            |
+| `active`, new qty == old | *(none)*                  | `refresh(quantity, expiresAt)` — TTL only |
+| `released` / `expired`   | `reserve(quantity)`       | `reactivate(quantity, expiresAt)`         |
+| `committed`              | —                         | `RESERVATION_INVALID_STATE` (409)         |
 
 The counter moves by **only the delta**, never the full quantity, so re-reserving
 the same line twice never double-counts `quantityReserved`. Every write also
@@ -136,9 +136,12 @@ The out-of-stock rejection carries the live number, not just a message:
 
 `InventoryDomainException` gained an optional `details` field; the
 `InventoryRpcExceptionFilter` forwards it on the wire when present. A client can
-branch on `details.available` ("only 2 left") instead of parsing prose. (The
-gateway error util forwards `details` once the retail-facing wiring teaches it to;
-until then the field is harmlessly dropped at the gateway edge.)
+branch on `details.available` ("only 2 left") instead of parsing prose. (At this
+point in the build the gateway edge still dropped the field; the retail-facing
+wiring in [05](05-add-to-cart-cross-service-reserve.md) taught
+`apps/api-gateway/src/common/utils/throw-rpc-error.util.ts` to forward an
+object-valued `details` alongside the typed `code`, so the number now reaches the
+HTTP caller end-to-end.)
 
 ## Release writes an audit trail
 

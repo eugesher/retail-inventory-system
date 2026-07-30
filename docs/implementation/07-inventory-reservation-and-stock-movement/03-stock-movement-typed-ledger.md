@@ -21,14 +21,14 @@ the type**. The reading is physical: positive rows record stock *entering*
 on-hand, negative rows record stock *leaving* or a *hold being torn down*, and
 `adjustment` carries the operator's own signed delta.
 
-| Type         | Sign            | Reading                                                     |
-| ------------ | --------------- | ---------------------------------------------------------- |
-| `receipt`    | strictly **+**  | stock physically arrived (a goods-in)                      |
-| `return`     | strictly **+**  | a customer return re-entered on-hand                       |
-| `sale`       | strictly **−**  | stock left on a fulfilled sale                             |
-| `allocation` | strictly **−**  | stock committed (held firm) to a placed order              |
-| `release`    | strictly **−**  | a hold/allocation was torn down (recorded as it unwinds)   |
-| `adjustment` | either, non-0   | the operator's signed correction (cycle count, breakage…)  |
+| Type         | Sign           | Reading                                                   |
+|--------------|----------------|-----------------------------------------------------------|
+| `receipt`    | strictly **+** | stock physically arrived (a goods-in)                     |
+| `return`     | strictly **+** | a customer return re-entered on-hand                      |
+| `sale`       | strictly **−** | stock left on a fulfilled sale                            |
+| `allocation` | strictly **−** | stock committed (held firm) to a placed order             |
+| `release`    | strictly **−** | a hold/allocation was torn down (recorded as it unwinds)  |
+| `adjustment` | either, non-0  | the operator's signed correction (cycle count, breakage…) |
 
 The invariant is enforced in the `StockMovement` constructor and re-asserted on
 the load path (`reconstitute`), so a corrupted stored sign is rejected on read.
@@ -97,11 +97,18 @@ layer, so there is no API through which a movement could be mutated or removed:
    precedent). The class exposes **no instance methods at all** — no mutators, no
    getters — so its prototype carries only the constructor. A constructed movement
    cannot change at runtime; a strict-mode write throws.
-2. **Port — only `append` + `listByVariant`.** `IStockMovementRepositoryPort` has
-   no `save`, `update`, or `delete`. An UPDATE/DELETE is not even *typeable*
+2. **Port — one write verb, and it only appends.** `IStockMovementRepositoryPort`
+   has no `save`, `update`, or `delete`. An UPDATE/DELETE is not even *typeable*
    against the seam the use cases inject. `append` is scope-aware so a movement is
    written in the **same transaction** as the `StockLevel` counter change that
-   caused it — a rolled-back counter change leaves no orphan movement row.
+   caused it — a rolled-back counter change leaves no orphan movement row. As
+   shipped here the surface was exactly `append` + `listByVariant`; a third,
+   read-only method `existsByReference(...)` was added later, when the
+   ledger-backed idempotency guard (the generated `movement_dedupe_key` column and
+   its `UC_STOCK_MOVEMENT_DEDUPE` UNIQUE, added by
+   `migrations/1783872387242-AddStockMovementDedupeKey.ts`) gave Commit Sale and
+   Restock From Return a way to recognise a redelivered request. The append-only
+   property is unchanged — the addition is a probe, not a mutator.
 3. **Repository — INSERT only.** `StockMovementTypeormRepository` implements the
    port **directly**, deliberately *not* extending `BaseTypeormRepository` (whose
    public `save` / `softDelete` would reintroduce mutation). Its one write verb,
@@ -152,10 +159,23 @@ This is the ledger's foundation; the following land in later inventory work:
   `listByVariant` method ships **now** so the read seam is complete, but nothing
   calls it yet.
 
+All of the above landed later in this same epic, and the ledger now has a writer
+on every counter-changing path: Release in
+[04](04-no-oversell-invariant-and-occ.md), Allocate and Cancel-Allocation in
+[06](06-allocate-on-place.md), Receive and Adjust in
+[08](08-receive-adjust-now-write-movements.md), Transfer in
+[09](09-transfer-stock-two-movements.md), and the `listByVariant` read seam wired
+through to `GET /api/inventory/variants/:variantId/movements` in
+[10](10-movements-audit-endpoint-and-http-file.md). Two further writers arrived
+with later capabilities — `sale` gained one with fulfilment (Commit Sale) and
+`return` with returns (Restock From Return) — so every member of the six-type
+vocabulary below now has a producer.
+
 ## See also
 
 - [ADR-030 — Reservation TTL aggregate and the stock-movement ledger](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md)
-- [ADR-027 — `StockLevel` running totals and `StockLocation`](../../adr/027-stocklevel-running-totals-and-stocklocation.md)
+- [ADR-027 — `StockLevel` running totals and
+  `StockLocation`](../../adr/027-stocklevel-running-totals-and-stocklocation.md)
   (the running totals that stay the balance authority)
 - [ADR-029 — Category materialized path and polymorphic media](../../adr/029-category-materialized-path-and-polymorphic-media.md)
   (the polymorphic-no-FK reference precedent)

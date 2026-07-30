@@ -54,10 +54,18 @@ arrives with the Reserve use case in a later session). The lifecycle is:
 `isExpired(now)` is a strict `<` comparison: a hold whose `expiresAt` equals
 `now` is **not** yet expired.
 
-> **There is no background sweeper yet.** A stale `active` hold keeps occupying
-> its `quantityReserved` counter until a manual release endpoint or a later
-> sweeper capability acts. The two indexes the table ships (below) exist for that
-> future scan.
+> **No background sweeper existed when this foundation shipped.** A stale `active`
+> hold kept occupying its `quantityReserved` counter until a manual release
+> endpoint acted, and the indexes the table ships (below) were added for that
+> future scan. **That scan has since arrived:**
+> [ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md) added
+> `SweepExpiredReservationsUseCase` — driven both by a scheduled
+> `ReservationSweepScheduler` and by an on-demand `inventory.reservation.sweep`
+> RPC — which is what now calls `expire()`, returns the held units to `available`,
+> and appends the negative `release` ledger row. A hold can still be
+> wall-clock-expired but still `active` in the window between its `expiresAt` and
+> the next sweep tick, so the inline TTL policies described in the sibling docs
+> remain load-bearing.
 
 ## 3. The status machine
 
@@ -113,10 +121,19 @@ The `reservation` table
   `UC_RESERVATION_CART_VARIANT_LOCATION (cart_id, variant_id, stock_location_id)`
   spans every status, which is the structural reason `reactivate` exists (§3) and
   the reason a lost INSERT race converges on reuse rather than a duplicate (below).
-- **Two sweeper indexes.** `IDX_RESERVATION_EXPIRES_AT (expires_at)` and
-  `IDX_RESERVATION_STATUS_EXPIRES_AT (status, expires_at)` serve the future
+- **Two sweeper indexes, of which one survives.** This migration created both
+  `IDX_RESERVATION_EXPIRES_AT (expires_at)` and
+  `IDX_RESERVATION_STATUS_EXPIRES_AT (status, expires_at)` to serve the future
   sweeper's "find stale active holds" scan (the composite one narrows by status
-  first).
+  first). Once the sweeper actually landed
+  ([ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md)) the
+  single-column index turned out to be dead weight and
+  `migrations/1783647515262-DropRedundantReservationExpiresAtIndex.ts` **dropped
+  it**: the composite is a strict superset for every read this table admits, since
+  the sweep filters `status = 'active'` and only then ranges on `expires_at`, and
+  a composite serves its leftmost prefix. Because `expires_at` is rewritten by
+  every Reserve, `refresh()` and Allocate, the redundant index was pure write
+  amplification on the hottest column of a hot table.
 - **Cross-service FKs in the one shared database.** `variant_id →
   product_variant(id)`, `stock_location_id → stock_location(id)`, and `cart_id →
   cart(id)`, all `ON DELETE RESTRICT` — a referenced variant / location / cart
@@ -151,12 +168,18 @@ transaction-scope-aware** so reservation reads/writes join the same unit of work
 as the `StockLevel` counter change:
 
 ```ts
-findById(id, scope?)
-findByKey(cartId, variantId, stockLocationId, scope?)   // any status — the UNIQUE triple
-listActiveByCart(cartId, scope?)
-listActiveByCartAndVariant(cartId, variantId, scope?)
-save(reservation, scope?)                               // insert-or-update by id; re-read
+findById(id, scope ?)
+findByKey(cartId, variantId, stockLocationId, scope ?)   // any status — the UNIQUE triple
+listActiveByCart(cartId, scope ?)
+listActiveByCartAndVariant(cartId, variantId, scope ?)
+save(reservation, scope ?)                               // insert-or-update by id; re-read
 ```
+
+Since the sweeper landed
+([ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md)) the port
+carries a sixth method — `listExpiredActive(now, limit, scope?)`, the bounded,
+oldest-first candidate scan for stale `active` holds that the composite
+`(status, expires_at)` index above serves.
 
 `ReservationTypeormRepository` is the single `@InjectRepository(ReservationEntity)`
 site. Its `save` re-reads the row so the committed `version` and DB timestamps come

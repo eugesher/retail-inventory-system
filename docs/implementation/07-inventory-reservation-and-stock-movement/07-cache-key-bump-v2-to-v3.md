@@ -56,7 +56,7 @@ data exists, and the cache is a latency optimization over MySQL (the source of
 truth), so an orphaned `v2` entry is at worst a one-TTL miss, never a correctness
 problem.
 
-## The new legacy prefix in a five-family fan-out
+## The new legacy prefix in a five-family fan-out (since reduced to one)
 
 A rolling deploy can leave in-flight `v2` entries written by an old replica moments
 before the bump. To wipe those promptly rather than waiting out their TTL, the
@@ -68,23 +68,35 @@ invalidate-only builder was added:
 inventoryStockLegacyPrefixV2: (id: number): string => `ris:inventory:stock:v2:${id}:`,
 ```
 
-It is exposed **solely** for the transition-window wipe — reads and writes use the
-current `v3` builders. `StockCache.invalidatePrefixes` now issues **five**
-`delByPrefix` calls per affected `variantId`:
+It was exposed **solely** for the transition-window wipe — reads and writes use the
+current `v3` builders. As this shipped, `StockCache.invalidatePrefixes` issued
+**five** `delByPrefix` calls per affected `variantId`, one per historical family.
 
-| Prefix builder | Shape | Role |
-|---|---|---|
-| `inventoryStockPrefix` | `ris:[t:…:]inventory:stock:v3:<id>:` | current (tenant-aware) |
-| `inventoryStockLegacyPrefixV2` | `ris:inventory:stock:v2:<id>:` | pre-v3 (this bump) |
-| `inventoryStockLegacyPrefixV1` | `ris:inventory:stock:v1:<id>:` | pre-v2 |
-| `inventoryStockLegacyPrefix` | `ris:inventory:stock:<id>:` | pre-v1 (no version) |
-| `productStockPrefix` | `stock:<id>:` | pre-ADR-016 |
+> **That fan-out has since been removed** (ISSUE-03;
+> [ADR-053](../../adr/053-how-a-transition-window-closes.md)). The write path now
+> wipes **exactly one** prefix — the live `v3` one — and all four retired builders
+> have **no caller at all**. The reasoning: there is deliberately no full-key
+> builder for a retired shape, so an entry written under one is unreachable
+> garbage that no request could ever be served; it ages out on its own TTL. The
+> four extra `SCAN`s could never match anything that mattered, yet ran on the hot
+> path of every receive, adjust, reserve, release, allocate and transfer —
+> a permanent tax to close a transition window that nobody ever closed. The table
+> below is kept as the **registry** of every shape this key has had, with each
+> row's role *today*.
+
+| Prefix builder                 | Shape                                | Role today                                                                   |
+|--------------------------------|--------------------------------------|------------------------------------------------------------------------------|
+| `inventoryStockPrefix`         | `ris:[t:…:]inventory:stock:v3:<id>:` | current (tenant-aware) — read, written, **and the one prefix a write wipes** |
+| `inventoryStockLegacyPrefixV2` | `ris:inventory:stock:v2:<id>:`       | pre-v3 (this bump) — retired, no caller                                      |
+| `inventoryStockLegacyPrefixV1` | `ris:inventory:stock:v1:<id>:`       | pre-v2 — retired, no caller                                                  |
+| `inventoryStockLegacyPrefix`   | `ris:inventory:stock:<id>:`          | pre-v1 (no version) — retired, no caller                                     |
+| `productStockPrefix`           | `stock:<id>:`                        | pre-ADR-016 — retired, no caller                                             |
 
 Only the current `v3` family carries the opt-in `t:<tenantId>:` segment; the four
-legacy shapes are wiped tenant-agnostically (the older shapes never carried a tenant
-segment, and the `v2` legacy builder takes only the id). Each `delByPrefix` runs
-`SCAN MATCH <prefix>*` + `UNLINK`, so the fan-out is bounded and non-blocking on
-Redis's main thread.
+legacy shapes never carried a tenant segment (the `v2` legacy builder takes only
+the id), which is part of why they could not be swept tenant-correctly anyway. The
+surviving `delByPrefix` runs `SCAN MATCH <prefix>*` + `UNLINK`, so invalidation
+stays bounded and non-blocking on Redis's main thread.
 
 ## Verification
 
@@ -94,8 +106,9 @@ After deploying the bump, confirm reads/writes land on `v3` and no code writes `
 # Current-shape entries appear under v3 after a read primes them:
 redis-cli --scan --pattern 'ris:inventory:stock:v3:*'
 
-# No NEW v2 entries should appear after the deploy (a few may linger from
-# in-flight pre-deploy writes until the next invalidate or their TTL):
+# No NEW v2 entries should appear after the deploy. Any that linger from
+# in-flight pre-deploy writes now age out purely on their own TTL — since the
+# fan-out was removed (see above) nothing sweeps a retired prefix:
 redis-cli --scan --pattern 'ris:inventory:stock:v2:*'
 
 # Inspect a specific variant's cached availability + its remaining TTL:
