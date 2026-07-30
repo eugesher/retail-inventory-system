@@ -15,14 +15,14 @@ snapshotted its own working price, but Place Order re-resolves the authoritative
 price at placement). For every cart line, Place Order reads two things from the
 catalog microservice and freezes them onto the new `OrderLine`:
 
-| `OrderLine` field   | Source                                                      |
-| ------------------- | ----------------------------------------------------------- |
-| `sku`               | `catalog.variant.get` → the variant's SKU                   |
-| `nameSnapshot`      | `catalog.variant.get` → product name + variant option values |
-| `unitPriceMinor`    | `catalog.price.select` → the applicable price's `amountMinor` |
-| `taxAmountMinor`    | `0` (no tax capability — see below)                         |
-| `discountAmountMinor` | `0` (no discount capability)                              |
-| `lineTotalMinor`    | derived: `unitPriceMinor × quantity`                        |
+| `OrderLine` field     | Source                                                        |
+|-----------------------|---------------------------------------------------------------|
+| `sku`                 | `catalog.variant.get` → the variant's SKU                     |
+| `nameSnapshot`        | `catalog.variant.get` → product name + variant option values  |
+| `unitPriceMinor`      | `catalog.price.select` → the applicable price's `amountMinor` |
+| `taxAmountMinor`      | `0` (no tax capability — see below)                           |
+| `discountAmountMinor` | `0` (no discount capability)                                  |
+| `lineTotalMinor`      | derived: `unitPriceMinor × quantity`                          |
 
 `nameSnapshot` is **composed**: the product name plus the variant's option values,
 e.g. `Aurora Desk Lamp (color: warm-white)`. Composing the option values (sorted for
@@ -44,11 +44,21 @@ re-pricing a product tomorrow, or renaming it, or archiving the variant, would
 silently rewrite every historical order that contained it. That is wrong — the buyer
 agreed to a specific price for a specifically named item at a specific instant.
 
-So the line **freezes** the catalog values at place-time. `OrderLine` is fully
-immutable — every field is `readonly` and the instance is `Object.freeze`-d at
-construction — so the snapshot cannot drift after placement
-([ADR-028 §1](../../adr/028-cart-order-payment-and-address-chain.md)). A later price
-change appends a new `price` row (the pricing ledger never mutates history,
+So the line **freezes** the catalog values at place-time. `OrderLine`'s money/identity
+snapshot fields — `sku`, `nameSnapshot`, `unitPriceMinor`, `quantity`, the money
+columns — are each `readonly` with **no setter**, so the snapshot cannot drift after
+placement ([ADR-028 §1](../../adr/028-cart-order-payment-and-address-chain.md)).
+
+> **The line is no longer `Object.freeze`-d, though.** At the walking-skeleton stage
+> the whole instance was frozen; later capabilities gave it a mutable
+> fulfillment-progress `status`
+> ([ADR-031](../../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)) and a
+> mutable `cancelledQuantity`
+> ([ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md)), and a freeze
+> would have frozen those too. The immutability that protects the buyer's contract is
+> the setter-less money/identity fields, not a whole-object freeze.
+
+A later price change appends a new `price` row (the pricing ledger never mutates history,
 [ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md)); a later
 rename updates the catalog `product` row; neither touches the placed `order_line`.
 The variant stays resolvable even after it is archived precisely so that the

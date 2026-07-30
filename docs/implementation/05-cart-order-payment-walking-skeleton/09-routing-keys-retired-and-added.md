@@ -21,14 +21,14 @@ The previous order model exposed one coarse RPC surface plus three lifecycle eve
 All six were deleted outright when the legacy order tables were dropped (the cleanup
 removes, never renames — [ADR-028](../../adr/028-cart-order-payment-and-address-chain.md)):
 
-| Retired key | Was | Notes |
-|---|---|---|
-| `retail.order.create` | RPC | Created an order directly from a request body — superseded by the cart → place flow. |
-| `retail.order.confirm` | RPC | Cross-service stock-confirm on confirm; the whole confirm seam moved to a future inventory-reservation capability. |
-| `retail.order.get` | RPC | Single-order read — **re-introduced** below with owner-or-staff authorization (a name reused, a different contract). |
-| `retail.order.created` | event | Order-created fan-out to notification — **re-pointed** to `retail.order.placed` (see below). |
-| `retail.order.confirmed` | event | Reserved lifecycle event; no producer/consumer survived the rebuild. |
-| `retail.order.cancelled` | event | Reserved lifecycle event; the rebuilt `Order` has no cancel mutator yet. |
+| Retired key              | Was   | Notes                                                                                                                |
+|--------------------------|-------|----------------------------------------------------------------------------------------------------------------------|
+| `retail.order.create`    | RPC   | Created an order directly from a request body — superseded by the cart → place flow.                                 |
+| `retail.order.confirm`   | RPC   | Cross-service stock-confirm on confirm; the whole confirm seam moved to a future inventory-reservation capability.   |
+| `retail.order.get`       | RPC   | Single-order read — **re-introduced** below with owner-or-staff authorization (a name reused, a different contract). |
+| `retail.order.created`   | event | Order-created fan-out to notification — **re-pointed** to `retail.order.placed` (see below).                         |
+| `retail.order.confirmed` | event | Reserved lifecycle event; no producer/consumer survived the rebuild.                                                 |
+| `retail.order.cancelled` | event | Reserved lifecycle event; the rebuilt `Order` has no cancel mutator yet.                                             |
 
 ## Added — the cart / order / payment surface
 
@@ -39,30 +39,30 @@ controller, since placement produces an `Order`.
 
 ### RPC command keys (API Gateway → Retail, served on `retail_queue`)
 
-| Key | Kind | Handler | Resolves |
-|---|---|---|---|
-| `retail.cart.create` | RPC | cart controller | `CartView` |
-| `retail.cart.get` | RPC | cart controller | `CartView` (owner-checked) |
-| `retail.cart.add-line` | RPC | cart controller | `CartView` (snapshots price; unpriced variant → 409) |
-| `retail.cart.change-line-quantity` | RPC | cart controller | `CartView` (`0` rejected) |
-| `retail.cart.remove-line` | RPC | cart controller | `CartView` |
-| `retail.cart.claim` | RPC | cart controller | `CartView` (guest-cart promotion) |
-| `retail.cart.place` | RPC | **orders** controller | `OrderView` (convert cart → order, authorize-on-place) |
-| `retail.order.get` | RPC | orders controller | `OrderView` (owner or staff `order:read`) |
-| `retail.order.list` | RPC | orders controller | `IPage<OrderView>` (own-only, newest-first) |
-| `retail.payment.capture` | RPC | orders controller | `OrderView` (owner or staff `order:capture`) |
+| Key                                | Kind | Handler               | Resolves                                               |
+|------------------------------------|------|-----------------------|--------------------------------------------------------|
+| `retail.cart.create`               | RPC  | cart controller       | `CartView`                                             |
+| `retail.cart.get`                  | RPC  | cart controller       | `CartView` (owner-checked)                             |
+| `retail.cart.add-line`             | RPC  | cart controller       | `CartView` (snapshots price; unpriced variant → 409)   |
+| `retail.cart.change-line-quantity` | RPC  | cart controller       | `CartView` (`0` rejected)                              |
+| `retail.cart.remove-line`          | RPC  | cart controller       | `CartView`                                             |
+| `retail.cart.claim`                | RPC  | cart controller       | `CartView` (guest-cart promotion)                      |
+| `retail.cart.place`                | RPC  | **orders** controller | `OrderView` (convert cart → order, authorize-on-place) |
+| `retail.order.get`                 | RPC  | orders controller     | `OrderView` (owner or staff `order:read`)              |
+| `retail.order.list`                | RPC  | orders controller     | `IPage<OrderView>` (own-only, newest-first)            |
+| `retail.payment.capture`           | RPC  | orders controller     | `OrderView` (owner or staff `order:capture`)           |
 
 ### Event keys
 
-| Key | Kind | Queue | Consumer |
-|---|---|---|---|
-| `retail.cart.created` | event | `retail_queue` | none (reserved surface) |
-| `retail.cart.line-added` | event | `retail_queue` | none (reserved surface) |
-| `retail.cart.line-removed` | event | `retail_queue` | none (reserved surface) |
-| `retail.cart.line-quantity-changed` | event | `retail_queue` | none (reserved surface) |
-| **`retail.order.placed`** | event | **`notification_events`** | **`OrderEventsConsumer`** (active) |
-| `retail.payment.authorized` | event | `retail_queue` | none (reserved surface) |
-| `retail.payment.captured` | event | `retail_queue` | none (reserved surface) |
+| Key                                 | Kind  | Queue                     | Consumer                           |
+|-------------------------------------|-------|---------------------------|------------------------------------|
+| `retail.cart.created`               | event | `retail_queue`            | none (reserved surface)            |
+| `retail.cart.line-added`            | event | `retail_queue`            | none (reserved surface)            |
+| `retail.cart.line-removed`          | event | `retail_queue`            | none (reserved surface)            |
+| `retail.cart.line-quantity-changed` | event | `retail_queue`            | none (reserved surface)            |
+| **`retail.order.placed`**           | event | **`notification_events`** | **`OrderEventsConsumer`** (active) |
+| `retail.payment.authorized`         | event | `retail_queue`            | none (reserved surface)            |
+| `retail.payment.captured`           | event | `retail_queue`            | none (reserved surface)            |
 
 `retail.order.placed` is the only retail event with a live consumer. It is emitted
 onto `notification_events` — the notification microservice's queue — because the
@@ -91,27 +91,39 @@ The re-point is a clean re-create, not a rename, because the payload changed sha
   is a thin header: `orderId` / `orderNumber` identify the order, `grandTotalMinor` /
   `currency` / `lineCount` summarize it, `customerId` is the gateway customer UUID or
   `null` (a tombstoned order). A consumer that needs line detail reads the order back.
-  `eventVersion` is pinned `'v1'`; `occurredAt` is ISO-8601.
+  `eventVersion` is pinned `'v1'`; `occurredAt` is ISO-8601. (Since
+  [ADR-033](../../adr/033-notification-templates-deliveries-and-render-dispatch.md) the
+  event also carries `customerEmail` / `customerLocale`, resolved producer-side, so the
+  notification consumer needs no per-delivery customer RPC; `customerLocale` always ships
+  `null`.)
 
-The rebuilt leg is two files plus their registration:
+At the walking-skeleton stage the rebuilt leg was two files: an `OrderEventsConsumer`
+bound to `@EventPattern(ROUTING_KEYS.RETAIL_ORDER_PLACED)`, delegating to a
+`SendOrderNotificationUseCase` that built a `Notification` and dispatched it via the
+`NOTIFIER` port.
 
-- **`SendOrderNotificationUseCase`** consumes `IRetailOrderPlacedEvent`, builds a
-  `Notification` (`channel: LOG`, `recipient: 'order:<orderId>'`, subject/body citing
-  `orderNumber` + `grandTotalMinor` + `currency` + `lineCount`, `metadata` carrying the
-  event fields + `occurredAt`), logs the `correlationId`, and dispatches via the
-  `NOTIFIER` port (default `LogNotifierAdapter`).
-- **`OrderEventsConsumer`** binds `@EventPattern(ROUTING_KEYS.RETAIL_ORDER_PLACED)` →
-  `SendOrderNotificationUseCase.execute(event)`.
+> **The notification pipeline was later rebuilt around templates + deliveries**
+> ([ADR-033](../../adr/033-notification-templates-deliveries-and-render-dispatch.md)), so
+> `SendOrderNotificationUseCase` no longer exists. `OrderEventsConsumer` still binds
+> `@EventPattern(RETAIL_ORDER_PLACED)`, but now routes the event through the shared
+> `dispatchCustomerEmailNotification` helper into **`RenderAndDispatchUseCase`**: it loads
+> the active `retail.order.placed` template, renders it against the event fields, persists
+> a `queued` `NotificationDelivery` **before** the `NOTIFIER` call, then flips the row.
+> The recipient is the event's `customerEmail` (resolved producer-side, ADR-033); the
+> buyer's `customerId` is the dedupe anchor collapsing an at-least-once redelivery. This
+> consumer is one of **six** dispatch consumers registered in `notifications.module.ts`
+> today, not the single one it started as.
 
-Both are registered in `notifications.module.ts` alongside the untouched low-stock
-consumer. The full path — gateway → retail Place Order → `retail.order.placed` →
-notification fan-out — is the same `retail.order.placed` emit the place use case
-performs best-effort post-commit; the notification microservice now picks it up.
+The full path — gateway → retail Place Order → `retail.order.placed` → notification
+fan-out — is the same `retail.order.placed` emit the place use case performs best-effort
+post-commit; the notification microservice picks it up.
 
 ## Related documents
 
-- [01 — Retail rebuild, old tables dropped](01-retail-rebuild-and-old-tables-dropped.md) — where the six keys were retired.
-- [07 — Authorize on place, capture explicit](07-authorize-on-place-capture-explicit-q5.md) — the producer of `retail.order.placed`.
+- [01 — Retail rebuild, old tables dropped](01-retail-rebuild-and-old-tables-dropped.md) — where the six keys were
+  retired.
+- [07 — Authorize on place, capture explicit](07-authorize-on-place-capture-explicit-q5.md) — the producer of
+  `retail.order.placed`.
 - [ADR-008 — RabbitMQ wiring and dotted routing keys](../../adr/008-rabbitmq-via-libs-messaging.md).
 - [ADR-011 — `NotifierPort` and the notification microservice template](../../adr/011-notifier-port-and-adapters.md).
 - [ADR-028 — Cart / Order / Payment / Address chain](../../adr/028-cart-order-payment-and-address-chain.md).

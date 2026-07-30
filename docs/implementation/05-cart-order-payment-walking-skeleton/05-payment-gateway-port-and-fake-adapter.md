@@ -27,14 +27,30 @@ authorize-when-an-order-is-placed, capture-when-the-goods-ship — is exactly wh
 want to model now.
 
 The resolution is a **port-and-adapter split**. The `IPaymentGatewayPort` interface
-declares the two operations the checkout needs:
+declares the operations the checkout needs — at the walking-skeleton stage two,
+authorize and capture:
 
 ```ts
-authorize(req: IPaymentAuthorizeRequest): Promise<IPaymentAuthorizeResult>;
-capture(gatewayReference: string, correlationId?: string): Promise<IPaymentCaptureResult>;
+authorize(req
+:
+IPaymentAuthorizeRequest
+):
+Promise<IPaymentAuthorizeResult>;
+capture(gatewayReference
+:
+string, correlationId ? : string
+):
+Promise<IPaymentCaptureResult>;
 ```
 
-The future Place Order and Capture use cases depend **only** on this interface. The
+> **The port now carries a third operation, `refund`**, added with the returns/refunds
+> capability ([ADR-032](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)):
+> `refund(req: IPaymentRefundRequest): Promise<IPaymentRefundResult>`. A real processor
+> authorizes, captures **and** refunds through one seam, so `refund` joined this port
+> rather than getting a parallel one, and `FakePaymentGatewayAdapter` grew a matching
+> always-succeed `refund` that mints a fresh `fake_refund_<uuid>` reference.
+
+The Place Order and Capture use cases depend **only** on this interface. The
 concrete processor is selected by a single provider binding in `orders.module.ts`.
 Today that binding is the `FakePaymentGatewayAdapter`; swapping in a real processor
 later is:
@@ -85,17 +101,17 @@ not a context of its own.
 
 ### Fields and invariants
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `id` | `number \| null` | DB-assigned BIGINT, null until persisted |
-| `orderId` | `number` | the order this pays — positive integer |
-| `amountMinor` | `number` | minor units (integer cents), non-negative |
-| `currency` | `string` | non-empty |
-| `method` | `string` | opaque gateway token (e.g. `fake-card`), non-empty |
-| `status` | `PaymentStatusEnum` | the payment-row lifecycle |
-| `gatewayReference` | `string` | opaque gateway reference, non-empty, UNIQUE in the DB |
-| `authorizedAt` | `Date \| null` | stamped at authorize |
-| `capturedAt` | `Date \| null` | null until capture |
+| Field              | Type                | Notes                                                 |
+|--------------------|---------------------|-------------------------------------------------------|
+| `id`               | `number \| null`    | DB-assigned BIGINT, null until persisted              |
+| `orderId`          | `number`            | the order this pays — positive integer                |
+| `amountMinor`      | `number`            | minor units (integer cents), non-negative             |
+| `currency`         | `string`            | non-empty                                             |
+| `method`           | `string`            | opaque gateway token (e.g. `fake-card`), non-empty    |
+| `status`           | `PaymentStatusEnum` | the payment-row lifecycle                             |
+| `gatewayReference` | `string`            | opaque gateway reference, non-empty, UNIQUE in the DB |
+| `authorizedAt`     | `Date \| null`      | stamped at authorize                                  |
+| `capturedAt`       | `Date \| null`      | null until capture                                    |
 
 Invariant violations throw the orders context's `OrderDomainException` with a typed
 `OrderErrorCodeEnum` code (`PAYMENT_*`) — `Payment` **reuses the existing orders
@@ -108,10 +124,10 @@ HTTP status when the operations land; the domain stays transport-free.
 
 The payment **row** status is a separate enum from the order's payment **axis**:
 
-| Enum | Members | Lives on |
-| --- | --- | --- |
-| `OrderPaymentStatusEnum` | `none` · `authorized` · `captured` · `refunded` · `failed` | the `order` header |
-| `PaymentStatusEnum` | `authorized` · `captured` · `voided` · `refunded` · `failed` | a `payment` row |
+| Enum                     | Members                                                                    | Lives on           |
+|--------------------------|----------------------------------------------------------------------------|--------------------|
+| `OrderPaymentStatusEnum` | `none` · `authorized` · `captured` · `refunded` · `failed`                 | the `order` header |
+| `PaymentStatusEnum`      | `authorized` · `capturing` · `captured` · `voided` · `refunded` · `failed` | a `payment` row    |
 
 The order axis carries a `none` member for the **pre-payment window** — an order
 exists before any money moves. A `payment` **row**, by contrast, only ever exists
@@ -120,22 +136,36 @@ because an authorize succeeded, so its earliest state is `authorized`; there is 
 the guard against assigning `none` to a payment row. `voided` is the payment-row
 counterpart of an order-level cancel-before-capture.
 
-### One mutation: `capture`
+### Capture: one mutation at this stage, split into two later
 
-`Payment` exposes exactly **one** state mutation:
+At the walking-skeleton stage `Payment` exposed exactly **one** state mutation:
 
-- `capture(at: Date)` — `authorized → captured`, stamping `capturedAt`. It rejects
+- `capture(at: Date)` — `authorized → captured`, stamping `capturedAt`. It rejected
   any non-`authorized` start (a double-capture, or capturing a voided/failed
   payment) with `PAYMENT_INVALID_STATUS_TRANSITION`.
 
 Construction is through `Payment.authorized({ orderId, amountMinor, currency, method,
 gatewayReference, authorizedAt })` — the path from a successful gateway authorize,
 which opens the payment `AUTHORIZED` with `capturedAt = null` — or `Payment.reconstitute(props)`
-on the load path. `void` / `refund` / `fail` transitions are **deliberately absent**:
-they would be dead, untested code in this chain. They land with the cancel / refund /
-decline capabilities that drive them. The unit spec covers the `authorized` factory
-(status + null `capturedAt`), the `authorized → captured` transition, capture's
-rejection of a non-authorized payment, and the field invariants.
+on the load path.
+
+> **The mutator set has grown well past one.** Two capabilities reached into
+> `Payment`:
+>
+> - **Claim-before-you-charge** ([ADR-052](../../adr/052-claim-before-you-charge.md))
+    > split the single `capture(at)` into **two** transitions: `beginCapture()`
+    > (`authorized → capturing`, the durable claim written under a row lock and committed
+    > *before* the gateway call) and `completeCapture(at)` (`capturing → captured`), plus
+    > `releaseCapture()` (`capturing → authorized`, when the gateway *declined*). The old
+    > one-shot `capture(at)` no longer exists.
+> - **Cancel / refund** added `void()` (`authorized → voided`, an un-captured cancel),
+    > `flagForRefund()` (mark a captured payment as owing money back), and `refund(amountMinor)`
+    > (accumulate `refundedAmountMinor`; on a full refund walk `captured → refunded`) —
+    > [ADR-032](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md).
+>
+> The aggregate correspondingly gained `flaggedForRefund` and `refundedAmountMinor`
+> fields (both default `false` / `0`). The `capturing` state also joined
+> `PaymentStatusEnum` (see below).
 
 The aggregate records **no domain events**. The wire events for the checkout flow
 (`retail.order.placed`, and the payment surface) belong to the order use cases that
@@ -148,17 +178,17 @@ services ([ADR-011](../../adr/011-notifier-port-and-adapters.md) /
 One migration creates the `payment` table (`synchronize` stays off,
 [ADR-019](../../adr/019-typeorm-and-mysql-for-persistence.md)):
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `BIGINT UNSIGNED` PK | generated; the entity keeps `BaseEntity`'s numeric PK |
-| `order_id` | `BIGINT UNSIGNED` | plain scalar + FK — Payment is its own root, **not** an owned child of Order |
-| `amount_minor` | `BIGINT` | minor units; mysql2 returns it as a string, the mapper coerces with `Number(...)` |
-| `currency` | `CHAR(3)` | |
-| `method` | `VARCHAR(64)` | opaque |
-| `status` | `ENUM(...)` | the five `PaymentStatusEnum` values |
-| `gateway_reference` | `VARCHAR(255)` | **UNIQUE** (`UC_PAYMENT_GATEWAY_REFERENCE`) |
-| `authorized_at` / `captured_at` | `TIMESTAMP NULL` | |
-| `created_at` / `updated_at` / `deleted_at` | `TIMESTAMP` | `deleted_at` inert — payments are append-only |
+| Column                                     | Type                 | Notes                                                                             |
+|--------------------------------------------|----------------------|-----------------------------------------------------------------------------------|
+| `id`                                       | `BIGINT UNSIGNED` PK | generated; the entity keeps `BaseEntity`'s numeric PK                             |
+| `order_id`                                 | `BIGINT UNSIGNED`    | plain scalar + FK — Payment is its own root, **not** an owned child of Order      |
+| `amount_minor`                             | `BIGINT`             | minor units; mysql2 returns it as a string, the mapper coerces with `Number(...)` |
+| `currency`                                 | `CHAR(3)`            |                                                                                   |
+| `method`                                   | `VARCHAR(64)`        | opaque                                                                            |
+| `status`                                   | `ENUM(...)`          | the five `PaymentStatusEnum` values                                               |
+| `gateway_reference`                        | `VARCHAR(255)`       | **UNIQUE** (`UC_PAYMENT_GATEWAY_REFERENCE`)                                       |
+| `authorized_at` / `captured_at`            | `TIMESTAMP NULL`     |                                                                                   |
+| `created_at` / `updated_at` / `deleted_at` | `TIMESTAMP`          | `deleted_at` inert — payments are append-only                                     |
 
 - **`order_id` is a plain column + the `FK_PAYMENT_ORDER` foreign key**, not an
   owned-child `@ManyToOne` relation, because `Payment` is its own aggregate root. The
@@ -170,6 +200,13 @@ One migration creates the `payment` table (`synchronize` stays off,
   `deleted_at IS NULL` to every `find`) — it stays **inert**; a payment is never
   soft-deleted.
 
+> **The table has since gained two columns**, both defaulting so the add was
+> non-destructive: `flagged_for_refund BOOLEAN DEFAULT false` (set by Cancel Order on a
+> captured payment) and `refunded_amount_minor BIGINT UNSIGNED DEFAULT 0` (the cumulative
+> refunded total) — the returns/refunds capability
+> ([ADR-032](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)). Read the
+> current column list off `payment.entity.ts` + its migrations.
+
 `PaymentTypeormRepository` is the single `@InjectRepository` site for the payment
 aggregate. Its `save` is a single-row upsert (no owned children, no `@VersionColumn`)
 that **re-reads the row by id** so the returned aggregate carries the concrete
@@ -178,9 +215,21 @@ order and address repositories follow. It returns domain types only — no TypeO
 leaks past it (ADR-017). The port is:
 
 ```ts
-save(payment: Payment): Promise<Payment>;
-findById(id: number): Promise<Payment | null>;
-findByOrderId(orderId: number): Promise<Payment | null>;   // one payment per order here
+save(payment
+:
+Payment
+):
+Promise<Payment>;
+findById(id
+:
+number
+):
+Promise<Payment | null>;
+findByOrderId(orderId
+:
+number
+):
+Promise<Payment | null>;   // one payment per order here
 ```
 
 `findByOrderId` returns a single `Payment | null` rather than an array because this
