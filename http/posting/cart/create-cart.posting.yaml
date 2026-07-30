@@ -2,7 +2,9 @@ name: create-cart
 description: |-
   POST /api/cart  (Bearer — owner is the authenticated customer)
   Opens a new active cart for the caller. Body (CreateCartRequestDto):
-    currency?: 3-letter code (defaults to USD)
+    currency?: 3-letter code. Omit it and the cart opens in the deployment's
+               configured DEFAULT_CURRENCY, resolved retail-side — NOT
+               necessarily USD, which is only the shipped default.
   Response is CartView { id, customerId, currency, status, lines: [], subtotalMinor }.
 method: POST
 url: $ENV_BASE_URL/cart

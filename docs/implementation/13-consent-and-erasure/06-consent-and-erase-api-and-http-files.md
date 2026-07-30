@@ -98,7 +98,8 @@ POST /api/admin/customers/{id}/erase
   operator knows which customer that is, and the two must agree. The full rationale
   is [05-confirm-email-guard.md](05-confirm-email-guard.md).
 - The erase **nulls PII** across `customer`, its `address` rows, and abandons active
-  `cart`s in one transaction; sets `status='deleted'` + `deleted_at`; nulls the
+  `cart`s, plus deletes the customer's `consent_record` row, in one transaction; sets
+  `status='deleted'` + `deleted_at`; nulls the
   refresh-token hash (so any live session's `/auth/refresh` now `401`s). It emits
   `customer.erased`, which carries **no PII** — ids and `erasedAt` only.
 - It is **idempotent**: re-erasing an already-`deleted` customer is a `200` no-op

@@ -8,6 +8,7 @@ import {
   MAX_DELIVERY_ATTEMPTS,
   NOTIFICATION_DELIVERY_REPOSITORY,
 } from '../ports';
+import { staleQueuedHorizon } from './queued-staleness';
 import { RetryDeliveryUseCase } from './retry-delivery.use-case';
 
 // Exponential backoff base (milliseconds). The gate the sweeper applies is
@@ -35,8 +36,10 @@ export interface IRetrySweepResult {
 
 // Retry Failed Deliveries — the scheduled sweeper (ADR-033) driven by
 // `@nestjs/schedule`'s `DeliveryRetryScheduler`. It scans `failed` deliveries that have
-// not yet exhausted their `MAX_DELIVERY_ATTEMPTS` budget (`listRetryable`), applies the
-// exponential backoff gate, and re-dispatches each due row through
+// not yet exhausted their `MAX_DELIVERY_ATTEMPTS` budget **and `queued` deliveries orphaned
+// between the persist and the dispatch** (`listRetryable`, two arms — see
+// `queued-staleness.ts`), applies the exponential backoff gate, and re-dispatches each due
+// row through
 // `RetryDeliveryUseCase.reattempt` — the same single re-dispatch + cap-emit path the
 // manual retry uses. A row that reaches the cap stays `failed`, emits
 // `notifications.delivery.failed` once (inside `reattempt`), and is excluded from every
@@ -63,7 +66,11 @@ export class RetryFailedDeliveriesUseCase {
     const sweepCorrelationId = randomUUID();
     const now = new Date();
 
-    const items = await this.deliveryRepo.listRetryable(this.maxAttempts, SWEEP_BATCH_SIZE);
+    const items = await this.deliveryRepo.listRetryable(
+      this.maxAttempts,
+      SWEEP_BATCH_SIZE,
+      staleQueuedHorizon(now),
+    );
 
     let skipped = 0;
     let retried = 0;
@@ -98,8 +105,13 @@ export class RetryFailedDeliveriesUseCase {
   }
 
   // The backoff gate: a row is due when its last attempt is at least `backoff(attemptCount)`
-  // in the past. A row with no recorded attempt (defensive — a `failed` row always has one)
-  // is treated as immediately due.
+  // in the past.
+  //
+  // A row with no recorded attempt is treated as immediately due, and that branch is no
+  // longer merely defensive — it is the ORPHANED `queued` row's path. Such a row has
+  // `lastAttemptAt === null` and `attemptCount === 0` because no attempt was ever recorded
+  // against it, and it needs no backoff here: the scan's `created_at < queuedStaleBefore`
+  // bound already made it wait out the staleness horizon before it could be selected at all.
   private isDue(lastAttemptAt: Date | null, attemptCount: number, now: Date): boolean {
     if (lastAttemptAt === null) {
       return true;

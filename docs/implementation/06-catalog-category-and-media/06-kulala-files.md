@@ -19,12 +19,12 @@ permission gating asserted from the seeded users
 
 ## Artifacts
 
-| Artifact | What it locks |
-| --- | --- |
-| `test/catalog-categories.e2e-spec.ts` | The category surface through the gateway: hierarchy + paths, reparent + subtree rebase, reclassify + both browse endpoints, the cycle 409, and the 401/403/404/409 gates. |
-| `test/catalog-media.e2e-spec.ts` | The polymorphic media surface: attach-appends-in-order, atomic reorder (200 + the mismatch 409), detach as an archive flip (+ the second-detach 409), variant-scoped media, and the 401/403/404/400 gates. |
-| `http/kulala/catalog-categories.http` | An interactive, top-to-bottom walk of the same category flows, ending in a deliberate cycle-reparent 409. |
-| `http/kulala/catalog-media.http` | An interactive walk of the media flows + a deliberate mismatch-reorder 409, plus the publish soft-warning demonstration. |
+| Artifact                              | What it locks                                                                                                                                                                                              |
+|---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `test/catalog-categories.e2e-spec.ts` | The category surface through the gateway: hierarchy + paths, reparent + subtree rebase, reclassify + both browse endpoints, the cycle 409, and the 401/403/404/409 gates.                                  |
+| `test/catalog-media.e2e-spec.ts`      | The polymorphic media surface: attach-appends-in-order, atomic reorder (200 + the mismatch 409), detach as an archive flip (+ the second-detach 409), variant-scoped media, and the 401/403/404/400 gates. |
+| `http/kulala/catalog-categories.http` | An interactive, top-to-bottom walk of the same category flows, ending in a deliberate cycle-reparent 409.                                                                                                  |
+| `http/kulala/catalog-media.http`      | An interactive walk of the media flows + a deliberate mismatch-reorder 409, plus the publish soft-warning demonstration.                                                                                   |
 
 ## A prerequisite: the gateway now forwards the typed error code
 

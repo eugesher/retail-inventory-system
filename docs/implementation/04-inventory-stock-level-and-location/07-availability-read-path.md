@@ -22,10 +22,10 @@ two use cases depend on `INVENTORY_GATEWAY_PORT`, and only
 `InventoryRabbitmqAdapter` (under `infrastructure/messaging/`) holds a
 `ClientProxy`.
 
-| Route | Auth | RPC | Returns |
-| ----- | ---- | --- | ------- |
-| `GET /api/inventory/variants/:variantId/stock` | `@Public()` | `inventory.stock-level.get` | `VariantStockView` |
-| `GET /api/inventory/locations` | `@RequiresPermission(inventory:read)` | `inventory.location.list` | `StockLocationView[]` |
+| Route                                          | Auth                                  | RPC                         | Returns               |
+|------------------------------------------------|---------------------------------------|-----------------------------|-----------------------|
+| `GET /api/inventory/variants/:variantId/stock` | `@Public()`                           | `inventory.stock-level.get` | `VariantStockView`    |
+| `GET /api/inventory/locations`                 | `@RequiresPermission(inventory:read)` | `inventory.location.list`   | `StockLocationView[]` |
 
 The two gates differ on purpose
 ([ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)):
@@ -105,11 +105,12 @@ The variant-stock read is cached with Redis cache-aside
 ([ADR-002](../../adr/002-redis-cache-aside-product-stock.md)); the location list
 is not (a small, slow-changing set). The mechanism is unchanged from the prior
 inventory model — only the cached *value shape* changed, which is what forced the
-[`v1 → v2` key-version bump](04-cache-key-bump-v1-to-v2.md). The cached value is
-the `VariantStockView`, stored under
+[`v1 → v2` key-version bump](04-cache-key-bump-v1-to-v2.md) (and, later, a `v2 → v3`
+bump — ADR-030 §7, when reservations began moving `quantityReserved`; the live segment
+is `v3` today). The cached value is the `VariantStockView`, stored under
 
 ```
-ris:inventory:stock:v2:<variantId>:<facet>
+ris:inventory:stock:v3:<variantId>:<facet>
 ```
 
 where `<facet>` is the sorted, comma-joined location scope, or the `__all__`
@@ -175,8 +176,8 @@ With the stack and a fresh seed up (`docker compose up -d`, `yarn migration:run`
 curl -s http://localhost:3000/api/inventory/variants/1/stock | jq
 
 # Same read again, then confirm the cache key landed in Redis
-redis-cli --scan 'ris:inventory:stock:v2:*'
-#   ris:inventory:stock:v2:1:__all__
+redis-cli --scan 'ris:inventory:stock:v3:*'
+#   ris:inventory:stock:v3:1:__all__
 
 # Location list — 401 without a token, 200 with a staff bearer (admin or warehouse-staff)
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/inventory/locations   # 401

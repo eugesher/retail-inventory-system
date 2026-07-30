@@ -26,7 +26,8 @@ keys on).
 
 ## 1. Why a sibling module, not a new microservice
 
-Pricing could have been a fifth deployable. It is not, and the reason is bounded
+Pricing could have been a deployable of its own — a fifth at the time this
+landed; the system runs **six** today. It is not, and the reason is bounded
 contexts and the cost of a network hop:
 
 - **Pricing colocates with catalog by domain.** A price is attached to a
@@ -49,7 +50,10 @@ contexts and the cost of a network hop:
   wiring. A sibling module reuses the catalog service's RMQ transport: pricing's
   future `@MessagePattern` handlers listen on the same `catalog_queue` the catalog
   controller already uses, and the gateway proxies them over the same client. One
-  service, two modules, one queue.
+  service, two modules, one queue. (They landed exactly so: `PricingController`
+  carries **six** `@MessagePattern` handlers on `catalog_queue` — see
+  [05 — Set / Schedule / Select Applicable Price](05-select-applicable-price.md) §5
+  and [03 — `TaxCategory` and variant attachment](03-tax-category-and-variant-attachment.md) §6.)
 
 This mirrors how the API gateway already hosts two stateful modules side by side —
 `auth` and `iam` ([ADR-024](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)) —
@@ -96,26 +100,31 @@ with the pricing domain and use cases.
 
 ### `index.ts` and the `pricingEntities` seam
 
-The module-root barrel exports two things:
+The module-root barrel re-exports two things:
 
 - `PricingModule` — re-exported from `./pricing.module`.
-- `pricingEntities` — `export const pricingEntities: EntityClassOrSchema[] = [];`
+- `pricingEntities` — re-exported from `./infrastructure/persistence`, where the
+  const is actually declared.
 
 `pricingEntities` is the seam the service's composition root consumes. The catalog
 service runs **one** MySQL connection, registered once at the app level. Its
-`app/app.module.ts` now reads:
+`app/app.module.ts` reads:
 
 ```ts
-DatabaseModule.forRoot([...(catalogEntities ?? []), ...pricingEntities]),
+DatabaseModule.forRoot([...catalogEntities, ...pricingEntities]),
 ```
 
 so the single `forRoot` aggregates the entities of both colocated modules. The
 array is empty today — pricing owns no persistence yet — and gains the `Price` /
 `TaxCategory` entities when they land, **without touching `app.module.ts` again**.
-Typing it as a concrete `EntityClassOrSchema[]` (never `undefined`) keeps the
-spread well-typed under `strictNullChecks`; `catalogEntities` is typed as the
-looser `TypeOrmModuleOptions['entities']` (which may be `undefined`), hence the
-`?? []` guard on its half of the spread.
+
+**The const must stay unannotated.** The original scaffold typed it
+`export const pricingEntities: EntityClassOrSchema[] = []` and guarded the sibling
+half of the spread as `...(catalogEntities ?? [])`. Both were dropped:
+`TypeOrmModuleOptions['entities']` is a *parameter* type (`MixedList | undefined`),
+so annotating either list with it stops the value being spreadable and stops it
+satisfying `forFeature`. Today both consts are plain inferred arrays of entity
+classes, spread directly with no cast and no `?? []`.
 
 ## 3. Boundaries — same rules, no config change
 
@@ -147,7 +156,7 @@ by the opaque **`variantId`** and must never import a catalog domain type. The
 fixture injects
 
 ```ts
-import { Product } from '../../catalog/domain/product.model';
+import {Product} from '../../catalog/domain/product.model';
 ```
 
 at a `pricing/domain/__fixture__.ts` path and asserts `boundaries/dependencies`
@@ -172,9 +181,12 @@ categories) need a code, so this change adds:
 PRICING_WRITE = 'pricing:write',
 ```
 
-It matches the registry's `^[a-z][a-z-]*:[a-z][a-z-]*$` shape. No route is gated
-by it yet — the gateway pricing routes are later work — but the code exists in the
-single source of truth so that work has it to reference.
+It matches the registry's `^[a-z][a-z-]*:[a-z][a-z-]*$` shape. No route was gated
+by it at this point — the gateway pricing routes were later work — but the code
+existed in the single source of truth so that work had it to reference. It now
+gates the **three** pricing write routes at the gateway (set/schedule a price,
+create a tax category, attach one to a variant); see
+[06 — Pricing API at the gateway](06-pricing-api-and-kulala.md) §2.
 
 ### The enum ↔ seed coupling
 

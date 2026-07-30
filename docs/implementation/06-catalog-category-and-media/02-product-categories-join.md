@@ -17,12 +17,12 @@ All four operations are RPCs on `catalog_queue`, served by the catalog
 There is **no gateway HTTP surface yet** — these RPCs are reachable from an RMQ
 client and the unit suite; the HTTP edge is a later catalog capability.
 
-| RPC key | Use case | Response |
-| --- | --- | --- |
-| `catalog.category.list` | `ListCategoriesUseCase` | `CategoryView[]` |
-| `catalog.category.get-tree` | `GetCategoryTreeUseCase` | `CategoryTreeNodeView` |
+| RPC key                          | Use case                      | Response                         |
+|----------------------------------|-------------------------------|----------------------------------|
+| `catalog.category.list`          | `ListCategoriesUseCase`       | `CategoryView[]`                 |
+| `catalog.category.get-tree`      | `GetCategoryTreeUseCase`      | `CategoryTreeNodeView`           |
 | `catalog.category.list-products` | `ListCategoryProductsUseCase` | `IPage<ProductWithVariantsView>` |
-| `catalog.product.reclassify` | `ReclassifyProductUseCase` | `ProductCategoriesView` |
+| `catalog.product.reclassify`     | `ReclassifyProductUseCase`    | `ProductCategoriesView`          |
 
 `catalog.product.reclassify` is a `product.*` key but is served by the **category**
 controller — the operation's subject is the product's category membership, not the
@@ -36,12 +36,13 @@ membership is a classic N↔M relationship, and it is stored as a **bare join
 table**:
 
 ```sql
-CREATE TABLE product_categories (
-  product_id  BIGINT UNSIGNED NOT NULL,
-  category_id BIGINT UNSIGNED NOT NULL,
-  PRIMARY KEY (product_id, category_id),
-  FOREIGN KEY (product_id)  REFERENCES product(id)  ON DELETE CASCADE,
-  FOREIGN KEY (category_id) REFERENCES category(id) ON DELETE CASCADE
+CREATE TABLE product_categories
+(
+    product_id  BIGINT UNSIGNED NOT NULL,
+    category_id BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (product_id, category_id),
+    FOREIGN KEY (product_id) REFERENCES product (id) ON DELETE CASCADE,
+    FOREIGN KEY (category_id) REFERENCES category (id) ON DELETE CASCADE
 );
 ```
 
@@ -86,11 +87,15 @@ therefore idempotent by construction:
 
 ```sql
 -- attachProductCategories(productId, [3, 5])
-INSERT IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?), (?, ?);
+INSERT
+IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?), (?, ?);
 --   params: [productId, 3, productId, 5]
 
 -- detachProductCategories(productId, [3, 5])
-DELETE FROM product_categories WHERE product_id = ? AND category_id IN (?, ?);
+DELETE
+FROM product_categories
+WHERE product_id = ?
+  AND category_id IN (?, ?);
 --   params: [productId, 3, 5]
 ```
 
@@ -121,12 +126,12 @@ the product exists, the category repository resolves slugs and writes the join �
 and returns the product header plus its **full current membership** after the
 operation (the "updated product header", not a diff).
 
-| Condition | Code | HTTP |
-| --- | --- | --- |
-| Product id not found | `CATALOG_PRODUCT_NOT_FOUND` | 404 |
-| A slug in **either** list resolves to no category | `CATALOG_CATEGORY_NOT_FOUND` | 404 |
-| A slug in the **attach** list is an **archived** category | `CATALOG_CATEGORY_ARCHIVED` | 409 |
-| A slug in the **detach** list is an **archived** category | *(allowed)* | — |
+| Condition                                                 | Code                         | HTTP |
+|-----------------------------------------------------------|------------------------------|------|
+| Product id not found                                      | `CATALOG_PRODUCT_NOT_FOUND`  | 404  |
+| A slug in **either** list resolves to no category         | `CATALOG_CATEGORY_NOT_FOUND` | 404  |
+| A slug in the **attach** list is an **archived** category | `CATALOG_CATEGORY_ARCHIVED`  | 409  |
+| A slug in the **detach** list is an **archived** category | *(allowed)*                  | —    |
 
 The asymmetry on archived categories is intentional and mirrors the create/reparent
 rules from doc 01:
@@ -206,13 +211,14 @@ The membership filter is a **parameterized id-subselect** against the bare join,
 never a string-interpolated id list:
 
 ```sql
-SELECT … FROM product p
-LEFT JOIN product_variant pv ON pv.product_id = p.id
+SELECT …
+FROM product p
+         LEFT JOIN product_variant pv ON pv.product_id = p.id
 WHERE p.status = 'active'
-  AND p.id IN (
-    SELECT pc.product_id FROM product_categories pc
-    WHERE pc.category_id IN (:...categoryIds)   -- ids bound, implicitly DISTINCT
-  )
+  AND p.id IN (SELECT pc.product_id
+               FROM product_categories pc
+               WHERE pc.category_id IN (:...categoryIds) -- ids bound, implicitly DISTINCT
+)
 ORDER BY p.id DESC;
 ```
 
@@ -236,16 +242,16 @@ its own decision when a consumer exists.
 
 ## 6. Where the code lives
 
-| Concern | File |
-| --- | --- |
-| Reclassify use case | `application/use-cases/reclassify-product.use-case.ts` |
-| List / tree / browse use cases | `application/use-cases/list-categories.use-case.ts`, `get-category-tree.use-case.ts`, `list-category-products.use-case.ts` |
-| Tree-node + membership-view factory | `application/use-cases/category-view.factory.ts` (`toCategoryTreeNode`), `catalog-view.factory.ts` (`toProductView`) |
-| Membership SQL (`INSERT IGNORE` / `DELETE` / id-subselect) | `infrastructure/persistence/category-typeorm.repository.ts` |
-| Category-scoped product browse SQL | `infrastructure/persistence/catalog-typeorm.repository.ts` (`listActiveByCategoryIds`) |
-| RPC handlers (4) | `presentation/category.controller.ts` |
-| Wire contracts | `libs/contracts/catalog/dto/{category-tree,product-categories}.view.ts`, `interfaces/{category-list,category-tree,category-products,product-reclassify}.interface.ts` |
-| Routing keys | `libs/messaging/routing-keys.constants.ts` + the mirrored `MicroserviceMessagePatternEnum` |
+| Concern                                                    | File                                                                                                                                                                  |
+|------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Reclassify use case                                        | `application/use-cases/reclassify-product.use-case.ts`                                                                                                                |
+| List / tree / browse use cases                             | `application/use-cases/list-categories.use-case.ts`, `get-category-tree.use-case.ts`, `list-category-products.use-case.ts`                                            |
+| Tree-node + membership-view factory                        | `application/use-cases/category-view.factory.ts` (`toCategoryTreeNode`), `catalog-view.factory.ts` (`toProductView`)                                                  |
+| Membership SQL (`INSERT IGNORE` / `DELETE` / id-subselect) | `infrastructure/persistence/category-typeorm.repository.ts`                                                                                                           |
+| Category-scoped product browse SQL                         | `infrastructure/persistence/catalog-typeorm.repository.ts` (`listActiveByCategoryIds`)                                                                                |
+| RPC handlers (4)                                           | `presentation/category.controller.ts`                                                                                                                                 |
+| Wire contracts                                             | `libs/contracts/catalog/dto/{category-tree,product-categories}.view.ts`, `interfaces/{category-list,category-tree,category-products,product-reclassify}.interface.ts` |
+| Routing keys                                               | `libs/messaging/routing-keys.constants.ts` + the mirrored `MicroserviceMessagePatternEnum`                                                                            |
 
 With these four operations, the category surface is **RPC-complete**:
 create, reparent, list, tree, browse, and reclassify all exist over RabbitMQ. What

@@ -200,7 +200,7 @@ export class CancelLineUseCase {
     quantity: number,
     actorId: string,
     correlationId: string,
-  ): IAllocationCancelPayload {
+  ): Omit<IAllocationCancelPayload, 'operationKey'> {
     return {
       orderId: order.id!,
       lines: [{ variantId, stockLocationId: INVENTORY_DEFAULT_STOCK_LOCATION, quantity }],

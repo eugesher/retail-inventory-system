@@ -75,6 +75,15 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       CACHE_TTL_MS_DEFAULT: 60000
+      # THREE deployables read this one variable and they must agree: the catalog
+      # prices against it, the cart opens in it, and a `?currency`-less price read
+      # here scopes to it. Set it on one and not the others and a correctly
+      # configured non-USD shop displays no price at all — every variant, every
+      # read (ISSUE-11). `Order.currency` is immutable, so a mismatched cart bakes
+      # the wrong unit into the order forever. It carries a Joi default, so a
+      # missing value never fails boot — which is exactly what makes a partial
+      # override silent.
+      DEFAULT_CURRENCY: USD
       OTEL_SERVICE_NAME: api-gateway
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     volumes:
@@ -174,6 +183,10 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       CACHE_TTL_MS_DEFAULT: 60000
+      # The currency a cart opens in — the same variable the catalog prices
+      # against and the gateway scopes a price read to. See the note on the
+      # api-gateway service; all three must carry the same value.
+      DEFAULT_CURRENCY: USD
       # Idempotency-key retention + optimistic-concurrency retry budget (ADR-036).
       IDEMPOTENCY_KEY_TTL_HOURS: 24
       OCC_RETRY_ATTEMPTS: 5
@@ -206,6 +219,9 @@ services:
       EVENTSTORE_DATABASE_URL: mysql://retail:retailpass@mysql:3306/ris_eventstore
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      # The currency the publish price gate resolves against — shared with the
+      # gateway's price reads and the cart. See the note on the api-gateway
+      # service; all three must carry the same value.
       DEFAULT_CURRENCY: USD
       OTEL_SERVICE_NAME: catalog-microservice
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces

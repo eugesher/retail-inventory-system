@@ -42,6 +42,14 @@ apps/api-gateway/src/modules/catalog/
   catalog.module.ts                # binds CATALOG_GATEWAY_PORT -> adapter
 ```
 
+That is the module **as this change leaves it**. Later capabilities extended the
+same three folders rather than adding modules: `catalog.controller.ts` now also
+fronts the six pricing / tax-category routes (ADR-026), and two sibling
+controllers appeared beside it — `category.controller.ts` and
+`media.controller.ts` (ADR-029). `ICatalogGatewayPort` and
+`CatalogRabbitmqAdapter` grew one method per new RPC. The seven routes described
+in §3 are unchanged in path, permission and status code.
+
 Like the other gateway modules — and unlike the `auth` module — the catalog
 module has **no `domain/`**: the gateway holds no catalog state, it only
 translates HTTP into RPC (ADR-009). The dependency direction is
@@ -84,15 +92,15 @@ stays green: the only transport import lives where the rules permit it.
 The controller is mounted at `@Controller('catalog')`; with the gateway's `api`
 global prefix the routes are under `/api/catalog`.
 
-| Method | Path | Body / query | Auth | Success |
-|---|---|---|---|---|
-| `POST` | `/products` | `{ name, slug, description? }` | `@RequiresPermission(CATALOG_WRITE)` | `201` `ProductView` (`status: 'draft'`) |
-| `POST` | `/products/:productId/variants` | `{ sku, gtin?, optionValues, weightG?, dimensionsMm? }` | `@RequiresPermission(CATALOG_WRITE)` | `201` `ProductVariantView` |
-| `POST` | `/products/:productId/publish` | — | `@RequiresPermission(CATALOG_PUBLISH)` | `200` `ProductView` (`status: 'active'`, `publishedAt`) |
-| `POST` | `/products/:productId/archive` | — | `@RequiresPermission(CATALOG_WRITE)` | `200` `ProductView` (`status: 'archived'`, `archivedAt`) |
-| `GET` | `/products` | `?status=&page=&pageSize=&search=` | `@Public()` | `200` `IPage<ProductWithVariantsView>` |
-| `GET` | `/products/:slug` | — | `@Public()` | `200` `ProductWithVariantsView` |
-| `GET` | `/variants/:variantId` | — | `@Public()` | `200` `VariantWithProductView` |
+| Method | Path                            | Body / query                                            | Auth                                   | Success                                                                      |
+|--------|---------------------------------|---------------------------------------------------------|----------------------------------------|------------------------------------------------------------------------------|
+| `POST` | `/products`                     | `{ name, slug, description? }`                          | `@RequiresPermission(CATALOG_WRITE)`   | `201` `ProductView` (`status: 'draft'`)                                      |
+| `POST` | `/products/:productId/variants` | `{ sku, gtin?, optionValues, weightG?, dimensionsMm? }` | `@RequiresPermission(CATALOG_WRITE)`   | `201` `ProductVariantView`                                                   |
+| `POST` | `/products/:productId/publish`  | —                                                       | `@RequiresPermission(CATALOG_PUBLISH)` | `200` `ProductView` (`status: 'active'`, `publishedAt`, optional `warnings`) |
+| `POST` | `/products/:productId/archive`  | —                                                       | `@RequiresPermission(CATALOG_WRITE)`   | `200` `ProductView` (`status: 'archived'`, `archivedAt`)                     |
+| `GET`  | `/products`                     | `?status=&page=&pageSize=&search=`                      | `@Public()`                            | `200` `IPage<ProductWithVariantsView>`                                       |
+| `GET`  | `/products/:slug`               | —                                                       | `@Public()`                            | `200` `ProductWithVariantsView`                                              |
+| `GET`  | `/variants/:variantId`          | —                                                       | `@Public()`                            | `200` `VariantWithProductView`                                               |
 
 Each route resolves a `correlationId` via `@CorrelationId()`, delegates to its
 use case, and returns the use case's value. `:productId` / `:variantId` parse
@@ -118,11 +126,11 @@ All gateway routes are protected by default by the global guard chain
 routes split cleanly along the read/write line:
 
 - **Write routes** carry `@RequiresPermission(<code>)`:
-  - `catalog:write` for **register**, **add-variant**, and **archive** — the
-    content-authoring mutations.
-  - `catalog:publish` for **publish** — promoting a product into the live
-    catalogue is the higher-trust action, so it gets its own code. A role may
-    hold `catalog:write` without `catalog:publish`.
+    - `catalog:write` for **register**, **add-variant**, and **archive** — the
+      content-authoring mutations.
+    - `catalog:publish` for **publish** — promoting a product into the live
+      catalogue is the higher-trust action, so it gets its own code. A role may
+      hold `catalog:write` without `catalog:publish`.
 - **Read routes** carry `@Public()` so an unauthenticated shopper can browse the
   catalogue. The browse/resolve surface is the Customer-facing read path
   ([ADR-025](../../adr/025-catalog-product-and-variant-aggregate.md)): public
@@ -168,30 +176,44 @@ authoritatively downstream.
 
 The use cases wrap the port call and translate a failed RPC into an HTTP
 exception via the shared `throwRpcError` helper (`common/utils`), exactly as the
-retail and inventory gateway use cases do. When a downstream handler rejects with
-a structured `RpcException({ statusCode, message })`, `throwRpcError` re-throws
-the matching `NotFoundException` / `BadRequestException`; anything else becomes a
-`500`.
+retail and inventory gateway use cases do. It reads `{ statusCode, message, code }`
+(plus an optional structured `details`) off the rejection value and re-throws the
+matching Nest exception: `404 → NotFoundException`, `400 → BadRequestException`,
+`409 → ConflictException`, `403 → ForbiddenException`, any other tagged 4xx/5xx →
+a bare `HttpException` carrying that status. A rejection with **no** `code` (a
+transport-level failure, an untyped `Error`) falls through to a `500`. The typed
+`code` is forwarded into the HTTP body so a client can branch on
+`CATALOG_PRODUCT_SLUG_TAKEN` rather than brittle-matching a message.
 
-Note the current downstream behavior: the catalog microservice's write/read use
-cases throw a `CatalogDomainException` (a plain `DomainException`, not an
-`RpcException`). NestJS's RMQ transport flattens any non-`RpcException` error to
-`{ status: 'error', message: 'Internal server error' }` on the wire, so the typed
-`CatalogErrorCodeEnum` does not survive the process boundary and a domain
-rejection (e.g. a duplicate slug, or publishing a variant-less product) currently
-surfaces at the gateway as a `500`. The gateway seam is already in the right
-shape to map those precisely (`PRODUCT_NOT_FOUND` → 404, `*_TAKEN` → 409,
-invariant/transition codes → 400) the moment the catalog microservice raises a
-structured `RpcException` carrying the status — the same pattern the retail
-`OrderConfirmPipe` already uses for its not-found rejection. None of the
-happy-path or permission flows are affected.
+**The other half of that seam lives downstream**, and it closed the gap this
+section originally described. The catalog microservice's use cases throw a
+`CatalogDomainException` — a plain `DomainException`, not an `RpcException` — and
+Nest's RMQ transport flattens any non-`RpcException` error to
+`{ status: 'error', message: 'Internal server error' }`, which is why every
+catalog rejection once surfaced at the gateway as a `500`. The fix was on the
+microservice side: `presentation/catalog-rpc-exception.filter.ts`
+(`CatalogRpcExceptionFilter`, registered via `APP_FILTER` in `catalog.module.ts`)
+terminates each `CatalogDomainException` into exactly the `{ statusCode, message,
+code }` shape `throwRpcError` understands. Its status table is a **total**
+`Record<CatalogErrorCodeEnum, HttpStatus>`, so a new error code fails the build
+until it is given a status:
+
+| Code family                                                                                                                                                        | HTTP  |
+|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------|
+| `PRODUCT_NOT_FOUND`, `VARIANT_NOT_FOUND`                                                                                                                           | `404` |
+| `PRODUCT_SLUG_TAKEN`, `VARIANT_SKU_TAKEN`, `PRODUCT_INVALID_STATE_TRANSITION`, `PRODUCT_PUBLISH_REQUIRES_VARIANT`, `PRODUCT_PUBLISH_REQUIRES_PRICE`                | `409` |
+| `PRODUCT_NAME_REQUIRED`, `PRODUCT_SLUG_REQUIRED`, `VARIANT_SKU_REQUIRED`, `VARIANT_OPTION_VALUES_REQUIRED`, `VARIANT_WEIGHT_INVALID`, `VARIANT_DIMENSIONS_INVALID` | `400` |
+
+(The same filter also covers the category and media codes added by ADR-029.)
+Plain `Error`s — genuine invariant breaches such as "persisted variant id missing
+after save" — are deliberately **not** caught and stay `500`.
 
 ## 7. Verification
 
 ```bash
 yarn lint                 # --max-warnings 0, exit 0
 yarn test:unit            # unchanged — the gateway module is covered by e2e
-yarn build                # 5 apps compile
+yarn build                # every app compiles (six deployables today)
 
 # End-to-end through the gateway (fresh infra reload → migrate → seed → tests):
 yarn test:e2e             # test/catalog.e2e-spec.ts green
@@ -204,3 +226,14 @@ by-variant), admin archives it, and the anonymous browse no longer lists it. The
 permission gates assert `403` for the no-catalog-permission staff user on both a
 write and the publish route, `401` for an unauthenticated write, and `200` for
 the unauthenticated public browse.
+
+The spec has since gained two things worth knowing before running it. First, a
+step between add-variant and publish that inserts an **open USD price row per
+variant** straight over SQL (`CatalogE2ESpecDataSource.insertActivePrice`),
+because publish now hard-fails without one (§ ADR-026 —
+[05](./05-catalog-use-cases.md) §4). Second, a
+`typed domain errors map to HTTP statuses` block that pins the §6 mapping
+end-to-end: unknown slug → `404`, unknown variant id → `404`, duplicate slug →
+`409`, duplicate sku → `409`, publishing an archived (non-draft) product →
+`409`. Every fixture is stamped with `Date.now()`, so the spec is re-runnable
+against an already-seeded database.

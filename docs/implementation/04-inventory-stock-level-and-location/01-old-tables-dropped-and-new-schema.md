@@ -52,9 +52,10 @@ ledger-as-source-of-truth stores the *inputs* (every delta) and pays the cost on
 **read** (re-aggregate). Stock is read far more often than it is mutated, and a
 position's row count under a ledger is unbounded over its lifetime — so running
 totals fit the workload. The audit value a ledger gave for free is preserved
-separately: a dedicated stock-movement log (owned by the later
-inventory-reservation capability) records every change, but it is **not** the
-authority for the current balance.
+separately: a dedicated stock-movement log — added by the later inventory-reservation
+capability ([ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md))
+and now written by every counter-changing operation, Receive and Adjust included —
+records every change, but it is **not** the authority for the current balance.
 
 See [02-default-stocklocation-auto-provision.md](02-default-stocklocation-auto-provision.md)
 for why exactly one default location is auto-provisioned, and

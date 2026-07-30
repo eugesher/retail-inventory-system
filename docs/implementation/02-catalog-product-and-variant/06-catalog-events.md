@@ -12,7 +12,8 @@ It is the companion to
 use cases that produce these events. The wiring rules it follows are
 [ADR-008 (RabbitMQ via `libs/messaging`, dotted routing keys)](../../adr/008-rabbitmq-via-libs-messaging.md),
 [ADR-020 (RabbitMQ as the inter-service bus)](../../adr/020-rabbitmq-as-inter-service-bus.md),
-and [ADR-011 (wire events are plain interfaces, never `DomainEvent` subclasses)](../../adr/011-notifier-port-and-adapters.md).
+and [ADR-011 (wire events are plain interfaces, never
+`DomainEvent` subclasses)](../../adr/011-notifier-port-and-adapters.md).
 The code lives under
 `apps/catalog-microservice/src/modules/catalog/infrastructure/messaging/`,
 `libs/contracts/catalog/`, and `libs/messaging/`.
@@ -20,18 +21,22 @@ The code lives under
 ## 1. Routing keys — command vs event
 
 The catalog write seam owns seven routing keys: four imperative RPC commands and
-three past-tense events. The wire format is the dotted
+three past-tense events. (The read path adds three more RPC keys —
+`catalog.product.list` / `.get` and `catalog.variant.get`, see
+[05](./05-catalog-use-cases.md) §9; the pricing, category and media capabilities
+add their own later. The seven below are the write seam's.) The wire format is
+the dotted
 `<service>.<aggregate>.<action>` convention every key follows (ADR-008):
 
-| `ROUTING_KEYS` member | wire value | kind |
-|---|---|---|
-| `CATALOG_PRODUCT_REGISTER` | `catalog.product.register` | RPC command |
-| `CATALOG_PRODUCT_PUBLISH` | `catalog.product.publish` | RPC command |
-| `CATALOG_PRODUCT_ARCHIVE` | `catalog.product.archive` | RPC command |
-| `CATALOG_VARIANT_CREATE` | `catalog.variant.create` | RPC command |
-| `CATALOG_VARIANT_CREATED` | `catalog.variant.created` | event |
-| `CATALOG_PRODUCT_PUBLISHED` | `catalog.product.published` | event |
-| `CATALOG_PRODUCT_ARCHIVED` | `catalog.product.archived` | event |
+| `ROUTING_KEYS` member       | wire value                  | kind        |
+|-----------------------------|-----------------------------|-------------|
+| `CATALOG_PRODUCT_REGISTER`  | `catalog.product.register`  | RPC command |
+| `CATALOG_PRODUCT_PUBLISH`   | `catalog.product.publish`   | RPC command |
+| `CATALOG_PRODUCT_ARCHIVE`   | `catalog.product.archive`   | RPC command |
+| `CATALOG_VARIANT_CREATE`    | `catalog.variant.create`    | RPC command |
+| `CATALOG_VARIANT_CREATED`   | `catalog.variant.created`   | event       |
+| `CATALOG_PRODUCT_PUBLISHED` | `catalog.product.published` | event       |
+| `CATALOG_PRODUCT_ARCHIVED`  | `catalog.product.archived`  | event       |
 
 The **command/event distinction is carried in the verb tense**. An imperative key
 (`catalog.variant.create`, `catalog.product.publish`, `catalog.product.archive`)
@@ -67,36 +72,40 @@ maps it to one of these interfaces.
 
 ```ts
 interface ICatalogVariantCreatedEvent extends ICorrelationPayload {
-  productId: number;
-  variantId: number;
-  sku: string;
-  eventVersion: 'v1';
-  occurredAt: string; // ISO-8601
+    productId: number;
+    variantId: number;
+    sku: string;
+    eventVersion: 'v1';
+    occurredAt: string; // ISO-8601
 }
 ```
 
-`variantId` is the **concrete, persisted id**. The in-process
-`VariantCreatedEvent` the aggregate records has a `null` id (it is recorded before
-the row exists); the use case re-reads the real id after commit and builds this
-payload then (see [05](./05-catalog-use-cases.md) §3).
+`variantId` is the **concrete, persisted id**, and it is non-nullable here on
+purpose. The in-process `VariantCreatedEvent` the aggregate records carries no
+variant id at all — it is recorded before the row exists — so the use case looks
+the saved variant up by `sku` after commit and builds this payload then (see
+[05](./05-catalog-use-cases.md) §3 and
+[03](./03-product-and-variant-domain.md) §5).
 
 ### `catalog.product.published`
 
 ```ts
 interface ICatalogProductPublishedEvent extends ICorrelationPayload {
-  productId: number;
-  slug: string;
-  variantIds: number[];
-  publishedAt: string;  // ISO-8601
-  eventVersion: 'v1';
-  occurredAt: string;   // ISO-8601
+    productId: number;
+    slug: string;
+    variantIds: number[];
+    publishedAt: string;  // ISO-8601
+    eventVersion: 'v1';
+    occurredAt: string;   // ISO-8601
 }
 ```
 
 Emitted after a product transitions `draft → active`. `variantIds` are the
-concrete variant ids that are now part of the published product — the eventual
-consumer (a later inventory capability that initialises a zero stock level per
-variant) keys on the **variant**, not the product (ADR-025). `publishedAt` is the
+concrete variant ids that are now part of the published product — a consumer
+keys on the **variant**, not the product (ADR-025). (In the event, inventory's
+zero-stock-level auto-init bound `catalog.variant.created` instead, which fires
+once per variant at add-time; `catalog.product.published` still has no business
+consumer and stays a reserved surface — §4.) `publishedAt` is the
 business timestamp of the transition; `occurredAt` is the event-envelope
 timestamp. They carry the same instant today (both are the drained
 `ProductPublishedEvent.occurredAt`), kept as distinct fields so a future producer
@@ -107,10 +116,10 @@ the emission `occurredAt` — without a breaking version bump.
 
 ```ts
 interface ICatalogProductArchivedEvent extends ICorrelationPayload {
-  productId: number;
-  archivedAt: string; // ISO-8601
-  eventVersion: 'v1';
-  occurredAt: string; // ISO-8601
+    productId: number;
+    archivedAt: string; // ISO-8601
+    eventVersion: 'v1';
+    occurredAt: string; // ISO-8601
 }
 ```
 
@@ -145,15 +154,23 @@ other microservices use — `@nestjs/microservices` transport types are allowed
 - **Port** — `application/ports/catalog-events.publisher.port.ts` declares
   `ICatalogEventsPublisherPort` and the DI symbol `CATALOG_EVENTS_PUBLISHER`. It
   has one method per catalog write event:
-  - `publishVariantCreated(event, correlationId?)`
-  - `publishProductPublished(event, correlationId?)`
-  - `publishProductArchived(event, correlationId?)`
+    - `publishVariantCreated(event, correlationId?)`
+    - `publishProductPublished(event, correlationId?)`
+    - `publishProductArchived(event, correlationId?)`
 - **Adapter** — `infrastructure/messaging/catalog-rabbitmq.publisher.ts`
   (`CatalogRabbitmqPublisher`) injects the catalog `ClientProxy` under the
   `CATALOG_MICROSERVICE` token and `emit`s each event onto its routing key,
   materialized with `firstValueFrom`. `ClientProxy.emit()` returns a cold
   Observable; `firstValueFrom` subscribes and waits for the broker ack, so the
   caller depends on a plain `Promise` (ADR-020).
+
+  The adapter now holds **two** clients and one mirror publisher, for reasons §4
+  covers: `catalog.variant.created` goes out through the
+  `INVENTORY_MICROSERVICE` client (its consumer lives on `inventory_queue`), the
+  other two through the `CATALOG_MICROSERVICE` client, and each `emit` is
+  followed by a best-effort `RisEventsMirrorPublisher.mirror(...)` onto the
+  `ris.events` topic exchange
+  ([ADR-035](../../adr/035-event-store-firehose-topic-exchange.md)).
 
 The **wire event is built in the use case, not the adapter.** This diverges from
 the retail `OrderRabbitmqPublisher` (which maps a domain event to its wire shape
@@ -172,16 +189,39 @@ thin `emit`-only seam whose sole job is to hide the `ClientProxy`.
 `catalog_queue` under the `CATALOG_MICROSERVICE` token, mirroring the other
 per-service client modules. The catalog microservice imports it to publish its
 **own** events — the service both listens on `catalog_queue` (its
-`@MessagePattern` handlers) and emits the three catalog events back onto it.
+`@MessagePattern` handlers) and, at this stage, emits all three catalog events
+back onto it.
 
-This is intentional. None of the three events has a cross-service consumer today:
-the eventual consumer of `catalog.variant.created` (and, transitively, of the
-`variantIds` in `catalog.product.published`) is a later inventory capability that
-will initialise a zero stock level for each new variant. Emitting an event to a
-queue with **no matching handler** is harmless and is exactly the reserved-surface
-pattern the system already uses for `retail.order.confirmed` (published today, no
-cross-service consumer). All queues bind to the default exchange
-(ADR-008/ADR-020); no topic-exchange routing is wired.
+This is intentional. None of the three events has a cross-service consumer *at
+this stage*: the eventual consumer of `catalog.variant.created` (and,
+transitively, of the `variantIds` in `catalog.product.published`) is a later
+inventory capability that will initialise a zero stock level for each new
+variant. Emitting an event to a queue with **no matching handler** is harmless
+and is exactly the reserved-surface pattern the system uses elsewhere.
+
+### What changed since
+
+Two later decisions moved this ground, and the current shape is worth stating
+plainly because it contradicts the paragraph above:
+
+- **`catalog.variant.created` acquired its consumer**, and therefore changed
+  queues. Inventory's `CatalogEventsConsumer`
+  (`apps/inventory-microservice/src/modules/stock/infrastructure/consumers/catalog-events.consumer.ts`)
+  binds it and drives `AutoInitStockLevelUseCase`, which creates the zeroed
+  `stock_level` row. Under the **producer-targets-the-consumer's-queue** rule
+  (ADR-008 / ADR-020) the catalog publisher therefore emits it through the
+  `INVENTORY_MICROSERVICE` client, onto `inventory_queue` — *not* `catalog_queue`.
+  `catalog.product.published` / `.archived` stay on `catalog_queue` and remain
+  genuine reserved surfaces.
+- **The default exchange is no longer the only one.** Since
+  [ADR-035](../../adr/035-event-store-firehose-topic-exchange.md) every producer
+  **dual-publishes**: the primary `emit` goes to the consumer's queue on the
+  default exchange as before, and the same routing key + payload is then mirrored
+  onto the `ris.events` **topic** exchange through the shared
+  `RisEventsMirrorPublisher`, where the event store's firehose queue (bound to a
+  lone `#`) captures it. The mirror is best-effort, non-throwing, and always
+  ordered *after* the primary emit, so a firehose problem can never affect the
+  business path.
 
 ## 5. The contracts surface
 
@@ -196,7 +236,8 @@ holds:
 - `dto/` — the RPC response views `ProductView` and `ProductVariantView`.
   `ProductView` gained optional `publishedAt` / `archivedAt` timestamps, set only
   by the operation that performs the matching transition (see
-  [05](./05-catalog-use-cases.md) §8).
+  [05](./05-catalog-use-cases.md) §8), and later an optional `warnings[]` set
+  only by publish.
 - `events/` — the three event interfaces above.
 
 Everything here is framework-free transport shape (the view DTOs carry
@@ -220,6 +261,8 @@ TypeScript on the producer and the consumer alike.
 
 This seam **emits** all three catalog events; it adds **no consumer** — the
 inventory side that auto-initialises a stock level for a new variant is owned by
-later inventory work. The read path (the published-catalogue query surface) and
-the API gateway HTTP surface that fronts these RPC commands are described in their
-own documents as they land.
+later inventory work. *(That consumer has since landed — see §4 "What changed
+since".)* The read path (the published-catalogue query surface) and the API
+gateway HTTP surface that fronts these RPC commands are described in their own
+documents: [05](./05-catalog-use-cases.md) §9 and
+[07](./07-api-gateway-catalog-module.md).

@@ -10,8 +10,8 @@ import { NotificationDeliveryStatusEnum } from './enums';
 // filter ⇒ every delivery, newest-first). `customerId` maps onto the row's
 // `recipient_customer_id` (the per-customer history read); `eventReferenceType` /
 // `eventReferenceId` scope to one business event (`order` / `return-request` /
-// `stock-low` / `fulfillment` / `refund` + its id); `status` scopes to one
-// lifecycle state.
+// `stock-low` / `fulfillment` / `refund` / `marketing` + its id); `status` scopes to
+// one lifecycle state.
 //
 // `page` is 1-based and `pageSize` is the page length — both optional here (the
 // gateway DTO defaults them at the edge, the use case defaults them again as a

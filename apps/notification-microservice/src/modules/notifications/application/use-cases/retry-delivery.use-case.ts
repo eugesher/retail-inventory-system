@@ -24,6 +24,7 @@ import {
   NOTIFIER,
 } from '../ports';
 import { toNotificationDeliveryView } from './notification-delivery-view.factory';
+import { isOrphanedQueued, QUEUED_STALE_AFTER_MS } from './queued-staleness';
 import { resolveTransportSubject } from './transport-subject';
 
 // Retry Delivery — the operator manual-retry of one `failed` notification delivery
@@ -39,10 +40,11 @@ import { resolveTransportSubject } from './transport-subject';
 // the sweeper calls directly with an already-loaded failed row (so the two retry paths
 // share one source of truth; the one-use-case-with-multiple-public-methods precedent).
 //
-// State rule: only a `failed` delivery is retryable. An unknown id →
-// `DELIVERY_NOT_FOUND` (404); a non-`failed` source (`queued` / `sent` / `delivered` /
-// `bounced`) → `DELIVERY_INVALID_STATUS_TRANSITION` (409). `correlationId` is logged
-// inline (ADR-011 §7).
+// State rule: a `failed` delivery is retryable, and so is a `queued` one that has been
+// orphaned mid-dispatch (older than the staleness horizon — `queued-staleness.ts`). An
+// unknown id → `DELIVERY_NOT_FOUND` (404); anything else, including a FRESH `queued` row
+// that is plausibly still dispatching → `DELIVERY_INVALID_STATUS_TRANSITION` (409).
+// `correlationId` is logged inline (ADR-011 §7).
 @Injectable()
 export class RetryDeliveryUseCase {
   constructor(
@@ -73,14 +75,26 @@ export class RetryDeliveryUseCase {
       );
     }
 
-    // Only a `failed` delivery is retryable. A `queued` row is awaiting its first
-    // dispatch, a `sent`/`delivered`/`bounced` row already succeeded — re-dispatching any
-    // of them would double-send. (`markFailed`/`markSent` would *accept* a `queued` row,
-    // so the guard is the use case's, not just the model's.)
-    if (delivery.status !== NotificationDeliveryStatusEnum.FAILED) {
+    // Two things are retryable, and the second is the narrow one:
+    //
+    //  - a `failed` delivery — the ordinary case, a recorded transport rejection;
+    //  - a `queued` delivery **older than the staleness horizon** — a row orphaned between
+    //    the persist and the dispatch (`queued-staleness.ts`). A FRESH `queued` row is still
+    //    refused: it is being dispatched right now, and re-dispatching it is not recovery.
+    //
+    // Everything else double-sends: a `sent`/`delivered`/`bounced` row already succeeded,
+    // and a `skipped-no-consent` row was deliberately not sent at all. (`markSent` /
+    // `markFailed` would *accept* a `queued` row — `assertAttemptable` always has — so the
+    // age half of this rule is the use case's, not the model's.)
+    if (
+      delivery.status !== NotificationDeliveryStatusEnum.FAILED &&
+      !isOrphanedQueued(delivery, new Date())
+    ) {
       throw new NotificationDomainException(
         NotificationErrorCodeEnum.DELIVERY_INVALID_STATUS_TRANSITION,
-        `Notification delivery ${deliveryId} is not retryable (status: ${delivery.status}); only a failed delivery can be retried`,
+        delivery.status === NotificationDeliveryStatusEnum.QUEUED
+          ? `Notification delivery ${deliveryId} is queued and may still be dispatching; it becomes retryable once it is older than ${QUEUED_STALE_AFTER_MS}ms`
+          : `Notification delivery ${deliveryId} is not retryable (status: ${delivery.status}); only a failed delivery, or a queued one orphaned mid-dispatch, can be retried`,
       );
     }
 

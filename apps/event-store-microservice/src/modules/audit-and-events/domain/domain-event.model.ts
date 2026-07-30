@@ -1,9 +1,9 @@
 // One immutable row of the event-store firehose log: a captured copy of a business
 // event that crossed the `ris.events` topic exchange
-// (docs/adr/035-event-store-firehose-topic-exchange.md). The `domain-events` module
-// sinks EVERY event the system publishes (the `#` firehose), so this model is the
-// universal envelope around an opaque `payload` — it is deliberately NOT a typed view
-// of any one producer's event.
+// (docs/adr/035-event-store-firehose-topic-exchange.md). The `audit-and-events` module's
+// `domain_event` log sinks EVERY event the system publishes (the `#` firehose), so this
+// model is the universal envelope around an opaque `payload` — it is deliberately NOT a
+// typed view of any one producer's event.
 //
 // Framework-free per ADR-004, and a fully **immutable** record in the `StockMovement`
 // ledger style (ADR-030 §2): every field is `public readonly`, the constructed

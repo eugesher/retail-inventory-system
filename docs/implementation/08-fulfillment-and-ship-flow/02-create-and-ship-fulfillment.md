@@ -75,9 +75,15 @@ For each requested `{ orderLineId, quantity }`:
    **already-fulfilled** quantity for that order line = the sum of its
    `FulfillmentLine.quantity` across all of the order's **non-`cancelled`**
    fulfillments (loaded via `FULFILLMENT_REPOSITORY.listByOrderId`). The request is
-   valid only when `alreadyFulfilled + requested ≤ ordered`; otherwise reject
+   valid only when `alreadyFulfilled + requested ≤ activeQuantity`; otherwise reject
    `FULFILLMENT_QUANTITY_EXCEEDS_REMAINING` (`409`), with the remaining count carried in
-   the message.
+   the message. (The bound was the place-time `ordered` when this shipped;
+   [ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md) replaced it with
+   `activeQuantity = ordered − cancelled_quantity`, because Cancel Line has by then already
+   released the cancelled units' allocation — shipping them would move stock inventory no
+   longer holds against this order.) Entries naming the **same** `orderLineId` twice in one
+   request are summed *before* the comparison, so a split request cannot over-ship one line
+   by having each entry checked independently.
 
 A **cancelled** fulfillment is excluded from the already-fulfilled sum, so cancelling a
 planned shipment frees its quantities back to the remaining pool — the units never
@@ -110,7 +116,10 @@ After the write commits, the use case emits `retail.fulfillment.created` best-ef
 onto `retail_queue` (built from the saved aggregate's concrete ids). The emit is
 post-commit and warn-and-swallow ([ADR-020](../../adr/020-rabbitmq-as-inter-service-bus.md)):
 a publish failure never fails a committed plan. The event is a reserved surface — no
-consumer is bound yet.
+**business** consumer is bound to it. It is no longer unobserved, though: since
+[ADR-035](../../adr/035-event-store-firehose-topic-exchange.md) every producer
+dual-publishes onto the `ris.events` topic exchange, so the event-store firehose
+ingests this event like every other.
 
 ## 2. Partial vs full ship (setup)
 
@@ -129,15 +138,16 @@ shipments fall out for free:
 
 The invariant that holds these together is the per-`OrderLine` sum: **across all of an
 order's non-`cancelled` fulfillments, the sum of a line's fulfilled quantities never
-exceeds the ordered quantity.** Create enforces it incrementally — each new shipment is
+exceeds the line's active quantity** (the ordered quantity when this shipped; `ordered −
+cancelled_quantity` since ADR-040). Create enforces it incrementally — each new shipment is
 measured against the already-fulfilled remainder (§1). A worked sequence for a line
 ordered at quantity 3:
 
-| Step | Request | Already fulfilled | Remaining | Outcome |
-| --- | --- | --- | --- | --- |
-| 1 | ship 2 | 0 | 3 | accepted (a `pending` fulfillment of 2) |
-| 2 | ship 2 | 2 | 1 | rejected `FULFILLMENT_QUANTITY_EXCEEDS_REMAINING` |
-| 3 | ship 1 | 2 | 1 | accepted (the line is now fully planned) |
+| Step | Request | Already fulfilled | Remaining | Outcome                                           |
+|------|---------|-------------------|-----------|---------------------------------------------------|
+| 1    | ship 2  | 0                 | 3         | accepted (a `pending` fulfillment of 2)           |
+| 2    | ship 2  | 2                 | 1         | rejected `FULFILLMENT_QUANTITY_EXCEEDS_REMAINING` |
+| 3    | ship 1  | 2                 | 1         | accepted (the line is now fully planned)          |
 
 The order's own roll-up `fulfillmentStatus` (`unfulfilled` →
 `partially-shipped` → `shipped`) is **not** stored on the fulfillment; it is derived by
@@ -191,9 +201,19 @@ authorization model.
 - **The fulfillment is `pending`.** Only a planned-but-unshipped shipment can ship; a
   `shipped` / `delivered` / `cancelled` one is `409`
   (`FULFILLMENT_INVALID_STATUS_TRANSITION`). A repeated ship of the same fulfillment is
-  therefore rejected rather than silently re-run — the `Idempotency-Key` header is
-  accepted and logged but **not** deduped, and Commit Sale is independently idempotent on
-  `fulfillmentId` inventory-side, so a genuine retry never double-decrements stock.
+  therefore rejected rather than silently re-run.
+
+  > **The `Idempotency-Key` is no longer merely logged.** When this shipped, the header was
+  > accepted and logged but **not** deduped, and the natural `pending`-only guard plus
+  > Commit Sale's inventory-side `fulfillmentId` idempotency were the whole story.
+  > [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) since made Ship one
+  > of the request-level-idempotent writes: the key is **required** (a missing one is
+  > `400`), the use case fingerprints the canonical body and looks
+  > `(scope='ship-fulfillment', key)` up in the `idempotency_key` store **before any side
+  > effect** — a same-key/same-body hit replays the stored `FulfillmentView` with no
+  > capture, no Commit Sale and no events, and a same-key/*different*-body hit is `422`.
+  > The `pending`-only guard survives underneath it as the backstop for a *new* key
+  > (§[07](07-fulfillment-http-files.md)).
 - **A tracking number is supplied** (the tracking-number policy, below).
 - **The order has a payment to capture.** A fulfillable order was authorized-on-place, so
   a missing payment is an invariant breach (`409`).
@@ -228,8 +248,13 @@ flag:
 1. **Each shipped `OrderLine.status`.** For every order line, the use case sums the units
    shipped across the order's `shipped`/`delivered` fulfillments (the just-shipped one is
    now `shipped` and counted). A line whose cumulative shipped quantity reaches its
-   ordered quantity flips to `shipped`; a line with *some but not all* units shipped flips
-   to `partially-shipped`; a line with no shipped units stays `allocated`. The flip rides
+   **active** quantity flips to `shipped`; a line with *some but not all* units shipped flips
+   to `partially-shipped`; a line with no shipped units stays `allocated`. (When this shipped
+   the bound was the place-time *ordered* quantity;
+   [ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md) replaced it with
+   `activeQuantity = quantity − cancelled_quantity`, and made the roll-up **skip** a line
+   whose active quantity is `0` — it is terminal at `cancelled`, can never accumulate
+   shipped units, and would otherwise pin the order's axis below `shipped` forever.) The flip rides
    `OrderLine.markFulfillment`, a forward-only mutator (`allocated → partially-shipped →
    shipped`) — the only mutable field on the otherwise-immutable place-time line snapshot.
 2. **The order's roll-up `fulfillmentStatus`.** `Order.advanceFulfillment(next)` sets the
@@ -251,10 +276,10 @@ a line `shipped` before its second box ever left.
 A worked sequence for a single-line order, line ordered at quantity 10, planned as two
 fulfillments F1 (qty 4) and F2 (qty 6):
 
-| Step | Action | Line shipped | Line status | Order `fulfillmentStatus` |
-| --- | --- | --- | --- | --- |
-| 1 | ship F1 | 4 / 10 | `partially-shipped` | `partially-shipped` |
-| 2 | ship F2 | 10 / 10 | `shipped` | `shipped` |
+| Step | Action  | Line shipped | Line status         | Order `fulfillmentStatus` |
+|------|---------|--------------|---------------------|---------------------------|
+| 1    | ship F1 | 4 / 10       | `partially-shipped` | `partially-shipped`       |
+| 2    | ship F2 | 10 / 10      | `shipped`           | `shipped`                 |
 
 All of step 1–3's writes — the fulfillment transition, the payment capture record (when
 one happened), the line flips, and the order-axis advance — commit in **one local

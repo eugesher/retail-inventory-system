@@ -43,10 +43,10 @@ things at once, breaking that invariant.
 
 So a transfer is modelled as a **pair** of `adjustment` rows:
 
-| Leg         | Location          | `quantity` | `reasonCode`   |
-| ----------- | ----------------- | ---------- | -------------- |
-| source      | `fromLocationId`  | `−quantity`| `transfer-out` |
-| destination | `toLocationId`    | `+quantity`| `transfer-in`  |
+| Leg         | Location         | `quantity`  | `reasonCode`   |
+|-------------|------------------|-------------|----------------|
+| source      | `fromLocationId` | `−quantity` | `transfer-out` |
+| destination | `toLocationId`   | `+quantity` | `transfer-in`  |
 
 Both rows carry the **same** `referenceType = 'transfer'` and the **same**
 `referenceId` — a single `crypto.randomUUID()` generated per transfer. That shared

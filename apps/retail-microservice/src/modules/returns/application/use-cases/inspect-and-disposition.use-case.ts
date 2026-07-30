@@ -9,6 +9,7 @@ import {
   ReturnDispositionEnum,
   ReturnRequestView,
 } from '@retail-inventory-system/contracts';
+import { retryThenLogForReplay } from '@retail-inventory-system/common';
 
 import {
   ReturnDomainException,
@@ -33,15 +34,27 @@ import {
 } from '../ports';
 import { loadReturnById } from './return-access';
 import { resolveCustomerEmail } from './resolve-customer-email';
-import { retryThenLogForReplay } from './retry-then-log-for-replay';
 import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
-// How many times Restock from Return is attempted after the local inspection commit
-// before the failure is logged for operator replay. Restock is idempotent on
-// `returnRequestId` inventory-side, so a retry never double-credits (ADR-032). Retries are
-// immediate (no backoff) — the realistic failure is a transient RMQ hiccup the broker
-// recovers from (the `COMMIT_SALE_MAX_ATTEMPTS` precedent).
+// How many times Restock from Return is attempted after the local inspection commit before
+// the failure is logged for operator replay. Retries are immediate — no backoff.
+//
+// **The bound is a latency budget, not a correctness one — and it did not start that way**
+// (the correction `COMMIT_SALE_MAX_ATTEMPTS` carries, for the same reason). A retry is safe
+// because restock is idempotent on `returnRequestId`, but that idempotency did not always
+// hold against a CONCURRENT redelivery: inventory's `existsByReference` probe reads outside
+// its write transaction, so two deliveries in flight at once — which is exactly what a
+// **timeout** produces, since a timeout does not cancel the RPC — could both credit the
+// stock. `UC_STOCK_MOVEMENT_DEDUPE` (migration `1783872387242`) closed that: the probe is
+// now the fast path and the ledger UNIQUE is the guarantee, so a concurrent redelivery is as
+// safe as a sequential one (ADR-032).
+//
+// What still bounds this number is that the retries are **awaited inside the inspect
+// request** — `execute` does not resolve until `restockFitForResaleLines` does, so the
+// warehouse caller holds the connection for every attempt. Three ride out a broker blip;
+// more would only hold that caller open against a broker that is already down, and buy
+// nothing, because the log-for-replay record plus the idempotent replay cover the rest.
 const RESTOCK_MAX_ATTEMPTS = 3;
 
 // Inspect & Disposition — the warehouse step that records each `ReturnLine`'s outcome and

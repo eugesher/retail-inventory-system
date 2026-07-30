@@ -119,10 +119,15 @@ leave a hold occupying its counter longer than intended:
   cancel-allocation is also best-effort.
 
 In both cases the hold is never *lost* — only delayed in returning to
-`available`. Until a TTL-sweeper capability lands, **this endpoint is the only
-operator-reachable tool to free such a hold.** A stale `active` hold otherwise
-keeps subtracting from `available` even past its `expiresAt` (nothing reclaims an
-expired hold automatically yet).
+`available`. When this shipped there was no TTL sweeper, so **this endpoint was
+the only operator-reachable tool to free such a hold**, and a stale `active` hold
+kept subtracting from `available` indefinitely, even past its `expiresAt`.
+[ADR-038](../../adr/038-reservation-ttl-sweep-and-bounded-batches.md) has since
+added that sweeper (plus its own `POST /api/inventory/reservations/sweep` route),
+so an *expired* hold is now reclaimed automatically. This route keeps two jobs the
+sweeper does not do: freeing a hold **before** its TTL lapses, and freeing one
+**precisely** — by id, one row, with a `manual` reason and the operator's own
+`actorId` on the ledger row.
 
 ### `manual` reason + actor attribution
 

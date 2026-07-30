@@ -15,26 +15,36 @@ the aggregate, and the file all went away together when the inventory context wa
 re-founded on per-location `StockLevel` running totals
 ([ADR-027](../../adr/027-stocklevel-running-totals-and-stocklocation.md)).
 
-## The four requests
+## The requests
 
 The file mirrors `apps/api-gateway/src/modules/inventory/presentation/inventory.controller.ts`
 one-to-one. Each request carries a `# @name <id>` line (so a later request can
 reference an earlier response) and a header comment citing the controller path,
 the auth gate, and the body/query shape.
 
-| `# @name` | Method + path | Gate | Purpose |
-| --- | --- | --- | --- |
-| `login` | `POST /api/auth/staff/login` | `@Public()` | Capture a staff bearer token (prereq) |
-| `listLocations` | `GET /api/inventory/locations` | `inventory:read` | List `StockLocationView[]` (optional `?activeOnly`) |
-| `getVariantStockAllLocations` | `GET /api/inventory/variants/1/stock` | `@Public()` | `VariantStockView` aggregated across all locations |
-| `getVariantStockFiltered` | `GET /api/inventory/variants/1/stock?locationIds=default-warehouse` | `@Public()` | The same read scoped to one location |
-| `receiveStock` | `POST /api/inventory/variants/1/stock/receive` | `inventory:adjust` | Raise on-hand by a positive `quantity` |
-| `adjustStock` | `POST /api/inventory/variants/1/stock/adjust` | `inventory:adjust` | Apply a signed `quantityDelta` + `reasonCode` |
-| `adjustStockBelowZero` | `POST /api/inventory/variants/1/stock/adjust` | `inventory:adjust` | A delta past zero → `409` (the below-zero invariant) |
+The table below lists the **four endpoints this epic introduced** (the two reads and the
+two writes); the file has since grown alongside the controller — see the note under it.
 
-The two reads and the two writes are the four inventory endpoints; `login` and the
-deliberate below-zero adjust are there to make the file self-contained and to prove
-the rejection path.
+| `# @name`                     | Method + path                                                       | Gate               | Purpose                                              |
+|-------------------------------|---------------------------------------------------------------------|--------------------|------------------------------------------------------|
+| `login`                       | `POST /api/auth/staff/login`                                        | `@Public()`        | Capture a staff bearer token (prereq)                |
+| `listLocations`               | `GET /api/inventory/locations`                                      | `inventory:read`   | List `StockLocationView[]` (optional `?activeOnly`)  |
+| `getVariantStockAllLocations` | `GET /api/inventory/variants/1/stock`                               | `@Public()`        | `VariantStockView` aggregated across all locations   |
+| `getVariantStockFiltered`     | `GET /api/inventory/variants/1/stock?locationIds=default-warehouse` | `@Public()`        | The same read scoped to one location                 |
+| `receiveStock`                | `POST /api/inventory/variants/1/stock/receive`                      | `inventory:adjust` | Raise on-hand by a positive `quantity`               |
+| `adjustStock`                 | `POST /api/inventory/variants/1/stock/adjust`                       | `inventory:adjust` | Apply a signed `quantityDelta` + `reasonCode`        |
+| `adjustStockBelowZero`        | `POST /api/inventory/variants/1/stock/adjust`                       | `inventory:adjust` | A delta past zero → `409` (the below-zero invariant) |
+
+The two reads and the two writes above are the four endpoints this epic introduced;
+`login` and the deliberate below-zero adjust make the file self-contained and prove the
+rejection path. **The file has since grown past these four:** later capabilities appended
+requests for stock transfer (`transferStock` / `transferStockOverSource`), the
+stock-movement audit read (`listVariantMovements` / `listVariantMovementsFiltered`), and
+the reservation-hold operators (`releaseReservation`, `releaseReservationNotFound`,
+`sweepReservations`, `sweepReservationsCustomBatch`) — so today it still mirrors
+`inventory.controller.ts` one-to-one, but that controller now carries **eight** routes, of
+which four belong to later epics (ADR-030/031/038). The table above is the epic-04 subset
+only.
 
 ## `# Prereqs:` and the captured `@accessToken`
 
@@ -113,8 +123,10 @@ hand there. So the requests tell a coherent story against a fresh seed:
 Each write returns the updated single-location `StockLevelView`
 (`{ stockLocationId, quantityOnHand, quantityAllocated, quantityReserved,
 available, version, updatedAt }`); the `reasonCode` on an adjust rides the
-`inventory.stock.adjusted` event and the logs — no `StockMovement` audit row is
-written yet (deferred to a later capability, see
+`inventory.stock.adjusted` event and the logs, and — since the movement ledger landed
+([ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md) §2) — is
+also persisted to a signed `adjustment` row in `stock_movement`, inside the same
+transaction as the counter (at epic time no `StockMovement` row was written; see
 [06](06-receive-and-adjust-use-cases.md)).
 
 ## Self-containment

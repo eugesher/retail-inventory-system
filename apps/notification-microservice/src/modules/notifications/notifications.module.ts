@@ -99,11 +99,17 @@ import { DeliveryRetentionScheduler, DeliveryRetryScheduler } from './infrastruc
 // `APP_FILTER`-registered `NotificationRpcExceptionFilter` maps a thrown
 // `NotificationDomainException` onto the wire `{ statusCode, message, code }` shape.
 //
-// Six event consumers are wired, and EVERY one now routes its wire event through
-// `RenderAndDispatchUseCase` (the template-driven persist-then-send pipeline, ADR-033) —
-// the inline per-event send use cases they used to call are deleted. Each consumer owns
-// only the event → `IRenderAndDispatchInput` mapping (`eventType`, reference type/id,
-// recipient, render context):
+// **Seven** consumers sit in `controllers` below, but only **six of them dispatch**: every one
+// of those six routes its wire event through `RenderAndDispatchUseCase` (the template-driven
+// persist-then-send pipeline, ADR-033) — the inline per-event send use cases they used to call
+// are deleted. The seventh, `ConsentEventsConsumer`, sends nothing at all: it keeps `CONSENT_CACHE`
+// fresh (`customer.consent.updated` write-through, `customer.erased` evict, ADR-037) so the
+// dispatch path's consent gate never pays a per-delivery DB read. Counting it among the dispatch
+// consumers is the easy mistake — it is the one consumer whose absence would cause *stale sends*,
+// not *missing* ones.
+//
+// Each dispatch consumer owns only the event → `IRenderAndDispatchInput` mapping (`eventType`,
+// reference type/id, recipient, render context):
 // `InventoryEventsConsumer` fans out the inventory low-stock alert
 // (`inventory.stock.low`) to the ops mailbox (`OPS_NOTIFICATIONS_EMAIL`, a null-recipient
 // system row); `OrderEventsConsumer` the order-placed confirmation

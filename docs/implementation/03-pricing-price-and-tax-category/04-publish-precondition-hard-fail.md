@@ -87,8 +87,8 @@ So the catalog defines its own thin seam, an **application port**:
 export const ACTIVE_PRICE_PROBE = Symbol('ACTIVE_PRICE_PROBE');
 
 export interface IActivePriceProbePort {
-  // Of the given variant ids, which have NO in-effect Price in `currency` at now?
-  findVariantsMissingActivePrice(variantIds: number[], currency: string): Promise<number[]>;
+    // Of the given variant ids, which have NO in-effect Price in `currency` at now?
+    findVariantsMissingActivePrice(variantIds: number[], currency: string): Promise<number[]>;
 }
 ```
 
@@ -102,11 +102,11 @@ The TypeORM adapter (`ActivePriceProbeTypeormAdapter`, under
 
 ```sql
 SELECT DISTINCT variant_id AS variantId
-  FROM price
- WHERE variant_id IN (?, ?, …)
-   AND currency = ?
-   AND valid_from <= UTC_TIMESTAMP()
-   AND (valid_to IS NULL OR valid_to > UTC_TIMESTAMP())
+FROM price
+WHERE variant_id IN (?, ?, …)
+                     AND currency = ?
+                     AND valid_from <= UTC_TIMESTAMP()
+                     AND (valid_to IS NULL OR valid_to> UTC_TIMESTAMP())
 ```
 
 then diffs the requested ids against the priced set — what remains is the
@@ -145,6 +145,17 @@ unpriced set. Key properties:
 4. **Persist**, then drain the event and emit `catalog.product.published`
    (best-effort post-commit; a broker failure is warn-logged and swallowed).
 
+A **fifth** step joined the flow later, and the contrast with the price gate is
+the point. Since [ADR-029](../../adr/029-category-materialized-path-and-polymorphic-media.md) §7
+the use case also runs a *soft* media recommendation — `collectMediaWarnings`
+probes for ≥1 active media asset across the product and its variants and, finding
+none, attaches a `CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA` entry to the response's
+optional `ProductView.warnings[]`. It runs **after** the save, on an
+already-active product, and is wrapped in try/catch — so it is provably unable to
+change the outcome. Missing price → **409, blocked**; missing media → **200 with a
+warning**. Same "the domain cannot see it, so the use case owns it" placement,
+opposite strength.
+
 The two precondition layers stay **independent and correctly ordered**. A
 variant-less product produces an *empty* id list, so the probe is a no-op
 (returns `[]`, and short-circuits before touching the DB) — the ≥1-variant rule
@@ -172,6 +183,17 @@ Because it carries a default, a missing env var never fails boot; the
 `docker-compose.yml` catalog service and the `.env.example` template set it
 explicitly so the live value is greppable.
 
+**Two more readers joined later, and the variable is deliberately shared.**
+`RETAIL_DEFAULT_CURRENCY` (the currency a cart opens in) and
+`CATALOG_GATEWAY_DEFAULT_CURRENCY` (the scope a `?currency`-less price read
+resolves to) both read this same `DEFAULT_CURRENCY`. Three tokens, one variable,
+on purpose: a catalog quoting EUR, a cart opening in USD and a price read scoped
+to a third would each be wrong in a different direction — and `Order.currency` is
+immutable, so a mismatch is baked into the order forever. Note that
+`docker-compose.yml` still sets `DEFAULT_CURRENCY` on the **catalog service
+only**; the other two deployables fall back to the Joi default, so a non-USD
+deployment must set it on all three.
+
 The use case must not depend on `@nestjs/config` (ADR-017 keeps the application
 layer framework-light), so the value is threaded in as a plain string under the
 `CATALOG_DEFAULT_CURRENCY` DI token. `catalog.module.ts` binds it with a factory
@@ -189,14 +211,14 @@ non-goal here — one default currency is the rule.
 - **Unit — `publish-product.use-case.spec.ts`** (with an in-memory
   `IActivePriceProbePort` double whose `unpriced` set names the variants reported
   missing):
-  - rejects the publish with `PRODUCT_PUBLISH_REQUIRES_PRICE` when a variant is
-    unpriced — nothing persisted, no event emitted;
-  - publishes and emits `catalog.product.published` when every variant is priced,
-    and the probe is consulted with the product's variant ids and the default
-    currency;
-  - the no-variant case still fails on `PRODUCT_PUBLISH_REQUIRES_VARIANT` (the
-    probe is a no-op on the empty list), and the not-found case still
-    short-circuits before the probe runs.
+    - rejects the publish with `PRODUCT_PUBLISH_REQUIRES_PRICE` when a variant is
+      unpriced — nothing persisted, no event emitted;
+    - publishes and emits `catalog.product.published` when every variant is priced,
+      and the probe is consulted with the product's variant ids and the default
+      currency;
+    - the no-variant case still fails on `PRODUCT_PUBLISH_REQUIRES_VARIANT` (the
+      probe is a no-op on the empty list), and the not-found case still
+      short-circuits before the probe runs.
 - **Unit — `active-price-probe.typeorm.adapter.spec.ts`**: the SQL is
   parameterized (placeholders + a bound args array, never interpolated ids), the
   empty-input short-circuit skips the query entirely, the mysql2 string-BIGINT
@@ -205,17 +227,24 @@ non-goal here — one default currency is the rule.
   `PRODUCT_PUBLISH_REQUIRES_PRICE → 409`, and the exhaustive "no code falls
   through to 500" check covers the new member.
 - **E2E — `test/catalog.e2e-spec.ts`**: the live register → variant → publish
-  flow now seeds an open USD price per variant (directly via SQL, the only
-  price-write path until the gateway pricing routes land) before publishing, so
-  the precondition is met and the happy path stays green. The negative
-  publish-with-no-price 409 is proven end-to-end through the gateway in a later
-  step, once the pricing HTTP surface exists.
+  flow now seeds an open USD price per variant (directly via SQL — at the time the
+  only price-write path there was; the spec still does it that way, and the
+  gateway pricing routes have since landed) before publishing, so the
+  precondition is met and the happy path stays green. The negative
+  publish-with-no-price 409 was left for a later step, once the pricing HTTP
+  surface existed; it is now proven end-to-end through the gateway in
+  `test/pricing.e2e-spec.ts` (§ *"publishing with no price hard-fails 409 and the
+  product stays draft"*).
 
 ## 7. What this leaves for later
 
+Both items below have since landed; they are kept as the record of what this step
+deliberately deferred.
+
 - The gateway already surfaces the wire error's `statusCode`, so the 409
   propagates over HTTP with no gateway change. The **end-to-end proof** of the
-  publish-with-no-price 409 (and a concurrency check) lives with the gateway
-  pricing endpoints work.
-- The `README` environment-variable table gains its `DEFAULT_CURRENCY` row with
+  publish-with-no-price 409 (and a concurrency check) was left to the gateway
+  pricing endpoints work — both now live in `test/pricing.e2e-spec.ts`
+  ([06 — Pricing API at the gateway](06-pricing-api-and-kulala.md) §6).
+- The `README` environment-variable table gained its `DEFAULT_CURRENCY` row in
   the broader seed/finalization pass.

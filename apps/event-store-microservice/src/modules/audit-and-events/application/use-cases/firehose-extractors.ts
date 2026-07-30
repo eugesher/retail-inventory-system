@@ -1,6 +1,7 @@
-// Heuristic field resolvers for the firehose ingest. The `domain-events` module sinks
-// EVERY business event the system publishes (the `#` topic-exchange firehose,
-// docs/adr/035-event-store-firehose-topic-exchange.md), so it can assume nothing about a
+// Heuristic field resolvers for the firehose ingest. The `audit-and-events` module's
+// `domain_event` log sinks EVERY business event the system publishes (the `#`
+// topic-exchange firehose, docs/adr/035-event-store-firehose-topic-exchange.md), so it
+// can assume nothing about a
 // concrete payload's shape — there is no uniform `aggregateId` across producers, and the
 // producer/aggregate identity is not carried as a field at all. These pure helpers
 // recover the three indexed columns (`producer`, `aggregate_type`, `aggregate_id`) from

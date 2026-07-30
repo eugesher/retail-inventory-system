@@ -198,8 +198,15 @@ export enum OrderErrorCodeEnum {
   // (`markIssued` / `markFailed` off non-`pending`) — a well-formed request the
   // resource state forbids.
   REFUND_INVALID_STATUS_TRANSITION = 'REFUND_INVALID_STATUS_TRANSITION',
-  // The refund being read/operated on does not exist.
-  REFUND_NOT_FOUND = 'REFUND_NOT_FOUND',
+  // There is deliberately no `REFUND_NOT_FOUND` here. It was declared alongside these,
+  // mapped to a 404 in the filter's total `Record` — and thrown by nothing, for the whole
+  // time it existed. **A refund is never addressed on its own:** Issue Refund reads a
+  // payment's history through `findByPaymentId` for its over-refund guard, and the refund
+  // read is order-scoped. `IRefundRepositoryPort.findById` was its twin and ADR-049
+  // already removed it for the identical reason; this is the same cleanup, one layer up.
+  // A `Record` arm is not free just because the compiler accepts it — it **asserts** that
+  // this surface can answer 404 with that code, which was never true. If a
+  // `GET /orders/:orderId/refunds/:refundId` ever lands, it arrives with its own code.
   // The requested refund amount would push the cumulative refunded total past the
   // payment's captured amount (`amount > Payment.amountMinor −
   // Payment.refundedAmountMinor`) — the over-refund ceiling the Issue Refund use case
@@ -210,9 +217,11 @@ export enum OrderErrorCodeEnum {
   REFUND_PAYMENT_NOT_CAPTURED = 'REFUND_PAYMENT_NOT_CAPTURED',
   // Distinct from `ORDER_ACCESS_FORBIDDEN` so the refund surface can say why in its own words.
   //
-  // **Note the asymmetry with returns:** a non-owner reading someone else's refunds is REFUSED here,
-  // while `list-returns` returns an empty list for the same shape of request. One confirms the
-  // order exists; the other does not. Nothing records which was intended.
+  // **There is no asymmetry with returns any more.** A non-owner reading someone else's refunds is
+  // refused here, and `list-returns` refuses the same shape of request the same way — it used to
+  // hand back a filtered empty list instead, which ADR-051 settled in favour of the refusal every
+  // other ownership check in `apps/` already made. Only the code differs, so each surface can word
+  // its own message.
   REFUND_ACCESS_FORBIDDEN = 'REFUND_ACCESS_FORBIDDEN',
 }
 

@@ -67,16 +67,16 @@ construction — each change *is* a row.
 convention a caller must remember:
 
 - **Two construction paths with different guards.**
-  - `Price.set({ variantId, currency, amountMinor, validFrom?, validTo?,
+    - `Price.set({ variantId, currency, amountMinor, validFrom?, validTo?,
     priority? })` is the standard write path. `validFrom` **defaults to "now"**,
-    and a `validFrom` **strictly before now** is rejected with
-    `PRICE_VALID_FROM_IN_PAST`. You set or schedule only open intervals at or
-    after now; you can *never* author a historical row through this path. (`now`
-    is an injectable second argument so specs are deterministic.)
-  - `Price.reconstitute({ id, variantId, currency, amountMinor, validFrom,
+      and a `validFrom` **strictly before now** is rejected with
+      `PRICE_VALID_FROM_IN_PAST`. You set or schedule only open intervals at or
+      after now; you can *never* author a historical row through this path. (`now`
+      is an injectable second argument so specs are deterministic.)
+    - `Price.reconstitute({ id, variantId, currency, amountMinor, validFrom,
     validTo, priority })` loads a persisted row with **any** `validFrom`,
-    including the past — no guard. The repository uses it for every row it
-    materializes, including a closed predecessor.
+      including the past — no guard. The repository uses it for every row it
+      materializes, including a closed predecessor.
 - **`close(at)` is the only mutation an existing row ever receives.** It returns
   a **new** `Price` with the same value fields and `validTo = at`. There is **no
   setter** for `amountMinor`, `currency`, `variantId`, or `priority` — they are
@@ -89,13 +89,13 @@ convention a caller must remember:
 The invariants, each raising a `PricingDomainException` with a typed
 `PricingErrorCodeEnum` code (the ADR-025 pattern):
 
-| Rule | Code |
-| --- | --- |
-| `amountMinor` is an integer `≥ 0` | `PRICE_AMOUNT_INVALID` |
-| `currency` matches `^[A-Z]{3}$` (ISO-4217 *shape* only) | `PRICE_CURRENCY_INVALID` |
-| when `validTo` is set, `validFrom < validTo` | `PRICE_INTERVAL_INVALID` |
-| `validFrom` not strictly before now (on `set`) | `PRICE_VALID_FROM_IN_PAST` |
-| `priority` is an integer (default `0`) | `PRICE_PRIORITY_INVALID` |
+| Rule                                                    | Code                       |
+|---------------------------------------------------------|----------------------------|
+| `amountMinor` is an integer `≥ 0`                       | `PRICE_AMOUNT_INVALID`     |
+| `currency` matches `^[A-Z]{3}$` (ISO-4217 *shape* only) | `PRICE_CURRENCY_INVALID`   |
+| when `validTo` is set, `validFrom < validTo`            | `PRICE_INTERVAL_INVALID`   |
+| `validFrom` not strictly before now (on `set`)          | `PRICE_VALID_FROM_IN_PAST` |
+| `priority` is an integer (default `0`)                  | `PRICE_PRIORITY_INVALID`   |
 
 `amountMinor` is **minor units** (an integer count of cents), never a float —
 money is integer arithmetic. `currency` is validated for *shape* only; pricing
@@ -154,7 +154,8 @@ MySQL has **no native partial unique index** — you cannot write Postgres's
 `STORED` generated column that is non-NULL **only while the row is open**:
 
 ```sql
-open_scope_key VARCHAR(32) GENERATED ALWAYS AS
+open_scope_key
+VARCHAR(32) GENERATED ALWAYS AS
   (CASE WHEN valid_to IS NULL THEN CONCAT(variant_id, ':', currency) ELSE NULL END) STORED,
 CONSTRAINT UC_PRICE_OPEN_SCOPE UNIQUE (open_scope_key)
 ```
@@ -182,7 +183,8 @@ place the two contexts touch is the foreign key in persistence:
 
 ```sql
 CONSTRAINT FK_PRICE_VARIANT FOREIGN KEY (variant_id)
-  REFERENCES product_variant (id) ON DELETE RESTRICT
+  REFERENCES product_variant (id) ON DELETE
+RESTRICT
 ```
 
 `ON DELETE RESTRICT` means a variant with prices cannot be hard-deleted — which
@@ -221,22 +223,26 @@ is a `number`).
 only** — no TypeORM `Repository`/`EntityManager`/entity leaks (ADR-017 forbids
 `typeorm` in `application/ports`). Its price methods:
 
-| Method | Purpose |
-| --- | --- |
-| `findOpenPrice(variantId, currency)` | The single open row for a scope, or null (the predecessor the write use case closes). |
-| `appendPrice(newPrice, predecessorToClose)` | Atomic close-of-predecessor + insert, re-read with concrete id (§3). |
-| `findInEffect(variantId, currency, asOf)` | All rows whose `[validFrom, validTo)` contains `asOf` — a **coarse** candidate set; the priority/recency pick lives in the use case (ADR-026 §4). |
+| Method                                      | Purpose                                                                                                                                           |
+|---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `findOpenPrice(variantId, currency)`        | The single open row for a scope, or null (the predecessor the write use case closes).                                                             |
+| `appendPrice(newPrice, predecessorToClose)` | Atomic close-of-predecessor + insert, re-read with concrete id (§3).                                                                              |
+| `findInEffect(variantId, currency, asOf)`   | All rows whose `[validFrom, validTo)` contains `asOf` — a **coarse** candidate set; the priority/recency pick lives in the use case (ADR-026 §4). |
 
 `findInEffect` is backed by `IDX_PRICE_RESOLVE (variant_id, currency, valid_from
 DESC)` and orders by `priority DESC, validFrom DESC` as a convenience — but the
 authoritative Select Applicable policy (highest priority, then latest
 `validFrom`) is the use case's, not the query's, so the rule stays unit-testable
 and free to evolve without a schema change. `PricingTypeormRepository` is the
-single `@InjectRepository` site for the context; it is bound to
-`PRICING_REPOSITORY` via `useExisting` in `pricing.module.ts`, which also
-registers `DatabaseModule.forFeature([PriceEntity, TaxCategoryEntity])`. The
-module-root `index.ts` now exports `pricingEntities = [PriceEntity,
-TaxCategoryEntity]`, which the service composition root spreads into its single
+single `@InjectRepository` site for the context (it holds **two** injected
+repositories — `PriceEntity` and `TaxCategoryEntity` — in that one class, and
+extends `BaseTypeormRepository<PriceEntity, Price>` for the `toDomain`/`toEntity`
+seam); it is bound to `PRICING_REPOSITORY` via `useExisting` in
+`pricing.module.ts`, which also registers
+`DatabaseModule.forFeature(pricingEntities)`. That const —
+`[PriceEntity, TaxCategoryEntity]` — is declared **unannotated** in
+`infrastructure/persistence/index.ts` and re-exported by the module-root
+`index.ts`; the service composition root spreads it into its single
 `DatabaseModule.forRoot([...catalogEntities, ...pricingEntities])` — so both
 colocated modules share one MySQL connection with no `app.module.ts` change.
 

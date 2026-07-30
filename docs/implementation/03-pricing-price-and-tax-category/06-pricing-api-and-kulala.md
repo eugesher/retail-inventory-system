@@ -26,14 +26,14 @@ tax category both address a *variant*, which the catalog module already fronts.
 All routes sit under the global `api` prefix, so `/catalog/...` resolves to
 `/api/catalog/...`.
 
-| Method | Path | Body / query | Auth | Use case → RPC | Success |
-|---|---|---|---|---|---|
-| `POST` | `/catalog/variants/:variantId/prices` | `{ currency, amountMinor, validFrom?, validTo?, priority? }` | `PRICING_WRITE` | `SetPriceUseCase` → `catalog.price.set` | `201` `PriceView` |
-| `GET` | `/catalog/variants/:variantId/prices` | `?currency=USD&asOf=…` | public | `ListPricesUseCase` → `catalog.price.list` | `200` `PriceView[]` |
-| `GET` | `/catalog/variants/:variantId/price` | `?currency=USD&asOf=…` | public | `GetApplicablePriceUseCase` → `catalog.price.select` | `200` `PriceView` or `null` |
-| `POST` | `/catalog/tax-categories` | `{ code, name, description? }` | `PRICING_WRITE` | `CreateTaxCategoryUseCase` → `catalog.tax-category.create` | `201` `TaxCategoryView` |
-| `GET` | `/catalog/tax-categories` | — | public | `ListTaxCategoriesUseCase` → `catalog.tax-category.list` | `200` `TaxCategoryView[]` |
-| `PATCH` | `/catalog/variants/:variantId/tax-category` | `{ taxCategoryCode }` | `PRICING_WRITE` | `AttachVariantTaxCategoryUseCase` → `catalog.variant.set-tax-category` | `200` `VariantTaxHeaderView` |
+| Method  | Path                                        | Body / query                                                 | Auth            | Use case → RPC                                                         | Success                      |
+|---------|---------------------------------------------|--------------------------------------------------------------|-----------------|------------------------------------------------------------------------|------------------------------|
+| `POST`  | `/catalog/variants/:variantId/prices`       | `{ currency, amountMinor, validFrom?, validTo?, priority? }` | `PRICING_WRITE` | `SetPriceUseCase` → `catalog.price.set`                                | `201` `PriceView`            |
+| `GET`   | `/catalog/variants/:variantId/prices`       | `?currency=USD&asOf=…`                                       | public          | `ListPricesUseCase` → `catalog.price.list`                             | `200` `PriceView[]`          |
+| `GET`   | `/catalog/variants/:variantId/price`        | `?currency=USD&asOf=…`                                       | public          | `GetApplicablePriceUseCase` → `catalog.price.select`                   | `200` `PriceView` or `null`  |
+| `POST`  | `/catalog/tax-categories`                   | `{ code, name, description? }`                               | `PRICING_WRITE` | `CreateTaxCategoryUseCase` → `catalog.tax-category.create`             | `201` `TaxCategoryView`      |
+| `GET`   | `/catalog/tax-categories`                   | —                                                            | public          | `ListTaxCategoriesUseCase` → `catalog.tax-category.list`               | `200` `TaxCategoryView[]`    |
+| `PATCH` | `/catalog/variants/:variantId/tax-category` | `{ taxCategoryCode }`                                        | `PRICING_WRITE` | `AttachVariantTaxCategoryUseCase` → `catalog.variant.set-tax-category` | `200` `VariantTaxHeaderView` |
 
 `:variantId` parses with `ParseIntPipe` (mirroring the existing variant routes).
 The two `POST`s default to `201`; the `PATCH` carries `@HttpCode(HttpStatus.OK)`
@@ -45,7 +45,7 @@ decorator is explicit so the contract is greppable). The reads are `200`.
 The three mutations — set/schedule a price, create a tax category, attach a tax
 category to a variant — are gated by
 `@RequiresPermission(PermissionCodeEnum.PRICING_WRITE)` (`pricing:write`, seeded to
-`admin` and `catalog-manager`). The four reads (list prices, single applicable
+`admin` and `catalog-manager`). The three reads (list prices, single applicable
 price, list tax categories) are `@Public()` so an unauthenticated shopper can read
 prices while browsing.
 
@@ -60,13 +60,34 @@ no token → `401`, public reads → `200`).
 Both price GETs answer the same `(variantId, currency)`-scoped question at a point
 in time, and share one query DTO (`PriceQueryDto`):
 
-- **`?currency`** defaults to `USD` at the edge (a field default on the DTO), so a
-  caller that omits it reads the default-currency price. The shape is validated
-  (`^[A-Z]{3}$`); the scope is always carried on the wire.
+- **`?currency`** is optional, and an omitted one resolves to the deployment's
+  configured default so the caller reads the default-currency price. The shape is
+  validated (`^[A-Z]{3}$`); the scope is always carried on the wire.
 - **`?asOf`** defaults to **now** at the edge (an ISO-8601 field default), so a
   caller that omits it reads the *currently* applicable price. A supplied `?asOf`
   resolves the ledger as of that instant — this is how a caller reads a historic
   or a scheduled-future price.
+
+#### Where the `currency` default lives — and why it moved (ISSUE-11)
+
+As shipped here, `PriceQueryDto` carried `public currency = 'USD'` — a field
+initializer the global `ValidationPipe` (`transform: true`) keeps, so an omitted
+`?currency=` put the literal `USD` on the wire on the caller's behalf. That was a
+bug on any shop configured otherwise: with `DEFAULT_CURRENCY=EUR` the catalog holds
+only EUR prices (a variant cannot even publish without an active price in
+`CATALOG_DEFAULT_CURRENCY`), so both `@Public()` reads asked for a currency the
+catalog does not stock and found **nothing, for every variant** — a correctly
+configured shop that could not display a price.
+
+The fix moved the default one layer in, not out. `PriceQueryDto.currency` is now
+`@IsOptional()` with no initializer, and `ListPricesUseCase` /
+`GetApplicablePriceUseCase` resolve `query.currency ?? this.defaultCurrency` before
+dispatching, injecting `CATALOG_GATEWAY_DEFAULT_CURRENCY` — a `ConfigService`-backed
+value provider over the same `DEFAULT_CURRENCY` the catalog prices against. The
+decision that defaulting is a **gateway** concern (`IPriceQuery.currency` stays
+required on the wire) was right and is kept; only the *source* of the default was
+wrong, and a DTO cannot inject `ConfigService`. `?asOf`'s initializer stays — "now"
+is not configurable.
 
 The two reads differ in **what** they return for that scope/instant:
 
@@ -104,9 +125,18 @@ shapes (`ISetPriceCommand`, `IPriceQueryCommand`, `ICreateTaxCategoryCommand`,
 the port (ADR-009). No domain state lives at the gateway — pricing logic stays in
 `catalog_queue`.
 
+A **fifth** shape, `IPriceQueryRequest`, joined with the ISSUE-11 fix in §3. It is
+`IPriceQueryCommand` with `currency` optional, and the two differ by exactly that
+one `?`: the *Request* is what arrives from the edge, the *Command* is what goes on
+the wire with a **resolved** currency scope. Splitting them is what makes the
+compiler refuse a read path that dispatches without resolving.
+
 Files added under `apps/api-gateway/src/modules/catalog/`:
 
-- `application/use-cases/{set-price,list-prices,get-applicable-price,create-tax-category,list-tax-categories,attach-variant-tax-category}.use-case.ts`
+-
+
+`application/use-cases/{set-price,list-prices,get-applicable-price,create-tax-category,list-tax-categories,attach-variant-tax-category}.use-case.ts`
+
 - `presentation/dto/{set-price.request,price-query,create-tax-category.request,attach-tax-category.request}.dto.ts`
 
 and the port/adapter/controller/module/barrels were extended.
@@ -120,8 +150,9 @@ invariant.
 - `SetPriceRequestDto` — `currency` (`^[A-Z]{3}$`), `amountMinor` (`@IsInt @Min(0)`,
   integer minor units / cents), `validFrom?` / `validTo?` (`@IsISO8601`),
   `priority?` (`@IsInt`). One body backs both Set and Schedule.
-- `PriceQueryDto` — `currency` (default `USD`), `asOf` (default now); shared by the
-  two price GETs.
+- `PriceQueryDto` — `currency` (optional, `^[A-Z]{3}$`; the default is resolved in
+  the use case from `CATALOG_GATEWAY_DEFAULT_CURRENCY`, §3), `asOf` (field default
+  = now); shared by the two price GETs.
 - `CreateTaxCategoryRequestDto` — `code` (`^[A-Z][A-Z0-9_]*$`), `name`
   (`1..255`), `description?` (`≤1000`).
 - `AttachTaxCategoryRequestDto` — `taxCategoryCode` (`^[A-Z][A-Z0-9_]*$`).
@@ -186,16 +217,16 @@ the controller path, the body/query shape, and the auth posture.
 
 ### The flow
 
-| # | `# @name` | Method · path | Auth | What it proves |
-|---|---|---|---|---|
-| 1 | `login` | `POST /auth/staff/login` | — | Seeded admin (`admin@example.com`) → captures `@accessToken` |
-| 2 | `createTaxCategory` | `POST /catalog/tax-categories` | Bearer | Creates the non-seed `LUXURY` label |
-| 3 | `listTaxCategories` | `GET /catalog/tax-categories` | public | The created label appears, no token |
-| 4 | `setPriceVariant1` | `POST /catalog/variants/1/prices` | Bearer | Immediate Set (USD 4999, `validFrom` omitted) |
-| 5 | `listPricesVariant1` | `GET /catalog/variants/1/prices?currency=USD` | public | Every row in effect now |
-| 6 | `getApplicablePriceVariant1` | `GET /catalog/variants/1/price?currency=USD` | public | The single applicable row now |
-| 7 | `schedulePriceVariant1` | `POST /catalog/variants/1/prices` | Bearer | A future-`validFrom` schedule |
-| 8 | `attachTaxCategoryVariant1` | `PATCH /catalog/variants/1/tax-category` | Bearer | Attaches `LUXURY` to variant 1 |
+| # | `# @name`                    | Method · path                                 | Auth   | What it proves                                               |
+|---|------------------------------|-----------------------------------------------|--------|--------------------------------------------------------------|
+| 1 | `login`                      | `POST /auth/staff/login`                      | —      | Seeded admin (`admin@example.com`) → captures `@accessToken` |
+| 2 | `createTaxCategory`          | `POST /catalog/tax-categories`                | Bearer | Creates the non-seed `LUXURY` label                          |
+| 3 | `listTaxCategories`          | `GET /catalog/tax-categories`                 | public | The created label appears, no token                          |
+| 4 | `setPriceVariant1`           | `POST /catalog/variants/1/prices`             | Bearer | Immediate Set (USD 4999, `validFrom` omitted)                |
+| 5 | `listPricesVariant1`         | `GET /catalog/variants/1/prices?currency=USD` | public | Every row in effect now                                      |
+| 6 | `getApplicablePriceVariant1` | `GET /catalog/variants/1/price?currency=USD`  | public | The single applicable row now                                |
+| 7 | `schedulePriceVariant1`      | `POST /catalog/variants/1/prices`             | Bearer | A future-`validFrom` schedule                                |
+| 8 | `attachTaxCategoryVariant1`  | `PATCH /catalog/variants/1/tax-category`      | Bearer | Attaches `LUXURY` to variant 1                               |
 
 Run the `login` block first: it captures the seeded admin's bearer token into
 `@accessToken`, which every write substitutes into its `Authorization` header. The
@@ -206,16 +237,35 @@ the seeded catalog variants (1 `AURORA-WARM` … 4 `NIMBUS-GREY`) and drives var
 
 ### Why it Sets before it Gets (self-containment)
 
-The price and tax **seed rows do not exist** when this file is meant to run — the
-pricing seed is added later alongside the rest of the seed data, and the e2e never
-depends on a seeded price either. So the collection cannot assume any price or tax
-category is already present: it **Creates a tax category before it lists/attaches
-one** (block 2 before 3 and 8) and **Sets a price before it lists/resolves one**
-(block 4 before 5 and 6). A non-seed code, `LUXURY`, is chosen for the create so
-the block stays runnable on a freshly-seeded database where a seeded `STANDARD` /
-`REDUCED` / `EXEMPT` set might later exist — a repeat run against the same DB would
-`409` on the duplicate `code`, which is why a second top-to-bottom pass wants a
-fresh DB (`yarn test:infra:reload`).
+The price and tax **seed rows did not exist** when this file was written — the
+pricing seed was added later alongside the rest of the seed data, and the e2e
+never depends on a seeded price either. So the collection cannot assume any price
+or tax category is already present: it **Creates a tax category before it
+lists/attaches one** (block 2 before 3 and 8) and **Sets a price before it
+lists/resolves one** (block 4 before 5 and 6). A non-seed code, `LUXURY`, is
+chosen for the create so the block stays runnable on a freshly-seeded database
+where a seeded `STANDARD` / `REDUCED` / `EXEMPT` set might later exist — a repeat
+run against the same DB would `409` on the duplicate `code`, which is why a second
+top-to-bottom pass wants a fresh DB (`yarn test:infra:reload`).
+
+**Those seeds have since landed, and the ordering above is what keeps the file
+running anyway.** `yarn test:seed` now applies `scripts/seeds/tax-category.sql`
+(`STANDARD` / `REDUCED` / `EXEMPT` — code + name, no rate) and
+`scripts/seeds/price.sql` (one **open** USD row per seeded variant 1–4: `4999` for
+the lamp pair, `19999` for the chair pair, all with a fixed
+`valid_from = 2020-01-01` so the seed is deterministic and idempotent). Three
+consequences for a hand run:
+
+- `createTaxCategory` still succeeds — `LUXURY` is deliberately outside the seeded
+  set — and `listTaxCategories` now returns **four** rows, not one.
+- `setPriceVariant1` still succeeds: variant 1's seeded row opened in 2020, which
+  is strictly before the new `validFrom`, so `resolvePredecessor` closes it and
+  appends rather than raising `PRICE_SCHEDULE_CONFLICT`.
+- `getApplicablePriceVariant1` therefore answers with the *block-4* price, not the
+  seeded `4999` — same `priority` `0`, later `validFrom` wins the tiebreak.
+
+The file's own header comment still says it "assumes NO price/tax seed rows"; that
+sentence is stale, the ordering it justifies is not.
 
 ### The future-`validFrom` scheduling demonstration
 
@@ -240,3 +290,11 @@ future.)
 `test/pricing.e2e-spec.ts` remains the automated reference for the same
 request/response shapes and the full auth posture; `http/kulala/pricing.http` is the
 hand-runnable companion.
+
+A **Posting mirror** of the same eight requests was added later under
+`http/posting/pricing/` — same order, same captures, a different runner. Kulala
+chains declaratively (`{{login.response.body.$.accessToken}}`); Posting has no such
+reference, so the producer blocks carry `on_response` hooks in
+`http/posting/pricing/scripts.py` that call `posting.set_variable(...)`, and
+consumers read `$accessToken`. Run it from the collection root:
+`posting --collection http/posting --env http/posting/dev.env`.

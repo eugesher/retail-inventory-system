@@ -49,18 +49,24 @@ backbone key, and the inventory/retail columns that still carry a plain
 
 ### Files
 
-| File | Contents |
-|---|---|
-| `domain/product.model.ts` | `Product` aggregate root: factories, getters, `addVariant`, `publish`, `archive`. |
-| `domain/product-variant.model.ts` | `ProductVariant` child entity + its construction invariants. |
-| `domain/product-status.enum.ts` | `ProductStatusEnum` (`draft / active / archived`). |
-| `domain/product-variant-status.enum.ts` | `ProductVariantStatusEnum` (`active / archived`). |
-| `domain/option-values.vo.ts` | `OptionValues` value object (non-empty map invariant). |
-| `domain/dimensions.vo.ts` | `Dimensions` value object (non-negative integer mm). |
-| `domain/catalog.exception.ts` | `CatalogDomainException` + `CatalogErrorCodeEnum`. |
-| `domain/events/*.event.ts` | `VariantCreatedEvent`, `ProductPublishedEvent`, `ProductArchivedEvent`. |
-| `domain/events/index.ts`, `domain/index.ts` | Barrels. |
-| `domain/spec/*.spec.ts` | Two domain spec siblings. |
+| File                                                                             | Contents                                                                          |
+|----------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
+| `domain/product.model.ts`                                                        | `Product` aggregate root: factories, getters, `addVariant`, `publish`, `archive`. |
+| `domain/product-variant.model.ts`                                                | `ProductVariant` child entity + its construction invariants.                      |
+| `domain/product-status.enum.ts`                                                  | `ProductStatusEnum` (`draft / active / archived`).                                |
+| `domain/product-variant-status.enum.ts`                                          | `ProductVariantStatusEnum` (`active / archived`).                                 |
+| `domain/option-values.vo.ts`                                                     | `OptionValues` value object (non-empty map invariant).                            |
+| `domain/dimensions.vo.ts`                                                        | `Dimensions` value object (non-negative integer mm).                              |
+| `domain/catalog.exception.ts`                                                    | `CatalogDomainException` + `CatalogErrorCodeEnum`.                                |
+| `domain/events/*.event.ts`                                                       | `VariantCreatedEvent`, `ProductPublishedEvent`, `ProductArchivedEvent`.           |
+| `domain/events/index.ts`, `domain/index.ts`                                      | Barrels.                                                                          |
+| `domain/spec/product.model.spec.ts`, `domain/spec/product-variant.model.spec.ts` | The two domain spec siblings for this model.                                      |
+
+(The same `domain/` folder later gained the `Category` and `MediaAsset`
+aggregates and their own spec siblings —
+[ADR-029](../../adr/029-category-materialized-path-and-polymorphic-media.md).
+They are separate aggregates in the same bounded context; nothing in the table
+above changed.)
 
 ## 2. Field shapes
 
@@ -82,6 +88,11 @@ getters so persistence and the read model do not have to know about the VO. The
 `sku` and `slug` stay primitive-plus-invariant on the entity — their only rule
 is "non-empty", which does not earn a dedicated type.
 
+One normalization the constructor does perform: an empty or whitespace-only
+`gtin` is stored as `null`, not verbatim. MySQL's `UNIQUE (gtin)` permits many
+`NULL`s but only one `''`, so an optional field left blank at the edge would
+otherwise collide on the second variant and surface as a raw driver 500.
+
 ## 3. Invariants and where each is enforced
 
 Invariants split into two homes. **The domain can only see itself** — it cannot
@@ -89,17 +100,17 @@ inspect other aggregates — so anything that requires a global view is a
 repository-level guarantee, and the domain trusts the repository to reject a
 clash.
 
-| Invariant | Enforced where | How |
-|---|---|---|
-| `Product.name` non-empty | Domain | `Product` constructor throws `CatalogDomainException` |
-| `Product.slug` non-empty | Domain | `Product` constructor throws |
-| `Product.slug` **globally unique** | **Repository** | unique constraint; asserted in the register use-case spec via a repository double |
-| `ProductVariant.sku` non-empty | Domain | `ProductVariant` constructor throws |
-| `ProductVariant.sku` **globally unique** | **Repository** | unique constraint; asserted in the add-variant use-case spec |
-| `optionValues` non-empty map of non-empty strings | Domain | `OptionValues` value object |
-| `weightG` non-negative integer when present | Domain | `ProductVariant` constructor |
-| `dimensionsMm` non-negative integer mm when present | Domain | `Dimensions` value object |
-| `publish()` requires ≥1 variant | Domain | `Product.publish()` |
+| Invariant                                           | Enforced where | How                                                                               |
+|-----------------------------------------------------|----------------|-----------------------------------------------------------------------------------|
+| `Product.name` non-empty                            | Domain         | `Product` constructor throws `CatalogDomainException`                             |
+| `Product.slug` non-empty                            | Domain         | `Product` constructor throws                                                      |
+| `Product.slug` **globally unique**                  | **Repository** | unique constraint; asserted in the register use-case spec via a repository double |
+| `ProductVariant.sku` non-empty                      | Domain         | `ProductVariant` constructor throws                                               |
+| `ProductVariant.sku` **globally unique**            | **Repository** | unique constraint; asserted in the add-variant use-case spec                      |
+| `optionValues` non-empty map of non-empty strings   | Domain         | `OptionValues` value object                                                       |
+| `weightG` non-negative integer when present         | Domain         | `ProductVariant` constructor                                                      |
+| `dimensionsMm` non-negative integer mm when present | Domain         | `Dimensions` value object                                                         |
+| `publish()` requires ≥1 variant                     | Domain         | `Product.publish()`                                                               |
 
 Every domain rejection raises a `CatalogDomainException` carrying a typed code
 from `CatalogErrorCodeEnum` (e.g. `CATALOG_PRODUCT_PUBLISH_REQUIRES_VARIANT`).
@@ -135,10 +146,10 @@ draft ───────────────▶ active ──────
   [03-pricing · 04 — Publishing hard-fails on a missing active Price](../03-pricing-price-and-tax-category/04-publish-precondition-hard-fail.md).)
 - **`active → archived`** via `Product.archive()`.
 - **Rejected transitions** (each raises a `CatalogDomainException`):
-  - `publish()` on a non-draft product (already active, or archived).
-  - `archive()` on a non-active product (still draft, or already archived).
-  - There is **no** `archived → draft` and **no** `archived → active` —
-    archival is terminal for this work.
+    - `publish()` on a non-draft product (already active, or archived).
+    - `archive()` on a non-active product (still draft, or already archived).
+    - There is **no** `archived → draft` and **no** `archived → active` —
+      archival is terminal for this work.
 
 ### `ProductVariant` — `active / archived`
 
@@ -153,11 +164,11 @@ constructor.
 The aggregate records three `DomainEvent<number>` subclasses — the base
 `aggregateId` is the product id:
 
-| Event | Recorded by | Payload (beyond `aggregateId` = productId) |
-|---|---|---|
-| `VariantCreatedEvent` | `Product.addVariant(...)` | `variantId: number \| null`, `sku` |
-| `ProductPublishedEvent` | `Product.publish()` | `slug`, `variantIds: number[]` |
-| `ProductArchivedEvent` | `Product.archive()` | — |
+| Event                   | Recorded by               | Payload (beyond `aggregateId` = productId) |
+|-------------------------|---------------------------|--------------------------------------------|
+| `VariantCreatedEvent`   | `Product.addVariant(...)` | `sku` — **no `variantId`** (see below)     |
+| `ProductPublishedEvent` | `Product.publish()`       | `slug`, `variantIds: number[]`             |
+| `ProductArchivedEvent`  | `Product.archive()`       | —                                          |
 
 There is deliberately **no `ProductCreated` event** — `Product.create(...)`
 builds a draft and records nothing. The three events correspond to the three
@@ -174,13 +185,23 @@ work, not here. This mirrors the `Order` aggregate
 ([ADR-013](../../adr/013-order-aggregate-and-cross-service-confirm.md)) and the
 notification template.
 
-**Why `VariantCreatedEvent.variantId` is nullable.** `addVariant` can run before
-the product (and therefore the new variant) has ever been persisted, so the
-variant id is `null` at record-time. The use case re-reads the concrete id from
-the saved aggregate before emitting the wire event — a `null` never reaches a
-subscriber. `ProductPublishedEvent`, by contrast, always runs against an
+**Why `VariantCreatedEvent` carries no `variantId` at all.** `addVariant` can run
+before the product (and therefore the new variant) has ever been persisted, so
+the variant id would be `null` at record-time. Rather than model a
+`number | null` field that is null on every real path, the in-process event
+carries only the `sku` (globally unique, always known at add-time) and the
+`occurredAt` timestamp; the use case matches the saved variant **by `sku`** after
+the repository round-trip and stamps the concrete id onto the *wire* event
+(`ICatalogVariantCreatedEvent.variantId: number`, non-nullable). A `null`
+therefore never reaches a subscriber, and never exists on the domain event
+either. `ProductPublishedEvent`, by contrast, always runs against an
 already-persisted product, so the aggregate filters out any null variant id and
 the `variantIds` array is concrete.
+
+(ADR-025 §5 still describes `VariantCreatedEvent` as carrying a
+`variantId: number | null`. An accepted ADR is immutable
+([ADR-003](../../adr/003-record-architecture-decisions.md)); the code and this file
+are the current shape.)
 
 ## 6. Soft-delete via `status`, never `deletedAt`
 
@@ -194,9 +215,12 @@ is left **inert** on the catalog tables; anyone reading the schema should treat
 
 A related, deliberate omission: there is **no optimistic-lock `version` column.**
 Catalog is last-writer-wins — it is not in the no-oversell critical path (that
-is the inventory `StockItem` reservation flow,
-[ADR-012](../../adr/012-stock-aggregate-and-port-adapter.md)). ADR-025 §3 records
-the trade-off.
+was the inventory `StockItem` reservation flow,
+[ADR-012](../../adr/012-stock-aggregate-and-port-adapter.md); since
+[ADR-027](../../adr/027-stocklevel-running-totals-and-stocklocation.md) that path
+is `StockLevel`, which *does* carry a `version`). ADR-025 §3 records the
+trade-off, and it still holds: `product` / `product_variant` have no `version`
+column today.
 
 ## 7. Boundaries and tests
 

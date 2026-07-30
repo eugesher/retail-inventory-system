@@ -100,22 +100,29 @@ foreign key in persistence.
 
 ### The `version` optimistic-concurrency token
 
-`Cart` carries a `version` column **now**, even though no concurrency guard
-consumes it yet. The aggregate advances it on every mutation; TypeORM's
-`@VersionColumn` owns the persisted value. Shipping the column up front keeps a
-later concurrency-hardening retrofit non-destructive — adding an optimistic-lock
-column to a populated table is an `ALTER TABLE` on live data, the same
+`Cart` carries a `version` column from the start. The aggregate advances it on every
+mutation; TypeORM's `@VersionColumn` owns the persisted value. Shipping the column up
+front kept a later concurrency-hardening retrofit non-destructive — adding an
+optimistic-lock column to a populated table is an `ALTER TABLE` on live data, the same
 forward-provisioning reasoning the inventory `stock_level.version` used.
+
+> **Since [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) /
+> [ADR-045](../../adr/045-one-occ-retry-protocol.md), that concurrency guard is
+> live** — the column is no longer just provisioned. Every cart write runs under
+> `runWithCartWriteRetry`, which re-reads on a lost compare-and-swap and surfaces a
+> `409` once the OCC budget is spent. The three cart line routes accept an optional
+> `If-Match: <version>` precondition at the gateway: supply a stale version and the
+> write fails fast with `409 { code: VERSION_MISMATCH }` instead of retrying.
 
 ## The `cart` / `cart_line` schema
 
 One migration creates both tables (`synchronize` stays off —
 [ADR-019](../../adr/019-typeorm-and-mysql-for-persistence.md)):
 
-| Table | Key columns | Notes |
-| --- | --- | --- |
-| `cart` | `id CHAR(36)` PK, `customer_id CHAR(36)` NULL, `currency CHAR(3)`, `status ENUM('active','abandoned','converted')`, `expires_at`, `version INT`, timestamps + inert `deleted_at` | `FK_CART_CUSTOMER → customer(id) ON DELETE SET NULL` (a deleted customer leaves a customerless cart, never cascades it away) |
-| `cart_line` | `id BIGINT UNSIGNED` PK, `variant_id BIGINT UNSIGNED`, `quantity INT`, `unit_price_snapshot_minor BIGINT`, `currency_snapshot CHAR(3)`, timestamps + inert `deleted_at` | `FK_CART_LINE_CART → cart(id) ON DELETE CASCADE`, `FK_CART_LINE_VARIANT → product_variant(id) ON DELETE RESTRICT`, `CHECK (quantity > 0)`, index on `cart_id` |
+| Table       | Key columns                                                                                                                                                                      | Notes                                                                                                                                                         |
+|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `cart`      | `id CHAR(36)` PK, `customer_id CHAR(36)` NULL, `currency CHAR(3)`, `status ENUM('active','abandoned','converted')`, `expires_at`, `version INT`, timestamps + inert `deleted_at` | `FK_CART_CUSTOMER → customer(id) ON DELETE SET NULL` (a deleted customer leaves a customerless cart, never cascades it away)                                  |
+| `cart_line` | `id BIGINT UNSIGNED` PK, `variant_id BIGINT UNSIGNED`, `quantity INT`, `unit_price_snapshot_minor BIGINT`, `currency_snapshot CHAR(3)`, timestamps + inert `deleted_at`          | `FK_CART_LINE_CART → cart(id) ON DELETE CASCADE`, `FK_CART_LINE_VARIANT → product_variant(id) ON DELETE RESTRICT`, `CHECK (quantity > 0)`, index on `cart_id` |
 
 All four bounded contexts share the one MySQL database, so `cart.customer_id` and
 `cart_line.variant_id` are **real cross-context foreign keys** onto the gateway
@@ -195,14 +202,14 @@ inline (microservice handlers cannot use request-scoped log assignment —
 retail `cart.controller.ts`'s six `@MessagePattern` handlers on `retail_queue`,
 which the gateway calls (next section).
 
-| Operation | RPC key | What it does |
-| --- | --- | --- |
-| **Create Cart** | `retail.cart.create` | Opens a new `active` cart for the caller; defaults `currency`→`USD`; emits `retail.cart.created`. |
-| **Get Cart** | `retail.cart.get` | Returns the cart view (owner-checked); `404` if missing. |
-| **Add to Cart** | `retail.cart.add-line` | Resolves the variant's price, snapshots it onto a new/incremented line; emits `retail.cart.line-added`. |
-| **Change Quantity** | `retail.cart.change-line-quantity` | Sets a line's quantity (`0` rejected); emits `retail.cart.line-quantity-changed`. |
-| **Remove from Cart** | `retail.cart.remove-line` | Drops a line; emits `retail.cart.line-removed`. |
-| **Claim Cart** | `retail.cart.claim` | Promotes a guest cart to a registered customer (see [Guest carts](#guest-carts-and-the-claim-promotion-q1q7)). |
+| Operation            | RPC key                            | What it does                                                                                                                                                                                                                                                            |
+|----------------------|------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Create Cart**      | `retail.cart.create`               | Opens a new `active` cart for the caller; when the request omits `currency`, defaults to the injected `RETAIL_DEFAULT_CURRENCY` (← the `DEFAULT_CURRENCY` env var — **not a hard-coded `USD` literal**; `USD` only when the var is unset); emits `retail.cart.created`. |
+| **Get Cart**         | `retail.cart.get`                  | Returns the cart view (owner-checked); `404` if missing.                                                                                                                                                                                                                |
+| **Add to Cart**      | `retail.cart.add-line`             | Resolves the variant's price, snapshots it onto a new/incremented line; emits `retail.cart.line-added`.                                                                                                                                                                 |
+| **Change Quantity**  | `retail.cart.change-line-quantity` | Sets a line's quantity (`0` rejected); emits `retail.cart.line-quantity-changed`.                                                                                                                                                                                       |
+| **Remove from Cart** | `retail.cart.remove-line`          | Drops a line; emits `retail.cart.line-removed`.                                                                                                                                                                                                                         |
+| **Claim Cart**       | `retail.cart.claim`                | Promotes a guest cart to a registered customer (see [Guest carts](#guest-carts-and-the-claim-promotion-q1q7)).                                                                                                                                                          |
 
 ### Add-to-Cart snapshots the applicable price
 
@@ -212,9 +219,11 @@ the catalog microservice for the variant's applicable price before mutating:
 
 1. It calls the catalog `catalog.price.select` RPC through a dedicated port,
    `ICartCatalogGatewayPort` (`CART_CATALOG_GATEWAY`), backed by
-   `CartCatalogRabbitmqAdapter` — one of the cart module's two `ClientProxy`
-   holders. The query uses the **cart's own currency**, so the snapshot is always
-   in the currency the cart was opened in.
+   `CartCatalogRabbitmqAdapter` — one of the cart module's `ClientProxy` holders
+   (at this stage two; a later reservation-aware capability added a third,
+   `CartInventoryRabbitmqAdapter` behind `CART_INVENTORY_GATEWAY`, which
+   add/change/remove consult for stock availability). The query uses the **cart's own
+   currency**, so the snapshot is always in the currency the cart was opened in.
 2. `catalog.price.select` resolves to a single `PriceView` (priority then recency
    — the resolution policy lives in the catalog, not the cart) **or `null`** when
    the variant is unknown or has no in-effect price.
@@ -235,7 +244,7 @@ unit-tested against a price double, with no live RabbitMQ.
 
 Each mutating operation maps its in-process `DomainEvent` to the matching wire
 event and emits it through `ICartEventsPublisherPort` (`CART_EVENTS_PUBLISHER`,
-backed by `CartRabbitmqPublisher`, the module's other `ClientProxy` holder) onto
+backed by `CartRabbitmqPublisher`, another of the module's `ClientProxy` holders) onto
 **`retail_queue` — the producer's own queue**. No `@EventPattern` consumer is
 bound to these yet; they are **reserved surfaces** (the same pattern the
 `inventory.stock.{received,adjusted}` events follow), held by the broker for a
@@ -287,14 +296,14 @@ The gateway fronts the six RPCs over HTTP at `/api/cart`
 `CartRabbitmqAdapter` (the sole `ClientProxy` holder) backs `CART_GATEWAY_PORT`,
 and six thin use cases plus the controller depend on the port symbol only.
 
-| Method | Path | Body | Use case |
-| --- | --- | --- | --- |
-| `POST` | `/api/cart` | `{ currency? }` | Create Cart (`customerId = @CurrentUser().id`) |
-| `GET` | `/api/cart/:cartId` | — | Get Cart |
-| `POST` | `/api/cart/:cartId/lines` | `{ variantId, quantity }` | Add to Cart |
-| `PATCH` | `/api/cart/:cartId/lines/:lineId` | `{ quantity }` | Change Quantity |
-| `DELETE` | `/api/cart/:cartId/lines/:lineId` | — | Remove from Cart |
-| `POST` | `/api/cart/:cartId/claim` | `{ fromCustomerId }` | Claim Cart |
+| Method   | Path                              | Body                      | Use case                                       |
+|----------|-----------------------------------|---------------------------|------------------------------------------------|
+| `POST`   | `/api/cart`                       | `{ currency? }`           | Create Cart (`customerId = @CurrentUser().id`) |
+| `GET`    | `/api/cart/:cartId`               | —                         | Get Cart                                       |
+| `POST`   | `/api/cart/:cartId/lines`         | `{ variantId, quantity }` | Add to Cart                                    |
+| `PATCH`  | `/api/cart/:cartId/lines/:lineId` | `{ quantity }`            | Change Quantity                                |
+| `DELETE` | `/api/cart/:cartId/lines/:lineId` | —                         | Remove from Cart                               |
+| `POST`   | `/api/cart/:cartId/claim`         | `{ fromCustomerId }`      | Claim Cart                                     |
 
 `cartId` is the `CHAR(36)` UUID (a string param); `lineId` is the BIGINT
 `cart_line.id`. Request DTOs (`class-validator`) are the edge guard — `variantId`

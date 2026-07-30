@@ -1,7 +1,16 @@
 # ADR-025: Catalog `Product` aggregate and its `ProductVariant` children
 
 - **Date**: 2026-06-02
-- **Status**: Accepted
+- **Status**: Accepted — **amended on one point**: §6's prediction that the publish
+  use case would *warn* rather than *block* on a price-less product is superseded by
+  [ADR-026](026-price-append-only-ledger-and-tax-category.md) (there is a `Price` to
+  check against now, and `PublishProductUseCase` hard-fails with
+  `PRODUCT_PUBLISH_REQUIRES_PRICE` → 409 via the `ACTIVE_PRICE_PROBE` seam), while the
+  warn-shaped slot was filled by a different, genuinely non-blocking rule in
+  [ADR-029](029-category-materialized-path-and-polymorphic-media.md) §7 (the ≥1-active-media
+  recommendation, surfaced as `ProductView.warnings[]`). **§6's principle is unchanged and
+  still binding** — a cross-aggregate fact stays out of `Product.publish()`; that is what
+  the code and the later implementation docs cite. Everything else stands.
 
 ---
 
@@ -13,7 +22,8 @@ service owned this. The inventory microservice carried a vestigial `product`
 table whose only job was to be a foreign-key target for
 `product_stock.product_id`; it held no behaviour and no use case read or wrote
 it through a domain model. That stub was removed outright (see
-[02 — Removing the inventory `product` stub](../implementation/02-catalog-product-and-variant/02-inventory-product-stub-removed.md)),
+[02 — Removing the inventory
+`product` stub](../implementation/02-catalog-product-and-variant/02-inventory-product-stub-removed.md)),
 which freed the `product` table name in the shared `retail_db` schema for a
 context that actually owns product identity.
 
@@ -235,7 +245,9 @@ it does not retro-fit the older aggregates.
 - [ADR-008](008-rabbitmq-via-libs-messaging.md) /
   [ADR-022](022-cache-keys-tenant-and-schema-version.md) — the dotted-routing-key
   and schema-versioning conventions the `v1` wire events follow.
-- [02 — Removing the inventory `product` stub](../implementation/02-catalog-product-and-variant/02-inventory-product-stub-removed.md)
+- [02 — Removing the inventory
+  `product` stub](../implementation/02-catalog-product-and-variant/02-inventory-product-stub-removed.md)
   — the cleanup that freed the `product` table name for this context.
-- [03 — The `Product` and `ProductVariant` domain](../implementation/02-catalog-product-and-variant/03-product-and-variant-domain.md)
+- [03 — The `Product` and
+  `ProductVariant` domain](../implementation/02-catalog-product-and-variant/03-product-and-variant-domain.md)
   — the implementation companion to this decision.

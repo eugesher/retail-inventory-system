@@ -13,8 +13,9 @@ browsable inside the editor and reviewable in pull requests.
 
 `http/kulala/auth.http` covers the auth controllers (staff + customer + admin-ping):
 
-- `POST /api/auth/staff/login` (canonical) and `POST /api/auth/login` (the
-  deprecated alias for one release).
+- `POST /api/auth/staff/login` — the only staff-login path.
+  ([ADR-050](../../adr/050-the-alias-that-was-born-deprecated.md) removed the
+  `/api/auth/login` alias this file used to also carry.)
 - `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`,
   `GET /api/auth/admin/ping`.
 - `POST /api/auth/customer/register`, `POST /api/auth/customer/login`,
@@ -81,12 +82,12 @@ references `{{staffLogin.response.body.$.accessToken}}` or
 
 Two follow-up cleanups are out of scope here but worth flagging:
 
-- `http/kulala/order.http` and `http/product.http` have no chained auth block.
-  Operators currently send the request unauthenticated (the global guard
-  rejects it) or hand-paste a token into the `Authorization` header. A
-  follow-up could either add a leading login block to each file
-  (matching the iam.http pattern) or factor a shared login fragment when
-  Kulala supports request includes.
+- ~~`http/kulala/order.http` and `http/product.http` have no chained auth block.~~
+  **Resolved / obsolete.** `http/kulala/order.http` now opens with a
+  `# @name login` block (`POST {{baseUrl}}/auth/customer/login`) that later blocks
+  chain off, exactly the `iam.http` pattern. `http/product.http` never survived —
+  every `.http` file lives under `http/kulala/`. The remaining idea, factoring a
+  shared login fragment once Kulala supports request includes, is still open.
 - `http/kulala/http-client.env.json` could grow `adminEmail` / `adminPassword`
   entries to avoid hardcoding `admin@example.com` / `admin1234` in two
   places, but the convention in the existing files is to hardcode literal

@@ -153,9 +153,12 @@ Non-obvious facts, each worth a debugging cycle.
 
 **Repo**
 
-- `.env.local` **is git-tracked** (CI reads it), but `.env.example` is **not** — `.gitignore`'s
-  `.env.*` glob swallows it and only `.env.local` is force-tracked. An edit to `.env.example`
-  never shows up in `git status`; do not conclude it was missed.
+- `.env.example` is the **tracked** template (`.gitignore`'s `.env.*` glob swallows every env
+  file; `!.env.example` force-tracks that one) and `.env.local` **is not in the repo at all** —
+  an edit to `.env.example` *does* show in `git status`. This is the reverse of what it was
+  before `dddf733`; carryover notes saying `.env.local` is tracked are wrong. CI reads no env
+  file (inline `env:` in `.github/workflows/ci-cd.yml`), and `envFilePath` is
+  `['.env.local', '.env']` — so a host run needs `cp .env.example .env.local` first.
 - Bare `npx jest` fails with a Babel TypeScript parse error (not a code bug). Always pass
   `--config jest.unit.config.js`.
 - `yarn lint` is the **source of truth for where a file belongs**. Never weaken a
@@ -513,7 +516,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `056`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `058`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

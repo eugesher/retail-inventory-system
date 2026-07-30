@@ -55,7 +55,10 @@ isolation gain. See [ADR-031](../../adr/031-fulfillment-aggregate-and-ship-trigg
 The aggregate enforces **only its own shape**: at least one line, each line's quantity
 a positive integer, the legal status transitions, and the tracking-on-ship rule. The
 **cross-fulfillment invariant** — the sum of a line's quantities across *all* of an
-order's shipments must not exceed the ordered quantity — is **not** in the model. The
+order's shipments must not exceed the line's **active** quantity (the ordered quantity when
+this shipped; `ordered − cancelled_quantity` since
+[ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md)) — is **not** in the
+model. The
 aggregate cannot see its sibling fulfillments or the order's line quantities, so that
 check belongs to the Create Fulfillment use case (which loads the order and the
 order's existing fulfillments), surfaced as `FULFILLMENT_QUANTITY_EXCEEDS_REMAINING`.
@@ -84,15 +87,21 @@ order's own `fulfillment_status` is the **roll-up across them** (computed by the
 operations, not stored on the fulfillment): `shipped` once every line is fully
 shipped, otherwise `partially-shipped`.
 
+> Since [ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md), "fully
+> shipped" is measured against the line's **active** quantity (`quantity −
+> cancelled_quantity`), not its place-time ordered quantity, and a line whose active
+> quantity has fallen to `0` is skipped by the roll-up entirely — otherwise a
+> fully-cancelled line would hold the order's fulfillment axis below `shipped` forever.
+
 **Worked example.** An order for 3 units of line A and 2 of line B ships the 3 A's
 from `default-warehouse` today and the 2 B's tomorrow:
 
-| Moment | `Order.status` | `Order.paymentStatus` | `Order.fulfillmentStatus` | Fulfillment #1 (A×3) | Fulfillment #2 (B×2) |
-| --- | --- | --- | --- | --- | --- |
-| placed | pending | authorized | unfulfilled | — | — |
-| box 1 ships | confirmed | **captured** | **partially-shipped** | **shipped** | pending |
-| box 2 ships | confirmed | captured | **shipped** | shipped | **shipped** |
-| both delivered | **delivered** | captured | **delivered** | **delivered** | **delivered** |
+| Moment         | `Order.status` | `Order.paymentStatus` | `Order.fulfillmentStatus` | Fulfillment #1 (A×3) | Fulfillment #2 (B×2) |
+|----------------|----------------|-----------------------|---------------------------|----------------------|----------------------|
+| placed         | pending        | authorized            | unfulfilled               | —                    | —                    |
+| box 1 ships    | confirmed      | **captured**          | **partially-shipped**     | **shipped**          | pending              |
+| box 2 ships    | confirmed      | captured              | **shipped**               | shipped              | **shipped**          |
+| both delivered | **delivered**  | captured              | **delivered**             | **delivered**        | **delivered**        |
 
 Which operation advances which axis (the operations are detailed in the sibling
 documents):
@@ -132,18 +141,18 @@ Two tables, created by the `CreateFulfillmentTables` migration in FK-dependency 
 
 **`fulfillment`**
 
-| column | type | notes |
-| --- | --- | --- |
-| `id` | BIGINT UNSIGNED PK | auto-increment (the `BaseEntity` numeric id) |
-| `order_id` | BIGINT UNSIGNED | FK → `order.id` `ON DELETE RESTRICT` |
-| `stock_location_id` | VARCHAR(64) | opaque inventory id — **no FK** (retail never imports inventory) |
-| `status` | ENUM | `pending` / `shipped` / `delivered` / `cancelled`, default `pending` |
-| `tracking_number` | VARCHAR(64) NULL | stamped on ship |
-| `carrier` | VARCHAR(64) NULL | optional metadata |
-| `shipped_at` | TIMESTAMP NULL | stamped on ship |
-| `delivered_at` | TIMESTAMP NULL | stamped on deliver |
-| `version` | INT | the `@VersionColumn` optimistic-concurrency token |
-| `created_at` / `updated_at` / `deleted_at` | TIMESTAMP | `deleted_at` inert |
+| column                                     | type               | notes                                                                |
+|--------------------------------------------|--------------------|----------------------------------------------------------------------|
+| `id`                                       | BIGINT UNSIGNED PK | auto-increment (the `BaseEntity` numeric id)                         |
+| `order_id`                                 | BIGINT UNSIGNED    | FK → `order.id` `ON DELETE RESTRICT`                                 |
+| `stock_location_id`                        | VARCHAR(64)        | opaque inventory id — **no FK** (retail never imports inventory)     |
+| `status`                                   | ENUM               | `pending` / `shipped` / `delivered` / `cancelled`, default `pending` |
+| `tracking_number`                          | VARCHAR(64) NULL   | stamped on ship                                                      |
+| `carrier`                                  | VARCHAR(64) NULL   | optional metadata                                                    |
+| `shipped_at`                               | TIMESTAMP NULL     | stamped on ship                                                      |
+| `delivered_at`                             | TIMESTAMP NULL     | stamped on deliver                                                   |
+| `version`                                  | INT                | the `@VersionColumn` optimistic-concurrency token                    |
+| `created_at` / `updated_at` / `deleted_at` | TIMESTAMP          | `deleted_at` inert                                                   |
 
 Index `IDX_FULFILLMENT_ORDER_SHIPPED (order_id, shipped_at)` — supports listing an
 order's fulfillments newest-first (a still-`pending` fulfillment has a null
@@ -151,13 +160,13 @@ order's fulfillments newest-first (a still-`pending` fulfillment has a null
 
 **`fulfillment_line`**
 
-| column | type | notes |
-| --- | --- | --- |
-| `id` | BIGINT UNSIGNED PK | auto-increment |
-| `fulfillment_id` | BIGINT UNSIGNED | FK → `fulfillment.id` `ON DELETE CASCADE` — a line cannot outlive its fulfillment |
-| `order_line_id` | BIGINT UNSIGNED | FK → `order_line.id` `ON DELETE RESTRICT` |
-| `quantity` | INT | units of that order line in this shipment |
-| `created_at` / `updated_at` / `deleted_at` | TIMESTAMP | `deleted_at` inert |
+| column                                     | type               | notes                                                                             |
+|--------------------------------------------|--------------------|-----------------------------------------------------------------------------------|
+| `id`                                       | BIGINT UNSIGNED PK | auto-increment                                                                    |
+| `fulfillment_id`                           | BIGINT UNSIGNED    | FK → `fulfillment.id` `ON DELETE CASCADE` — a line cannot outlive its fulfillment |
+| `order_line_id`                            | BIGINT UNSIGNED    | FK → `order_line.id` `ON DELETE RESTRICT`                                         |
+| `quantity`                                 | INT                | units of that order line in this shipment                                         |
+| `created_at` / `updated_at` / `deleted_at` | TIMESTAMP          | `deleted_at` inert                                                                |
 
 Index `IDX_FULFILLMENT_LINE_ORDER_LINE (order_line_id)`.
 
@@ -178,5 +187,7 @@ rule).
 - [ADR-028 — Cart, Order, Payment, and Address](../../adr/028-cart-order-payment-and-address-chain.md)
   — the three orthogonal order axes and the one-throwable-per-module convention this
   aggregate extends.
-- `02-create-and-ship-fulfillment.md` *(forthcoming)* — creating a fulfillment from an
-  order's lines (with the cross-fulfillment sum invariant) and shipping it.
+- [02-create-and-ship-fulfillment.md](02-create-and-ship-fulfillment.md) — creating a
+  fulfillment from an order's lines (with the cross-fulfillment sum invariant) and
+  shipping it. *(Written as forthcoming when this document shipped; it has since landed,
+  along with `03`–`07`.)*

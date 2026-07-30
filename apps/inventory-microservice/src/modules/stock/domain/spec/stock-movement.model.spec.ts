@@ -150,6 +150,9 @@ describe('StockMovement', () => {
         referenceType: 'cart',
         referenceId: 'cart-abc',
         actorId: null,
+        // A cart-driven release carries no operation key — only Cancel-Allocation mints one
+        // (ADR-057), which is what keeps every other release out of the dedupe UNIQUE.
+        operationKey: null,
         occurredAt,
       });
 
@@ -177,6 +180,7 @@ describe('StockMovement', () => {
           referenceType: null,
           referenceId: null,
           actorId: null,
+          operationKey: null,
           occurredAt: new Date(),
         }),
       ).toThrow(Error);

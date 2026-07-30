@@ -57,7 +57,8 @@ one-class-per-module convention. The returns context
 ([`01-rma-lifecycle.md`](./01-rma-lifecycle.md)) never imports the orders module; when a
 closing return needs to trigger a refund, that crossing happens at the use-case /
 eventing layer, not by importing the `Refund` aggregate into `returns/`. See
-[`docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md`](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)
+[
+`docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md`](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)
 for the full module-split rationale.
 
 ## 3. Partial-vs-full refund accounting
@@ -72,8 +73,20 @@ contract:
   payment.refunded_amount_minor` — what is left to refund. A refund whose amount would
   push the cumulative total past `amount_minor` is rejected
   (`REFUND_EXCEEDS_REFUNDABLE`, 409). This ceiling, plus the gateway-reference natural
-  idempotency, is what stops a replay from over-refunding — there is no transactional
-  outbox / event-store yet (the ADR-028 §6 posture).
+  idempotency, is what stops a replay from over-refunding.
+
+  > Two of the absences this sentence originally cited have since been filled, and the
+  > ceiling's role changed accordingly. An **event store** exists
+  > ([ADR-034](../../adr/034-isolated-eventstore-database.md) /
+  > [ADR-035](../../adr/035-event-store-firehose-topic-exchange.md)) — every producer
+  > dual-publishes onto `ris.events` and the firehose ingests it — though it is a capture
+  > surface, not a transactional outbox, which
+  > [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) explicitly reconsidered
+  > and rejected for this scope. And a **request-level idempotency store** exists, which Issue
+  > Refund enforces **reserve-first**. So the ceiling is now the *backstop* rather than the
+  > front line: the store turns a duplicate away before the gateway is ever called. It still
+  > earns its place — it is the only guard against a caller who refunds too much on purpose,
+  > with a perfectly fresh key.
 - A refund that brings the cumulative total **exactly to `amount_minor`** is a **full**
   refund: it walks the payment to `status = refunded` and clears its
   `flagged_for_refund` flag (the flag Cancel Order sets on a captured-payment
@@ -127,20 +140,30 @@ precedent), not pulled from the aggregate.
 
 ### Error codes
 
-Seven `OrderErrorCodeEnum` members back the refund capability (all mapped in the orders
+**Six** `OrderErrorCodeEnum` members back the refund capability (all mapped in the orders
 module's total `Record<OrderErrorCodeEnum, HttpStatus>` exception filter, so a missing
 arm is a compile error). The model throws three of them; the rest are thrown by the
 Issue Refund / refund-read operations:
 
-| Code                               | HTTP | Thrown by    | Meaning                                                          |
-| ---------------------------------- | ---- | ------------ | ---------------------------------------------------------------- |
-| `REFUND_AMOUNT_INVALID`            | 400  | model        | amount not a strictly positive integer (distinct from `PAYMENT_AMOUNT_INVALID`, which allows 0) |
-| `REFUND_REASON_REQUIRED`           | 400  | model        | empty reason                                                     |
-| `REFUND_INVALID_STATUS_TRANSITION` | 409  | model        | `markIssued` / `markFailed` from a non-`pending` state           |
-| `REFUND_NOT_FOUND`                 | 404  | use case     | the refund being read/operated on does not exist                 |
-| `REFUND_EXCEEDS_REFUNDABLE`        | 409  | use case     | amount > `amount_minor − refunded_amount_minor` (the over-refund ceiling) |
-| `REFUND_PAYMENT_NOT_CAPTURED`      | 409  | use case     | the payment is not `captured`, so there is nothing to refund     |
-| `REFUND_ACCESS_FORBIDDEN`          | 403  | use case     | the caller is neither the refunded order's owner nor staff       |
+| Code                               | HTTP | Thrown by | Meaning                                                                                         |
+|------------------------------------|------|-----------|-------------------------------------------------------------------------------------------------|
+| `REFUND_AMOUNT_INVALID`            | 400  | model     | amount not a strictly positive integer (distinct from `PAYMENT_AMOUNT_INVALID`, which allows 0) |
+| `REFUND_REASON_REQUIRED`           | 400  | model     | empty reason                                                                                    |
+| `REFUND_INVALID_STATUS_TRANSITION` | 409  | model     | `markIssued` / `markFailed` from a non-`pending` state                                          |
+| `REFUND_EXCEEDS_REFUNDABLE`        | 409  | use case  | amount > `amount_minor − refunded_amount_minor` (the over-refund ceiling)                       |
+| `REFUND_PAYMENT_NOT_CAPTURED`      | 409  | use case  | the payment is not `captured`, so there is nothing to refund                                    |
+| `REFUND_ACCESS_FORBIDDEN`          | 403  | use case  | the caller is neither the refunded order's owner nor staff                                      |
+
+> **There was a seventh, `REFUND_NOT_FOUND`, and it has been removed.** It was declared in
+> `OrderErrorCodeEnum` and mapped to `404` in the orders filter's total `Record` — and raised
+> by no use case, for the whole time it existed, because **a refund is never addressed on its
+> own**: Issue Refund reads a payment's refunds through `findByPaymentId` for its over-refund
+> guard, and List Refunds is order-scoped. `IRefundRepositoryPort.findById` was its twin, and
+> [ADR-049](../../adr/049-the-port-methods-nothing-calls.md) had already removed that for the
+> identical reason — leaving the error code behind left half a cleanup done. The decisive
+> argument is ADR-049's own: a `Record` arm is not free just because the compiler accepts it.
+> It **asserts** that this surface can answer `404` with that code, which was never true. A
+> `GET /orders/:orderId/refunds/:refundId`, if it is ever wanted, arrives with its own code.
 
 `Refund.amountMinor` is **strictly positive** — a zero/negative refund is meaningless —
 so it gets its own `REFUND_AMOUNT_INVALID` code rather than reusing `Payment`'s
@@ -155,18 +178,18 @@ convention. `REFUND_ACCESS_FORBIDDEN` is a **dedicated** code rather than a reus
 
 The `refund` table (migration `1781859356461-CreateRefundTable`):
 
-| Column              | Type                                   | Notes                                                       |
-| ------------------- | -------------------------------------- | ----------------------------------------------------------- |
-| `id`                | `BIGINT UNSIGNED AUTO_INCREMENT` PK    | `BaseEntity`'s numeric PK, widened to BIGINT by the migration |
-| `order_id`          | `BIGINT UNSIGNED NOT NULL`             | FK → `order(id)` `ON DELETE RESTRICT` (`FK_REFUND_ORDER`)   |
-| `payment_id`        | `BIGINT UNSIGNED NOT NULL`             | FK → `payment(id)` `ON DELETE RESTRICT` (`FK_REFUND_PAYMENT`) |
-| `amount_minor`      | `BIGINT NOT NULL`                      | minor units; mysql2 returns it as a string — the mapper coerces with `Number(...)` |
-| `currency`          | `CHAR(3) NOT NULL`                     |                                                             |
-| `status`            | `ENUM('pending','issued','failed')`    | default `'pending'`                                         |
-| `reason`            | `VARCHAR(255) NOT NULL`                |                                                             |
-| `gateway_reference` | `VARCHAR(255) NULL`                    | null while `pending`; stamped on issue                     |
-| `issued_at`         | `TIMESTAMP NULL`                       | null while `pending`; stamped on issue                     |
-| `created_at` / `updated_at` / `deleted_at` | `TIMESTAMP`             | `deleted_at` **inert** — a refund is never soft-deleted     |
+| Column                                     | Type                                | Notes                                                                              |
+|--------------------------------------------|-------------------------------------|------------------------------------------------------------------------------------|
+| `id`                                       | `BIGINT UNSIGNED AUTO_INCREMENT` PK | `BaseEntity`'s numeric PK, widened to BIGINT by the migration                      |
+| `order_id`                                 | `BIGINT UNSIGNED NOT NULL`          | FK → `order(id)` `ON DELETE RESTRICT` (`FK_REFUND_ORDER`)                          |
+| `payment_id`                               | `BIGINT UNSIGNED NOT NULL`          | FK → `payment(id)` `ON DELETE RESTRICT` (`FK_REFUND_PAYMENT`)                      |
+| `amount_minor`                             | `BIGINT NOT NULL`                   | minor units; mysql2 returns it as a string — the mapper coerces with `Number(...)` |
+| `currency`                                 | `CHAR(3) NOT NULL`                  |                                                                                    |
+| `status`                                   | `ENUM('pending','issued','failed')` | default `'pending'`                                                                |
+| `reason`                                   | `VARCHAR(255) NOT NULL`             |                                                                                    |
+| `gateway_reference`                        | `VARCHAR(255) NULL`                 | null while `pending`; stamped on issue                                             |
+| `issued_at`                                | `TIMESTAMP NULL`                    | null while `pending`; stamped on issue                                             |
+| `created_at` / `updated_at` / `deleted_at` | `TIMESTAMP`                         | `deleted_at` **inert** — a refund is never soft-deleted                            |
 
 Both FKs are `ON DELETE RESTRICT`: a refund is an append-only audit record of money
 returned, so neither its order nor its payment can be hard-deleted out from under it.
@@ -184,16 +207,24 @@ forward-shipped columns the refund flow consumes (`flagged_for_refund`,
 
 `IRefundRepositoryPort` (`REFUND_REPOSITORY`) returns domain types only — no TypeORM
 leak (ADR-017). It declares `save` (single-row upsert + re-read so the generated BIGINT
-id comes back concrete), `findById`, `findByOrderId` (newest-first by `issued_at` then
-`id`), and `findByPaymentId` (the per-payment history backing the over-refund guard).
-`save` / `findById` / `findByPaymentId` accept an optional transaction scope so Issue
+id comes back concrete), `findByOrderId` (newest-first by `issued_at` then `id`), and
+`findByPaymentId` (the per-payment history backing the over-refund guard).
+`save` / `findByPaymentId` accept an optional transaction scope so Issue
 Refund can persist the `Refund` and advance the `Payment` in one short follow-up
 transaction (the `PaymentTypeormRepository` precedent, ADR-017 §6).
 `RefundTypeormRepository` is the single `@InjectRepository(RefundEntity)` site.
 
+> **A fourth method, `findById`, shipped here and was removed by
+> [ADR-049](../../adr/049-the-port-methods-nothing-calls.md).** It was declared, implemented,
+> tested — and called by nothing, for the same reason `REFUND_NOT_FOUND` had no thrower (§4): a
+> refund is never addressed on its own. Deleting it is the point of that ADR: a port method with
+> no caller is not a spare part, it is a claim about the seam that the code does not honour. The
+> error code outlived it by a while; both are gone now.
+
 ## 6. Related decisions and forward links
 
-- [`docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md`](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)
+- [
+  `docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md`](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md)
   — the whole returns-and-refunds capability, including `Refund`-as-distinct-entity and
   the partial-vs-full accounting.
 - [`docs/adr/028-cart-order-payment-and-address-chain.md`](../../adr/028-cart-order-payment-and-address-chain.md)
@@ -201,8 +232,10 @@ transaction (the `PaymentTypeormRepository` precedent, ADR-017 §6).
   `flagged_for_refund` / `refunded_amount_minor` forward-shipped columns (§6).
 - [`01-rma-lifecycle.md`](./01-rma-lifecycle.md) — the `ReturnRequest` aggregate a
   closing return triggers a refund from.
-- `04-auto-refund-from-cancel-order.md` (forthcoming) — the consumer that issues a
-  refund automatically when Cancel Order flags a captured payment.
-- `05-fake-gateway-refund-method.md` (forthcoming) — the `FakePaymentGatewayAdapter`'s
-  always-succeed `refund()` that makes the flow exercisable end-to-end, and the
-  `Payment.refund()` mutator + over-refund guard that this foundation defers.
+- [`04-auto-refund-from-cancel-order.md`](./04-auto-refund-from-cancel-order.md) — the
+  consumer that issues a refund automatically when Cancel Order flags a captured payment. It
+  landed later in this same epic.
+- [`05-fake-gateway-refund-method.md`](./05-fake-gateway-refund-method.md) — the
+  `FakePaymentGatewayAdapter`'s always-succeed `refund()` that makes the flow exercisable
+  end-to-end, and the `Payment.refund()` mutator + over-refund guard that this foundation
+  defers. It landed later in this same epic.

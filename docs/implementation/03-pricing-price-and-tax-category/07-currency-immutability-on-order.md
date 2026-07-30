@@ -1,14 +1,19 @@
 # 07 — Currency on the price ledger seeds an immutable order currency
 
-This document is **forward-looking**. It records a contract the pricing capability
-deliberately *shapes* but does not *own*: how the `currency` carried on each
-`Price` row becomes the seed of a future order's header currency, and why that
-order currency must then be immutable for the life of the order.
+This document was **forward-looking** when written. It records a contract the
+pricing capability deliberately *shapes* but does not *own*: how the `currency`
+carried on each `Price` row becomes the seed of a future order's header currency,
+and why that order currency must then be immutable for the life of the order.
 
 Nothing here changes pricing code. It exists so that whoever builds the cart /
 order-placement capability inherits the reasoning instead of re-deriving it — and
 so they do not accidentally model currency in a way that re-opens a question the
 price ledger already answered.
+
+> **The order side has since been built, and it honours both obligations** — see
+> §5 for what was actually implemented and the one place the shipped design is
+> *stricter* than the prediction below. §§1–4 are kept as the record of the
+> reasoning handed forward.
 
 It builds on the ledger model in
 [02 — Price domain and append-only history](02-price-domain-and-append-only-history.md)
@@ -31,8 +36,12 @@ identity. Two facts follow directly:
   `(variant 1, EUR)` are independent append-only timelines, each with its own
   at-most-one-open-row invariant. Selecting a price is therefore always a
   `(variantId, currency, asOf)` question — currency is a required input, not a
-  derived one. The gateway read DTO encodes this by defaulting `?currency` to the
-  configured `DEFAULT_CURRENCY` (`USD`) at the edge rather than leaving it absent.
+  derived one. The gateway encodes this by resolving an omitted `?currency` to the
+  configured `DEFAULT_CURRENCY` before dispatching, rather than sending the scope
+  absent. (The resolution originally sat on the read DTO as a literal `'USD'`
+  initializer; it now lives one layer in, in the read use cases, over the
+  `CATALOG_GATEWAY_DEFAULT_CURRENCY` token — see
+  [06 — Pricing API at the gateway](06-pricing-api-and-kulala.md) §3.)
 
 So the system already has a single, unambiguous source for "what currency is this
 variant priced in, right now" — and it is per variant, not global.
@@ -78,7 +87,8 @@ stops at the boundary:
 - It does **not** own an `Order`, an `Order.currency` column, or any place-time
   capture. There is no order-side code here, and pricing has no opinion on order
   lifecycle — it exposes `catalog.price.select` and lets the caller decide what to
-  do with the answer.
+  do with the answer. (That is still true of *this* module; the order side now
+  exists in `retail-microservice` — §5.)
 
 That split is intentional. Pricing is a read the order side *calls*; it is not a
 writer into the order aggregate. The forward contract is therefore expressible as
@@ -102,3 +112,31 @@ amount." Writing that expectation down here means the order side starts from
 re-price themselves or that two currencies have leaked into one total. The
 groundwork — the scope, the resolution, the single-currency-per-read shape — is
 laid; this note is the bridge to the side that will consume it.
+
+## 5. What the order side actually did
+
+The cart / order-placement capability has since shipped in
+`retail-microservice`, and both obligations of §3 hold:
+
+1. **Resolve, then capture.** `PlaceOrderUseCase.snapshotLines` calls
+   `catalog.price.select` once per cart line at place-time and stamps the resolved
+   `amountMinor` onto the line as `unitPriceMinor`; `lineTotalMinor` is that times
+   the quantity. Nothing holds a live reference back into the `price` table — a
+   later reprice cannot re-total a placed order.
+2. **Freeze the header currency.** `Order.currency` is a `private readonly` field
+   validated against the same `^[A-Z]{3}$` shape, with a getter and **no setter**,
+   so it is immutable for the order's lifetime by construction.
+
+**One place the shipped design is stricter than the prediction above.** §2 assumed
+the header currency would be *derived* "from the prices resolved at place-time."
+It is not — the arrow runs the other way. The currency comes from `cart.currency`
+(itself opened from `RETAIL_DEFAULT_CURRENCY` ← the same `DEFAULT_CURRENCY`), and
+that currency is then the **input** to every line's price resolution. A variant
+with no applicable price in the cart's currency does not silently pull the order
+into a second currency: the placement is rejected outright with a typed
+`ORDER_LINE_NO_PRICE` (→ 409).
+
+That inversion is what makes the freeze cheap rather than merely enforced. A
+straddling order is not something the aggregate has to detect and reject after the
+fact — it is unrepresentable, because one currency is chosen before any price is
+read.

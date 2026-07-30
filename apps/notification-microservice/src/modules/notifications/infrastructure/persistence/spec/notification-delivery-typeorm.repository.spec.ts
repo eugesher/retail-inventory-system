@@ -231,6 +231,30 @@ describe('NotificationDeliveryTypeormRepository.save', () => {
   });
 });
 
+describe('NotificationDeliveryTypeormRepository.findById', () => {
+  // A miss must be `null`, not a rejection: every caller above this — Record Outcome, manual
+  // Retry — turns the null into a typed `DELIVERY_NOT_FOUND` (404). A repository that threw
+  // instead would surface an unknown id as a 500.
+  it('resolves a missing row to null rather than throwing', async () => {
+    const d = makeRepoDouble();
+    d.programFindOne(null);
+
+    const found = await new NotificationDeliveryTypeormRepository(d.repository).findById(404);
+
+    expect(found).toBeNull();
+    expect(d.lastFindOne().where).toEqual({ id: 404 });
+  });
+
+  it('maps a found row to the domain aggregate', async () => {
+    const d = makeRepoDouble();
+
+    const found = await new NotificationDeliveryTypeormRepository(d.repository).findById(7);
+
+    expect(found).toBeInstanceOf(NotificationDelivery);
+    expect(found?.id).toBe(7);
+  });
+});
+
 describe('NotificationDeliveryTypeormRepository.list', () => {
   it('builds an empty where-clause when no filter is supplied', async () => {
     const d = makeRepoDouble();
@@ -294,12 +318,19 @@ describe('NotificationDeliveryTypeormRepository.listRetryable', () => {
   // The sweeper's scan. `attemptCount < maxAttempts` is the budget — an off-by-one here (`LessThan` →
   // `LessThanOrEqual`) does not fail: it just retries every delivery one extra time, forever, against a
   // transport that already refused it.
+  const STALE_BEFORE = new Date('2026-07-24T11:55:00.000Z');
+
   it('scans failed rows under the attempt budget, oldest attempt first, bounded by the limit', async () => {
     const d = makeRepoDouble();
 
-    const rows = await new NotificationDeliveryTypeormRepository(d.repository).listRetryable(3, 50);
+    const rows = await new NotificationDeliveryTypeormRepository(d.repository).listRetryable(
+      3,
+      50,
+      STALE_BEFORE,
+    );
 
-    expect(d.lastFind().where).toEqual({
+    // An ARRAY of where-objects is TypeORM's OR. The FIRST arm is the ordinary one.
+    expect((d.lastFind().where as unknown[])[0]).toEqual({
       status: NotificationDeliveryStatusEnum.FAILED,
       attemptCount: LessThan(3),
     });
@@ -308,12 +339,50 @@ describe('NotificationDeliveryTypeormRepository.listRetryable', () => {
     expect(rows[0]).toBeInstanceOf(NotificationDelivery);
   });
 
+  // The second arm. Without it a delivery orphaned in `queued` between the persist and the dispatch
+  // is unreachable by every path in the service — the sweeper never sees it and the manual retry
+  // refuses it — which is precisely what ADR-033 §3 says must not happen.
+  it('also scans queued rows older than the staleness horizon — the orphan arm', async () => {
+    const d = makeRepoDouble();
+
+    await new NotificationDeliveryTypeormRepository(d.repository).listRetryable(
+      3,
+      50,
+      STALE_BEFORE,
+    );
+
+    expect((d.lastFind().where as unknown[])[1]).toEqual({
+      status: NotificationDeliveryStatusEnum.QUEUED,
+      createdAt: LessThan(STALE_BEFORE),
+    });
+  });
+
+  // The bound is the whole point of the orphan arm: a `queued` row persisted moments ago is being
+  // dispatched RIGHT NOW, and re-dispatching it is a race, not a recovery. An unbounded
+  // `status = queued` arm would double-send every notification in flight on every sweep.
+  it('bounds the queued arm by created_at — never an unqualified status scan', async () => {
+    const d = makeRepoDouble();
+
+    await new NotificationDeliveryTypeormRepository(d.repository).listRetryable(
+      3,
+      50,
+      STALE_BEFORE,
+    );
+
+    const queuedArm = (d.lastFind().where as Record<string, unknown>[])[1];
+    expect(Object.keys(queuedArm).sort()).toEqual(['createdAt', 'status']);
+  });
+
   // `find`, never `findAndCount`: the sweeper iterates the batch and would discard a `COUNT(*)` it
   // paid a full table scan for.
   it('does not pay for a COUNT it would discard', async () => {
     const d = makeRepoDouble();
 
-    await new NotificationDeliveryTypeormRepository(d.repository).listRetryable(3, 50);
+    await new NotificationDeliveryTypeormRepository(d.repository).listRetryable(
+      3,
+      50,
+      STALE_BEFORE,
+    );
 
     expect(d.find).toHaveBeenCalledTimes(1);
     expect(d.findAndCount).not.toHaveBeenCalled();

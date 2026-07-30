@@ -2,7 +2,8 @@ name: list-tax-categories
 description: |-
   GET /api/catalog/tax-categories  (public)
   Lists every tax category, ordered by code. No Authorization header — the
-  @Public() route serves an unauthenticated caller. On a freshly-seeded stack the
-  only row is the LUXURY category just created; any later-seeded labels would
-  appear here too. Response is TaxCategoryView[].
+  @Public() route serves an unauthenticated caller. On a freshly-seeded stack
+  that is FOUR rows: EXEMPT, LUXURY (just created), REDUCED, STANDARD — the
+  three from scripts/seeds/tax-category.sql plus this collection's own. Response
+  is TaxCategoryView[].
 url: $ENV_BASE_URL/catalog/tax-categories

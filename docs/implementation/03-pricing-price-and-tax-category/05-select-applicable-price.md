@@ -39,26 +39,40 @@ endpoint. The only branch is at the very end — which event is emitted.
 2. **Find the open predecessor.** `repo.findOpenPrice(variantId, currency)` — the
    single open (`validTo IS NULL`) row for the scope, or `null`.
 3. **Decide what to close** (`resolvePredecessor`):
-   - `open === null` → nothing to close; this is the first price for the scope.
-   - `open.validFrom < newPrice.validFrom` → close it **at** the new `validFrom`
-     (`open.close(newPrice.validFrom)`). The predecessor's interval becomes
-     `[open.validFrom, newPrice.validFrom)` and the successor's is
-     `[newPrice.validFrom, …)` — they tile without overlap.
-   - otherwise (`open.validFrom >= newPrice.validFrom`) → reject with
-     `PRICE_SCHEDULE_CONFLICT`. A new interval cannot begin at or before an
-     already-open one; see [§4](#4-the-schedule-conflict-and-its-deliberate-limit).
+    - `open === null` → nothing to close; this is the first price for the scope.
+    - `open.validFrom < newPrice.validFrom` → close it **at** the new `validFrom`
+      (`open.close(newPrice.validFrom)`). The predecessor's interval becomes
+      `[open.validFrom, newPrice.validFrom)` and the successor's is
+      `[newPrice.validFrom, …)` — they tile without overlap.
+    - otherwise (`open.validFrom >= newPrice.validFrom`) → reject with
+      `PRICE_SCHEDULE_CONFLICT`. A new interval cannot begin at or before an
+      already-open one; see [§4](#4-the-schedule-conflict-and-its-deliberate-limit).
 4. **Append atomically.** `repo.appendPrice(newPrice, predecessorToClose)` runs the
    close-UPDATE and the insert in one transaction and re-reads the inserted row so
    its concrete id comes back (ADR-026 §3).
-5. **Emit, best-effort, post-commit.** If `saved.validFrom > now` the price is in
-   the future → emit `catalog.price.scheduled` (with `effectiveAt == validFrom`);
-   otherwise → `catalog.price.changed`. A broker failure is warn-logged and
-   swallowed — the row is already persisted (ADR-020).
+5. **Emit, best-effort, post-commit.** If the price is in the future → emit
+   `catalog.price.scheduled` (with `effectiveAt == validFrom`); otherwise →
+   `catalog.price.changed`. A broker failure is warn-logged and swallowed — the
+   row is already persisted (ADR-020).
 6. **Return** the persisted row as a `PriceView`.
 
 Because the immediate/scheduled decision is `validFrom > now`, an immediate price
 (whose `validFrom` defaulted to the same `now`) is never mistaken for a scheduled
 one, and the two events stay cleanly separated.
+
+### The classification reads `newPrice`, never `saved`
+
+The test in step 5 is `newPrice.validFrom > now` — the **pre-persist** instant —
+not `saved.validFrom`, and the distinction is load-bearing. `price.valid_from` is
+`TIMESTAMP(0)`, second-granular, so MySQL rounds the sub-second instant the domain
+captured to the nearest whole second and can round it **up**. Reading the
+round-tripped `saved.validFrom` would then see `> now` for a price the caller meant
+as immediate, and emit `catalog.price.scheduled` instead of
+`catalog.price.changed` — roughly half the time, whenever the millisecond
+component of `now` is ≥ 500. `newPrice.validFrom` is exactly the instant the caller
+asked for, so it is the one that classifies the event. (The same rounding is why
+`test/pricing.e2e-spec.ts` waits just over a second between the last price Set and
+the publish — see [06 — Pricing API at the gateway](06-pricing-api-and-kulala.md) §6.)
 
 ### Why scheduling leaves the current price untouched
 
@@ -100,8 +114,8 @@ Two steps, two responsibilities:
   match at the boundary instant.
 - **The pick policy is the use case's.** From the candidate set, `resolve`
   chooses:
-  1. **highest `priority`** wins;
-  2. on a tie, **latest `validFrom`** (the most recently started interval) wins.
+    1. **highest `priority`** wins;
+    2. on a tie, **latest `validFrom`** (the most recently started interval) wins.
 
   `resolve` is a pure static method (`SelectApplicablePriceUseCase.resolve`), so
   it is reasoned about and tested without an instance, and returns `null` for an
@@ -140,10 +154,10 @@ All amounts are minor units (integer cents). `asOf` is an instant; intervals are
 
 ### Overlapping priorities — a promo over a base price
 
-| id | amount | interval | priority |
-| --- | --- | --- | --- |
-| 1 | 1000 | `[2020-01-01, ∞)` | 0 |
-| 2 | 800 | `[2026-01-01, 2027-01-01)` | 10 |
+| id | amount | interval                   | priority |
+|----|--------|----------------------------|----------|
+| 1  | 1000   | `[2020-01-01, ∞)`          | 0        |
+| 2  | 800    | `[2026-01-01, 2027-01-01)` | 10       |
 
 - `resolve(asOf = 2026-06-01)` → both rows are in effect; row 2 has the higher
   priority → **800**.
@@ -152,10 +166,10 @@ All amounts are minor units (integer cents). `asOf` is an instant; intervals are
 
 ### The tiebreak — equal priority, latest start wins
 
-| id | amount | interval | priority |
-| --- | --- | --- | --- |
-| 3 | 700 | `[2026-01-01, 2027-01-01)` | 5 |
-| 4 | 650 | `[2026-03-01, 2027-01-01)` | 5 |
+| id | amount | interval                   | priority |
+|----|--------|----------------------------|----------|
+| 3  | 700    | `[2026-01-01, 2027-01-01)` | 5        |
+| 4  | 650    | `[2026-03-01, 2027-01-01)` | 5        |
 
 - `resolve(asOf = 2026-06-01)` → both in effect, same priority → the later
   `validFrom` (row 4) wins → **650**.
@@ -165,10 +179,10 @@ All amounts are minor units (integer cents). `asOf` is an instant; intervals are
 Start with an open row `1500` over `[2020-01-01, ∞)`. Schedule `2500` at
 `F = 2099-06-01`. After `SetPriceUseCase`:
 
-| id | amount | interval | note |
-| --- | --- | --- | --- |
-| 1 | 1500 | `[2020-01-01, 2099-06-01)` | predecessor, **closed at F** |
-| 2 | 2500 | `[2099-06-01, ∞)` | scheduled, open |
+| id | amount | interval                   | note                         |
+|----|--------|----------------------------|------------------------------|
+| 1  | 1500   | `[2020-01-01, 2099-06-01)` | predecessor, **closed at F** |
+| 2  | 2500   | `[2099-06-01, ∞)`          | scheduled, open              |
 
 - `resolve(asOf = 2030-01-01)` → **1500** (only the predecessor contains it).
 - `resolve(asOf = 2099-12-01)` → **2500** (only the scheduled row contains it).
@@ -177,9 +191,9 @@ Start with an open row `1500` over `[2020-01-01, ∞)`. Schedule `2500` at
 
 ### Empty result → `null`
 
-| id | amount | interval | priority |
-| --- | --- | --- | --- |
-| 7 | 1000 | `[2026-01-01, 2026-02-01)` | 0 |
+| id | amount | interval                   | priority |
+|----|--------|----------------------------|----------|
+| 7  | 1000   | `[2026-01-01, 2026-02-01)` | 0        |
 
 - `resolve(asOf = 2025-01-01)` → no interval contains it → **`null`**.
 - A scope with no rows at all → **`null`**.
@@ -209,22 +223,30 @@ raw open-scope UNIQUE-violation from the database.
 Three RPCs on `catalog_queue`, handled by `PricingController`
 (`presentation/pricing.controller.ts`), each a thin translation into a use case:
 
-| Routing key | Handler | Returns |
-| --- | --- | --- |
-| `catalog.price.set` | `SetPriceUseCase` | `PriceView` |
-| `catalog.price.list` | `ListPricesUseCase` | `PriceView[]` |
+| Routing key            | Handler                        | Returns             |
+|------------------------|--------------------------------|---------------------|
+| `catalog.price.set`    | `SetPriceUseCase`              | `PriceView`         |
+| `catalog.price.list`   | `ListPricesUseCase`            | `PriceView[]`       |
 | `catalog.price.select` | `SelectApplicablePriceUseCase` | `PriceView \| null` |
 
 Two events, emitted post-commit by `PricingRabbitmqPublisher`
 (`infrastructure/messaging/` — the **only** `ClientProxy` holder in pricing):
 
-| Routing key | When |
-| --- | --- |
-| `catalog.price.changed` | an immediate price was appended (`validFrom <= now`) |
+| Routing key               | When                                                                   |
+|---------------------------|------------------------------------------------------------------------|
+| `catalog.price.changed`   | an immediate price was appended (`validFrom <= now`)                   |
 | `catalog.price.scheduled` | a future price was appended (`validFrom > now`); carries `effectiveAt` |
 
-Both events ride `catalog_queue` with **no cross-service consumer yet** — a later
-audit / event-store capability binds them. The five routing keys
+Both events ride `catalog_queue` with **no business consumer** — no
+`@EventPattern` anywhere binds either key, and none is planned. That is a
+*reserved surface*, not dead code, and it stopped meaning "unread" when
+[ADR-035](../../adr/035-event-store-firehose-topic-exchange.md) landed:
+`PricingRabbitmqPublisher` now **dual-publishes**, mirroring each event onto the
+`ris.events` topic exchange through the shared `RisEventsMirrorPublisher` right
+after the primary emit, and the event store's firehose consumes that exchange
+wholesale. A price event is durably captured today, in `ris_eventstore`. The
+mirror is best-effort and non-throwing, ordered *after* the primary emit — it can
+never fail a price write. The five routing keys
 (`catalog.price.set/list/select/changed/scheduled`) live in **both**
 `ROUTING_KEYS` (`libs/messaging`) and `MicroserviceMessagePatternEnum`
 (`libs/contracts`), kept value-for-value (asserted by
@@ -270,11 +292,19 @@ stance the `catalogProduct*` builder takes.
 
 ## What this does not do
 
-There is **no** active-Price publish hard-fail yet — `catalog.product.publish`
-still does not block a price-less product; `select-applicable` is the seam that
-precondition will consume, completed in a later document in this folder. There are
-**no** gateway HTTP routes for these RPCs and **no** `.http` file yet, and **no**
-tax-category use cases or variant attach use case (its FK column and repository
-methods exist — see
-[03 — `TaxCategory` and variant attachment](03-tax-category-and-variant-attachment.md)).
-Each lands as the pricing context grows.
+**Read this as of the moment this step shipped.** The file numbering in this
+folder is not the delivery order — this application layer landed *before* the
+publish hard-fail and the tax-category use cases, which carry lower numbers.
+Everything listed here has since landed; the pointers say where.
+
+There was **no** active-Price publish hard-fail at this point —
+`catalog.product.publish` did not yet block a price-less product. It landed in
+[04 — Publishing a product hard-fails on a missing active Price](04-publish-precondition-hard-fail.md),
+though **not** through `select-applicable`: the catalog module may not import
+pricing, so it runs its own parameterized read of the `price` table behind
+`ACTIVE_PRICE_PROBE`. Two readers of one table, deliberately. There were **no**
+gateway HTTP routes for these RPCs and **no** `.http` file — both landed in
+[06 — Pricing API at the gateway](06-pricing-api-and-kulala.md) — and **no**
+tax-category use cases or variant attach use case (only their FK column and
+repository methods existed), which landed in
+[03 — `TaxCategory` and variant attachment](03-tax-category-and-variant-attachment.md).

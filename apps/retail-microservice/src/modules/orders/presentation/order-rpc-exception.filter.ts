@@ -49,7 +49,6 @@ const ORDER_ERROR_STATUS: Record<OrderErrorCodeEnum, HttpStatus> = {
   [OrderErrorCodeEnum.ORDER_CART_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [OrderErrorCodeEnum.FULFILLMENT_NOT_FOUND]: HttpStatus.NOT_FOUND,
   [OrderErrorCodeEnum.ORDER_LINE_NOT_FOUND]: HttpStatus.NOT_FOUND,
-  [OrderErrorCodeEnum.REFUND_NOT_FOUND]: HttpStatus.NOT_FOUND,
 
   // Ownership failure → 403: the caller is not the cart's owner (place), nor the
   // order's owner / a staff override (read + capture), nor the refunded order's owner /

@@ -15,29 +15,42 @@ The retail-side RPCs they call are described in
 [`01-rma-lifecycle.md`](./01-rma-lifecycle.md) (the RMA state machine),
 [`02-return-line-disposition-and-restock.md`](./02-return-line-disposition-and-restock.md)
 (inspect + restock), [`03-refund-as-distinct-entity.md`](./03-refund-as-distinct-entity.md)
+
 + [`05-fake-gateway-refund-method.md`](./05-fake-gateway-refund-method.md) (Issue / List
-Refund), and [`04-auto-refund-from-cancel-order.md`](./04-auto-refund-from-cancel-order.md)
-(the cancel-driven auto refund). The cross-cutting rules are
-[`docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md`](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md),
-[`docs/adr/009-port-adapter-at-the-gateway.md`](../../adr/009-port-adapter-at-the-gateway.md),
-and [`docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md`](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)
-/ [`docs/adr/028-cart-order-payment-and-address-chain.md`](../../adr/028-cart-order-payment-and-address-chain.md)
-§7 (the authorization shapes).
+  Refund), and [`04-auto-refund-from-cancel-order.md`](./04-auto-refund-from-cancel-order.md)
+  (the cancel-driven auto refund). The cross-cutting rules are
+  [
+  `docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md`](../../adr/032-returns-and-refunds-rma-lifecycle-and-restock.md),
+  [`docs/adr/009-port-adapter-at-the-gateway.md`](../../adr/009-port-adapter-at-the-gateway.md),
+  and [
+  `docs/adr/024-rbac-v2-staffuser-customer-and-permissions.md`](../../adr/024-rbac-v2-staffuser-customer-and-permissions.md)
+  / [`docs/adr/028-cart-order-payment-and-address-chain.md`](../../adr/028-cart-order-payment-and-address-chain.md)
+  §7 (the authorization shapes).
 
 ## 1. The HTTP surface
 
-| Method | Path | Body | Auth | RPC |
-|---|---|---|---|---|
-| `POST` | `/api/orders/:orderId/returns` | `{ reasonCategory, notes?, lines: [{ orderLineId, quantity }] }` | owner **or** `order:return-authorize` | `retail.return.open` |
-| `POST` | `/api/returns/:rmaId/authorize` | — | `order:return-authorize` | `retail.return.authorize` |
-| `POST` | `/api/returns/:rmaId/reject` | `{ reason }` | `order:return-authorize` | `retail.return.reject` |
-| `POST` | `/api/returns/:rmaId/receive` | — | `inventory:receive-return` | `retail.return.receive` |
-| `POST` | `/api/returns/:rmaId/inspect` | `{ lines: [{ returnLineId, condition, disposition, lineRefundAmountMinor }] }` | `inventory:receive-return` | `retail.return.inspect` |
-| `POST` | `/api/returns/:rmaId/close` | — | `order:return-authorize` | `retail.return.close` |
-| `GET` | `/api/returns/:rmaId` | — | owner **or** `order:read` | `retail.return.get` |
-| `GET` | `/api/orders/:orderId/returns` | — | owner **or** `order:read` | `retail.return.list` |
-| `POST` | `/api/orders/:orderId/refunds` | `{ paymentId, amountMinor, reason }`, header `Idempotency-Key` | `order:refund` | `retail.refund.issue` |
-| `GET` | `/api/orders/:orderId/refunds` | — | owner **or** `order:read` | `retail.refund.list` |
+| Method | Path                            | Body                                                                           | Auth                                  | RPC                       |
+|--------|---------------------------------|--------------------------------------------------------------------------------|---------------------------------------|---------------------------|
+| `POST` | `/api/orders/:orderId/returns`  | `{ reasonCategory, notes?, lines: [{ orderLineId, quantity }] }`               | owner **or** `order:return-authorize` | `retail.return.open`      |
+| `POST` | `/api/returns/:rmaId/authorize` | —                                                                              | `order:return-authorize`              | `retail.return.authorize` |
+| `POST` | `/api/returns/:rmaId/reject`    | `{ reason }`                                                                   | `order:return-authorize`              | `retail.return.reject`    |
+| `POST` | `/api/returns/:rmaId/receive`   | —                                                                              | `inventory:receive-return`            | `retail.return.receive`   |
+| `POST` | `/api/returns/:rmaId/inspect`   | `{ lines: [{ returnLineId, condition, disposition, lineRefundAmountMinor }] }` | `inventory:receive-return`            | `retail.return.inspect`   |
+| `POST` | `/api/returns/:rmaId/close`     | —                                                                              | `order:return-authorize`              | `retail.return.close`     |
+| `GET`  | `/api/returns/:rmaId`           | —                                                                              | owner **or** `order:read`             | `retail.return.get`       |
+| `GET`  | `/api/orders/:orderId/returns`  | —                                                                              | owner **or** `order:read`             | `retail.return.list`      |
+| `POST` | `/api/orders/:orderId/refunds`  | `{ paymentId, amountMinor, reason }`, header `Idempotency-Key` (**required**)  | `order:refund`                        | `retail.refund.issue`     |
+| `GET`  | `/api/orders/:orderId/refunds`  | —                                                                              | owner **or** `order:read`             | `retail.refund.list`      |
+
+> **Issue Refund's `Idempotency-Key` was accepted-but-ignored when this shipped;
+> [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) made it required and
+> enforced.** It is the one route on this surface with a dynamic status: a fresh issue is
+> `201 Created`, a replay of the same key + same body is `200 OK` carrying
+> `Idempotent-Replay: true`. `RefundsController.issueRefund` therefore owns its response via
+> `@Res()` — the passthrough path would let Nest reset the status to the route default `201` —
+> and errors thrown before `res.json` still flow through the gateway's exception filters
+> (the place-order precedent). The header is read through the reusable `@IdempotencyKey()`
+> param decorator in `apps/api-gateway/src/common/decorators/`.
 
 ### The two authorization shapes
 
@@ -127,7 +140,19 @@ example:
 - `409 { code: 'REFUND_EXCEEDS_REFUNDABLE' }` for an over-refund,
 - `409 { code: 'REFUND_PAYMENT_NOT_CAPTURED' }` when the payment is not captured,
 - `403 { code: 'REFUND_ACCESS_FORBIDDEN' }` / `403 { code: 'RETURN_ACCESS_FORBIDDEN' }` for
-  a non-owner non-staff caller.
+  a non-owner non-staff caller — **including on `GET /api/orders/:orderId/returns`**, which
+  answered `200 []` until [ADR-051](../../adr/051-refusing-a-resource-you-do-not-own.md)
+  aligned it with every other ownership check.
+
+Four more codes reach this surface from later hardening, all forwarded the same way:
+
+- `409 { code: 'VERSION_MISMATCH', details: { currentVersion } }` — a lost optimistic
+  compare-and-swap on an RMA whose retry budget is spent (ADR-036/045). The `details` object
+  survives the boundary intact, so a client can refetch-and-retry from the version it carries.
+- `400 { code: 'ORDER_IDEMPOTENCY_KEY_REQUIRED' }`, `422 { code: 'ORDER_IDEMPOTENCY_KEY_REUSED' }`
+  and `409 { code: 'ORDER_IDEMPOTENCY_KEY_IN_PROGRESS' }` — the three ways Issue Refund's
+  reserve-first idempotency turns a request away (no key / one key reused for a different body /
+  a concurrent submit already mid-refund).
 
 A client branches on the stable `code` rather than brittle-matching a human message — the
 gateway never re-derives or re-maps these codes, it just forwards them. The gateway's own
@@ -142,6 +167,11 @@ Two new Kulala files document the surface end-to-end against the seeded environm
 Both follow the existing conventions — `@baseUrl = {{ENV_BASE_URL}}`, `###` separators, a
 `# @name` per request, a header comment citing the controller path + body shape, and a
 `# Prereqs:` block that logs in the seeded users and captures the bearer tokens.
+
+Each is mirrored request-for-request in the **Posting** format under `http/posting/returns/`
+and `http/posting/refunds/` — 16 `*.posting.yaml` apiece plus a `scripts.py` — the repo-wide
+two-client convention. The Kulala file is the readable narrative; the Posting directory is the
+runnable one, with the chaining assertions in `scripts.py`.
 
 The seeded **admin** (`admin@example.com`) holds *every* permission, so one operator token
 drives every staff step in both files. The comments record the production role split that
@@ -174,7 +204,11 @@ Two cases:
 - **Case 1 — manual goodwill refund (no return).** place → `capturePayment` (captures the
   authorized payment so it is refundable; captures `@paymentId` from the embedded
   `payment.id`) → `issueRefund` (a *partial* refund of 1000 of the 4999 captured — staff
-  `order:refund`, with an `Idempotency-Key` header) → `listRefunds`. This is the refund that
+  `order:refund`, with an `Idempotency-Key` header) → **`issueRefundReplay`** (the same key
+  and body again: expect `200` + `Idempotent-Replay: true`, and **no** second `refund` row) →
+  **`issueRefundDifferentBody`** (the same key, a different amount: expect `422
+  ORDER_IDEMPOTENCY_KEY_REUSED`) → `listRefunds`. The last two requests were added when
+  ADR-036 made the header enforced. This is the refund that
   needs no return at all — a price adjustment / goodwill credit, the reason
   [`03-refund-as-distinct-entity.md`](./03-refund-as-distinct-entity.md) keeps `Refund`
   distinct from `ReturnRequest`.
@@ -195,4 +229,13 @@ domain logic, no migration, no new permission code (the three codes
 gain their first HTTP endpoints here), and no new wire contract — every payload, view, and
 routing key already existed for the RPC layer. The behavioral coverage for these routes is
 the gateway e2e suite that drives the same HTTP surface (login → place → … → return →
-refund) and asserts through public state.
+refund) and asserts through public state. Concretely, six root specs cover this epic:
+
+| Spec                                         | What it drives                                                                                                                                                                        |
+|----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `test/return-restock-refund.e2e-spec.ts`     | the full happy path — deliver → open → authorize → receive → inspect (`restock`) → close, with the inventory restock asserted through public state                                    |
+| `test/return-rejected.e2e-spec.ts`           | the early-rejection branch, and that a rejected RMA frees its quantity back to the returnable pool                                                                                    |
+| `test/manual-refund.e2e-spec.ts`             | goodwill refunds with no RMA behind them: a partial refund leaves the payment `captured`, the final one flips it to `refunded`, and an over-refund is `409 REFUND_EXCEEDS_REFUNDABLE` |
+| `test/auto-refund-from-cancel.e2e-spec.ts`   | cancel-after-explicit-capture-before-ship → the consumer issues the full refund with no HTTP call of its own                                                                          |
+| `test/idempotency-refund.e2e-spec.ts`        | the reserve-first replay, the `422` on a reused key, and that a replay writes no second `refund` row (ADR-036)                                                                        |
+| `test/order-scoped-list-refusal.e2e-spec.ts` | all three order-scoped lists — returns, refunds, fulfillments — answer a non-owner with `403` (ADR-051)                                                                               |

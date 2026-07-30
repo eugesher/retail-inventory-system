@@ -10,7 +10,9 @@ column on `user` is replaced by a relational `role` + `permission` +
 ## 1. Why a relational model
 
 The pre-existing schema stored roles as a `simple-array` column on `user`
-(see `apps/api-gateway/src/modules/auth/infrastructure/persistence/user.entity.ts`).
+(then at `apps/api-gateway/src/modules/auth/infrastructure/persistence/user.entity.ts`
+— that entity and its table were removed by the `staff_user` rename described in
+[`01-staffuser-customer-split.md`](./01-staffuser-customer-split.md) §4).
 Two consequences follow from that shape:
 
 1. **The role set is a TypeScript release artifact.** Adding a new role,
@@ -33,13 +35,13 @@ refresh — no redeploy required.
 ### `role`
 
 ```sql
-CREATE TABLE role (
-  id          CHAR(36)     PRIMARY KEY,
-  name        VARCHAR(64)  NOT NULL UNIQUE,
-  description VARCHAR(255) NULL,
-  created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
-              ON UPDATE CURRENT_TIMESTAMP
+CREATE TABLE role
+(
+    id          CHAR(36) PRIMARY KEY,
+    name        VARCHAR(64) NOT NULL UNIQUE,
+    description VARCHAR(255) NULL,
+    created_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 ```
 
@@ -56,31 +58,33 @@ CREATE TABLE role (
 ### `permission`
 
 ```sql
-CREATE TABLE permission (
-  id          CHAR(36)     PRIMARY KEY,
-  code        VARCHAR(64)  NOT NULL UNIQUE,
-  description VARCHAR(255) NULL,
-  created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
-              ON UPDATE CURRENT_TIMESTAMP
+CREATE TABLE permission
+(
+    id          CHAR(36) PRIMARY KEY,
+    code        VARCHAR(64) NOT NULL UNIQUE,
+    description VARCHAR(255) NULL,
+    created_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 ```
 
 - **`code VARCHAR(64) UNIQUE`** matches the regex
   `^[a-z][a-z-]*:[a-z][a-z-]*$`. Sixty-four bytes is enough for any
-  realistic `<resource>:<action>` pair (the longest seeded today is
-  `inventory:receive-return`, 24 bytes). The code is the human-readable
+  realistic `<resource>:<action>` pair (the longest seeded by this epic is
+  `inventory:transfer`, 18 bytes; later epics added longer ones — the longest
+  today is `inventory:receive-return`, 24 bytes). The code is the human-readable
   identifier; the UUID is the join-table foreign key.
 
 ### `role_permissions`
 
 ```sql
-CREATE TABLE role_permissions (
-  role_id       CHAR(36) NOT NULL,
-  permission_id CHAR(36) NOT NULL,
-  PRIMARY KEY (role_id, permission_id),
-  FOREIGN KEY (role_id)       REFERENCES role       (id) ON DELETE CASCADE,
-  FOREIGN KEY (permission_id) REFERENCES permission (id) ON DELETE CASCADE
+CREATE TABLE role_permissions
+(
+    role_id       CHAR(36) NOT NULL,
+    permission_id CHAR(36) NOT NULL,
+    PRIMARY KEY (role_id, permission_id),
+    FOREIGN KEY (role_id) REFERENCES role (id) ON DELETE CASCADE,
+    FOREIGN KEY (permission_id) REFERENCES permission (id) ON DELETE CASCADE
 );
 ```
 
@@ -89,63 +93,75 @@ CREATE TABLE role_permissions (
   Set-backed no-op at the domain layer, but the DB constraint is the
   durable contract.
 - **`ON DELETE CASCADE`** on both foreign keys ensures that deleting a
-  `role` or a `permission` does not leave dangling bindings. Refusing to
-  delete a role that is currently assigned to a `StaffUser` is enforced
-  at the use-case level by the IAM admin layer (`DeleteRoleUseCase` returns 409 when
-  `staff_user_roles` references the role) — cascade here is about
-  schema cleanliness, not about the policy decision.
+  `role` or a `permission` does not leave dangling bindings. Note there is
+  **no delete-role route** on the IAM surface today (see
+  [`05-iam-admin-endpoints.md`](./05-iam-admin-endpoints.md) §1) — the cascade
+  here is purely about schema cleanliness (e.g. a direct-SQL cleanup or a future
+  delete path), not a policy an existing use case enforces.
 - Charset is `utf8mb4_unicode_ci` to match every other table in the
   schema; the `simple-array` `user.roles` column is dropped when `user`
   is renamed to `staff_user`.
 
 ## 3. Permission code list (seeded)
 
-| Code                  | Description                                |
-| --------------------- | ------------------------------------------ |
-| `catalog:read`        | Read catalog                               |
-| `catalog:write`       | Create or update catalog items             |
-| `catalog:publish`     | Publish catalog items                      |
-| `inventory:read`      | Read inventory levels                      |
-| `inventory:adjust`    | Adjust inventory quantities                |
-| `inventory:transfer`  | Transfer inventory between storages        |
-| `order:read`          | Read orders                                |
-| `order:cancel`        | Cancel orders                              |
-| `order:refund`        | Refund orders                              |
-| `iam:assign`          | Assign roles to staff users                |
-| `iam:role-edit`       | Edit role-permission bindings              |
-| `audit:read`          | Read audit log                             |
+| Code                 | Description                         |
+|----------------------|-------------------------------------|
+| `catalog:read`       | Read catalog                        |
+| `catalog:write`      | Create or update catalog items      |
+| `catalog:publish`    | Publish catalog items               |
+| `inventory:read`     | Read inventory levels               |
+| `inventory:adjust`   | Adjust inventory quantities         |
+| `inventory:transfer` | Transfer inventory between storages |
+| `order:read`         | Read orders                         |
+| `order:cancel`       | Cancel orders                       |
+| `order:refund`       | Refund orders                       |
+| `iam:assign`         | Assign roles to staff users         |
+| `iam:role-edit`      | Edit role-permission bindings       |
+| `audit:read`         | Read audit log                      |
 
-These are the twelve codes the baseline identity work introduced into
-`PermissionCodeEnum` (`libs/contracts/auth/permission.enum.ts`); the
-registry has since grown to twenty-two. The table above is that starting
-floor, not the current list. The enum is the single source
+These are the twelve codes **this epic** introduced into `PermissionCodeEnum`
+(`libs/contracts/auth/permission.enum.ts`). The enum is the single source
 of truth — the seed reads its values directly, the
 `@RequiresPermission(<code>)` decorator accepts the enum, and
 the IAM admin tooling validates against the enum keyset before
 inserting into `role_permissions`.
 
+**The registry has since grown to 22 codes.** Later epics added `pricing:write`,
+`order:capture`, `order:fulfill`, `order:return-authorize`,
+`inventory:receive-return`, `notifications:read`, `notifications:write`,
+`customer:read-consent`, `customer:erase` and `iam:staff-create` (ADR-047). The
+table above is the epic-01 floor, not today's full list — read the enum for that.
+
 ## 4. Role-to-permission bindings (seeded)
 
-| Role (`role.name`) | Permission codes                                                                                                                                                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin`            | every code in the registry — `Object.values(PermissionCodeEnum)`, so it grows with the enum                                                                                                                                      |
-| `catalog-manager`  | `catalog:read`, `catalog:write`, `catalog:publish`                                                                                                                                                                              |
-| `warehouse-staff`  | `inventory:read`, `inventory:adjust`, `inventory:transfer`                                                                                                                                                                      |
-| `order-support`    | `order:read`, `order:cancel`, `order:refund`                                                                                                                                                                                    |
+| Role (`role.name`) | Permission codes                                                |
+|--------------------|-----------------------------------------------------------------|
+| `admin`            | every code in `PermissionCodeEnum` (12 bindings then; 22 today) |
+| `catalog-manager`  | `catalog:read`, `catalog:write`, `catalog:publish`              |
+| `warehouse-staff`  | `inventory:read`, `inventory:adjust`, `inventory:transfer`      |
+| `order-support`    | `order:read`, `order:cancel`, `order:refund`                    |
 
-The three narrow roles above are the bundles this baseline seeded; each
-has since gained codes as the registry grew, so read `ROLE_SEEDS` in
-`scripts/test-db-seed.ts` for the current sets. The seed emits
-thirty-eight `role_permissions` rows today. It uses `INSERT IGNORE`
-on every statement, so running `yarn test:seed` twice produces no
-duplicate-key errors and no duplicate rows.
+Twenty-four `role_permissions` rows at the time of this epic. The seed uses
+`INSERT IGNORE` on every `permission` / `role` / `role_permissions` statement, so
+running `yarn test:seed` twice produces no duplicate-key errors and no duplicate
+rows.
+
+**Today the seed writes 38 rows.** Later epics widened both the registry and three
+of the four bundles: `admin` binds `Object.values(PermissionCodeEnum)` (22),
+`catalog-manager` 4 (it gained `pricing:write`), `warehouse-staff` 6 and
+`order-support` 6. `ROLE_SEEDS` in `scripts/test-db-seed.ts:144` is the
+authoritative list.
 
 ## 5. The JWT inflation path (preview)
 
-At login time, `LoginUseCase` resolves the authenticated
-`StaffUser`'s roles via `IRoleRepositoryPort.findAllByNames(...)`,
-collect the union of their `permissions` sets, and embed
-`permissions: string[]` in the access JWT payload. The relational schema
+At login time, `LoginUseCase` embeds `permissions: string[]` in the access JWT
+payload. **As implemented**, the union is not assembled inside the use case: the
+`StaffUser` the repository returns already carries its `RoleAggregate[]`, and the
+merge lives on the aggregate as the `permissionCodes` getter
+(`apps/api-gateway/src/modules/auth/domain/staff-user.model.ts:96`), which
+`LoginUseCase` merely reads — so login and refresh cannot compute it differently.
+`IRoleRepositoryPort.findAllByNames(...)` still exists, but it serves the IAM
+role-assign path, not the login path. The relational schema
 makes this inflation deterministic — one `SELECT … JOIN role_permissions`
 per login resolves the full effective permission set. Guards
 then read `request.user.permissions` without a per-request DB hit; the

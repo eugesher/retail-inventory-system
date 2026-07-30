@@ -13,16 +13,16 @@ canonical pair on the staff side. The "deprecated alias" column keeps
 `/api/auth/login` working for one release so existing staff clients
 have a window to migrate.
 
-| Method | Path                              | Auth          | Notes                                              |
-| ------ | --------------------------------- | ------------- | -------------------------------------------------- |
-| POST   | `/api/auth/customer/register`     | `@Public()`   | Creates a `customer` row in `status='active'`.     |
-| POST   | `/api/auth/customer/login`        | `@Public()`   | Issues an access + refresh JWT pair.               |
-| GET    | `/api/auth/customer/me`           | Bearer        | Returns the authenticated customer profile.       |
-| POST   | `/api/auth/staff/login`           | `@Public()`   | New canonical path for staff login.                |
-| POST   | `/api/auth/login`                 | `@Public()`   | Deprecated alias — staff login, kept one release.  |
-| POST   | `/api/auth/refresh`               | `@Public()`   | Same handler for both subject kinds.               |
-| POST   | `/api/auth/logout`                | Bearer        | Clears the live refresh-token hash.                |
-| GET    | `/api/auth/me`                    | Bearer        | Returns `ICurrentUser` from `request.user`.        |
+| Method | Path                          | Auth        | Notes                                             |
+|--------|-------------------------------|-------------|---------------------------------------------------|
+| POST   | `/api/auth/customer/register` | `@Public()` | Creates a `customer` row in `status='active'`.    |
+| POST   | `/api/auth/customer/login`    | `@Public()` | Issues an access + refresh JWT pair.              |
+| GET    | `/api/auth/customer/me`       | Bearer      | Returns the authenticated customer profile.       |
+| POST   | `/api/auth/staff/login`       | `@Public()` | New canonical path for staff login.               |
+| POST   | `/api/auth/login`             | `@Public()` | Deprecated alias — staff login, kept one release. |
+| POST   | `/api/auth/refresh`           | `@Public()` | Same handler for both subject kinds.              |
+| POST   | `/api/auth/logout`            | Bearer      | Clears the live refresh-token hash.               |
+| GET    | `/api/auth/me`                | Bearer      | Returns `ICurrentUser` from `request.user`.       |
 
 The two staff-login URLs share a single handler via a multi-prefix
 `@Controller(['auth', 'auth/staff'])` on `StaffLoginController` — Nest
@@ -48,7 +48,17 @@ as on a staff JWT; the customer JWT simply lands with `roles: []` and
 
 ```ts
 // access JWT payload (staff vs. customer)
-{ sub: '<uuid>', email: '<lower>', roles: [...], permissions: [...], jti: '<uuid>', iat, exp }
+{
+    sub: '<uuid>', email
+:
+    '<lower>', roles
+:
+    [...], permissions
+:
+    [...], jti
+:
+    '<uuid>', iat, exp
+}
 ```
 
 Two consequences of keeping the envelope identical:
@@ -71,15 +81,21 @@ Two consequences of keeping the envelope identical:
    `test/auth-customer.e2e-spec.ts`.
 
 The validator that turns a payload into a user is renamed from
-`ValidateStaffUserUseCase` to `ValidateJwtSubjectUseCase`. Its logic:
+`ValidateStaffUserUseCase` to `ValidateJwtSubjectUseCase`. Its logic
+(`apps/api-gateway/src/modules/auth/application/use-cases/validate-jwt-subject.use-case.ts:31`):
 
-1. Try `STAFF_USER_REPOSITORY.findById(payload.sub)`. Hit + active →
-   return.
-2. On miss (or inactive), try `CUSTOMER_REPOSITORY.findById(payload.sub)`.
-   Hit + active → return.
-3. Both miss → throw `UnauthorizedException`.
+1. Try `STAFF_USER_REPOSITORY.existsActiveById(payload.sub)`. Hit → the subject is
+   still live.
+2. On miss, try `CUSTOMER_REPOSITORY.existsAuthenticatableById(payload.sub)`
+   (`status IN ('active','guest')`). Hit → the subject is still live.
+3. Both miss → throw `UnauthorizedException('Account is no longer active')`.
 
-The fallback is **staff-first** because the staff `findById` is the hot
+The identity claims (`email`, `roles`, `permissions`) are read straight off the
+verified payload; the repositories are asked only *whether the subject is still
+live*, never to hand back a row. That existence check avoids loading — and then
+discarding — the full role/permission graph on every authenticated request.
+
+The fallback is **staff-first** because the staff lookup is the hot
 path for every back-office request; reversing the order would add a
 spurious customer lookup to every staff call.
 
@@ -122,15 +138,24 @@ baseline does *not* implement:
   (typically `email` + maybe `first_name`/`last_name`). The aggregate
   enforces the matching invariant: `passwordHash` may be `null` only
   when `status` is `'guest'` or `'deleted'`. A guest row is
-  `isActive === false`, so `LoginCustomerUseCase` cannot mint a token
-  against it; the guest must claim the row by going through
-  `POST /api/auth/customer/register` later (the future guest-claim flow).
+  `isActive === false`, so `LoginCustomerUseCase` cannot mint a token against it.
+
+  **What actually shipped** ([ADR-028](../../adr/028-cart-order-payment-and-address-chain.md) §9):
+  guest rows are not produced by the order flow reaching for a new factory, but by
+  `CreateGuestSessionUseCase`, which calls `Customer.register(...)` with
+  `status='guest'` and a synthetic unique email, and mints a guest-tier token
+  directly. `ValidateJwtSubjectUseCase` therefore admits `status IN ('active','guest')`
+  through `CUSTOMER_REPOSITORY.existsAuthenticatableById(...)`. Promotion of a guest
+  to a registered buyer is the `retail.cart.claim` cart re-point, not a re-`register`
+  of the customer row.
 - **Q6 — tombstone-friendly deletion.** Every PII column on `customer`
-  is nullable. The future GDPR erasure flow flips `status` to
-  `'deleted'` and nulls `email`, `phone`, `first_name`, `last_name`,
+  is nullable. The GDPR erasure flow — shipped later as `EraseCustomerUseCase`
+  under [ADR-037](../../adr/037-consent-record-and-tombstone-erasure.md) — flips
+  `status` to `'deleted'` and nulls `email`, `phone`, `first_name`, `last_name`,
   `password_hash`, `refresh_token_hash` — preserving the row's `id`
-  for FK resolution from historical order lines. The `customer.email`
-  UNIQUE constraint applies to non-NULL values only in MySQL, so a
+  for FK resolution from historical order lines. (That work also added a
+  `customer.deleted_at` column, which this baseline deliberately omitted.) The
+  `customer.email` UNIQUE constraint applies to non-NULL values only in MySQL, so a
   tombstoned row does not block a fresh signup at the same address.
 
 The shape is therefore "support tomorrow's flows without dropping

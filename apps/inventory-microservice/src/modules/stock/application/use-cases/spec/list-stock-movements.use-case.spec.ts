@@ -38,6 +38,7 @@ const movement = (props: {
     referenceType: props.referenceType ?? null,
     referenceId: props.referenceId ?? null,
     actorId: props.actorId ?? null,
+    operationKey: null,
     occurredAt: props.occurredAt ?? new Date('2026-06-10T12:00:00.000Z'),
   });
 

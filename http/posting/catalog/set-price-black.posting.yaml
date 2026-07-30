@@ -1,0 +1,24 @@
+name: set-price-black
+description: |-
+  POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+  Publish hard-fails with 409 CATALOG_PRODUCT_PUBLISH_REQUIRES_PRICE unless EVERY
+  variant carries an in-effect price in DEFAULT_CURRENCY (USD), so this block and
+  the next are a prerequisite of publish-product, not a pricing demo — the pricing
+  surface itself is exercised in the `pricing` subcollection. validFrom is omitted,
+  so the domain stamps it to now and opens the row (validTo = null). The seeded
+  admin holds pricing:write alongside the catalog codes, so the same $accessToken
+  works. Response is PriceView.
+method: POST
+url: $ENV_BASE_URL/catalog/variants/$variantId/prices
+body:
+  content: |-
+    {
+      "currency": "USD",
+      "amountMinor": 129900,
+      "priority": 0
+    }
+headers:
+- name: Authorization
+  value: Bearer $accessToken
+- name: Content-Type
+  value: application/json

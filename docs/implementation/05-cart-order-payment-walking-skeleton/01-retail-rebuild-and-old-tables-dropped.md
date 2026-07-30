@@ -24,8 +24,12 @@ in subsequent changes; this one only tears down and records the decision.
 - **The cross-service confirm→reserve caller** — the retail
   `INVENTORY_CONFIRM_GATEWAY` port, its adapter, and `ConfirmOrderUseCase`. Stock
   reservation already moved out of this RPC when inventory re-founded on running
-  totals; the inventory `inventory.order.confirm` handler remains only as a typed
-  deprecation stub (a reserved surface, see below).
+  totals; the inventory `inventory.order.confirm` handler remained only as a typed
+  deprecation stub at the time of this change (a reserved surface, see below). Since
+  the inventory-reservation capability landed
+  ([ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md)),
+  that whole seam has been **removed** — the handler, its `INVENTORY_ORDER_CONFIRM`
+  routing key, and the `IProductStockOrderConfirmPayload` contract no longer exist.
 - **The notification order consumer** — the `order-events.consumer.ts`
   subscriber and the `SendOrderNotificationUseCase` it drove (and their spec).
   The inventory low-stock consumer is untouched.
@@ -76,16 +80,22 @@ here.
 
 ## The kept inventory confirm surface
 
-The inventory `inventory.order.confirm` handler, its `INVENTORY_ORDER_CONFIRM`
-routing key, and the `IProductStockOrderConfirmPayload` wire contract are a
-**reserved surface** — they stay. Only the retail-side *caller* is deleted. The
-handler is a typed deprecation error today; the whole seam is removed when the
-inventory-reservation capability lands
-([ADR-027](../../adr/027-stocklevel-running-totals-and-stocklocation.md) owns
-that). The kept contract previously imported a retail order interface and status
-enum that were deleted here, so its per-line shape was **inlined** into the
-inventory contract to make the reserved surface self-contained (the line's
-`statusId` is now a plain string rather than the former enum).
+At the time of *this* change the inventory `inventory.order.confirm` handler, its
+`INVENTORY_ORDER_CONFIRM` routing key, and the `IProductStockOrderConfirmPayload`
+wire contract were kept as a **reserved surface** — only the retail-side *caller*
+was deleted, and the handler was left a typed deprecation error. The kept contract
+previously imported a retail order interface and status enum that were deleted here,
+so its per-line shape was **inlined** into the inventory contract to make the
+reserved surface self-contained (the line's `statusId` became a plain string rather
+than the former enum).
+
+**That surface has since been removed in full.** When the inventory-reservation
+capability landed
+([ADR-030](../../adr/030-reservation-ttl-aggregate-and-stock-movement-ledger.md)),
+stock is allocated on Place Order through the new reservation/allocation seam, so
+the deprecated confirm handler, its routing key, and the inlined contract were all
+deleted — a grep for `inventory.order.confirm` / `INVENTORY_ORDER_CONFIRM` now
+matches nothing.
 
 ## Migration & reversibility
 

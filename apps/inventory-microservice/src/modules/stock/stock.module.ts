@@ -53,8 +53,8 @@ import {
 
 // `useExisting` shares the single adapter instance with code that injects the
 // concrete class directly. The read path (Query Availability + List Locations)
-// is wired here together with the rebuilt `StockCache` (the cache-aside seam on
-// the new `v2`/`variantId` key shape). The `CatalogEventsConsumer` subscribes to
+// is wired here together with the `StockCache` (the cache-aside seam on the
+// `variantId` key shape; the live schema version is `v3`). The `CatalogEventsConsumer` subscribes to
 // `catalog.variant.created` (auto-init), driving `AutoInitStockLevelUseCase`.
 //
 // Three messaging clients are imported: `MicroserviceClientNotificationModule` for

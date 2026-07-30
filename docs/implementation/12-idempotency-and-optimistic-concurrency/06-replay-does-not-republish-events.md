@@ -94,12 +94,24 @@ stored response so both callers converge on one order.
 
 ## The four covered operations
 
-The same store-backed replay contract now guards all four mutating operations. Each
-`*UseCase.execute` runs the identical three ordered steps — require the key, fingerprint the
-canonical body, look the `(scope, key)` pair up first — and returns the
-`IIdempotentResult<TView>` envelope so the gateway can set `Idempotent-Replay: true` on a
-served replay. The scope namespaces the client key by operation, so one `Idempotency-Key`
-reused across two operations can never collide in the store.
+The same store-backed replay contract now guards all four mutating operations, and each returns
+the `IIdempotentResult<TView>` envelope so the gateway can set `Idempotent-Replay: true` on a
+served replay. The scope namespaces the client key by operation, so one `Idempotency-Key` reused
+across two operations can never collide in the store.
+
+**Three of the four share one shape; refund is the exception.** Place, Capture and Ship each run
+the same three ordered steps — require the key, fingerprint the canonical body, then
+`IDEMPOTENCY_STORE.find` the `(scope, key)` pair *first* — because each has a *second*
+serializing guard (the cart-conversion CAS / the payment-state + order OCC / the ship
+`SELECT … FOR UPDATE`) that makes a concurrent redundant run harmless. **Issue Refund has no such
+guard and the gateway refund is not naturally idempotent**, so it runs the **reserve-first**
+variant ([ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) §1): it `reserve`s an
+atomic *pending* row *before* the gateway call and branches on **four** outcomes instead of three
+— the extra one being `in-progress → 409 ORDER_IDEMPOTENCY_KEY_IN_PROGRESS`, which turns a truly
+concurrent same-key submit away before it can refund a second time. On success it `finalize`s the
+reserved row; on failure it `release`s it. Either way the replay short-circuit still sits upstream
+of every side effect (and, for refund, of the audit write), so the no-re-emit guarantee below
+holds for all four identically.
 
 | Operation | Scope | Response view | Fresh status | Canonical body (fingerprinted) | Natural backstop |
 | --- | --- | --- | --- | --- | --- |
@@ -114,10 +126,13 @@ staff-override flags for the others) — so a retry under a fresh correlation id
 differently-resolved caller, still fingerprints identically. Each `execute` extracts the real
 work into a private method (`place` / `capture` / `ship` / `issue`) that owns the whole flow
 including its emits; the replay `return` sits upstream of that method, so a replay runs none
-of it. On a store miss the work runs, then the response view is persisted under `(scope,
-key)`; a concurrent duplicate `save` is swallowed and an authoritative re-read converges both
-racers on the winner's stored response (the natural backstop guarantees the same entity
-either way).
+of it. For the three `find`-based operations, on a store miss the work runs, then the response
+view is persisted under `(scope, key)`; a concurrent duplicate `save` is swallowed and an
+authoritative re-read converges both racers on the winner's stored response. Refund reaches the
+same convergence through `reserve` → `finalize`/`release` instead (a concurrent racer is turned
+away `in-progress` rather than converging on a `save`), and the natural backstop — an
+already-`issued` refund for the same `(payment, amount, reason)` — guarantees the same entity
+either way.
 
 ### Two guarantees that hold for all four on replay
 

@@ -6,9 +6,12 @@ domain model, its `address` table, the `IAddressRepositoryPort` +
 contracts. It lands alongside the immutable order in
 [03-order-three-status-and-q4-decision.md](03-order-three-status-and-q4-decision.md)
 and is recorded in
-[ADR-028 §5](../../adr/028-cart-order-payment-and-address-chain.md). It is
-**foundation only** — there are no address use cases or gateway routes yet; an
-order's addresses are produced by the place capability later.
+[ADR-028 §5](../../adr/028-cart-order-payment-and-address-chain.md). It shipped as
+**foundation only** — the `Address` aggregate has no use cases or gateway routes of its
+own (there is still no address controller). Its producer, **Place Order**, has since
+landed: it calls `Address.forOrder(...)` twice per placement to snapshot the buyer's
+billing + shipping rows inside the place transaction (see
+[07 — Authorize on place](07-authorize-on-place-capture-explicit-q5.md)).
 
 ## One table, two owners — the polymorphic discriminator
 
@@ -21,10 +24,10 @@ uses for the same shape of data:
 Rather than two near-identical tables, `address` is **polymorphic** over a
 `(owner_type, owner_id)` pair:
 
-| Column | Meaning |
-| --- | --- |
-| `owner_type` | `ENUM('customer','order')` — which kind of thing owns this row |
-| `owner_id` | `VARCHAR(36)` — the owner's id: a customer's CHAR(36) UUID, or an order's (short, stringified) numeric id |
+| Column       | Meaning                                                                                                   |
+|--------------|-----------------------------------------------------------------------------------------------------------|
+| `owner_type` | `ENUM('customer','order')` — which kind of thing owns this row                                            |
+| `owner_id`   | `VARCHAR(36)` — the owner's id: a customer's CHAR(36) UUID, or an order's (short, stringified) numeric id |
 
 A composite **`IDX_ADDRESS_OWNER (owner_type, owner_id)`** index makes "all addresses
 for this owner" a single indexed lookup — the read the order view uses to resolve an
@@ -73,12 +76,12 @@ no `typeorm` — [ADR-004](../../adr/004-adopt-hexagonal-architecture-per-servic
   (There is no `customer` factory — that owner type is reserved for the address-book
   capability.)
 - **Invariants, all enforced at construction (the unit spec asserts each):**
-  - `recipientName`, `line1`, `city`, `region`, `postalCode` are **non-empty**.
-  - `country` is a **2-letter ISO code, upper-cased** — the model normalises
-    (`us → US`) then validates `^[A-Z]{2}$`, so `USA` (too long) and `u` (too short)
-    are rejected.
-  - `ownerType` is one of the two `AddressOwnerTypeEnum` values.
-  - `line2` and `phone` are optional (nullable).
+    - `recipientName`, `line1`, `city`, `region`, `postalCode` are **non-empty**.
+    - `country` is a **2-letter ISO code, upper-cased** — the model normalises
+      (`us → US`) then validates `^[A-Z]{2}$`, so `USA` (too long) and `u` (too short)
+      are rejected.
+    - `ownerType` is one of the two `AddressOwnerTypeEnum` values.
+    - `line2` and `phone` are optional (nullable).
 
 > **An ordering note for the place capability.** An order's address rows want
 > `ownerId = <order id>`, but the order's id is assigned by persistence while the
