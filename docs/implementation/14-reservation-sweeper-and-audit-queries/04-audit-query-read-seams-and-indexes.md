@@ -202,34 +202,33 @@ nothing, or one whose events have not been ingested yet (the firehose is at-leas
 asynchronous). A `404` would assert that the id itself is invalid, which the event store has
 no way to know.
 
-## 7. The cross-module read
+## 7. Both logs are one module's, so the trace injects both repositories
 
-`TraceByCorrelationUseCase` lives in the `audit-log/` module. It needs `domain_event` rows.
-The `domain-events/` module owns that table.
+`TraceByCorrelationUseCase` needs both logs — `domain_event` rows *and* `audit_log_entry`
+rows. Both tables are aggregates of the **one** `audit-and-events` module, so the trace injects
+both repository ports directly — `DOMAIN_EVENT_REPOSITORY` and `AUDIT_LOG_REPOSITORY` — and
+calls the same `listByCorrelationId(id)` on each (`domain-event.repository.port.ts:64`,
+`audit-log.repository.port.ts:49`). The two reads touch different tables under no ordering
+constraint, so they run concurrently with `Promise.all`. Both are the **unpaginated, ascending**
+trace read (`occurred_at ASC, id ASC`) — the mirror surface each port exposes beside `append`
+and `query`.
 
-`eslint-plugin-boundaries` ([ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md))
-forbids the reach: a module's `application/use-cases` may inject only its own module's ports,
-and `yarn lint` is the source of truth for where a file belongs. The rule was not weakened.
+> **Since [ADR-042](../../adr/042-one-bounded-context-one-module.md).** This is not the seam
+> [ADR-039](../../adr/039-audit-and-event-store-query-surface.md) §5 originally designed, and the
+> difference is worth knowing because the reader-port pattern it describes is real and still used
+> elsewhere. When the event store was **two** modules — `audit-log/` (where the trace lived) and
+> `domain-events/` (which owned `domain_event`) — the trace could not import the sibling's table,
+> so it reached it through a **raw-parameterized-SQL reader port, `TRACE_DOMAIN_EVENT_READER`**,
+> returning a plain `ITraceDomainEventRow` shape rather than the sibling's `DomainEvent` model.
+> ADR-042 collapsed the bounded context to a single module, which **erased the boundary the reader
+> port existed to respect**: with both tables owned by the same module, a direct repository
+> injection crosses no module line and `eslint-plugin-boundaries`
+> ([ADR-017](../../adr/017-architecture-lint-via-eslint-boundaries.md)) is satisfied. The port and
+> its row shape were deleted — `grep -rn TRACE_DOMAIN_EVENT_READER apps libs` returns nothing today
+> — and ADR-039 carries the amendment banner recording the change.
 
-Instead the trace reaches the table through **`TRACE_DOMAIN_EVENT_READER`**, a
-raw-parameterized-SQL reader port. Its adapter issues one statement through the injected
-`EntityManager`:
-
-```sql
-SELECT id, event_type, …, occurred_at
-  FROM domain_event
- WHERE correlation_id = ?
- ORDER BY occurred_at ASC, id ASC
-```
-
-The `?` is bound by the driver, never string-concatenated. The port returns a plain row shape
-(`ITraceDomainEventRow`), deliberately **not** the sibling module's `DomainEvent` model:
-leaking that class through the seam would re-couple by *type* exactly what the boundary
-decoupled by *import*. The use case projects the row onto the wire view itself, duplicating a
-few lines of field copying — the same trade the returns module makes with its local copy of
-`retry-then-log-for-replay.ts`.
-
-This is not a new invention. It is the seam this codebase already uses three times:
+That reader-port seam is not gone from the codebase, only from *here*. It is exactly how three
+**live** cross-module reads still work, each crossing a module line that was *not* merged away:
 
 - **`ORDER_CART_READER`** — the retail `orders` module reading the `cart` tables its sibling
   `cart` module owns.
@@ -237,9 +236,8 @@ This is not a new invention. It is the seam this codebase already uses three tim
   `fulfillment` tables the `orders` module owns.
 - **`CONSENT_READER`** — the notification service reading the gateway-owned `consent_record`.
 
-The event store's case is the easiest of the four: both modules live in the same
-`ris_eventstore` schema on the same connection, so no join is lost and no second connection is
-opened. Only the module line is crossed, and it is crossed through a port.
+The event store no longer needs one: both logs live in the same `ris_eventstore` schema on the
+same connection *and* in the same module, so nothing is crossed at all.
 
 ## 8. Two column asymmetries worth knowing
 
