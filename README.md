@@ -45,7 +45,8 @@ Node 20+, Yarn, Docker Compose.
 ```bash
 cp .env.example .env.local          # host-side defaults for `yarn start:dev`
 
-docker compose up -d mysql redis rabbitmq
+docker compose -f docker-compose.yml -f docker-compose.observability.yml \
+  up -d mysql redis rabbitmq jaeger otel-collector
 
 yarn migration:run                  # retail_db      (operational schema)
 yarn migration:run:eventstore       # ris_eventstore (isolated event-store schema)
@@ -58,27 +59,34 @@ yarn start:dev                      # all six services, watch mode
 `scripts/mysql-init/01-create-eventstore-db.sql`. Both migration pipelines keep separate
 `migrations` ledgers — see [ADR-034](docs/adr/034-isolated-eventstore-database.md).
 
+`jaeger` + `otel-collector` are the observability overlay
+([`docker-compose.observability.yml`](docker-compose.observability.yml)). Host-side
+`yarn start:dev` publishes OTLP to the collector on `:4318`, which forwards to the Jaeger UI
+on `:16686` (see [ADR-014](docs/adr/014-otel-exporter-otlp-http-and-jaeger.md) and the
+"Talk to it" table below). To skip tracing, drop both service names and the
+`-f docker-compose.observability.yml` flag — the base infra alone runs everything else.
+
 ### Talk to it
 
-| What | Where |
-| --- | --- |
-| HTTP API | `http://localhost:3000/api` |
-| Interactive API reference | `http://localhost:3000/api/reference` |
-| Request collections | [`http/kulala/`](http/kulala/) (Kulala) and [`http/posting/`](http/posting/) (posting.sh) |
-| Jaeger UI (observability overlay) | `http://localhost:16686` |
+| What                              | Where                                                                                     |
+|-----------------------------------|-------------------------------------------------------------------------------------------|
+| HTTP API                          | `http://localhost:3000/api`                                                               |
+| Interactive API reference         | `http://localhost:3000/api/reference`                                                     |
+| Request collections               | [`http/kulala/`](http/kulala/) (Kulala) and [`http/posting/`](http/posting/) (posting.sh) |
+| Jaeger UI (observability overlay) | `http://localhost:16686`                                                                  |
 
 ### Seeded logins
 
 `yarn test:seed` (also run by `yarn test:infra:reload`) inserts argon2id-hashed users —
 four staff, one per canonical role, and one customer.
 
-| Email | Password | Role | Subject kind |
-| --- | --- | --- | --- |
-| `admin@example.com` | `admin1234` | `admin` | StaffUser |
-| `catalog@example.com` | `catalog1234` | `catalog-manager` | StaffUser |
-| `warehouse@example.com` | `warehouse1234` | `warehouse-staff` | StaffUser |
-| `support@example.com` | `support1234` | `order-support` | StaffUser |
-| `customer@example.com` | `customer1234` | — | Customer |
+| Email                   | Password        | Role              | Subject kind |
+|-------------------------|-----------------|-------------------|--------------|
+| `admin@example.com`     | `admin1234`     | `admin`           | StaffUser    |
+| `catalog@example.com`   | `catalog1234`   | `catalog-manager` | StaffUser    |
+| `warehouse@example.com` | `warehouse1234` | `warehouse-staff` | StaffUser    |
+| `support@example.com`   | `support1234`   | `order-support`   | StaffUser    |
+| `customer@example.com`  | `customer1234`  | —                 | Customer     |
 
 ---
 
@@ -151,21 +159,21 @@ legibility. Redis is used by **inventory** (stock availability) and **notificati
 
 ### Deployables
 
-| Service | Transport | Responsibility |
-| --- | --- | --- |
-| `api-gateway` | HTTP `:3000` | Single entry point; JWT + RBAC; owns the identity tables (`auth`) and two admin shells (`iam`, `customer-admin`) |
-| `catalog-microservice` | RMQ `catalog_queue` | `Product` / `ProductVariant`, `Category` tree, polymorphic `MediaAsset`, plus the colocated **pricing** module (`Price` ledger, `TaxCategory`) |
-| `inventory-microservice` | RMQ `inventory_queue` | `StockLevel` running totals, `StockLocation`, TTL `Reservation` holds, append-only `StockMovement` ledger |
-| `retail-microservice` | RMQ `retail_queue` | Checkout — mutable `Cart`; immutable `Order` + `OrderLine` + `Address` + `Payment` + `Fulfillment` + `Refund`; the `ReturnRequest` RMA context |
-| `notification-microservice` | RMQ `notification_events` | Versioned templates, delivery audit trail, render-and-dispatch pipeline, consent gate, retry sweeper |
-| `event-store-microservice` | RMQ `event_store_firehose_queue` + `event_store_query_queue` | Append-only sink: `domain_event` (event firehose) + `audit_log_entry` (staff audit log), in its **own** database; answers the three `audit.*` query RPCs |
+| Service                     | Transport                                                    | Responsibility                                                                                                                                           |
+|-----------------------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `api-gateway`               | HTTP `:3000`                                                 | Single entry point; JWT + RBAC; owns the identity tables (`auth`) and two admin shells (`iam`, `customer-admin`)                                         |
+| `catalog-microservice`      | RMQ `catalog_queue`                                          | `Product` / `ProductVariant`, `Category` tree, polymorphic `MediaAsset`, plus the colocated **pricing** module (`Price` ledger, `TaxCategory`)           |
+| `inventory-microservice`    | RMQ `inventory_queue`                                        | `StockLevel` running totals, `StockLocation`, TTL `Reservation` holds, append-only `StockMovement` ledger                                                |
+| `retail-microservice`       | RMQ `retail_queue`                                           | Checkout — mutable `Cart`; immutable `Order` + `OrderLine` + `Address` + `Payment` + `Fulfillment` + `Refund`; the `ReturnRequest` RMA context           |
+| `notification-microservice` | RMQ `notification_events`                                    | Versioned templates, delivery audit trail, render-and-dispatch pipeline, consent gate, retry sweeper                                                     |
+| `event-store-microservice`  | RMQ `event_store_firehose_queue` + `event_store_query_queue` | Append-only sink: `domain_event` (event firehose) + `audit_log_entry` (staff audit log), in its **own** database; answers the three `audit.*` query RPCs |
 
 ### Two logical databases
 
-| Database | Owner | Contents |
-| --- | --- | --- |
-| `retail_db` | every operational context | identity, catalog, pricing, inventory, cart, orders, fulfillment, returns, refunds, idempotency keys, notification templates + deliveries |
-| `ris_eventstore` | event store only | `domain_event`, `audit_log_entry` — append-only, high volume, independently truncatable ([ADR-034](docs/adr/034-isolated-eventstore-database.md)) |
+| Database         | Owner                     | Contents                                                                                                                                          |
+|------------------|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `retail_db`      | every operational context | identity, catalog, pricing, inventory, cart, orders, fulfillment, returns, refunds, idempotency keys, notification templates + deliveries         |
+| `ris_eventstore` | event store only          | `domain_event`, `audit_log_entry` — append-only, high volume, independently truncatable ([ADR-034](docs/adr/034-isolated-eventstore-database.md)) |
 
 Entities live beside the bounded context that owns them; the shared `retail_db` is a
 deliberate monolith-of-schema with foreign keys across contexts (`cart.customer_id`,
@@ -192,18 +200,18 @@ exchange and is not bound to this exchange at all.
 > The binding pattern is a lone `#`, **not** `#.#`. RabbitMQ routes both, but Nest's
 > `matchRmqPattern` rejects `#.#` for any multi-word routing key and nacks the message.
 
-| Event | Consumer |
-| --- | --- |
-| `catalog.variant.created` | inventory — auto-init a zeroed `StockLevel` |
-| `inventory.stock.low` | notification — ops alert to `OPS_NOTIFICATIONS_EMAIL` |
-| `retail.order.placed` | notification |
-| `retail.order.cancelled` | **dual-emitted** — retail (auto-refund) *and* notification |
-| `retail.fulfillment.shipped` / `.delivered` | notification |
-| `retail.return.requested` / `.authorized` / `.received` / `.inspected` | notification |
-| `retail.refund.issued` | notification |
-| `customer.consent.updated` / `customer.erased` | notification — consent-cache write-through / evict |
-| `audit.staff.action` | event store → `audit_log_entry` |
-| *everything else on `ris.events`* | event store → `domain_event` |
+| Event                                                                  | Consumer                                                   |
+|------------------------------------------------------------------------|------------------------------------------------------------|
+| `catalog.variant.created`                                              | inventory — auto-init a zeroed `StockLevel`                |
+| `inventory.stock.low`                                                  | notification — ops alert to `OPS_NOTIFICATIONS_EMAIL`      |
+| `retail.order.placed`                                                  | notification                                               |
+| `retail.order.cancelled`                                               | **dual-emitted** — retail (auto-refund) *and* notification |
+| `retail.fulfillment.shipped` / `.delivered`                            | notification                                               |
+| `retail.return.requested` / `.authorized` / `.received` / `.inspected` | notification                                               |
+| `retail.refund.issued`                                                 | notification                                               |
+| `customer.consent.updated` / `customer.erased`                         | notification — consent-cache write-through / evict         |
+| `audit.staff.action`                                                   | event store → `audit_log_entry`                            |
+| *everything else on `ris.events`*                                      | event store → `domain_event`                               |
 
 **Reserved surfaces** (published, captured by the firehose, no business consumer):
 `catalog.product.*`, `catalog.price.*`, `inventory.stock-level.initialized`,
@@ -225,36 +233,36 @@ have **no HTTP route** are called by another *service*, never by a client.
 
 **Retail** (`retail_queue`)
 
-| Routing key | Use case | Controller |
-| --- | --- | --- |
-| `retail.cart.create` / `.get` / `.add-line` / `.change-line-quantity` / `.remove-line` / `.claim` | `CreateCart` / `GetCart` / `AddToCart` / `ChangeCartLineQuantity` / `RemoveFromCart` / `ClaimCart` | `cart.controller.ts` |
-| `retail.cart.place` | `PlaceOrderUseCase` | `orders.controller.ts` |
-| `retail.payment.capture` | `CapturePaymentUseCase` | ″ |
-| `retail.order.get` / `.list` / `.cancel` / `.cancel-line` | `GetOrder` / `ListMyOrders` / `CancelOrder` / `CancelLine` | ″ |
-| `retail.fulfillment.create` / `.list` / `.ship` / `.deliver` | `CreateFulfillment` / `ListFulfillments` / `ShipFulfillment` / `MarkDelivered` | ″ |
-| `retail.refund.issue` / `.list` | `IssueRefund` / `ListRefundsForOrder` | ″ |
+| Routing key                                                                                             | Use case                                                                                                                                                   | Controller              |
+|---------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
+| `retail.cart.create` / `.get` / `.add-line` / `.change-line-quantity` / `.remove-line` / `.claim`       | `CreateCart` / `GetCart` / `AddToCart` / `ChangeCartLineQuantity` / `RemoveFromCart` / `ClaimCart`                                                         | `cart.controller.ts`    |
+| `retail.cart.place`                                                                                     | `PlaceOrderUseCase`                                                                                                                                        | `orders.controller.ts`  |
+| `retail.payment.capture`                                                                                | `CapturePaymentUseCase`                                                                                                                                    | ″                       |
+| `retail.order.get` / `.list` / `.cancel` / `.cancel-line`                                               | `GetOrder` / `ListMyOrders` / `CancelOrder` / `CancelLine`                                                                                                 | ″                       |
+| `retail.fulfillment.create` / `.list` / `.ship` / `.deliver`                                            | `CreateFulfillment` / `ListFulfillments` / `ShipFulfillment` / `MarkDelivered`                                                                             | ″                       |
+| `retail.refund.issue` / `.list`                                                                         | `IssueRefund` / `ListRefundsForOrder`                                                                                                                      | ″                       |
 | `retail.return.open` / `.authorize` / `.reject` / `.receive` / `.inspect` / `.close` / `.get` / `.list` | `OpenReturnRequest` / `AuthorizeReturn` / `RejectReturn` / `ReceiveReturn` / `InspectAndDisposition` / `CloseReturn` / `GetReturn` / `ListReturnsForOrder` | `returns.controller.ts` |
 
 **Inventory** (`inventory_queue`) — all on `stock.controller.ts`
 
-| Routing key | Use case | Gateway route? |
-| --- | --- | --- |
-| `inventory.stock-level.get` / `.receive` / `.adjust` / `.transfer` | `QueryAvailability` / `ReceiveStock` / `AdjustStock` / `TransferStock` | yes |
-| `inventory.location.list` | `ListLocations` | yes |
-| `inventory.stock-movement.list` | `ListStockMovements` | yes |
+| Routing key                                                           | Use case                                                                             | Gateway route?              |
+|-----------------------------------------------------------------------|--------------------------------------------------------------------------------------|-----------------------------|
+| `inventory.stock-level.get` / `.receive` / `.adjust` / `.transfer`    | `QueryAvailability` / `ReceiveStock` / `AdjustStock` / `TransferStock`               | yes                         |
+| `inventory.location.list`                                             | `ListLocations`                                                                      | yes                         |
+| `inventory.stock-movement.list`                                       | `ListStockMovements`                                                                 | yes                         |
 | `inventory.reservation.reserve` / `.release` / `.sweep` / `.allocate` | `ReserveStock` / `ReleaseReservation` / `SweepExpiredReservations` / `AllocateStock` | **no** — retail drives them |
-| `inventory.allocation.cancel` | `CancelAllocation` | **no** |
-| `inventory.stock.commit-sale` | `CommitSale` | **no** |
-| `inventory.stock.restock-from-return` | `RestockFromReturn` | **no** |
+| `inventory.allocation.cancel`                                         | `CancelAllocation`                                                                   | **no**                      |
+| `inventory.stock.commit-sale`                                         | `CommitSale`                                                                         | **no**                      |
+| `inventory.stock.restock-from-return`                                 | `RestockFromReturn`                                                                  | **no**                      |
 
 **Catalog** (`catalog_queue`) — the colocated `pricing` module shares this queue
 
-| Routing key | Controller |
-| --- | --- |
-| `catalog.product.register` / `.publish` / `.archive` / `.list` / `.get`, `catalog.variant.create` / `.get` | `catalog.controller.ts` |
-| `catalog.category.create` / `.reparent` / `.list` / `.get-tree` / `.list-products`, `catalog.product.reclassify` | `category.controller.ts` |
-| `catalog.media.attach` / `.reorder` / `.detach` / `.list` | `media.controller.ts` |
-| `catalog.price.set` / `.list` / `.select`, `catalog.tax-category.create` / `.list`, `catalog.variant.set-tax-category` | `pricing.controller.ts` |
+| Routing key                                                                                                            | Controller               |
+|------------------------------------------------------------------------------------------------------------------------|--------------------------|
+| `catalog.product.register` / `.publish` / `.archive` / `.list` / `.get`, `catalog.variant.create` / `.get`             | `catalog.controller.ts`  |
+| `catalog.category.create` / `.reparent` / `.list` / `.get-tree` / `.list-products`, `catalog.product.reclassify`       | `category.controller.ts` |
+| `catalog.media.attach` / `.reorder` / `.detach` / `.list`                                                              | `media.controller.ts`    |
+| `catalog.price.set` / `.list` / `.select`, `catalog.tax-category.create` / `.list`, `catalog.variant.set-tax-category` | `pricing.controller.ts`  |
 
 Category and media operations emit **no** events.
 
@@ -266,11 +274,11 @@ design — no gateway route.
 
 **Event store** (`event_store_query_queue`) — all on `audit-query.controller.ts`
 
-| Routing key | Use case |
-| --- | --- |
-| `audit.event.query` | `QueryDomainEventsUseCase` |
-| `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
-| `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
+| Routing key                  | Use case                      |
+|------------------------------|-------------------------------|
+| `audit.event.query`          | `QueryDomainEventsUseCase`    |
+| `audit.entry.query`          | `QueryAuditLogEntriesUseCase` |
+| `audit.trace.by-correlation` | `TraceByCorrelationUseCase`   |
 
 Reached from the gateway's `modules/audit/` behind `GET /api/audit/{events,entries,trace/:id}`.
 `audit.staff.action` is the one `audit.` **event**, not an RPC: it rides `ris.events` into the
@@ -315,17 +323,17 @@ spec/                # repository-integrity specs: architecture-lint fixtures,
 
 Imported via path aliases as `@retail-inventory-system/<name>`.
 
-| Library | What it gives you |
-| --- | --- |
-| `contracts` | Wire contracts — `microservices/`, `auth/`, `audit/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs. |
-| `ddd` | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.** |
-| `common` | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token). |
-| `database` | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`. |
-| `messaging` | `clients/` — `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore,RisEvents}Module`, the per-queue `ClientProxy` providers a module imports. Plus `RisEventsMirrorPublisher`, `sendPreservingRpcError` (the cross-service `send` that preserves the upstream `{ code, details }`), `ROUTING_KEYS`, `EXCHANGES`. |
-| `cache` | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel-spanned), global `CacheModule`, `@Cacheable()`, `CACHE_KEYS`. |
-| `observability` | `LoggerModuleConfig` (Pino + trace correlation); `correlation/` — `CorrelationMiddleware`, `@CorrelationId()`, `CORRELATION_ID_HEADER`. OTel `tracer.ts` side-effect bootstrap (deep-import path). |
-| `auth` | `AuthModule.forRootAsync()`, `JwtStrategy`; `guards/` — the three global guards + `enforceRequiredClaim` (their shared claim check); `decorators/` — `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`. |
-| `config` | `configModuleConfig` — the Joi env schema. |
+| Library         | What it gives you                                                                                                                                                                                                                                                                                                               |
+|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `contracts`     | Wire contracts — `microservices/`, `auth/`, `audit/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs.                                                                                                                      |
+| `ddd`           | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.**                                                                                                                                                                                    |
+| `common`        | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token).                                                                                                                                                      |
+| `database`      | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`.                                                                                                                                                                 |
+| `messaging`     | `clients/` — `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore,RisEvents}Module`, the per-queue `ClientProxy` providers a module imports. Plus `RisEventsMirrorPublisher`, `sendPreservingRpcError` (the cross-service `send` that preserves the upstream `{ code, details }`), `ROUTING_KEYS`, `EXCHANGES`. |
+| `cache`         | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel-spanned), global `CacheModule`, `@Cacheable()`, `CACHE_KEYS`.                                                                                                                                                     |
+| `observability` | `LoggerModuleConfig` (Pino + trace correlation); `correlation/` — `CorrelationMiddleware`, `@CorrelationId()`, `CORRELATION_ID_HEADER`. OTel `tracer.ts` side-effect bootstrap (deep-import path).                                                                                                                              |
+| `auth`          | `AuthModule.forRootAsync()`, `JwtStrategy`; `guards/` — the three global guards + `enforceRequiredClaim` (their shared claim check); `decorators/` — `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`.                                                                              |
+| `config`        | `configModuleConfig` — the Joi env schema.                                                                                                                                                                                                                                                                                      |
 
 ### The per-module hexagon
 
@@ -433,10 +441,10 @@ category nor media operations emit events.
 
 **Two publish preconditions, deliberately asymmetric:**
 
-| Precondition | Behaviour |
-| --- | --- |
-| Every variant has an in-effect price in `DEFAULT_CURRENCY` | **Hard** — `409 PRODUCT_PUBLISH_REQUIRES_PRICE`. A price-less product breaks checkout. |
-| Some owner has an active `MediaAsset` | **Soft** — publish proceeds, `ProductView.warnings[]` carries `CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA`. A media-less product only looks bare. |
+| Precondition                                               | Behaviour                                                                                                                                      |
+|------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| Every variant has an in-effect price in `DEFAULT_CURRENCY` | **Hard** — `409 PRODUCT_PUBLISH_REQUIRES_PRICE`. A price-less product breaks checkout.                                                         |
+| Some owner has an active `MediaAsset`                      | **Soft** — publish proceeds, `ProductView.warnings[]` carries `CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA`. A media-less product only looks bare. |
 
 The colocated **`pricing`** module is *not* a separate deployable — a price attaches to a
 `variantId` and shares `catalog_queue`. `price` is an append-only-for-history,
@@ -444,7 +452,8 @@ The colocated **`pricing`** module is *not* a separate deployable — a price at
 predecessor's `[validFrom, validTo)` interval, with at most one open row per scope
 (app close-in-transaction plus a generated-column UNIQUE backstop). `tax_category` is a
 classification **label only**; rates and jurisdictions attach to it rather than living in it, and
-what that would take is sketched in [`docs/extensions/tax-rate-tables.md`](docs/extensions/pricing-and-promotions/tax-rate-tables.md).
+what that would take is sketched in [
+`docs/extensions/tax-rate-tables.md`](docs/extensions/pricing-and-promotions/tax-rate-tables.md).
 `catalog.price.set` is one command for both Set and Schedule, distinguished by `validFrom`;
 `catalog.price.select` resolves `(variantId, currency, asOf)` to a single price,
 priority DESC then `validFrom` DESC.
@@ -458,33 +467,33 @@ ADRs: [025](docs/adr/025-catalog-product-and-variant-aggregate.md),
 Three aggregates plus one append-only ledger record, all keyed on the opaque catalog
 `variantId`.
 
-| Aggregate | Shape |
-| --- | --- |
-| `StockLevel` | Per-`(variantId, stockLocationId)` running totals: `quantityOnHand`, `quantityAllocated`, `quantityReserved`. `available = onHand − allocated − reserved` is a **pure getter**. A `version` column carries OCC. |
-| `StockLocation` | Caller-assigned string PK, `StockLocationTypeEnum`, `active` flag. The migration auto-provisions `default-warehouse`. |
-| `Reservation` | TTL-bounded, cart-scoped hold. App-generated `CHAR(36)` UUID. `active → committed / released / expired`, plus a `reactivate` row-reuse path so the all-statuses UNIQUE `(cartId, variantId, stockLocationId)` triple survives a remove-then-re-add. |
-| `StockMovement` | Immutable, `Object.freeze`d ledger record — no mutators, no events. Six types with a **fixed sign**: `+` receipt/return, `−` sale/allocation/release, `±` non-zero adjustment. Polymorphic FK-less `referenceType`/`referenceId`. |
+| Aggregate       | Shape                                                                                                                                                                                                                                               |
+|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `StockLevel`    | Per-`(variantId, stockLocationId)` running totals: `quantityOnHand`, `quantityAllocated`, `quantityReserved`. `available = onHand − allocated − reserved` is a **pure getter**. A `version` column carries OCC.                                     |
+| `StockLocation` | Caller-assigned string PK, `StockLocationTypeEnum`, `active` flag. The migration auto-provisions `default-warehouse`.                                                                                                                               |
+| `Reservation`   | TTL-bounded, cart-scoped hold. App-generated `CHAR(36)` UUID. `active → committed / released / expired`, plus a `reactivate` row-reuse path so the all-statuses UNIQUE `(cartId, variantId, stockLocationId)` triple survives a remove-then-re-add. |
+| `StockMovement` | Immutable, `Object.freeze`d ledger record — no mutators, no events. Six types with a **fixed sign**: `+` receipt/return, `−` sale/allocation/release, `±` non-zero adjustment. Polymorphic FK-less `referenceType`/`referenceId`.                   |
 
 Every counter-changing operation appends a `StockMovement` **in the same transaction** and
 routes through `stockCache.withInvalidation(...)` (post-commit invalidation,
 [ADR-023](docs/adr/023-cache-invalidate-post-commit-by-type.md)) and the shared bounded-OCC
 `runWithStockWriteRetry`.
 
-| RPC | Use case | Notes |
-| --- | --- | --- |
-| `inventory.stock-level.get` | `QueryAvailabilityUseCase` | cache-aside, per variant |
-| `inventory.location.list` | `ListLocationsUseCase` | uncached |
-| `inventory.stock-movement.list` | `ListStockMovementsUseCase` | paginated, newest-first, uncached audit read |
-| `inventory.stock-level.receive` | `ReceiveStockUseCase` | positive `receipt` movement |
-| `inventory.stock-level.adjust` | `AdjustStockUseCase` | signed delta + `reasonCode`; below-zero → `409`; re-fires `inventory.stock.low` |
-| `inventory.stock-level.transfer` | `TransferStockUseCase` | atomic two-location on-hand move — two `StockLevel` writes + a paired `transfer-out`/`transfer-in` `adjustment` movement |
-| `inventory.reservation.reserve` | `ReserveStockUseCase` | no-oversell guard; idempotent by *absolute* quantity on the triple; `expiresAt = now + RESERVATION_TTL_MINUTES` |
-| `inventory.reservation.release` | `ReleaseReservationUseCase` | selector is `reservationId` **or** `cartId` (+ optional facets); both/neither → `400` |
-| `inventory.reservation.sweep` | `SweepExpiredReservationsUseCase` | the on-demand twin of the sweep timer — same use case, plus a staff `actorId` on every ledger row; `batchSize` clamped to `RESERVATION_SWEEP_BATCH_SIZE` |
-| `inventory.reservation.allocate` | `AllocateStockUseCase` | cart holds → order allocation at place-time; per line refresh-then-commit, drift-rebalance, or `allocateDirect` fallback; all-lines-atomic |
-| `inventory.allocation.cancel` | `CancelAllocationUseCase` | reverses an order's allocation; touches no reservation rows |
-| `inventory.stock.commit-sale` | `CommitSaleUseCase` | ship-from-allocated; **idempotency-first on `fulfillmentId`**; decrements on-hand **and** allocated |
-| `inventory.stock.restock-from-return` | `RestockFromReturnUseCase` | **idempotency-first on `returnRequestId`**; raises on-hand only, so no low-stock re-fire |
+| RPC                                   | Use case                          | Notes                                                                                                                                                    |
+|---------------------------------------|-----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `inventory.stock-level.get`           | `QueryAvailabilityUseCase`        | cache-aside, per variant                                                                                                                                 |
+| `inventory.location.list`             | `ListLocationsUseCase`            | uncached                                                                                                                                                 |
+| `inventory.stock-movement.list`       | `ListStockMovementsUseCase`       | paginated, newest-first, uncached audit read                                                                                                             |
+| `inventory.stock-level.receive`       | `ReceiveStockUseCase`             | positive `receipt` movement                                                                                                                              |
+| `inventory.stock-level.adjust`        | `AdjustStockUseCase`              | signed delta + `reasonCode`; below-zero → `409`; re-fires `inventory.stock.low`                                                                          |
+| `inventory.stock-level.transfer`      | `TransferStockUseCase`            | atomic two-location on-hand move — two `StockLevel` writes + a paired `transfer-out`/`transfer-in` `adjustment` movement                                 |
+| `inventory.reservation.reserve`       | `ReserveStockUseCase`             | no-oversell guard; idempotent by *absolute* quantity on the triple; `expiresAt = now + RESERVATION_TTL_MINUTES`                                          |
+| `inventory.reservation.release`       | `ReleaseReservationUseCase`       | selector is `reservationId` **or** `cartId` (+ optional facets); both/neither → `400`                                                                    |
+| `inventory.reservation.sweep`         | `SweepExpiredReservationsUseCase` | the on-demand twin of the sweep timer — same use case, plus a staff `actorId` on every ledger row; `batchSize` clamped to `RESERVATION_SWEEP_BATCH_SIZE` |
+| `inventory.reservation.allocate`      | `AllocateStockUseCase`            | cart holds → order allocation at place-time; per line refresh-then-commit, drift-rebalance, or `allocateDirect` fallback; all-lines-atomic               |
+| `inventory.allocation.cancel`         | `CancelAllocationUseCase`         | reverses an order's allocation; touches no reservation rows                                                                                              |
+| `inventory.stock.commit-sale`         | `CommitSaleUseCase`               | ship-from-allocated; **idempotency-first on `fulfillmentId`**; decrements on-hand **and** allocated                                                      |
+| `inventory.stock.restock-from-return` | `RestockFromReturnUseCase`        | **idempotency-first on `returnRequestId`**; raises on-hand only, so no low-stock re-fire                                                                 |
 
 The reserve / allocate / cancel-allocation / commit-sale / restock RPCs have **no gateway HTTP
 route** — they are driven retail → inventory. `CatalogEventsConsumer` handles
@@ -508,13 +517,13 @@ sibling line's change never re-prices it.
 
 Six RPCs, each re-asserting `cart.customerId === payload.customerId` (`403` on mismatch):
 
-| RPC | Inventory side effect |
-| --- | --- |
-| `retail.cart.create` / `.get` | none |
-| `retail.cart.add-line` | snapshots price via `catalog.price.select` (unpriced → `409`); **reserves the line's absolute target quantity before save** |
-| `retail.cart.change-line-quantity` | re-reserves the absolute new quantity before save |
-| `retail.cart.remove-line` | releases the hold **after** save, best-effort |
-| `retail.cart.claim` | none — a hold keys on `cartId`, and a claim only re-points the owner |
+| RPC                                | Inventory side effect                                                                                                       |
+|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `retail.cart.create` / `.get`      | none                                                                                                                        |
+| `retail.cart.add-line`             | snapshots price via `catalog.price.select` (unpriced → `409`); **reserves the line's absolute target quantity before save** |
+| `retail.cart.change-line-quantity` | re-reserves the absolute new quantity before save                                                                           |
+| `retail.cart.remove-line`          | releases the hold **after** save, best-effort                                                                               |
+| `retail.cart.claim`                | none — a hold keys on `cartId`, and a claim only re-points the owner                                                        |
 
 Out of stock is `409 { code: 'INVENTORY_OUT_OF_STOCK', details: { available } }`
 end-to-end, and the cart is never mutated.
@@ -529,22 +538,22 @@ session cookie, so a guest builds a cart through the same bearer-protected route
 
 The **immutable** side. Five sibling aggregates live here.
 
-| Aggregate | Id | Why it lives here |
-| --- | --- | --- |
-| `Order` + `OrderLine` | `BIGINT` | the root |
-| `Address` | `CHAR(36)` | polymorphic over `ownerType ∈ {customer, order}`; an order's addresses are immutable **snapshot copies**, never references into a customer address book |
-| `Payment` | `BIGINT` | its operations mutate `Order` |
-| `Fulfillment` + `FulfillmentLine` | `BIGINT` | per-shipment, per-location |
-| `Refund` | `BIGINT` | a refund mutates `Payment` — and a refund can exist with **no** return behind it (a chargeback, a goodwill credit, a cancel-before-ship) |
+| Aggregate                         | Id         | Why it lives here                                                                                                                                       |
+|-----------------------------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Order` + `OrderLine`             | `BIGINT`   | the root                                                                                                                                                |
+| `Address`                         | `CHAR(36)` | polymorphic over `ownerType ∈ {customer, order}`; an order's addresses are immutable **snapshot copies**, never references into a customer address book |
+| `Payment`                         | `BIGINT`   | its operations mutate `Order`                                                                                                                           |
+| `Fulfillment` + `FulfillmentLine` | `BIGINT`   | per-shipment, per-location                                                                                                                              |
+| `Refund`                          | `BIGINT`   | a refund mutates `Payment` — and a refund can exist with **no** return behind it (a chargeback, a goodwill credit, a cancel-before-ship)                |
 
 **An `Order` carries three orthogonal status axes**, not one combined enum, because a
 `captured` payment legitimately coexists with `unfulfilled` fulfillment:
 
-| Axis | Values |
-| --- | --- |
-| `status` | `pending` → `confirmed` / `cancelled` / `shipped` / `delivered` |
-| `paymentStatus` | `none` → `authorized` → `captured` → `refunded` (or `failed`) |
-| `fulfillmentStatus` | `unfulfilled` → `partially-shipped` → `shipped` → `delivered` |
+| Axis                | Values                                                          |
+|---------------------|-----------------------------------------------------------------|
+| `status`            | `pending` → `confirmed` / `cancelled` / `shipped` / `delivered` |
+| `paymentStatus`     | `none` → `authorized` → `captured` → `refunded` (or `failed`)   |
+| `fulfillmentStatus` | `unfulfilled` → `partially-shipped` → `shipped` → `delivered`   |
 
 `Fulfillment.status` (`pending → shipped → delivered`, or `cancelled`) is a **fourth axis**,
 evolving per shipment; the order's `fulfillmentStatus` is the roll-up. Partial and split
@@ -618,10 +627,10 @@ domain model, or contract changes.
 
 #### Concurrency guards, side by side
 
-| Contended row | Guard | Loser gets |
-| --- | --- | --- |
-| `fulfillment` (ship vs cancel) | pessimistic `SELECT … FOR UPDATE` re-read | its own terminal domain `409` (`FULFILLMENT_INVALID_STATUS_TRANSITION` / `ORDER_NOT_CANCELLABLE`) |
-| `order` header (two ships rolling up) | version-checked CAS inside a bounded retry | `409 VERSION_MISMATCH` + `details.currentVersion` |
+| Contended row                         | Guard                                      | Loser gets                                                                                        |
+|---------------------------------------|--------------------------------------------|---------------------------------------------------------------------------------------------------|
+| `fulfillment` (ship vs cancel)        | pessimistic `SELECT … FOR UPDATE` re-read  | its own terminal domain `409` (`FULFILLMENT_INVALID_STATUS_TRANSITION` / `ORDER_NOT_CANCELLABLE`) |
+| `order` header (two ships rolling up) | version-checked CAS inside a bounded retry | `409 VERSION_MISMATCH` + `details.currentVersion`                                                 |
 
 Both mean "you lost the race" — the **two legitimate 409s** model.
 
@@ -644,13 +653,13 @@ requested ──► authorized ──► received ──► inspected ──► 
 `condition` / `disposition` / `lineRefundAmountMinor` are null until inspection, then
 `inspect`-once.
 
-| Operation | Auth | Behaviour |
-| --- | --- | --- |
-| Open | owner-or-staff `order:return-authorize` | resolves the order via the raw-SQL `RETURN_ORDER_READER`; enforces the `RETURN_WINDOW_DAYS` window (a `delivered` order is always returnable; a `shipped` one only inside the window) and `requested ≤ ordered − cancelled − already-returned` |
-| Authorize / Reject / Close | staff `order:return-authorize` | status walk; Reject appends its reason to `notes` |
-| Receive | warehouse `inventory:receive-return` | status walk |
-| Inspect | warehouse `inventory:receive-return` | the inspection set must cover **every** line; after commit, each `restock`-disposition line calls `inventory.stock.restock-from-return` (retry-then-log, idempotent on `returnRequestId`). Records refund amounts but **issues no refund**. |
-| Get / List | owner-or-staff `order:read` | non-staff filtered to own |
+| Operation                  | Auth                                    | Behaviour                                                                                                                                                                                                                                      |
+|----------------------------|-----------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Open                       | owner-or-staff `order:return-authorize` | resolves the order via the raw-SQL `RETURN_ORDER_READER`; enforces the `RETURN_WINDOW_DAYS` window (a `delivered` order is always returnable; a `shipped` one only inside the window) and `requested ≤ ordered − cancelled − already-returned` |
+| Authorize / Reject / Close | staff `order:return-authorize`          | status walk; Reject appends its reason to `notes`                                                                                                                                                                                              |
+| Receive                    | warehouse `inventory:receive-return`    | status walk                                                                                                                                                                                                                                    |
+| Inspect                    | warehouse `inventory:receive-return`    | the inspection set must cover **every** line; after commit, each `restock`-disposition line calls `inventory.stock.restock-from-return` (retry-then-log, idempotent on `returnRequestId`). Records refund amounts but **issues no refund**.    |
+| Get / List                 | owner-or-staff `order:read`             | non-staff filtered to own                                                                                                                                                                                                                      |
 
 ### Notifications (`notification-microservice`)
 
@@ -680,12 +689,12 @@ concurrent race.
 **The consent gate** ([ADR-037](docs/adr/037-consent-record-and-tombstone-erasure.md)) runs
 before the transport call, for customer-facing rows only (a null-recipient ops row skips it):
 
-| Channel + event type | Gated on |
-| --- | --- |
+| Channel + event type                           | Gated on                                                                                             |
+|------------------------------------------------|------------------------------------------------------------------------------------------------------|
 | email, `eventType ∈ TRANSACTIONAL_EVENT_TYPES` | `transactionalEmail` — **the bypass**; an order confirmation is never blocked by a marketing opt-out |
-| email, anything else | `marketingEmail` |
-| sms | `marketingSms` |
-| push / webhook | ungated |
+| email, anything else                           | `marketingEmail`                                                                                     |
+| sms                                            | `marketingSms`                                                                                       |
+| push / webhook                                 | ungated                                                                                              |
 
 An unconsented channel persists a terminal `skipped-no-consent` row — an auditable
 "deliberately not sent" — **before and instead of** the transport call. Consent is read
@@ -721,10 +730,10 @@ gateway route; real webhook ingestion with signature verification is future work
 The sixth deployable — RMQ-only, no HTTP — is the append-only sink for two streams, in its
 **own** database `ris_eventstore`.
 
-| Table | Purpose | Dedupe |
-| --- | --- | --- |
-| `domain_event` | verbatim capture of every business event on the bus | composite UNIQUE `(producer, event_type, aggregate_id, occurred_at, correlation_id)` — an empty correlation id is coalesced to `''`, since MySQL treats `NULL`s as distinct |
-| `audit_log_entry` | who-did-what for every staff mutation, with `before`/`after` snapshots | **none** — two identical staff actions a second apart are two real events |
+| Table             | Purpose                                                                | Dedupe                                                                                                                                                                      |
+|-------------------|------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `domain_event`    | verbatim capture of every business event on the bus                    | composite UNIQUE `(producer, event_type, aggregate_id, occurred_at, correlation_id)` — an empty correlation id is coalesced to `''`, since MySQL treats `NULL`s as distinct |
+| `audit_log_entry` | who-did-what for every staff mutation, with `before`/`after` snapshots | **none** — two identical staff actions a second apart are two real events                                                                                                   |
 
 Both are **append-only in the table shape itself**: neither entity extends `BaseEntity`
 (no `updated_at`/`deleted_at` at all — only `received_at` beside `occurred_at`), and both
@@ -761,11 +770,11 @@ They are served by the `AuditQueryController` on a **second queue**,
 `event_store_query_queue`, bound to the default exchange — command traffic never rides the
 `ris.events` topic exchange:
 
-| Routing key | Use case |
-| --- | --- |
-| `audit.event.query` | `QueryDomainEventsUseCase` |
-| `audit.entry.query` | `QueryAuditLogEntriesUseCase` |
-| `audit.trace.by-correlation` | `TraceByCorrelationUseCase` |
+| Routing key                  | Use case                      |
+|------------------------------|-------------------------------|
+| `audit.event.query`          | `QueryDomainEventsUseCase`    |
+| `audit.entry.query`          | `QueryAuditLogEntriesUseCase` |
+| `audit.trace.by-correlation` | `TraceByCorrelationUseCase`   |
 
 `main.ts` is therefore a **hybrid app**: `NestFactory.create` + two `connectMicroservice`
 calls + `init()` + `startAllMicroservices()`. It never calls `listen()`, so the service still
@@ -794,11 +803,11 @@ POST /api/orders/:orderId/refunds
 
 Semantics are uniform:
 
-| Case | Result |
-| --- | --- |
-| **Missing header** | `400`. Rejected at the gateway edge by the reusable `@IdempotencyKey()` decorator (`IDEMPOTENCY_KEY_REQUIRED`) before any RPC; retail carries an `ORDER_IDEMPOTENCY_KEY_REQUIRED` backstop for a direct-RMQ caller. |
-| **Replay** (same key, same body) | The stored response body, `200`, header `Idempotent-Replay: true`. Replayed **without re-executing** — no second charge, no second stock movement, no re-emitted events, and for refund no second `audit_log_entry`. |
-| **Reuse** (same key, different body) | `422 ORDER_IDEMPOTENCY_KEY_REUSED`, fired **before any side effect** (for refund, before the gateway call) — a changed amount can never slip through. |
+| Case                                 | Result                                                                                                                                                                                                               |
+|--------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Missing header**                   | `400`. Rejected at the gateway edge by the reusable `@IdempotencyKey()` decorator (`IDEMPOTENCY_KEY_REQUIRED`) before any RPC; retail carries an `ORDER_IDEMPOTENCY_KEY_REQUIRED` backstop for a direct-RMQ caller.  |
+| **Replay** (same key, same body)     | The stored response body, `200`, header `Idempotent-Replay: true`. Replayed **without re-executing** — no second charge, no second stock movement, no re-emitted events, and for refund no second `audit_log_entry`. |
+| **Reuse** (same key, different body) | `422 ORDER_IDEMPOTENCY_KEY_REUSED`, fired **before any side effect** (for refund, before the gateway call) — a changed amount can never slip through.                                                                |
 
 "Same body" is an identical **canonical-JSON + SHA-256 fingerprint** of the
 client-controlled command. Transport and identity noise (`correlationId`, the key itself,
@@ -824,9 +833,9 @@ and retries up to `OCC_RETRY_ATTEMPTS` (default 5, injected as a per-module valu
 token — never `process.env`). On exhaustion the write surfaces a uniform
 `409 { code: 'VERSION_MISMATCH', details: { currentVersion } }`.
 
-| Aggregate | Exhaustion code |
-| --- | --- |
-| `StockLevel`, `Reservation` | `409 STOCK_WRITE_CONFLICT` |
+| Aggregate                                       | Exhaustion code                                                                      |
+|-------------------------------------------------|--------------------------------------------------------------------------------------|
+| `StockLevel`, `Reservation`                     | `409 STOCK_WRITE_CONFLICT`                                                           |
 | `Cart`, `Order`, `Fulfillment`, `ReturnRequest` | `409 VERSION_MISMATCH` (member name is module-prefixed; the *wire* value is uniform) |
 
 The three cart line writes additionally honour an optional **`If-Match: <version>`**
@@ -913,9 +922,9 @@ explicit opt-out. Interactive reference: `http://localhost:3000/api/reference`.
 
 ### Health
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `GET` | `/api/health` | `@Public()` |
+| Method | Route         | Auth        |
+|--------|---------------|-------------|
+| `GET`  | `/api/health` | `@Public()` |
 
 The system's liveness report ([ADR-044](docs/adr/044-system-health-fan-out.md)). The gateway
 probes all five RMQ deployables **concurrently over the real broker**, so a failing probe means
@@ -950,80 +959,80 @@ one dead service costs one timeout, not five.
 
 ### Auth — staff
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `POST` | `/auth/staff/login` | public |
-| `POST` | `/auth/refresh` | public |
-| `POST` | `/auth/logout` | bearer |
-| `GET` | `/auth/me` | bearer |
-| `GET` | `/auth/admin/ping` | `audit:read` — smoke endpoint |
+| Method | Route               | Auth                          |
+|--------|---------------------|-------------------------------|
+| `POST` | `/auth/staff/login` | public                        |
+| `POST` | `/auth/refresh`     | public                        |
+| `POST` | `/auth/logout`      | bearer                        |
+| `GET`  | `/auth/me`          | bearer                        |
+| `GET`  | `/auth/admin/ping`  | `audit:read` — smoke endpoint |
 
 ### Auth — customer
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `POST` | `/auth/customer/register` | public |
-| `POST` | `/auth/customer/login` | public |
+| Method | Route                          | Auth                                             |
+|--------|--------------------------------|--------------------------------------------------|
+| `POST` | `/auth/customer/register`      | public                                           |
+| `POST` | `/auth/customer/login`         | public                                           |
 | `POST` | `/auth/customer/guest-session` | public — mints a guest-tier token + `customerId` |
-| `GET` | `/auth/customer/me` | bearer |
-| `GET` | `/auth/customer/me/consent` | bearer — owner-inherent, **no permission code** |
-| `PUT` | `/auth/customer/me/consent` | bearer — owner-inherent, **no permission code** |
+| `GET`  | `/auth/customer/me`            | bearer                                           |
+| `GET`  | `/auth/customer/me/consent`    | bearer — owner-inherent, **no permission code**  |
+| `PUT`  | `/auth/customer/me/consent`    | bearer — owner-inherent, **no permission code**  |
 
 ### Catalog
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `POST` | `/catalog/products` | `catalog:write` |
-| `POST` | `/catalog/products/:productId/variants` | `catalog:write` |
-| `POST` | `/catalog/products/:productId/publish` | `catalog:publish` |
-| `POST` | `/catalog/products/:productId/archive` | `catalog:write` |
-| `GET` | `/catalog/products` | public — paged active-catalogue browse |
-| `GET` | `/catalog/products/:slug` | public — product + active variants |
-| `GET` | `/catalog/variants/:variantId` | public — variant + parent product |
+| Method | Route                                   | Auth                                   |
+|--------|-----------------------------------------|----------------------------------------|
+| `POST` | `/catalog/products`                     | `catalog:write`                        |
+| `POST` | `/catalog/products/:productId/variants` | `catalog:write`                        |
+| `POST` | `/catalog/products/:productId/publish`  | `catalog:publish`                      |
+| `POST` | `/catalog/products/:productId/archive`  | `catalog:write`                        |
+| `GET`  | `/catalog/products`                     | public — paged active-catalogue browse |
+| `GET`  | `/catalog/products/:slug`               | public — product + active variants     |
+| `GET`  | `/catalog/variants/:variantId`          | public — variant + parent product      |
 
 ### Pricing and tax categories
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `POST` | `/catalog/variants/:variantId/prices` | `pricing:write` — set or schedule |
-| `GET` | `/catalog/variants/:variantId/prices` | public — `?currency=USD`, `?asOf` |
-| `GET` | `/catalog/variants/:variantId/price` | public — single applicable price, or a null body |
-| `POST` | `/catalog/tax-categories` | `pricing:write` |
-| `GET` | `/catalog/tax-categories` | public |
-| `PATCH` | `/catalog/variants/:variantId/tax-category` | `pricing:write` — attach by code |
+| Method  | Route                                       | Auth                                             |
+|---------|---------------------------------------------|--------------------------------------------------|
+| `POST`  | `/catalog/variants/:variantId/prices`       | `pricing:write` — set or schedule                |
+| `GET`   | `/catalog/variants/:variantId/prices`       | public — `?currency=USD`, `?asOf`                |
+| `GET`   | `/catalog/variants/:variantId/price`        | public — single applicable price, or a null body |
+| `POST`  | `/catalog/tax-categories`                   | `pricing:write`                                  |
+| `GET`   | `/catalog/tax-categories`                   | public                                           |
+| `PATCH` | `/catalog/variants/:variantId/tax-category` | `pricing:write` — attach by code                 |
 
 ### Categories and media
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `POST` | `/catalog/categories` | `catalog:write` — create a root or child |
-| `PATCH` | `/catalog/categories/:slug/parent` | `catalog:write` — reparent (or demote to root) + rebase the subtree |
-| `GET` | `/catalog/categories` | public — flat active list, `?root` |
-| `GET` | `/catalog/categories/:slug/tree` | public — nested active subtree |
-| `GET` | `/catalog/categories/:slug/products` | public — `?includeDescendants`, `?page`, `?pageSize` |
-| `POST` | `/catalog/products/:productId/categories` | `catalog:write` — attach (returns the full membership, `200`) |
-| `DELETE` | `/catalog/products/:productId/categories/:categorySlug` | `catalog:write` — detach |
-| `POST` | `/catalog/media` | `catalog:write` — append at `max(sort_order) + 1` |
-| `PATCH` | `/catalog/media/reorder` | `catalog:write` — exact permutation, all-or-nothing |
-| `DELETE` | `/catalog/media/:id` | `catalog:write` — `active → archived` flip |
-| `GET` | `/catalog/products/:productId/media` | public — `sort_order ASC` |
-| `GET` | `/catalog/variants/:variantId/media` | public — `sort_order ASC` |
+| Method   | Route                                                   | Auth                                                                |
+|----------|---------------------------------------------------------|---------------------------------------------------------------------|
+| `POST`   | `/catalog/categories`                                   | `catalog:write` — create a root or child                            |
+| `PATCH`  | `/catalog/categories/:slug/parent`                      | `catalog:write` — reparent (or demote to root) + rebase the subtree |
+| `GET`    | `/catalog/categories`                                   | public — flat active list, `?root`                                  |
+| `GET`    | `/catalog/categories/:slug/tree`                        | public — nested active subtree                                      |
+| `GET`    | `/catalog/categories/:slug/products`                    | public — `?includeDescendants`, `?page`, `?pageSize`                |
+| `POST`   | `/catalog/products/:productId/categories`               | `catalog:write` — attach (returns the full membership, `200`)       |
+| `DELETE` | `/catalog/products/:productId/categories/:categorySlug` | `catalog:write` — detach                                            |
+| `POST`   | `/catalog/media`                                        | `catalog:write` — append at `max(sort_order) + 1`                   |
+| `PATCH`  | `/catalog/media/reorder`                                | `catalog:write` — exact permutation, all-or-nothing                 |
+| `DELETE` | `/catalog/media/:id`                                    | `catalog:write` — `active → archived` flip                          |
+| `GET`    | `/catalog/products/:productId/media`                    | public — `sort_order ASC`                                           |
+| `GET`    | `/catalog/variants/:variantId/media`                    | public — `sort_order ASC`                                           |
 
 Category and media authoring reuse `catalog:write` — **no new permission code was minted**.
 An unknown media owner is a `200 []`, not a `404`.
 
 ### Inventory
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `GET` | `/inventory/locations` | `inventory:read` — `?activeOnly` |
-| `GET` | `/inventory/variants/:variantId/stock` | public — per-location availability + totals, `?locationIds=a,b` |
-| `GET` | `/inventory/variants/:variantId/movements` | `inventory:read` — `?page`, `?pageSize`, `?type`, `?from`, `?to` |
-| `POST` | `/inventory/variants/:variantId/stock/receive` | `inventory:adjust` — `{ stockLocationId?, quantity }` |
-| `POST` | `/inventory/variants/:variantId/stock/adjust` | `inventory:adjust` — `{ stockLocationId?, quantityDelta, reasonCode }` |
-| `POST` | `/inventory/variants/:variantId/stock/transfer` | `inventory:transfer` — `{ fromLocationId, toLocationId, quantity }` |
-| `POST` | `/inventory/reservations/sweep` | `inventory:adjust` — `{ batchSize? }`, expires elapsed holds on demand |
-| `POST` | `/inventory/reservations/:reservationId/release` | `inventory:adjust` — the operator manual release |
+| Method | Route                                            | Auth                                                                   |
+|--------|--------------------------------------------------|------------------------------------------------------------------------|
+| `GET`  | `/inventory/locations`                           | `inventory:read` — `?activeOnly`                                       |
+| `GET`  | `/inventory/variants/:variantId/stock`           | public — per-location availability + totals, `?locationIds=a,b`        |
+| `GET`  | `/inventory/variants/:variantId/movements`       | `inventory:read` — `?page`, `?pageSize`, `?type`, `?from`, `?to`       |
+| `POST` | `/inventory/variants/:variantId/stock/receive`   | `inventory:adjust` — `{ stockLocationId?, quantity }`                  |
+| `POST` | `/inventory/variants/:variantId/stock/adjust`    | `inventory:adjust` — `{ stockLocationId?, quantityDelta, reasonCode }` |
+| `POST` | `/inventory/variants/:variantId/stock/transfer`  | `inventory:transfer` — `{ fromLocationId, toLocationId, quantity }`    |
+| `POST` | `/inventory/reservations/sweep`                  | `inventory:adjust` — `{ batchSize? }`, expires elapsed holds on demand |
+| `POST` | `/inventory/reservations/:reservationId/release` | `inventory:adjust` — the operator manual release                       |
 
 A variant with no stock rows is a `200` zero-availability answer (`locations: []`), not a
 `404`. The two reservation routes share `inventory:adjust` because they do the same thing to
@@ -1038,31 +1047,31 @@ by-id release needs a `reservationId` — source it from the reserve-path logs, 
 
 Bearer plus an **owner-check**, no permission code — a customer touches only its own cart.
 
-| Method | Route | Notes |
-| --- | --- | --- |
-| `POST` | `/cart` | open a cart |
-| `GET` | `/cart/:cartId` | |
-| `POST` | `/cart/:cartId/lines` | add a priced line — reserves stock; optional `If-Match: <version>` |
-| `PATCH` | `/cart/:cartId/lines/:lineId` | change quantity — re-reserves; optional `If-Match` |
-| `DELETE` | `/cart/:cartId/lines/:lineId` | remove a line — releases the hold best-effort; optional `If-Match` |
-| `POST` | `/cart/:cartId/claim` | promote a guest cart (`fromCustomerId` proof; no inventory call) |
-| `POST` | `/cart/:cartId/place` | place the order — `Idempotency-Key` **required**; `201` fresh, `200` + `Idempotent-Replay: true` on replay |
+| Method   | Route                         | Notes                                                                                                      |
+|----------|-------------------------------|------------------------------------------------------------------------------------------------------------|
+| `POST`   | `/cart`                       | open a cart                                                                                                |
+| `GET`    | `/cart/:cartId`               |                                                                                                            |
+| `POST`   | `/cart/:cartId/lines`         | add a priced line — reserves stock; optional `If-Match: <version>`                                         |
+| `PATCH`  | `/cart/:cartId/lines/:lineId` | change quantity — re-reserves; optional `If-Match`                                                         |
+| `DELETE` | `/cart/:cartId/lines/:lineId` | remove a line — releases the hold best-effort; optional `If-Match`                                         |
+| `POST`   | `/cart/:cartId/claim`         | promote a guest cart (`fromCustomerId` proof; no inventory call)                                           |
+| `POST`   | `/cart/:cartId/place`         | place the order — `Idempotency-Key` **required**; `201` fresh, `200` + `Idempotent-Replay: true` on replay |
 
 ### Orders, fulfillment, refunds
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `GET` | `/orders` | bearer — own orders, paginated, newest-first |
-| `GET` | `/orders/:orderId` | owner **or** staff `order:read` |
-| `POST` | `/orders/:orderId/payments/capture` | owner **or** staff `order:capture` — `Idempotency-Key` required |
-| `POST` | `/orders/:orderId/fulfillments` | `order:fulfill` — `201` |
-| `GET` | `/orders/:orderId/fulfillments` | owner **or** staff `order:read` |
-| `POST` | `/orders/:orderId/fulfillments/:id/ship` | `order:fulfill` — captures payment; `Idempotency-Key` required |
-| `POST` | `/orders/:orderId/fulfillments/:id/deliver` | `order:fulfill` |
-| `POST` | `/orders/:orderId/cancel` | owner **or** staff `order:cancel` |
-| `POST` | `/orders/:orderId/lines/:lineId/cancel` | staff `order:cancel` |
-| `POST` | `/orders/:orderId/refunds` | staff `order:refund` — `Idempotency-Key` required; `201` fresh, `200` replay |
-| `GET` | `/orders/:orderId/refunds` | owner **or** staff `order:read` |
+| Method | Route                                       | Auth                                                                         |
+|--------|---------------------------------------------|------------------------------------------------------------------------------|
+| `GET`  | `/orders`                                   | bearer — own orders, paginated, newest-first                                 |
+| `GET`  | `/orders/:orderId`                          | owner **or** staff `order:read`                                              |
+| `POST` | `/orders/:orderId/payments/capture`         | owner **or** staff `order:capture` — `Idempotency-Key` required              |
+| `POST` | `/orders/:orderId/fulfillments`             | `order:fulfill` — `201`                                                      |
+| `GET`  | `/orders/:orderId/fulfillments`             | owner **or** staff `order:read`                                              |
+| `POST` | `/orders/:orderId/fulfillments/:id/ship`    | `order:fulfill` — captures payment; `Idempotency-Key` required               |
+| `POST` | `/orders/:orderId/fulfillments/:id/deliver` | `order:fulfill`                                                              |
+| `POST` | `/orders/:orderId/cancel`                   | owner **or** staff `order:cancel`                                            |
+| `POST` | `/orders/:orderId/lines/:lineId/cancel`     | staff `order:cancel`                                                         |
+| `POST` | `/orders/:orderId/refunds`                  | staff `order:refund` — `Idempotency-Key` required; `201` fresh, `200` replay |
+| `GET`  | `/orders/:orderId/refunds`                  | owner **or** staff `order:read`                                              |
 
 **Two authorization shapes coexist.** Owner-or-staff routes carry **no
 `@RequiresPermission`** — that would block the owning customer, who holds no permissions;
@@ -1072,28 +1081,28 @@ directly. A permission code is a *staff override over an owner-check*, never a c
 
 ### Returns (RMA)
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `POST` | `/orders/:orderId/returns` | owner **or** staff `order:return-authorize` — `201` |
-| `GET` | `/orders/:orderId/returns` | owner **or** staff `order:read` |
-| `GET` | `/returns/:rmaId` | owner **or** staff `order:read` |
-| `POST` | `/returns/:rmaId/authorize` | `order:return-authorize` |
-| `POST` | `/returns/:rmaId/reject` | `order:return-authorize` — `{ reason }` |
-| `POST` | `/returns/:rmaId/receive` | `inventory:receive-return` |
-| `POST` | `/returns/:rmaId/inspect` | `inventory:receive-return` — per-line disposition; `restock` re-enters stock |
-| `POST` | `/returns/:rmaId/close` | `order:return-authorize` |
+| Method | Route                       | Auth                                                                         |
+|--------|-----------------------------|------------------------------------------------------------------------------|
+| `POST` | `/orders/:orderId/returns`  | owner **or** staff `order:return-authorize` — `201`                          |
+| `GET`  | `/orders/:orderId/returns`  | owner **or** staff `order:read`                                              |
+| `GET`  | `/returns/:rmaId`           | owner **or** staff `order:read`                                              |
+| `POST` | `/returns/:rmaId/authorize` | `order:return-authorize`                                                     |
+| `POST` | `/returns/:rmaId/reject`    | `order:return-authorize` — `{ reason }`                                      |
+| `POST` | `/returns/:rmaId/receive`   | `inventory:receive-return`                                                   |
+| `POST` | `/returns/:rmaId/inspect`   | `inventory:receive-return` — per-line disposition; `restock` re-enters stock |
+| `POST` | `/returns/:rmaId/close`     | `order:return-authorize`                                                     |
 
 ### Notifications (staff-only admin/ops)
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `GET` | `/notifications/templates` | `notifications:write` — every version, `?eventType`, `?channel`, `?locale` |
-| `POST` | `/notifications/templates` | `notifications:write` — author/edit a version, `201` |
-| `PATCH` | `/notifications/templates/:id/active` | `notifications:write` — `{ active }`, the rollback lever |
-| `GET` | `/notifications/deliveries` | `notifications:read` — `?customerId`, `?eventReferenceType`, `?eventReferenceId`, `?status`, `?page`, `?pageSize` |
-| `GET` | `/notifications/deliveries/:id` | `notifications:read` — one row, incl. `renderedBody` |
-| `POST` | `/notifications/deliveries/:id/retry` | `notifications:write` — forces past the backoff gate |
-| `POST` | `/notifications/marketing/send` | `notifications:write` — `{ customerId, customerEmail, eventType?, campaignId?, context? }`; the consent gate decides send vs `skipped-no-consent` |
+| Method  | Route                                 | Auth                                                                                                                                              |
+|---------|---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `GET`   | `/notifications/templates`            | `notifications:write` — every version, `?eventType`, `?channel`, `?locale`                                                                        |
+| `POST`  | `/notifications/templates`            | `notifications:write` — author/edit a version, `201`                                                                                              |
+| `PATCH` | `/notifications/templates/:id/active` | `notifications:write` — `{ active }`, the rollback lever                                                                                          |
+| `GET`   | `/notifications/deliveries`           | `notifications:read` — `?customerId`, `?eventReferenceType`, `?eventReferenceId`, `?status`, `?page`, `?pageSize`                                 |
+| `GET`   | `/notifications/deliveries/:id`       | `notifications:read` — one row, incl. `renderedBody`                                                                                              |
+| `POST`  | `/notifications/deliveries/:id/retry` | `notifications:write` — forces past the backoff gate                                                                                              |
+| `POST`  | `/notifications/marketing/send`       | `notifications:write` — `{ customerId, customerEmail, eventType?, campaignId?, context? }`; the consent gate decides send vs `skipped-no-consent` |
 
 The gateway resolves the `marketing.email.promo` default and **mints a fresh `campaignId`
 per request**, so repeated sends are distinct rows. `customerEmail` is a documented operator
@@ -1101,11 +1110,11 @@ input, not a cross-module lookup.
 
 ### Audit and event store (staff-only)
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `GET` | `/audit/events` | `audit:read` — `?eventType`, `?aggregateType`, `?aggregateId`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize` |
-| `GET` | `/audit/entries` | `audit:read` — `?actorId`, `?entityType`, `?entityId`, `?action`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize` |
-| `GET` | `/audit/trace/:correlationId` | `audit:read` — both logs for one request, each oldest-first |
+| Method | Route                         | Auth                                                                                                                     |
+|--------|-------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `GET`  | `/audit/events`               | `audit:read` — `?eventType`, `?aggregateType`, `?aggregateId`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize`    |
+| `GET`  | `/audit/entries`              | `audit:read` — `?actorId`, `?entityType`, `?entityId`, `?action`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize` |
+| `GET`  | `/audit/trace/:correlationId` | `audit:read` — both logs for one request, each oldest-first                                                              |
 
 Three questions: *what did the system do* (`domain_event`), *what did a person do*
 (`audit_log_entry`), *what did this one request cause* (both, joined by correlation id). Every
@@ -1138,16 +1147,16 @@ extracted under their own type and their own id. Reassembling one order's whole 
 
 ### Admin
 
-| Method | Route | Auth |
-| --- | --- | --- |
-| `GET` | `/iam/roles` | `iam:role-edit` |
-| `POST` | `/iam/roles` | `iam:role-edit` |
-| `PATCH` | `/iam/roles/:id` | `iam:role-edit` |
-| `POST` | `/iam/staff` | `iam:staff-create` — create a staff user with its roles |
-| `POST` | `/iam/staff/:id/roles` | `iam:assign` |
-| `DELETE` | `/iam/staff/:id/roles/:roleName` | `iam:assign` |
-| `GET` | `/admin/customers/:id/consent` | `customer:read-consent` |
-| `POST` | `/admin/customers/:id/erase` | `customer:erase` — `{ confirmEmail }`; `400` on mismatch; idempotent |
+| Method   | Route                            | Auth                                                                 |
+|----------|----------------------------------|----------------------------------------------------------------------|
+| `GET`    | `/iam/roles`                     | `iam:role-edit`                                                      |
+| `POST`   | `/iam/roles`                     | `iam:role-edit`                                                      |
+| `PATCH`  | `/iam/roles/:id`                 | `iam:role-edit`                                                      |
+| `POST`   | `/iam/staff`                     | `iam:staff-create` — create a staff user with its roles              |
+| `POST`   | `/iam/staff/:id/roles`           | `iam:assign`                                                         |
+| `DELETE` | `/iam/staff/:id/roles/:roleName` | `iam:assign`                                                         |
+| `GET`    | `/admin/customers/:id/consent`   | `customer:read-consent`                                              |
+| `POST`   | `/admin/customers/:id/erase`     | `customer:erase` — `{ confirmEmail }`; `400` on mismatch; idempotent |
 
 ### Error contract
 
@@ -1157,8 +1166,20 @@ upstream **typed `code`** and any object-valued **`details`** verbatim, so a cli
 on a stable code rather than a message:
 
 ```json
-{ "statusCode": 409, "code": "INVENTORY_OUT_OF_STOCK", "details": { "available": 0 } }
-{ "statusCode": 409, "code": "VERSION_MISMATCH",       "details": { "currentVersion": 7 } }
+{
+  "statusCode": 409,
+  "code": "INVENTORY_OUT_OF_STOCK",
+  "details": {
+    "available": 0
+  }
+}
+{
+  "statusCode": 409,
+  "code": "VERSION_MISMATCH",
+  "details": {
+    "currentVersion": 7
+  }
+}
 ```
 
 ---
@@ -1213,40 +1234,40 @@ Roles live in `role`, bound to codes through `role_permissions`; staff acquire r
 [`libs/contracts/auth/permission.enum.ts`](libs/contracts/auth/permission.enum.ts); the four
 seeded bundles live in `scripts/test-db-seed.ts`.
 
-| Role | Permission codes |
-| --- | --- |
-| `admin` | every code |
-| `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish`, `pricing:write` |
+| Role              | Permission codes                                                                                                        |
+|-------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `admin`           | every code                                                                                                              |
+| `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish`, `pricing:write`                                                     |
 | `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer`, `inventory:receive-return`, `order:fulfill`, `order:cancel` |
-| `order-support` | `order:read`, `order:capture`, `order:fulfill`, `order:cancel`, `order:refund`, `order:return-authorize` |
+| `order-support`   | `order:read`, `order:capture`, `order:fulfill`, `order:cancel`, `order:refund`, `order:return-authorize`                |
 
 <details>
 <summary>Every seeded code and the roles it appears in</summary>
 
-| Code | Roles |
-| --- | --- |
-| `catalog:read` | `admin`, `catalog-manager` |
-| `catalog:write` | `admin`, `catalog-manager` |
-| `catalog:publish` | `admin`, `catalog-manager` |
-| `pricing:write` | `admin`, `catalog-manager` |
-| `inventory:read` | `admin`, `warehouse-staff` |
-| `inventory:adjust` | `admin`, `warehouse-staff` |
-| `inventory:transfer` | `admin`, `warehouse-staff` |
-| `inventory:receive-return` | `admin`, `warehouse-staff` |
-| `order:read` | `admin`, `order-support` |
-| `order:capture` | `admin`, `order-support` |
-| `order:fulfill` | `admin`, `warehouse-staff`, `order-support` |
-| `order:cancel` | `admin`, `warehouse-staff`, `order-support` |
-| `order:refund` | `admin`, `order-support` |
-| `order:return-authorize` | `admin`, `order-support` |
-| `notifications:read` | `admin` |
-| `notifications:write` | `admin` |
-| `iam:staff-create` | `admin` |
-| `iam:assign` | `admin` |
-| `iam:role-edit` | `admin` |
-| `audit:read` | `admin` |
-| `customer:read-consent` | `admin` |
-| `customer:erase` | `admin` |
+| Code                       | Roles                                       |
+|----------------------------|---------------------------------------------|
+| `catalog:read`             | `admin`, `catalog-manager`                  |
+| `catalog:write`            | `admin`, `catalog-manager`                  |
+| `catalog:publish`          | `admin`, `catalog-manager`                  |
+| `pricing:write`            | `admin`, `catalog-manager`                  |
+| `inventory:read`           | `admin`, `warehouse-staff`                  |
+| `inventory:adjust`         | `admin`, `warehouse-staff`                  |
+| `inventory:transfer`       | `admin`, `warehouse-staff`                  |
+| `inventory:receive-return` | `admin`, `warehouse-staff`                  |
+| `order:read`               | `admin`, `order-support`                    |
+| `order:capture`            | `admin`, `order-support`                    |
+| `order:fulfill`            | `admin`, `warehouse-staff`, `order-support` |
+| `order:cancel`             | `admin`, `warehouse-staff`, `order-support` |
+| `order:refund`             | `admin`, `order-support`                    |
+| `order:return-authorize`   | `admin`, `order-support`                    |
+| `notifications:read`       | `admin`                                     |
+| `notifications:write`      | `admin`                                     |
+| `iam:staff-create`         | `admin`                                     |
+| `iam:assign`               | `admin`                                     |
+| `iam:role-edit`            | `admin`                                     |
+| `audit:read`               | `admin`                                     |
+| `customer:read-consent`    | `admin`                                     |
+| `customer:erase`           | `admin`                                     |
 
 </details>
 
@@ -1259,7 +1280,11 @@ Guard a controller method on a precise code:
 ```ts
 @Get('roles')
 @RequiresPermission(PermissionCodeEnum.IAM_ROLE_EDIT)
-public list(): Promise<RoleResponseDto[]> { … }
+public
+list()
+:
+Promise < RoleResponseDto[] > { …
+}
 ```
 
 Passwords use **argon2id** (OWASP 2024 defaults). Staff actions are audited through
@@ -1279,51 +1304,51 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 
 ### Required
 
-| Variable | Notes |
-| --- | --- |
-| `NODE_ENV` | `development` \| `production` \| `test` |
-| `API_GATEWAY_PORT` | gateway HTTP port |
-| `DATABASE_URL` | `mysql://…/retail_db` — the shared operational schema |
-| `EVENTSTORE_DATABASE_URL` | `mysql://…/ris_eventstore` — the isolated event-store schema. Required in **every** service's env (one shared Joi schema), but only the event store opens it. |
-| `RABBITMQ_URL` | `amqp://…` |
-| `REDIS_URL` | `redis://…` |
-| `JWT_ACCESS_SECRET` | ≥ 32 chars |
-| `JWT_REFRESH_SECRET` | ≥ 32 chars; **must differ** from the access secret so it can be rotated independently |
-| `OTEL_SERVICE_NAME` | distinct per service — Jaeger's "Service" filter |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | e.g. `http://otel-collector:4318/v1/traces` |
+| Variable                      | Notes                                                                                                                                                         |
+|-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NODE_ENV`                    | `development` \| `production` \| `test`                                                                                                                       |
+| `API_GATEWAY_PORT`            | gateway HTTP port                                                                                                                                             |
+| `DATABASE_URL`                | `mysql://…/retail_db` — the shared operational schema                                                                                                         |
+| `EVENTSTORE_DATABASE_URL`     | `mysql://…/ris_eventstore` — the isolated event-store schema. Required in **every** service's env (one shared Joi schema), but only the event store opens it. |
+| `RABBITMQ_URL`                | `amqp://…`                                                                                                                                                    |
+| `REDIS_URL`                   | `redis://…`                                                                                                                                                   |
+| `JWT_ACCESS_SECRET`           | ≥ 32 chars                                                                                                                                                    |
+| `JWT_REFRESH_SECRET`          | ≥ 32 chars; **must differ** from the access secret so it can be rotated independently                                                                         |
+| `OTEL_SERVICE_NAME`           | distinct per service — Jaeger's "Service" filter                                                                                                              |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | e.g. `http://otel-collector:4318/v1/traces`                                                                                                                   |
 
 ### Defaulted
 
-| Variable | Default | Role |
-| --- | --- | --- |
-| `API_GATEWAY_PREFIX` | — | global route prefix (`api` in compose) |
-| `API_GATEWAY_USE_API_REFERENCE` | `NODE_ENV !== 'production'` | serve `/api/reference` |
-| `HEALTH_PROBE_TIMEOUT_MS` | `2000` | bounds **one** liveness probe, not the fan-out — the five run concurrently ([§6](#6-http-api)) |
-| `DATABASE_LOGGING` | `NODE_ENV !== 'production'` | TypeORM query log |
-| `DEFAULT_CURRENCY` | `USD` | ISO-4217 currency the catalog publish price gate resolves against |
-| `LOG_LEVEL` | `debug` dev / `info` prod | `trace` … `fatal` |
-| `CACHE_TTL_MS_DEFAULT` | `60000` | global default for an unscoped `set()` |
-| `CACHE_TTL_MS_PRODUCT_STOCK` | `60000` | TTL for a cached availability read (the name predates the running-totals rewrite) |
-| `RESERVATION_TTL_MINUTES` | `15` | hold lifetime — `expiresAt = now + this` on every Reserve |
-| `RESERVATION_SWEEP_BATCH_SIZE` | `200` | rows one expired-reservation sweep scans and expires; a ceiling a caller cannot raise |
-| `RESERVATION_SWEEP_TRANSACTION_SIZE` | `25` | rows one sweep transaction expires — bounds how long it holds row locks |
-| `RESERVATION_SWEEP_INTERVAL_SECONDS` | `60` | seconds between sweep invocations; decides how promptly an already-expired hold is reclaimed |
-| `RETURN_WINDOW_DAYS` | `30` | a `shipped` order is returnable only within this window; a `delivered` one always is |
-| `OCC_RETRY_ATTEMPTS` | `5` | bounded retry budget for version-checked writes |
-| `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows |
-| `CAPTURE_CLAIM_STALE_MINUTES` | `15` | how long a payment may sit `capturing` before the report names it; the report resolves nothing ([§13](#13-background-jobs)) |
-| `OPS_NOTIFICATIONS_EMAIL` | `ops@example.com` | mailbox for system-only notifications with no customer recipient |
-| `MAX_DELIVERY_ATTEMPTS` | `3` | attempts before a delivery is abandoned and `notifications.delivery.failed` is emitted |
-| `RETENTION_DELIVERY_DAYS` | `90` | delivery-row retention horizon; the nightly purge hard-deletes rows older than this ([§13](#13-background-jobs)) |
-| `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300` | staleness safety net; the consent cache is kept fresh by events, not TTL |
-| `NOTIFIER_TEST_FLAKY` | `false` | **test-only** — swaps in a flaky notifier that fails the first dispatch of any `__FAIL_ONCE__`-marked body. Never set it outside the retry e2e suite. |
-| `AUTH_ARGON2_MEMORY_COST` | `19456` KiB | OWASP 2024 minimum for argon2id |
-| `AUTH_ARGON2_TIME_COST` | `2` | iterations |
-| `AUTH_ARGON2_PARALLELISM` | `1` | threads |
-| `JWT_ACCESS_EXPIRES_IN` | `15m` | `ms`-style string |
-| `JWT_REFRESH_EXPIRES_IN` | `7d` | |
-| `OTEL_RESOURCE_ATTRIBUTES` | — | merged into the OTel `Resource` |
-| `OTEL_SDK_DISABLED` | `false` | short-circuit the SDK at boot |
+| Variable                                  | Default                     | Role                                                                                                                                                  |
+|-------------------------------------------|-----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `API_GATEWAY_PREFIX`                      | —                           | global route prefix (`api` in compose)                                                                                                                |
+| `API_GATEWAY_USE_API_REFERENCE`           | `NODE_ENV !== 'production'` | serve `/api/reference`                                                                                                                                |
+| `HEALTH_PROBE_TIMEOUT_MS`                 | `2000`                      | bounds **one** liveness probe, not the fan-out — the five run concurrently ([§6](#6-http-api))                                                        |
+| `DATABASE_LOGGING`                        | `NODE_ENV !== 'production'` | TypeORM query log                                                                                                                                     |
+| `DEFAULT_CURRENCY`                        | `USD`                       | ISO-4217 currency the catalog publish price gate resolves against                                                                                     |
+| `LOG_LEVEL`                               | `debug` dev / `info` prod   | `trace` … `fatal`                                                                                                                                     |
+| `CACHE_TTL_MS_DEFAULT`                    | `60000`                     | global default for an unscoped `set()`                                                                                                                |
+| `CACHE_TTL_MS_PRODUCT_STOCK`              | `60000`                     | TTL for a cached availability read (the name predates the running-totals rewrite)                                                                     |
+| `RESERVATION_TTL_MINUTES`                 | `15`                        | hold lifetime — `expiresAt = now + this` on every Reserve                                                                                             |
+| `RESERVATION_SWEEP_BATCH_SIZE`            | `200`                       | rows one expired-reservation sweep scans and expires; a ceiling a caller cannot raise                                                                 |
+| `RESERVATION_SWEEP_TRANSACTION_SIZE`      | `25`                        | rows one sweep transaction expires — bounds how long it holds row locks                                                                               |
+| `RESERVATION_SWEEP_INTERVAL_SECONDS`      | `60`                        | seconds between sweep invocations; decides how promptly an already-expired hold is reclaimed                                                          |
+| `RETURN_WINDOW_DAYS`                      | `30`                        | a `shipped` order is returnable only within this window; a `delivered` one always is                                                                  |
+| `OCC_RETRY_ATTEMPTS`                      | `5`                         | bounded retry budget for version-checked writes                                                                                                       |
+| `IDEMPOTENCY_KEY_TTL_HOURS`               | `24`                        | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows                                                               |
+| `CAPTURE_CLAIM_STALE_MINUTES`             | `15`                        | how long a payment may sit `capturing` before the report names it; the report resolves nothing ([§13](#13-background-jobs))                           |
+| `OPS_NOTIFICATIONS_EMAIL`                 | `ops@example.com`           | mailbox for system-only notifications with no customer recipient                                                                                      |
+| `MAX_DELIVERY_ATTEMPTS`                   | `3`                         | attempts before a delivery is abandoned and `notifications.delivery.failed` is emitted                                                                |
+| `RETENTION_DELIVERY_DAYS`                 | `90`                        | delivery-row retention horizon; the nightly purge hard-deletes rows older than this ([§13](#13-background-jobs))                                      |
+| `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300`                       | staleness safety net; the consent cache is kept fresh by events, not TTL                                                                              |
+| `NOTIFIER_TEST_FLAKY`                     | `false`                     | **test-only** — swaps in a flaky notifier that fails the first dispatch of any `__FAIL_ONCE__`-marked body. Never set it outside the retry e2e suite. |
+| `AUTH_ARGON2_MEMORY_COST`                 | `19456` KiB                 | OWASP 2024 minimum for argon2id                                                                                                                       |
+| `AUTH_ARGON2_TIME_COST`                   | `2`                         | iterations                                                                                                                                            |
+| `AUTH_ARGON2_PARALLELISM`                 | `1`                         | threads                                                                                                                                               |
+| `JWT_ACCESS_EXPIRES_IN`                   | `15m`                       | `ms`-style string                                                                                                                                     |
+| `JWT_REFRESH_EXPIRES_IN`                  | `7d`                        |                                                                                                                                                       |
+| `OTEL_RESOURCE_ATTRIBUTES`                | —                           | merged into the OTel `Resource`                                                                                                                       |
+| `OTEL_SDK_DISABLED`                       | `false`                     | short-circuit the SDK at boot                                                                                                                         |
 
 ---
 
@@ -1335,28 +1360,28 @@ Six service names are valid everywhere a `<service>` appears: `api-gateway`,
 `inventory-microservice`, `retail-microservice`, `notification-microservice`,
 `catalog-microservice`, `event-store-microservice`.
 
-| Script | Description |
-| --- | --- |
-| `yarn start:dev` | Start all six services concurrently, watch reload (`scripts/bash/start-dev.sh`). |
-| `yarn start:dev:<service>` | Start one service with watch reload. |
-| `yarn start:prod:<service>` | Run a built service from `dist/`. |
-| `yarn build` | `nest build --all`. |
-| `yarn build:<service>` | Build one app. |
-| `yarn lint` | Full ESLint pass incl. `boundaries/*`, `--max-warnings 0` (CI gate). |
-| `yarn lint:fix` | Auto-fix what can be auto-fixed. |
-| `yarn format` / `yarn format:check` | Prettier write / check-only (CI gate). |
+| Script                              | Description                                                                      |
+|-------------------------------------|----------------------------------------------------------------------------------|
+| `yarn start:dev`                    | Start all six services concurrently, watch reload (`scripts/bash/start-dev.sh`). |
+| `yarn start:dev:<service>`          | Start one service with watch reload.                                             |
+| `yarn start:prod:<service>`         | Run a built service from `dist/`.                                                |
+| `yarn build`                        | `nest build --all`.                                                              |
+| `yarn build:<service>`              | Build one app.                                                                   |
+| `yarn lint`                         | Full ESLint pass incl. `boundaries/*`, `--max-warnings 0` (CI gate).             |
+| `yarn lint:fix`                     | Auto-fix what can be auto-fixed.                                                 |
+| `yarn format` / `yarn format:check` | Prettier write / check-only (CI gate).                                           |
 
 ### Migrations
 
 Two pipelines, two `migrations` ledgers.
 
-| Script | Target |
-| --- | --- |
-| `yarn migration:create <Name>` | scaffold under `migrations/` |
-| `yarn migration:run` / `:revert` / `:show` | `retail_db` |
-| `yarn migration:create:eventstore <Name>` | scaffold under `migrations/eventstore/` |
-| `yarn migration:run:eventstore` / `:revert:eventstore` / `:show:eventstore` | `ris_eventstore` |
-| `yarn typeorm:migration-cli` | the raw TypeORM CLI hook the `retail_db` commands wrap |
+| Script                                                                      | Target                                                 |
+|-----------------------------------------------------------------------------|--------------------------------------------------------|
+| `yarn migration:create <Name>`                                              | scaffold under `migrations/`                           |
+| `yarn migration:run` / `:revert` / `:show`                                  | `retail_db`                                            |
+| `yarn migration:create:eventstore <Name>`                                   | scaffold under `migrations/eventstore/`                |
+| `yarn migration:run:eventstore` / `:revert:eventstore` / `:show:eventstore` | `ris_eventstore`                                       |
+| `yarn typeorm:migration-cli`                                                | the raw TypeORM CLI hook the `retail_db` commands wrap |
 
 `DatabaseModule.forRoot(entities)` pins `mysql2` to UTC (`timezone: 'Z'`) so JS `Date`s
 write and read as UTC wall-clock — matching the MySQL server clock and `UTC_TIMESTAMP()`,
@@ -1365,34 +1390,35 @@ the driver would default to the Node host's local timezone.
 
 ### Testing
 
-| Script | Description |
-| --- | --- |
-| `yarn test:unit` | Jest unit suite (`jest.unit.config.js`). |
-| `yarn test:e2e` | `test:infra:reload`, then the full e2e suite against a clean database. |
-| `yarn test:e2e:run` | e2e only — assumes infra is up. |
-| `yarn test:infra:up` / `:down` | start / tear down MySQL + Redis + RabbitMQ (`down` drops volumes). |
-| `yarn test:infra:reload` | down → up → **both** migration runs → seed. |
-| `yarn test:seed` | deterministic fixtures from `scripts/test-db-seed.ts`. |
+| Script                         | Description                                                            |
+|--------------------------------|------------------------------------------------------------------------|
+| `yarn test:unit`               | Jest unit suite (`jest.unit.config.js`).                               |
+| `yarn test:e2e`                | `test:infra:reload`, then the full e2e suite against a clean database. |
+| `yarn test:e2e:run`            | e2e only — assumes infra is up.                                        |
+| `yarn test:infra:up` / `:down` | start / tear down MySQL + Redis + RabbitMQ (`down` drops volumes).     |
+| `yarn test:infra:reload`       | down → up → **both** migration runs → seed.                            |
+| `yarn test:seed`               | deterministic fixtures from `scripts/test-db-seed.ts`.                 |
 
 **E2E suites drive gateway HTTP and assert through public state** — order/refund reads, the
 public stock read, the uncached movements ledger, the delivery audit reads, and (as the
 "exactly one event" oracle) direct SQL against `ris_eventstore`. Never an event spy.
 
-| Capability | Suites |
-| --- | --- |
-| Reservations + movements | `cart-reserve-release`, `place-order-allocates`, `inventory-movements-audit`, **`concurrent-oversell`** |
-| Reservation TTL sweep | `reservation-sweeper`, `reservation-sweeper-cron`, **`concurrent-sweep-release`** |
+| Capability                  | Suites                                                                                                                                                                         |
+|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Reservations + movements    | `cart-reserve-release`, `place-order-allocates`, `inventory-movements-audit`, **`concurrent-oversell`**                                                                        |
+| Reservation TTL sweep       | `reservation-sweeper`, `reservation-sweeper-cron`, **`concurrent-sweep-release`**                                                                                              |
 | Fulfillment + ship + cancel | `fulfillment-happy-path`, `fulfillment-partial-ship`, `cancel-order-pre-fulfillment`, `cancel-order-blocked-after-ship`, `ship-triggers-capture`, **`concurrent-ship-cancel`** |
-| Returns + refunds | `return-restock-refund`, `return-rejected`, `auto-refund-from-cancel`, `manual-refund` |
-| Notifications | `notifications-place-order`, `notifications-ship-fulfillment`, `notifications-low-stock`, `notifications-template-edit`, `notifications-retry`, `notification` |
-| Event store | `event-store-firehose`, `event-store-audit-log`, `event-store-idempotency` |
-| Audit + event-store reads | `audit-event-query`, `audit-entry-query`, `audit-trace-correlation` |
-| Idempotency + OCC | `idempotency-{place-order,different-body,capture,ship,refund,purge}`, `occ-cart`, `concurrent-place-order`, `inventory-concurrency` |
-| Consent + erasure | `consent-roundtrip`, `notification-consent-gating`, `erase-customer-tombstone`, `erase-customer-confirm-guard` |
+| Returns + refunds           | `return-restock-refund`, `return-rejected`, `auto-refund-from-cancel`, `manual-refund`                                                                                         |
+| Notifications               | `notifications-place-order`, `notifications-ship-fulfillment`, `notifications-low-stock`, `notifications-template-edit`, `notifications-retry`, `notification`                 |
+| Event store                 | `event-store-firehose`, `event-store-audit-log`, `event-store-idempotency`                                                                                                     |
+| Audit + event-store reads   | `audit-event-query`, `audit-entry-query`, `audit-trace-correlation`                                                                                                            |
+| Idempotency + OCC           | `idempotency-{place-order,different-body,capture,ship,refund,purge}`, `occ-cart`, `concurrent-place-order`, `inventory-concurrency`                                            |
+| Consent + erasure           | `consent-roundtrip`, `notification-consent-gating`, `erase-customer-tombstone`, `erase-customer-confirm-guard`                                                                 |
 
 The three concurrency proofs (`concurrent-oversell`, `concurrent-ship-cancel`,
 `concurrent-sweep-release`) are **winner-agnostic** and must stay green across five consecutive
-runs. See [the concurrent-oversell walkthrough](docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md)
+runs.
+See [the concurrent-oversell walkthrough](docs/implementation/07-inventory-reservation-and-stock-movement/11-concurrent-oversell-e2e.md)
 and [the sweep-vs-release walkthrough](docs/implementation/14-reservation-sweeper-and-audit-queries/08-sweep-vs-release-race-and-e2e-coverage.md).
 
 The ingest suites (`event-store-*`, `idempotency-place-order`, `idempotency-refund`) assert by
@@ -1419,32 +1445,32 @@ seed runs, so there is always a location to read from and write to.
 <details>
 <summary>Catalog: two products, four variants</summary>
 
-| Variant id | SKU | Product (slug) | Status |
-| --- | --- | --- | --- |
-| 1 | `AURORA-WARM` | `aurora-desk-lamp` | active |
-| 2 | `AURORA-COOL` | `aurora-desk-lamp` | active |
-| 3 | `NIMBUS-BLACK` | `nimbus-office-chair` | active |
-| 4 | `NIMBUS-GREY` | `nimbus-office-chair` | active |
+| Variant id | SKU            | Product (slug)        | Status |
+|------------|----------------|-----------------------|--------|
+| 1          | `AURORA-WARM`  | `aurora-desk-lamp`    | active |
+| 2          | `AURORA-COOL`  | `aurora-desk-lamp`    | active |
+| 3          | `NIMBUS-BLACK` | `nimbus-office-chair` | active |
+| 4          | `NIMBUS-GREY`  | `nimbus-office-chair` | active |
 
 </details>
 
 <details>
 <summary>Categories, memberships, media</summary>
 
-| id | Name | Slug | Parent | `path` | Sort |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Electronics | `electronics` | — | `/electronics` | 0 |
-| 2 | Phones | `phones` | 1 | `/electronics/phones` | 0 |
-| 3 | Apparel | `apparel` | — | `/apparel` | 1 |
+| id | Name        | Slug          | Parent | `path`                | Sort |
+|----|-------------|---------------|--------|-----------------------|------|
+| 1  | Electronics | `electronics` | —      | `/electronics`        | 0    |
+| 2  | Phones      | `phones`      | 1      | `/electronics/phones` | 0    |
+| 3  | Apparel     | `apparel`     | —      | `/apparel`            | 1    |
 
 Product 1 (`aurora-desk-lamp`) is a member of both `electronics` and `phones`, so
 `GET /api/catalog/categories/electronics/products?includeDescendants=true` returns it —
 directly and via the descendant.
 
-| Media id | Owner | Type | `sort_order` |
-| --- | --- | --- | --- |
-| 1 | product 1 | image | 0 |
-| 2 | product 1 | video | 1 |
+| Media id | Owner     | Type  | `sort_order` |
+|----------|-----------|-------|--------------|
+| 1        | product 1 | image | 0            |
+| 2        | product 1 | video | 1            |
 
 </details>
 
@@ -1483,19 +1509,19 @@ customer an inspectable state.
 template. Without a matching template the pipeline warn-logs and persists no delivery, so
 this seed is what makes a real `notification_delivery` row appear end to end.
 
-| `event_type` | Subject (Handlebars) |
-| --- | --- |
-| `retail.order.placed` | `Order #{{orderNumber}} confirmed` |
-| `retail.order.cancelled` | `Order #{{orderId}} cancelled` |
-| `retail.fulfillment.shipped` | `Order #{{orderId}} has shipped` |
-| `retail.fulfillment.delivered` | `Your order arrived` |
-| `retail.return.requested` | `Return {{rmaNumber}} received` |
-| `retail.return.authorized` | `Return {{rmaNumber}} authorized` |
-| `retail.return.received` | `Return {{rmaNumber}} received at warehouse` |
-| `retail.return.inspected` | `Return {{rmaNumber}} inspected` |
-| `retail.refund.issued` | `Refund issued` |
-| `inventory.stock.low` | `Low stock alert` |
-| `marketing.email.promo` | `A special offer just for you, {{customerName}}` |
+| `event_type`                   | Subject (Handlebars)                             |
+|--------------------------------|--------------------------------------------------|
+| `retail.order.placed`          | `Order #{{orderNumber}} confirmed`               |
+| `retail.order.cancelled`       | `Order #{{orderId}} cancelled`                   |
+| `retail.fulfillment.shipped`   | `Order #{{orderId}} has shipped`                 |
+| `retail.fulfillment.delivered` | `Your order arrived`                             |
+| `retail.return.requested`      | `Return {{rmaNumber}} received`                  |
+| `retail.return.authorized`     | `Return {{rmaNumber}} authorized`                |
+| `retail.return.received`       | `Return {{rmaNumber}} received at warehouse`     |
+| `retail.return.inspected`      | `Return {{rmaNumber}} inspected`                 |
+| `retail.refund.issued`         | `Refund issued`                                  |
+| `inventory.stock.low`          | `Low stock alert`                                |
+| `marketing.email.promo`        | `A special offer just for you, {{customerName}}` |
 
 Each `{{placeholder}}` on the ten transactional templates matches an actual field on that
 event's contract (the shipment and cancellation events carry `orderId` but no `orderNumber`,
@@ -1513,10 +1539,10 @@ never touches these baseline rows.
 
 All services emit JSON logs via [Pino](https://github.com/pinojs/pino) through `nestjs-pino`.
 
-| Environment | Format |
-| --- | --- |
+| Environment           | Format                               |
+|-----------------------|--------------------------------------|
 | `NODE_ENV=production` | JSON, one object per line, to stdout |
-| anything else | human-readable via `pino-pretty` |
+| anything else         | human-readable via `pino-pretty`     |
 
 Every line carries at least `level`, `time`, `app`, `context`, `correlationId`, `msg` — plus
 `traceId` / `spanId` when emitted inside an active OTel span
@@ -1545,13 +1571,74 @@ A single `POST /api/inventory/variants/1/stock/adjust` whose delta crosses the l
 threshold produces one correlated trail across three processes:
 
 ```json lines
-{"level":30,"app":"api-gateway","correlationId":"a1b2…","req":{"method":"POST","url":"/api/inventory/variants/1/stock/adjust"},"msg":"incoming request"}
-{"level":30,"app":"api-gateway","correlationId":"a1b2…","context":"AdjustStockUseCase","pattern":"inventory.stock-level.adjust","msg":"Sending RPC to inventory service"}
-{"level":30,"app":"inventory-microservice","correlationId":"a1b2…","context":"AdjustStockUseCase","variantId":1,"quantityDelta":-8,"reasonCode":"damage","msg":"Received RPC: adjust stock"}
-{"level":30,"app":"inventory-microservice","correlationId":"a1b2…","context":"AdjustStockUseCase","variantId":1,"stockLocationId":"default-warehouse","quantityOnHand":2,"msg":"Stock adjusted"}
-{"level":30,"app":"inventory-microservice","correlationId":"a1b2…","context":"AdjustStockUseCase","pattern":"inventory.stock.low","quantity":2,"threshold":5,"msg":"Emitting low-stock event"}
-{"level":30,"app":"notification-microservice","correlationId":"a1b2…","context":"RenderAndDispatchUseCase","deliveryId":42,"channel":"email","eventReferenceType":"stock-low","msg":"Notification dispatched"}
-{"level":30,"app":"api-gateway","correlationId":"a1b2…","res":{"statusCode":200},"responseTime":50,"msg":"request completed"}
+{
+  "level": 30,
+  "app": "api-gateway",
+  "correlationId": "a1b2…",
+  "req": {
+    "method": "POST",
+    "url": "/api/inventory/variants/1/stock/adjust"
+  },
+  "msg": "incoming request"
+}
+{
+  "level": 30,
+  "app": "api-gateway",
+  "correlationId": "a1b2…",
+  "context": "AdjustStockUseCase",
+  "pattern": "inventory.stock-level.adjust",
+  "msg": "Sending RPC to inventory service"
+}
+{
+  "level": 30,
+  "app": "inventory-microservice",
+  "correlationId": "a1b2…",
+  "context": "AdjustStockUseCase",
+  "variantId": 1,
+  "quantityDelta": -8,
+  "reasonCode": "damage",
+  "msg": "Received RPC: adjust stock"
+}
+{
+  "level": 30,
+  "app": "inventory-microservice",
+  "correlationId": "a1b2…",
+  "context": "AdjustStockUseCase",
+  "variantId": 1,
+  "stockLocationId": "default-warehouse",
+  "quantityOnHand": 2,
+  "msg": "Stock adjusted"
+}
+{
+  "level": 30,
+  "app": "inventory-microservice",
+  "correlationId": "a1b2…",
+  "context": "AdjustStockUseCase",
+  "pattern": "inventory.stock.low",
+  "quantity": 2,
+  "threshold": 5,
+  "msg": "Emitting low-stock event"
+}
+{
+  "level": 30,
+  "app": "notification-microservice",
+  "correlationId": "a1b2…",
+  "context": "RenderAndDispatchUseCase",
+  "deliveryId": 42,
+  "channel": "email",
+  "eventReferenceType": "stock-low",
+  "msg": "Notification dispatched"
+}
+{
+  "level": 30,
+  "app": "api-gateway",
+  "correlationId": "a1b2…",
+  "res": {
+    "statusCode": 200
+  },
+  "responseTime": 50,
+  "msg": "request completed"
+}
 ```
 
 ### Distributed tracing
@@ -1570,11 +1657,11 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml up
 docker compose -f docker-compose.yml -f docker-compose.observability.yml stop jaeger otel-collector
 ```
 
-| Endpoint | Purpose |
-| --- | --- |
+| Endpoint                 | Purpose                                           |
+|--------------------------|---------------------------------------------------|
 | `http://localhost:16686` | Jaeger UI — filter by service, search by trace id |
-| `http://localhost:4317` | OTLP/gRPC ingress |
-| `http://localhost:4318` | OTLP/HTTP ingress (the apps publish here) |
+| `http://localhost:4317`  | OTLP/gRPC ingress                                 |
+| `http://localhost:4318`  | OTLP/HTTP ingress (the apps publish here)         |
 
 The collector config ([`infrastructure/otel-collector-config.yaml`](infrastructure/otel-collector-config.yaml))
 is one pipeline: OTLP receiver → `batch` processor → OTLP exporter to Jaeger, plus a `debug`
@@ -1600,10 +1687,10 @@ ADRs: [001](docs/adr/001-structured-logging-with-pino.md),
 
 Two read paths use Redis today, both **cache-aside**:
 
-| Cached value | Key | Freshness |
-| --- | --- | --- |
-| `VariantStockView` — per-location `StockLevelView` rows + `totalOnHand` / `totalAvailable` | `ris:inventory:stock:v3:<variantId>:<facet>` | post-commit invalidation on every write |
-| `ConsentRecordView` — a customer's channel-consent snapshot | `ris:notifications:consent:v1:<customerId>` | event-driven write-through / evict; TTL is only a safety net |
+| Cached value                                                                               | Key                                          | Freshness                                                    |
+|--------------------------------------------------------------------------------------------|----------------------------------------------|--------------------------------------------------------------|
+| `VariantStockView` — per-location `StockLevelView` rows + `totalOnHand` / `totalAvailable` | `ris:inventory:stock:v3:<variantId>:<facet>` | post-commit invalidation on every write                      |
+| `ConsentRecordView` — a customer's channel-consent snapshot                                | `ris:notifications:consent:v1:<customerId>`  | event-driven write-through / evict; TTL is only a safety net |
 
 ### Read flow (inventory)
 
@@ -1713,13 +1800,13 @@ Nest does **not** wrap. **There, and only there, a rejection is an `unhandledRej
 process on Node ≥15 — so the catch is genuinely load-bearing**, and its spec is the only one that
 asserts on it.
 
-| Job | Registering file | Cadence | What a missed tick costs |
-| --- | --- | --- | --- |
-| Reservation TTL sweep | `apps/inventory-microservice/…/stock/infrastructure/scheduling/reservation-sweep.scheduler.ts` | `RESERVATION_SWEEP_INTERVAL_SECONDS` (default `60`) | stranded holds keep depressing `available` — the system under-sells |
-| Idempotency-key TTL purge | `apps/retail-microservice/…/orders/infrastructure/idempotency/idempotency-purge.scheduler.ts` | fixed `@Cron`, every 10 minutes | `idempotency_key` keeps rows past `IDEMPOTENCY_KEY_TTL_HOURS`; the table grows |
-| Notification delivery retry sweep | `apps/notification-microservice/…/notifications/infrastructure/scheduling/delivery-retry.scheduler.ts` | fixed `@Interval`, 60 s | a `failed` delivery waits one more interval for its next attempt |
-| Stranded capture-claim report | `apps/retail-microservice/…/orders/infrastructure/scheduling/stale-capture-claim.scheduler.ts` | fixed `@Cron`, every 10 minutes | a payment stuck `capturing` (a request that died mid-charge) goes unreported for one more tick. **It REPORTS and resolves nothing** — the gateway cannot be asked whether the charge landed, so releasing the claim risks a second charge and completing it records money that may never have moved (ADR-052) |
-| Notification delivery retention purge | `apps/notification-microservice/…/notifications/infrastructure/scheduling/delivery-retention.scheduler.ts` | fixed `@Cron`, daily at 03:00 | `notification_delivery` keeps rows past `RETENTION_DELIVERY_DAYS` (default 90). A **hard** delete — soft-deleting would hide the dedupe anchor and send the same notification twice |
+| Job                                   | Registering file                                                                                           | Cadence                                             | What a missed tick costs                                                                                                                                                                                                                                                                                      |
+|---------------------------------------|------------------------------------------------------------------------------------------------------------|-----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Reservation TTL sweep                 | `apps/inventory-microservice/…/stock/infrastructure/scheduling/reservation-sweep.scheduler.ts`             | `RESERVATION_SWEEP_INTERVAL_SECONDS` (default `60`) | stranded holds keep depressing `available` — the system under-sells                                                                                                                                                                                                                                           |
+| Idempotency-key TTL purge             | `apps/retail-microservice/…/orders/infrastructure/idempotency/idempotency-purge.scheduler.ts`              | fixed `@Cron`, every 10 minutes                     | `idempotency_key` keeps rows past `IDEMPOTENCY_KEY_TTL_HOURS`; the table grows                                                                                                                                                                                                                                |
+| Notification delivery retry sweep     | `apps/notification-microservice/…/notifications/infrastructure/scheduling/delivery-retry.scheduler.ts`     | fixed `@Interval`, 60 s                             | a `failed` delivery waits one more interval for its next attempt                                                                                                                                                                                                                                              |
+| Stranded capture-claim report         | `apps/retail-microservice/…/orders/infrastructure/scheduling/stale-capture-claim.scheduler.ts`             | fixed `@Cron`, every 10 minutes                     | a payment stuck `capturing` (a request that died mid-charge) goes unreported for one more tick. **It REPORTS and resolves nothing** — the gateway cannot be asked whether the charge landed, so releasing the claim risks a second charge and completing it records money that may never have moved (ADR-052) |
+| Notification delivery retention purge | `apps/notification-microservice/…/notifications/infrastructure/scheduling/delivery-retention.scheduler.ts` | fixed `@Cron`, daily at 03:00                       | `notification_delivery` keeps rows past `RETENTION_DELIVERY_DAYS` (default 90). A **hard** delete — soft-deleting would hide the dedupe anchor and send the same notification twice                                                                                                                           |
 
 Only the reservation sweep's cadence is configurable, which is why it alone registers its timer
 imperatively through `SchedulerRegistry.addInterval` — a `@Cron` / `@Interval` argument is fixed
@@ -1760,23 +1847,23 @@ sketch in [`docs/extensions/`](docs/extensions/) instead
 ([§15](#15-extensions-and-future-expansion)). Where both apply, the row links the sketch and neither
 one restates the other.
 
-| Gap | Seam that exists |
-| --- | --- |
-| Free-text / JSON-path search over an event `payload` or an audit `before` / `after` | the columns are returned by `GET /api/audit/*` but no index can serve a predicate over them, so none is offered ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
-| Keyset (cursor) pagination for deep offsets over `domain_event` | `clampPageWindow` bounds the page, not the offset; `skip((page - 1) * size)` still walks the skipped rows ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)) |
-| Reservation retention / purge of `expired` rows | the sweep flips a hold to `expired` and leaves the row; the `(status, expires_at)` index that finds the sweep's candidates would find a purge's, and `stock_movement` already carries the release trail ([ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md)) |
-| Event retention / purge / event-sourced replay | `ris_eventstore` is a separate, independently truncatable database ([ADR-034](docs/adr/034-isolated-eventstore-database.md)) and `domain_event` stores every `payload` verbatim — but `append` is the only mutating verb on either log's port, so nothing can delete a row |
-| Real payment processor, partial captures, a gateway `fail` outcome | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter`. Card-present is the sharper end of the same gap — [`physical-retail-pos-terminals.md`](docs/extensions/physical-retail/physical-retail-pos-terminals.md) |
-| ESP webhook ingestion (signature verification, provider-payload mapping) | `notification.delivery.record-outcome` RPC, no HTTP route. Sketched from the transport side in [`webhook-subscription-management-ui.md`](docs/extensions/notifications-and-events/webhook-subscription-management-ui.md); [`ab-template-testing.md`](docs/extensions/notifications-and-events/ab-template-testing.md) is blocked on it |
-| Email / webhook notifier transports | `NOTIFIER` port; `LogNotifierAdapter` is the default binding. Three sketches sit behind it unchanged — [`webhook-subscription-management-ui.md`](docs/extensions/notifications-and-events/webhook-subscription-management-ui.md), [`in-app-inbox-feed.md`](docs/extensions/notifications-and-events/in-app-inbox-feed.md), [`push-device-token-registration.md`](docs/extensions/notifications-and-events/push-device-token-registration.md) |
-| Locale resolution | producer events ship `customerLocale: null` — see [`ab-template-testing.md`](docs/extensions/notifications-and-events/ab-template-testing.md) for what the null blocks |
-| Tax rates and jurisdictions | `TaxCategory` is a label only — [`tax-rate-tables.md`](docs/extensions/pricing-and-promotions/tax-rate-tables.md) (the rates) and [`tax-computation-engine.md`](docs/extensions/order-management/tax-computation-engine.md) (the call) |
-| Staff deactivation / password reset | `StaffUser` carries a `status` and the aggregate can suspend; nothing calls it. The same shape of gap `POST /api/iam/staff` closed ([ADR-047](docs/adr/047-staff-user-creation-over-http.md)). Reached from two sides in [`session-device-management.md`](docs/extensions/staff-and-access-control/session-device-management.md) and [`sso-saml-oidc-federation.md`](docs/extensions/staff-and-access-control/sso-saml-oidc-federation.md) |
-| Media upload pipeline | `MediaAsset.uri` is an opaque, already-uploaded reference |
-| Category archive / rename endpoints, cached category tree | reserved `catalogCategory*` cache builders |
-| Catalog / pricing cache-aside | reserved key builders, no `CacheModule` import |
-| Multi-tenancy | `t:<tenantId>` cache-key segment, opt-in — the authorization side is sketched in [`scoped-tenant-aware-roles.md`](docs/extensions/staff-and-access-control/scoped-tenant-aware-roles.md) |
-| Transactional outbox | dual-publish is best-effort; the firehose absorbs redelivery idempotently |
+| Gap                                                                                 | Seam that exists                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|-------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Free-text / JSON-path search over an event `payload` or an audit `before` / `after` | the columns are returned by `GET /api/audit/*` but no index can serve a predicate over them, so none is offered ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md))                                                                                                                                                                                                                                                             |
+| Keyset (cursor) pagination for deep offsets over `domain_event`                     | `clampPageWindow` bounds the page, not the offset; `skip((page - 1) * size)` still walks the skipped rows ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md))                                                                                                                                                                                                                                                                   |
+| Reservation retention / purge of `expired` rows                                     | the sweep flips a hold to `expired` and leaves the row; the `(status, expires_at)` index that finds the sweep's candidates would find a purge's, and `stock_movement` already carries the release trail ([ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md))                                                                                                                                                               |
+| Event retention / purge / event-sourced replay                                      | `ris_eventstore` is a separate, independently truncatable database ([ADR-034](docs/adr/034-isolated-eventstore-database.md)) and `domain_event` stores every `payload` verbatim — but `append` is the only mutating verb on either log's port, so nothing can delete a row                                                                                                                                                                   |
+| Real payment processor, partial captures, a gateway `fail` outcome                  | `PAYMENT_GATEWAY` port + `FakePaymentGatewayAdapter`. Card-present is the sharper end of the same gap — [`physical-retail-pos-terminals.md`](docs/extensions/physical-retail/physical-retail-pos-terminals.md)                                                                                                                                                                                                                               |
+| ESP webhook ingestion (signature verification, provider-payload mapping)            | `notification.delivery.record-outcome` RPC, no HTTP route. Sketched from the transport side in [`webhook-subscription-management-ui.md`](docs/extensions/notifications-and-events/webhook-subscription-management-ui.md); [`ab-template-testing.md`](docs/extensions/notifications-and-events/ab-template-testing.md) is blocked on it                                                                                                       |
+| Email / webhook notifier transports                                                 | `NOTIFIER` port; `LogNotifierAdapter` is the default binding. Three sketches sit behind it unchanged — [`webhook-subscription-management-ui.md`](docs/extensions/notifications-and-events/webhook-subscription-management-ui.md), [`in-app-inbox-feed.md`](docs/extensions/notifications-and-events/in-app-inbox-feed.md), [`push-device-token-registration.md`](docs/extensions/notifications-and-events/push-device-token-registration.md) |
+| Locale resolution                                                                   | producer events ship `customerLocale: null` — see [`ab-template-testing.md`](docs/extensions/notifications-and-events/ab-template-testing.md) for what the null blocks                                                                                                                                                                                                                                                                       |
+| Tax rates and jurisdictions                                                         | `TaxCategory` is a label only — [`tax-rate-tables.md`](docs/extensions/pricing-and-promotions/tax-rate-tables.md) (the rates) and [`tax-computation-engine.md`](docs/extensions/order-management/tax-computation-engine.md) (the call)                                                                                                                                                                                                       |
+| Staff deactivation / password reset                                                 | `StaffUser` carries a `status` and the aggregate can suspend; nothing calls it. The same shape of gap `POST /api/iam/staff` closed ([ADR-047](docs/adr/047-staff-user-creation-over-http.md)). Reached from two sides in [`session-device-management.md`](docs/extensions/staff-and-access-control/session-device-management.md) and [`sso-saml-oidc-federation.md`](docs/extensions/staff-and-access-control/sso-saml-oidc-federation.md)   |
+| Media upload pipeline                                                               | `MediaAsset.uri` is an opaque, already-uploaded reference                                                                                                                                                                                                                                                                                                                                                                                    |
+| Category archive / rename endpoints, cached category tree                           | reserved `catalogCategory*` cache builders                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Catalog / pricing cache-aside                                                       | reserved key builders, no `CacheModule` import                                                                                                                                                                                                                                                                                                                                                                                               |
+| Multi-tenancy                                                                       | `t:<tenantId>` cache-key segment, opt-in — the authorization side is sketched in [`scoped-tenant-aware-roles.md`](docs/extensions/staff-and-access-control/scoped-tenant-aware-roles.md)                                                                                                                                                                                                                                                     |
+| Transactional outbox                                                                | dual-publish is best-effort; the firehose absorbs redelivery idempotently                                                                                                                                                                                                                                                                                                                                                                    |
 
 ---
 
@@ -1801,14 +1888,14 @@ carries the admission question that routes a sentence to one or the other, and
 
 ## 16. Documentation map
 
-| Where | What it holds |
-| --- | --- |
-| [`docs/adr/`](docs/adr/) | The durable rationale — one decision per file, Nygard hybrid (Status, Context, Decision, Alternatives, Consequences). Start at [`index.md`](docs/adr/index.md). Numbering and slug rules are themselves an ADR ([003](docs/adr/003-record-architecture-decisions.md)). |
-| [`docs/implementation/`](docs/implementation/) | Per-capability walkthroughs, numbered by delivery order — the "how and why this specific thing works" notes an ADR is too coarse for. |
-| [`docs/extensions/`](docs/extensions/) | One sketch per capability the system deliberately does not have, grouped into nine clusters — how each would attach if it were ever wanted. See [§15](#15-extensions-and-future-expansion). |
-| [`docs/audits/`](docs/audits/) | Point-in-time review findings. |
-| `eslint.config.mjs` | The authoritative answer to "where does this file belong". |
-| The `*RpcExceptionFilter` of each module | The authoritative error-code → HTTP-status tables. |
+| Where                                          | What it holds                                                                                                                                                                                                                                                          |
+|------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`docs/adr/`](docs/adr/)                       | The durable rationale — one decision per file, Nygard hybrid (Status, Context, Decision, Alternatives, Consequences). Start at [`index.md`](docs/adr/index.md). Numbering and slug rules are themselves an ADR ([003](docs/adr/003-record-architecture-decisions.md)). |
+| [`docs/implementation/`](docs/implementation/) | Per-capability walkthroughs, numbered by delivery order — the "how and why this specific thing works" notes an ADR is too coarse for.                                                                                                                                  |
+| [`docs/extensions/`](docs/extensions/)         | One sketch per capability the system deliberately does not have, grouped into nine clusters — how each would attach if it were ever wanted. See [§15](#15-extensions-and-future-expansion).                                                                            |
+| [`docs/audits/`](docs/audits/)                 | Point-in-time review findings.                                                                                                                                                                                                                                         |
+| `eslint.config.mjs`                            | The authoritative answer to "where does this file belong".                                                                                                                                                                                                             |
+| The `*RpcExceptionFilter` of each module       | The authoritative error-code → HTTP-status tables.                                                                                                                                                                                                                     |
 
 When you make an architectural decision, **write an ADR** — next free 3-digit number,
 allocated at first commit. If a decision is later reversed, write a new ADR that

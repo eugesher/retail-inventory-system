@@ -54,18 +54,18 @@ exactly the property we want for a transport-agnostic contract.
 export const AUDIT_LOG_PUBLISHER = Symbol('AUDIT_LOG_PUBLISHER');
 
 export interface IAuditLogEvent {
-  name: string;                  // 'UserLoggedIn', 'RoleCreated', …
-  actorId: string | null;        // null for pre-auth events
-  actorKind: 'staff' | 'customer' | 'anonymous';
-  targetId: string | null;
-  targetKind: 'staff-user' | 'customer' | 'role' | 'permission' | null;
-  payload: Record<string, unknown>;
-  correlationId: string | null;
-  occurredAt?: Date;             // publisher-set, not caller-set
+    name: string;                  // 'UserLoggedIn', 'RoleCreated', …
+    actorId: string | null;        // null for pre-auth events
+    actorKind: 'staff' | 'customer' | 'anonymous';
+    targetId: string | null;
+    targetKind: 'staff-user' | 'customer' | 'role' | 'permission' | null;
+    payload: Record<string, unknown>;
+    correlationId: string | null;
+    occurredAt?: Date;             // publisher-set, not caller-set
 }
 
 export interface IAuditLogPublisher {
-  publish(event: IAuditLogEvent): Promise<void>;
+    publish(event: IAuditLogEvent): Promise<void>;
 }
 ```
 
@@ -85,12 +85,19 @@ the use case (no fire-and-forget).
 ## 3. No-op semantics
 
 The default adapter is bound inside
-`apps/api-gateway/src/modules/auth/infrastructure/auth.module.ts`:
+`apps/api-gateway/src/modules/auth/auth.module.ts` (the module file sits at the
+module root, not under `infrastructure/`):
 
 ```ts
 NoOpAuditLogPublisher,
-{ provide: AUDIT_LOG_PUBLISHER, useExisting: NoOpAuditLogPublisher },
+    {provide: AUDIT_LOG_PUBLISHER, useExisting: NoOpAuditLogPublisher},
 ```
+
+**Today that binding is gone.** The audit-log delivery work replaced it with the
+real publisher, and the `NoOpAuditLogPublisher` class no longer exists in the
+tree — `auth.module.ts:136` now reads
+`{ provide: AUDIT_LOG_PUBLISHER, useExisting: AuditLogRabbitmqPublisher }`. The rest of
+this section describes the no-op semantics as originally shipped.
 
 …and re-exported so the IAM module (which imports `AuthModule`) sees
 the same singleton. The adapter writes a Pino `debug` line under a
@@ -111,18 +118,18 @@ sites.
 
 ## 4. Event catalogue
 
-| Use case                        | Event name(s) emitted                                |
-| ------------------------------- | ---------------------------------------------------- |
-| `LoginUseCase`                  | `UserLoggedIn`, `LoginFailed`                        |
-| `RefreshTokenUseCase`           | `RefreshTokenRotated`, `RefreshFailed`, `RefreshReuseDetected` |
-| `LogoutUseCase`                 | `LogoutPerformed`                                    |
-| `RegisterStaffUserUseCase`      | `StaffUserRegistered`                                |
-| `RegisterCustomerUseCase`       | `CustomerRegistered`                                 |
-| `LoginCustomerUseCase`          | `CustomerLoggedIn`, `CustomerLoginFailed`            |
-| `CreateRoleUseCase`             | `RoleCreated`                                        |
-| `UpdateRoleUseCase`             | `RolePermissionsReplaced`                            |
-| `AssignStaffRoleUseCase`        | `StaffUserRolesAssigned` (carries the *added* diff)  |
-| `RevokeStaffRoleUseCase`        | `StaffUserRoleRevoked`                               |
+| Use case                   | Event name(s) emitted                                          |
+|----------------------------|----------------------------------------------------------------|
+| `LoginUseCase`             | `UserLoggedIn`, `LoginFailed`                                  |
+| `RefreshTokenUseCase`      | `RefreshTokenRotated`, `RefreshFailed`, `RefreshReuseDetected` |
+| `LogoutUseCase`            | `LogoutPerformed`                                              |
+| `RegisterStaffUserUseCase` | `StaffUserRegistered`                                          |
+| `RegisterCustomerUseCase`  | `CustomerRegistered`                                           |
+| `LoginCustomerUseCase`     | `CustomerLoggedIn`, `CustomerLoginFailed`                      |
+| `CreateRoleUseCase`        | `RoleCreated`                                                  |
+| `UpdateRoleUseCase`        | `RolePermissionsReplaced`                                      |
+| `AssignStaffRoleUseCase`   | `StaffUserRolesAssigned` (carries the *added* diff)            |
+| `RevokeStaffRoleUseCase`   | `StaffUserRoleRevoked`                                         |
 
 The contract is the event *name*. Payload details vary per use case but
 all keep to camelCase keys and stay well under 1 KB (long values belong
@@ -134,17 +141,27 @@ correlationId }` shape (see `*.use-case.spec.ts` files under
 
 ## 5. What the audit-log delivery work will change
 
-| Change                                    | Where                                                                  |
-| ----------------------------------------- | ---------------------------------------------------------------------- |
-| RMQ publisher adapter                     | `apps/api-gateway/src/modules/auth/infrastructure/audit/rmq-audit-log.publisher.ts` (new) |
-| Adapter binding swap                      | `auth.module.ts` — `useExisting: RmqAuditLogPublisher`                 |
-| `audit_log_entry` table + projection      | A new event-store microservice                                         |
-| `GET /audit-log` endpoint                 | A new presentation controller, gated by the existing `audit:read` code |
+| Change                               | Where                                                                                          |
+|--------------------------------------|------------------------------------------------------------------------------------------------|
+| RMQ publisher adapter                | `apps/api-gateway/src/modules/auth/infrastructure/audit/audit-log.rabbitmq.publisher.ts` (new) |
+| Adapter binding swap                 | `auth.module.ts` — `useExisting: AuditLogRabbitmqPublisher`                                    |
+| `audit_log_entry` table + projection | A new event-store microservice                                                                 |
+| `GET /audit-log` endpoint            | A new presentation controller, gated by the existing `audit:read` code                         |
 
 The use cases, the port shape, the no-op adapter file, and the existing
 spec files **do not change** — that work deletes the no-op binding line
 and adds the RMQ binding line. That's the whole point of investing in
 this skeleton up front.
+
+**Status: this landed, and the prediction held.** The event-store work
+([ADR-034](../../adr/034-isolated-eventstore-database.md),
+[ADR-035](../../adr/035-event-store-firehose-topic-exchange.md)) added
+`apps/api-gateway/src/modules/auth/infrastructure/audit/audit-log.rabbitmq.publisher.ts`,
+swapped the binding in `auth.module.ts`, and stood up `audit_log_entry` in the
+isolated `ris_eventstore` database — without touching a single auth/IAM use case.
+The one row of the table that did **not** ship is `GET /audit-log`: the event-store
+service has no `presentation/` layer, so the reads are wired but exposed by no
+endpoint. The `audit:read` code still gates only `/api/auth/admin/ping`.
 
 ## 6. Correlation id seam (a known shortcut)
 
@@ -155,7 +172,7 @@ threading: each command DTO carries an optional
 the use cases pass it straight into the audit event. The relevant
 seam points:
 
-- `libs/observability/correlation-id.decorator.ts` — `@CorrelationId()`
+- `libs/observability/correlation/correlation-id.decorator.ts` — `@CorrelationId()`
   reads `request.headers['x-correlation-id']` (set or generated by
   `CorrelationMiddleware`).
 - Auth controllers under
