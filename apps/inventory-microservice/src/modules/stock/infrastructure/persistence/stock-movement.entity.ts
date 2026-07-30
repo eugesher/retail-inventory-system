@@ -48,6 +48,12 @@ export class StockMovementEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 64, nullable: true })
   public actorId: string | null;
 
+  // The caller-minted identity of the cancellation that produced a `release` row (ADR-057).
+  // Null for every other producer — and that null is what keeps those rows out of
+  // `UC_STOCK_MOVEMENT_DEDUPE`, since the generated key is NULL without it.
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  public operationKey: string | null;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   public occurredAt: Date;
 }

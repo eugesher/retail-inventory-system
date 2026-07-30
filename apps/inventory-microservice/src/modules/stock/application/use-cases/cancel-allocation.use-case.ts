@@ -6,7 +6,12 @@ import {
   StockMovementTypeEnum,
 } from '@retail-inventory-system/contracts';
 
-import { StockMovement, StockReleasedEvent } from '../../domain';
+import {
+  InventoryDomainException,
+  InventoryErrorCodeEnum,
+  StockMovement,
+  StockReleasedEvent,
+} from '../../domain';
 import {
   IStockCachePort,
   IStockEventsPublisherPort,
@@ -22,6 +27,7 @@ import {
   TRANSACTION_PORT,
 } from '../ports';
 import { emitMovementRecorded } from './movement-recorded.emitter';
+import { isDuplicateEntryError } from './mysql-error.util';
 import {
   INormalizedReservationLine,
   levelKey,
@@ -55,8 +61,14 @@ interface ICancelledLine {
 // no in-repo caller.
 //
 // **No reservation rows are touched** — the holds are already `committed` (or never
-// existed); cancelling an order does not resurrect a cart hold. Idempotency is
-// quantity-guarded, not state-tracked: an over-cancel (more than is allocated) is a
+// existed); cancelling an order does not resurrect a cart hold.
+//
+// **Idempotency is keyed on the caller's `operationKey`** (ADR-057), because this operation
+// has no natural key of its own: Cancel Line cancels a QUANTITY, so the same
+// `(order, line, variant, location)` can legitimately be released again later. The quantity
+// check that used to stand alone here refuses only to go below zero — and on a counter
+// several orders share, "still enough to subtract" is not "not yet done", so a redelivery
+// could release a DIFFERENT order's units. An over-cancel is still a
 // 409 `STOCK_RESULT_NEGATIVE`, not a silent no-op. Like allocate, the cancel is
 // all-lines-atomic — every line is computed in memory (where an over-cancel throws)
 // before any write, then every distinct level is persisted once and every movement
@@ -91,24 +103,57 @@ export class CancelAllocationUseCase {
     );
 
     const lines = normalizeReservationLines(payload.lines, 'Cancel allocation');
+    // Backstop for the directly-reachable RMQ path — the retail caller always mints one
+    // (ADR-057). Without it the dedupe key generates NULL and the write silently loses its
+    // only guard, so an absent key is refused rather than accepted as "unkeyed".
+    const operationKey = payload.operationKey?.trim();
+    if (!operationKey) {
+      throw new InventoryDomainException(
+        InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID,
+        'Cancel allocation requires an operationKey — the identity that makes a redelivery recognisable',
+      );
+    }
 
-    const cancelled = await this.stockCache.withInvalidation(
-      () =>
-        runWithStockWriteRetry(
-          {
-            transactionPort: this.transactionPort,
-            logger: this.logger,
-            maxAttempts: this.maxAttempts,
-          },
-          (scope) => this.cancelOnce(scope, orderId, lines, reasonCode, actorId),
-          { correlationId },
-        ),
-      // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
-      // covering every location facet, so the raw per-line items are enough.
-      (rows) =>
-        rows.map((row) => ({ variantId: row.variantId, stockLocationId: row.stockLocationId })),
-      { correlationId },
-    );
+    let cancelled: ICancelledLine[];
+    try {
+      cancelled = await this.stockCache.withInvalidation(
+        () =>
+          runWithStockWriteRetry(
+            {
+              transactionPort: this.transactionPort,
+              logger: this.logger,
+              maxAttempts: this.maxAttempts,
+            },
+            (scope) => this.cancelOnce(scope, orderId, lines, reasonCode, actorId, operationKey),
+            { correlationId },
+          ),
+        // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
+        // covering every location facet, so the raw per-line items are enough.
+        (rows) =>
+          rows.map((row) => ({ variantId: row.variantId, stockLocationId: row.stockLocationId })),
+        { correlationId },
+      );
+    } catch (error) {
+      // THE GUARD, and the reason this operation needed a key at all (ADR-057). A release
+      // whose `operation_key` is already in the ledger is a redelivery of work that has
+      // ALREADY been applied — `UC_STOCK_MOVEMENT_DEDUPE` refuses the INSERT and the whole
+      // transaction rolls back, so this attempt released nothing.
+      //
+      // Before the key existed, `releaseAllocated`'s quantity check was the only thing here,
+      // and it cannot tell "already done" from "still enough to subtract" on a counter
+      // several orders share — so a redelivered cancel could release a DIFFERENT order's
+      // units, understating `quantity_allocated` and overselling. Never rethrow: an
+      // exception out of an `@MessagePattern` is blind-redelivered by the broker in a hot
+      // loop.
+      if (isDuplicateEntryError(error)) {
+        this.logger.info(
+          { correlationId, orderId, operationKey },
+          'Cancel allocation replay — this cancellation is already in the ledger, nothing released',
+        );
+        return { cancelled: lines.length };
+      }
+      throw error;
+    }
 
     this.logger.info(
       { correlationId, orderId, cancelledCount: cancelled.length },
@@ -130,6 +175,7 @@ export class CancelAllocationUseCase {
     lines: INormalizedReservationLine[],
     reasonCode: string,
     actorId: string | null,
+    operationKey: string,
   ): Promise<ICancelledLine[]> {
     // Phase 1 — load each distinct level once, capturing its optimistic token.
     const levels = await loadDistinctLevels(this.repository, lines, scope);
@@ -156,6 +202,10 @@ export class CancelAllocationUseCase {
           referenceType: 'order',
           referenceId: String(orderId),
           actorId,
+          // The identity of THIS cancellation (ADR-057). `reference_id` stays the order —
+          // an auditor still asks "what released order X?" — and the dedupe rides this
+          // column instead, because an order can be cancelled from more than once.
+          operationKey,
         }),
       });
     }

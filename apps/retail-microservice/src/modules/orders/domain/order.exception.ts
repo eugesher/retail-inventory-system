@@ -198,8 +198,15 @@ export enum OrderErrorCodeEnum {
   // (`markIssued` / `markFailed` off non-`pending`) — a well-formed request the
   // resource state forbids.
   REFUND_INVALID_STATUS_TRANSITION = 'REFUND_INVALID_STATUS_TRANSITION',
-  // The refund being read/operated on does not exist.
-  REFUND_NOT_FOUND = 'REFUND_NOT_FOUND',
+  // There is deliberately no `REFUND_NOT_FOUND` here. It was declared alongside these,
+  // mapped to a 404 in the filter's total `Record` — and thrown by nothing, for the whole
+  // time it existed. **A refund is never addressed on its own:** Issue Refund reads a
+  // payment's history through `findByPaymentId` for its over-refund guard, and the refund
+  // read is order-scoped. `IRefundRepositoryPort.findById` was its twin and ADR-049
+  // already removed it for the identical reason; this is the same cleanup, one layer up.
+  // A `Record` arm is not free just because the compiler accepts it — it **asserts** that
+  // this surface can answer 404 with that code, which was never true. If a
+  // `GET /orders/:orderId/refunds/:refundId` ever lands, it arrives with its own code.
   // The requested refund amount would push the cumulative refunded total past the
   // payment's captured amount (`amount > Payment.amountMinor −
   // Payment.refundedAmountMinor`) — the over-refund ceiling the Issue Refund use case

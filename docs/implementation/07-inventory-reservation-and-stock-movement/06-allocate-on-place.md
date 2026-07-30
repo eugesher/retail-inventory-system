@@ -141,8 +141,13 @@ committed. Order cancellation followed with the cancellation capability, which
 calls it from `cancel-order.use-case.ts` and `cancel-line.use-case.ts` through the
 shared `cancel-allocation-retry.ts` helper.
 
-**Idempotency posture.** Cancel is **quantity-guarded, not state-tracked**. There
-is no per-order "already cancelled" flag; an over-cancel (more than is allocated)
+**Idempotency posture.** Cancel was **quantity-guarded, not state-tracked**, and
+[ADR-057](../../adr/057-cancel-allocation-needs-an-operation-identity.md) replaced that with a
+caller-minted `operationKey` deduped by the ledger UNIQUE. The quantity guard described below
+is still there and still refuses an over-cancel — it was never the problem. What it could not
+do was tell a *redelivery* from a second genuine cancel: `quantity_allocated` is shared per
+`(variant, location)`, so a replay arriving after another order allocated the same level would
+pass the check and release **that order's** units. An over-cancel (more than is allocated)
 is a typed `STOCK_RESULT_NEGATIVE` (409) — the one allocated-counter rejection
 that *is* user-reachable, so a Cancel RPC with a wrong quantity fails cleanly
 rather than 500-ing or silently clamping. The RPC resolves `{ cancelled: n }`

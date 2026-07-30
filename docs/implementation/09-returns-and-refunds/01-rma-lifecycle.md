@@ -75,13 +75,29 @@ column) has six values. The aggregate's mutators each walk exactly one legal
 transition and bump the optimistic-concurrency `version`; an illegal start state
 raises `ReturnDomainException(RETURN_INVALID_STATUS_TRANSITION)` (409).
 
-| Transition                | Mutator           | Actor / permission           | Notes                                  |
-| ------------------------- | ----------------- | ---------------------------- | -------------------------------------- |
-| `requested → authorized`  | `authorize(at)`   | staff `order:return-authorize` | stamps `authorizedAt`                  |
-| `requested → rejected`    | `reject(at)`      | staff `order:return-authorize` | **terminal**; stamps `closedAt`        |
-| `authorized → received`   | `receive()`       | warehouse `inventory:receive-return` | goods logged in at the warehouse |
-| `received → inspected`    | `markInspected()` | warehouse `inventory:receive-return` | per-line condition/disposition recorded |
-| `inspected → closed`      | `close(at)`       | staff `order:return-authorize` | **terminal**; stamps `closedAt`        |
+> *
+*Since [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md) / [ADR-045](../../adr/045-one-occ-retry-protocol.md),
+that `version` bump is enforced, not
+> merely recorded.** When this capability shipped, `ReturnRequest.version` was a
+> forward-provisioned column with no consumer — the mutators advanced an in-memory
+> counter and persistence let the last writer win. Every RMA lifecycle write now runs
+> under `runWithReturnWriteRetry` (`application/use-cases/return-write.ts`), which binds
+> the returns module to the one shared `runWithOccRetry` protocol: each attempt re-reads
+> the RMA inside a fresh transaction, saves with the version pinned
+> (`save(request, scope, versionAtLoad)`), and retries a lost compare-and-swap up to the
+> injected `OCC_RETRY_ATTEMPTS` budget. Exhaustion surfaces a **409 carrying the wire code
+> `VERSION_MISMATCH`** (the enum member is `RETURN_VERSION_MISMATCH`, but its *value* is the
+> uniform cross-aggregate name) with `details.currentVersion` so the caller can
+> refetch-and-retry. A domain rejection — `RETURN_INVALID_STATUS_TRANSITION` among them — is
+> **never** retried: only the CAS loss is a race, a forbidden start state is an answer.
+
+| Transition               | Mutator           | Actor / permission                   | Notes                                   |
+|--------------------------|-------------------|--------------------------------------|-----------------------------------------|
+| `requested → authorized` | `authorize(at)`   | staff `order:return-authorize`       | stamps `authorizedAt`                   |
+| `requested → rejected`   | `reject(at)`      | staff `order:return-authorize`       | **terminal**; stamps `closedAt`         |
+| `authorized → received`  | `receive()`       | warehouse `inventory:receive-return` | goods logged in at the warehouse        |
+| `received → inspected`   | `markInspected()` | warehouse `inventory:receive-return` | per-line condition/disposition recorded |
+| `inspected → closed`     | `close(at)`       | staff `order:return-authorize`       | **terminal**; stamps `closedAt`         |
 
 `rejected` and `closed` are terminal. **Open** (the `requested` entry state) is
 owner-or-staff: the buyer who owns the order may open a return on it, and staff may
@@ -112,19 +128,19 @@ Two tables, created in foreign-key-dependency order (`return_request` first, the
 
 ### `return_request`
 
-| Column            | Type                                   | Notes                                            |
-| ----------------- | -------------------------------------- | ------------------------------------------------ |
-| `id`              | `BIGINT UNSIGNED` PK auto-increment     | the `BaseEntity` numeric PK widened to BIGINT    |
-| `rma_number`      | `VARCHAR(20)` UNIQUE, nullable          | `RMA-<year>-<pad8(id)>`, finalized post-insert   |
-| `order_id`        | `BIGINT UNSIGNED` FK → `order(id)`      | `ON DELETE RESTRICT`; plain scalar, no relation  |
-| `customer_id`     | `CHAR(36)` FK → `customer(id)`          | `ON DELETE RESTRICT`; the gateway buyer UUID     |
-| `status`          | `ENUM(...)` default `requested`         | the six-state lifecycle axis                     |
-| `reason_category` | `ENUM(...)`                             | the coarse return reason                         |
-| `notes`           | `TEXT`, nullable                        | optional free-text                               |
-| `requested_at`    | `TIMESTAMP`                             | stamped at Open                                  |
-| `authorized_at`   | `TIMESTAMP`, nullable                   | stamped at Authorize                             |
-| `closed_at`       | `TIMESTAMP`, nullable                   | stamped at Reject / Close                        |
-| `version`         | `INT` default 0 (`@VersionColumn`)      | per-RMA optimistic-concurrency token             |
+| Column            | Type                                | Notes                                           |
+|-------------------|-------------------------------------|-------------------------------------------------|
+| `id`              | `BIGINT UNSIGNED` PK auto-increment | the `BaseEntity` numeric PK widened to BIGINT   |
+| `rma_number`      | `VARCHAR(20)` UNIQUE, nullable      | `RMA-<year>-<pad8(id)>`, finalized post-insert  |
+| `order_id`        | `BIGINT UNSIGNED` FK → `order(id)`  | `ON DELETE RESTRICT`; plain scalar, no relation |
+| `customer_id`     | `CHAR(36)` FK → `customer(id)`      | `ON DELETE RESTRICT`; the gateway buyer UUID    |
+| `status`          | `ENUM(...)` default `requested`     | the six-state lifecycle axis                    |
+| `reason_category` | `ENUM(...)`                         | the coarse return reason                        |
+| `notes`           | `TEXT`, nullable                    | optional free-text                              |
+| `requested_at`    | `TIMESTAMP`                         | stamped at Open                                 |
+| `authorized_at`   | `TIMESTAMP`, nullable               | stamped at Authorize                            |
+| `closed_at`       | `TIMESTAMP`, nullable               | stamped at Reject / Close                       |
+| `version`         | `INT` default 0 (`@VersionColumn`)  | per-RMA optimistic-concurrency token            |
 
 Indexes: `UNIQUE(rma_number)`; `(order_id, requested_at DESC)`;
 `(customer_id, requested_at DESC)` — the two descending composite indexes support the
@@ -132,15 +148,15 @@ newest-first list reads (by order, by customer).
 
 ### `return_line`
 
-| Column                     | Type                                         | Notes                                          |
-| -------------------------- | -------------------------------------------- | ---------------------------------------------- |
-| `id`                       | `BIGINT UNSIGNED` PK auto-increment           | the `BaseEntity` numeric PK widened to BIGINT  |
-| `return_request_id`        | `BIGINT UNSIGNED` FK → `return_request(id)`   | `ON DELETE CASCADE`; the owning request        |
-| `order_line_id`            | `BIGINT UNSIGNED` FK → `order_line(id)`       | `ON DELETE RESTRICT`; opaque link, no relation |
-| `quantity`                 | `INT`                                         | units of the order line coming back            |
-| `condition`                | `ENUM(...)`, nullable                         | recorded at inspection (`null` until then)     |
-| `disposition`              | `ENUM(...)`, nullable                         | recorded at inspection                         |
-| `line_refund_amount_minor` | `BIGINT UNSIGNED`, nullable                   | recorded at inspection (minor units)           |
+| Column                     | Type                                        | Notes                                          |
+|----------------------------|---------------------------------------------|------------------------------------------------|
+| `id`                       | `BIGINT UNSIGNED` PK auto-increment         | the `BaseEntity` numeric PK widened to BIGINT  |
+| `return_request_id`        | `BIGINT UNSIGNED` FK → `return_request(id)` | `ON DELETE CASCADE`; the owning request        |
+| `order_line_id`            | `BIGINT UNSIGNED` FK → `order_line(id)`     | `ON DELETE RESTRICT`; opaque link, no relation |
+| `quantity`                 | `INT`                                       | units of the order line coming back            |
+| `condition`                | `ENUM(...)`, nullable                       | recorded at inspection (`null` until then)     |
+| `disposition`              | `ENUM(...)`, nullable                       | recorded at inspection                         |
+| `line_refund_amount_minor` | `BIGINT UNSIGNED`, nullable                 | recorded at inspection (minor units)           |
 
 Index: `(order_line_id)`.
 
@@ -177,16 +193,16 @@ The lifecycle is driven by eight retail RPCs. Each is served by the returns cont
 of fit-for-resale goods — see
 [`02-return-line-disposition-and-restock.md`](02-return-line-disposition-and-restock.md).
 
-| RPC                        | Use case                       | Actor / permission                   | Transition            | Event                       |
-| -------------------------- | ------------------------------ | ------------------------------------ | --------------------- | --------------------------- |
-| `retail.return.open`       | `OpenReturnRequestUseCase`     | owner **or** staff `order:return-authorize` | → `requested`  | `retail.return.requested`   |
-| `retail.return.authorize`  | `AuthorizeReturnUseCase`       | staff `order:return-authorize`       | `requested → authorized` | `retail.return.authorized`  |
-| `retail.return.reject`     | `RejectReturnUseCase`          | staff `order:return-authorize`       | `requested → rejected`   | `retail.return.rejected`    |
-| `retail.return.receive`    | `ReceiveReturnUseCase`         | warehouse `inventory:receive-return` | `authorized → received`  | `retail.return.received`    |
-| `retail.return.inspect`    | `InspectAndDispositionUseCase` | warehouse `inventory:receive-return` | `received → inspected`   | `retail.return.inspected`   |
-| `retail.return.close`      | `CloseReturnUseCase`           | staff `order:return-authorize`       | `inspected → closed`     | `retail.return.closed`      |
-| `retail.return.get`        | `GetReturnUseCase`             | owner **or** staff `order:read`      | — (read)              | —                           |
-| `retail.return.list`       | `ListReturnsForOrderUseCase`   | owner **or** staff `order:read`      | — (read)              | —                           |
+| RPC                       | Use case                       | Actor / permission                          | Transition               | Event                      |
+|---------------------------|--------------------------------|---------------------------------------------|--------------------------|----------------------------|
+| `retail.return.open`      | `OpenReturnRequestUseCase`     | owner **or** staff `order:return-authorize` | → `requested`            | `retail.return.requested`  |
+| `retail.return.authorize` | `AuthorizeReturnUseCase`       | staff `order:return-authorize`              | `requested → authorized` | `retail.return.authorized` |
+| `retail.return.reject`    | `RejectReturnUseCase`          | staff `order:return-authorize`              | `requested → rejected`   | `retail.return.rejected`   |
+| `retail.return.receive`   | `ReceiveReturnUseCase`         | warehouse `inventory:receive-return`        | `authorized → received`  | `retail.return.received`   |
+| `retail.return.inspect`   | `InspectAndDispositionUseCase` | warehouse `inventory:receive-return`        | `received → inspected`   | `retail.return.inspected`  |
+| `retail.return.close`     | `CloseReturnUseCase`           | staff `order:return-authorize`              | `inspected → closed`     | `retail.return.closed`     |
+| `retail.return.get`       | `GetReturnUseCase`             | owner **or** staff `order:read`             | — (read)                 | —                          |
+| `retail.return.list`      | `ListReturnsForOrderUseCase`   | owner **or** staff `order:read`             | — (read)                 | —                          |
 
 **Open** is the only operation that runs the policy gates the aggregate cannot enforce for
 itself (it can see neither the order nor sibling RMAs): it resolves the order through the
@@ -200,17 +216,36 @@ from the aggregate.
 (`RETURN_NOT_FOUND` if missing — the staff gate is enforced at the gateway, so the use case
 trusts the resolved flag), call the matching domain mutator (which enforces the legal
 transition — `RETURN_INVALID_STATUS_TRANSITION` on an illegal start), persist, and emit.
+Since ADR-036 each of those four wraps that resolve-mutate-persist trio in
+`runWithReturnWriteRetry` (§3), so the re-read happens **inside** the retried attempt and the
+save pins the version it read.
 Authorize re-running the window/condition check is deliberately omitted — the substantive
 eligibility gate was Open; Authorize is the staff's approval of an already-validated
 request. **Reject** records its optional `reason` by appending it to the RMA's `notes` (the
 domain `reject(at, reason)` does the append) — kept in `notes` so no schema column is
 needed; the reason also rides the `retail.return.rejected` event.
 
-**Get / List** are **owner-or-staff** reads: Get throws `RETURN_ACCESS_FORBIDDEN` for a
-non-owner-non-staff caller, while List filters to the caller's own RMAs (a non-owner gets an
-empty list with no existence leak — the own-only-list posture). The owner-check compares the
-RMA's `customerId` (the buyer, copied from the order at Open) against the resolved actor; a
-permission code is a **staff override** over that check, never a customer gate.
+**Get / List** are **owner-or-staff** reads, and **both refuse a non-owner with
+`RETURN_ACCESS_FORBIDDEN` (403)**. Get resolves the RMA and owner-checks it (`loadOwnedReturn`);
+List resolves the **order** through the raw-SQL reader (§8), owner-checks *that*, then lists —
+a missing order is `RETURN_ORDER_NOT_FOUND` (404). The owner-check compares the
+RMA's / order's `customerId` (the buyer, copied from the order at Open) against the resolved
+actor; a permission code is a **staff override** over that check, never a customer gate.
+
+> **List used to filter instead, and [ADR-051](../../adr/051-refusing-a-resource-you-do-not-own.md) removed the filter.
+** As shipped, `ListReturnsForOrderUseCase`
+> handed a non-owner an empty array — described here as "no existence leak, the own-only-list
+> posture". Two things were wrong with that. It made this the **one** dissenting ownership check
+> in `apps/`: `list-refunds`, `list-fulfillments`, `loadAuthorizedOrder` and `loadOwnedReturn` all
+> answered 403, so a client needed two error handlers for one shape of request. And the leak it
+> claimed to close **was never closed** — an order with no RMAs returned `[]` and an order with
+> RMAs returned `[]` too, so the endpoint still answered *"does this order have returns?"* to a
+> caller who may not know the order exists, while `GET /orders/:id/refunds` confirmed that
+> order's existence outright one route over. The rule ADR-051 wrote down: **a list scoped by a
+> resource id authorizes against that resource, not against the rows it returns.** (A list *not*
+> scoped by a resource id — `GET /api/orders` — is a different question and keeps filtering:
+> there is no named resource to refuse.) `test/order-scoped-list-refusal.e2e-spec.ts` pins all
+> three order-scoped lists to the same answer.
 
 ## 7. The return window
 
@@ -258,10 +293,20 @@ requested ≤ ordered − cancelled − already-returned
 ```
 
 - **`ordered`** is `order_line.quantity`.
-- **`cancelled`** is read from the line's status: a line cancelled to the `cancelled` status
-  removes its full ordered quantity from the pool. (Partial-quantity line cancellation is not
-  persisted — Cancel Line only releases the allocation — so it cannot be read back; a
-  documented limitation.)
+- **`cancelled`** is `order_line.cancelled_quantity` — the durable per-line count, read straight
+  off the reader's projection (`IReturnOrderLineSnapshot.cancelledQuantity`).
+
+  > **The limitation this bullet used to document is gone.** As shipped, `cancelled` was
+  > inferred from the line's *status*: a line flipped to `cancelled` removed its whole ordered
+  > quantity, and a **partial** cancellation removed nothing, because Cancel Line only released
+  > the inventory allocation and persisted no
+  count. [ADR-040](../../adr/040-persisted-cancelled-quantity-on-order-line.md) added the
+  > `order_line.cancelled_quantity` column (migration `1783693307152`, `CHECK 0 ≤ cancelled ≤
+  > quantity`) and made Cancel Line a **writing** operation under a version-checked CAS, so a
+  > partial cancellation now shrinks the returnable pool by exactly its units. A whole line
+  > cancelled reaches `cancelled_quantity = quantity`, which zeroes the pool — the case the old
+  > status-only read was reaching for, back when nothing ever wrote that status. The formula
+  > above is unchanged; only the source of its middle term is.
 - **`already-returned`** is `Σ return_line.quantity` per `order_line` across the order's
   **non-rejected** RMAs. A **rejected** RMA frees its quantity back to the pool (the buyer can
   re-request it). This sum is computed in the use case from
@@ -285,9 +330,24 @@ context's events `ClientProxy` holder, `ReturnRabbitmqPublisher` (two clients, t
   buyer-facing events — are emitted onto **`notification_events`** (the notification service's
   own queue) so they land where its returns fan-out consumer will bind them.
 - **`retail.return.rejected` / `.closed`** — the internal-status events — are emitted onto
-  **`retail_queue`** (the producer's own queue) as reserved surfaces (no consumer today; the
-  later refund capability is the natural consumer of `.closed`, since a closed RMA with money
-  owed triggers a refund).
+  **`retail_queue`** (the producer's own queue) as reserved surfaces: no **business** consumer
+  binds them.
+
+> **Two things about that "reserved" have changed since.** First, the forward guess did not come
+> true: the refund capability shipped in this same epic and **`.closed` is still unconsumed**.
+> Closing an RMA settles no money and triggers nothing that will — Inspect records what each line
+> earns (`lineRefundAmountMinor`), the RMA view surfaces it, and a staff member issues the money
+> through the orders refund endpoint. `CloseReturnUseCase`'s own class comment now states this
+> outright, and contrasts it with Cancel *Order*, which does flag the payment and auto-refund
+> through a consumer. Second, "no consumer" no longer means "unobserved": since
+> [ADR-035](../../adr/035-event-store-firehose-topic-exchange.md), `ReturnRabbitmqPublisher` **dual-publishes** every
+> one of the six
+> lifecycle events onto the `ris.events` topic exchange after its primary emit, and the event
+> store's firehose queue (bound to a lone `#`) ingests them into `domain_event`. So a reserved
+> surface today means *no business consumer* — every event is still captured and queryable
+> through `audit.event.query` ([ADR-039](../../adr/039-audit-and-event-store-query-surface.md)). The mirror is
+> best-effort and non-throwing,
+> ordered strictly after the primary emit, so it can never fail a committed transition.
 
 Each event is a plain wire interface extending `ICorrelationPayload` + `occurredAt`
 (ADR-011 — a domain object is never serialized across services); the use case maps the saved

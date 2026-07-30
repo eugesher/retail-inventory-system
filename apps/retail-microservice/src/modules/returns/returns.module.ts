@@ -87,8 +87,9 @@ import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';
 
     // The raw-SQL read of the gateway-owned `customer.email` the return events carry, so the
     // notification consumer has a recipient without a per-delivery RPC (ADR-033). A local copy
-    // of the orders reader — returns cannot import the orders module (ADR-017), the
-    // `retry-then-log-for-replay` per-module-copy precedent.
+    // of the orders reader — returns cannot import the orders module (ADR-017); it stays a copy
+    // because it implements a module-owned port (ADR-056 lifted the one helper that named no
+    // module type).
     CustomerContactReaderTypeormAdapter,
     { provide: RETURN_CUSTOMER_CONTACT_READER, useExisting: CustomerContactReaderTypeormAdapter },
 

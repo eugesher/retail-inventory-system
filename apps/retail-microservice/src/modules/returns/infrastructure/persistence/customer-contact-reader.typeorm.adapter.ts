@@ -14,7 +14,9 @@ interface ICustomerContactRow {
 // The returns context's read seam onto the gateway-owned **customer** table — a local copy
 // of the orders module's adapter (returns cannot import the orders module across the
 // boundaries-lint isolation line, ADR-017, so the one-place-per-module posture is duplicated
-// rather than shared, the `retry-then-log-for-replay` precedent). It reads `customer` with
+// rather than shared). It implements a module-owned port, which is what keeps it a copy —
+// unlike `retryThenLogForReplay`, whose signature named no module type and which now lives in
+// `libs/common` (ADR-056). It reads `customer` with
 // PARAMETERIZED SQL through the injected `EntityManager`, exactly as
 // `ReturnOrderReaderTypeormAdapter` reaches the order tables. The opaque shared FK
 // (`return_request.customer_id` → `customer.id`) is the only coupling; the `?` placeholder is

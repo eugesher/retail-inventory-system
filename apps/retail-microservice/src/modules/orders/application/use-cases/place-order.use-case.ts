@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
@@ -355,6 +357,10 @@ export class PlaceOrderUseCase {
           await this.inventory.cancelAllocation({
             orderId: allocatedOrderId,
             lines: allocationLines,
+            // A one-shot compensation, so its identity is minted right here (ADR-057).
+            // Nothing retries this call, but the broker can still redeliver the RPC, and a
+            // second release would unwind an allocation that is no longer this order's.
+            operationKey: randomUUID(),
             // A free-string movement `reason_code` recording WHY the allocation was
             // unwound (the default is `order-cancelled`); `place-rollback` keeps the
             // ledger honest about a compensation vs a genuine cancel.
@@ -452,6 +458,8 @@ export class PlaceOrderUseCase {
       await this.inventory.cancelAllocation({
         orderId,
         lines: allocationLines,
+        // One-shot compensation identity (ADR-057) — see the sibling above.
+        operationKey: randomUUID(),
         // The ledger records WHY the hold was unwound: not an operator cancelling an order, but a
         // place that never got off the ground.
         reason: 'authorization-declined',

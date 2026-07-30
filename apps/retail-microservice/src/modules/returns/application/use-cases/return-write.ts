@@ -10,7 +10,10 @@ import { ReturnWriteConflictError } from './return-write-conflict.error';
 // write (a plain `save`, or a `runInTransaction(...)` for Inspect) in
 // `runWithReturnWriteRetry`, so each retried `attempt` re-reads the return request
 // afresh and re-runs its version-checked compare-and-swap on a lost race. A local copy
-// of the orders/cart helper shape — returns cannot import the orders module (ADR-017).
+// of the orders/cart helper shape — returns cannot import the orders module (ADR-017). The
+// *protocol* underneath is not copied: it is `runWithOccRetry` in `libs/common/concurrency/`
+// (ADR-045). What stays here is only the module's half — its conflict type and its terminal
+// exception, both module-owned.
 export interface IReturnWriteRetryDeps {
   logger: PinoLogger;
   // The optimistic-concurrency retry budget — how many attempts a lost CAS may burn
