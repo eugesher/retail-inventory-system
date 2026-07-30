@@ -8,12 +8,20 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 //
 // Both keep `BaseEntity`'s numeric PK widened to BIGINT UNSIGNED (`synchronize` is off,
 // so this migration is the source of truth) plus `created_at` / `updated_at` /
-// `deleted_at`. `deleted_at` stays INERT on both: a template is soft-deleted via the
-// `active` flag, and a delivery is never deleted at all — neither is ever soft-deleted.
+// `deleted_at`. `deleted_at` stays INERT on both, and for two different reasons: a
+// template is soft-deleted via the `active` flag, while a delivery is never soft-deleted
+// at all — the row IS the dedupe anchor below, so one hidden from the dedupe query means
+// the same notification sends twice.
 //
-// This migration was written expecting a `RETENTION_DELIVERY_DAYS` purge to follow it. **It never
-// arrived.** The env var exists and validates, but no code reads it and no purge was ever built,
-// so `notification_delivery` is unbounded — it keeps every row for the life of the deployment.
+// This migration was written expecting a `RETENTION_DELIVERY_DAYS` purge to follow it, and for a
+// long time none did: the key sat in the shared Joi schema with no DI token, no provider and no
+// reader, so an operator who set it got a clean boot and no purge while this table grew for the
+// life of the deployment. **That gap is closed** (ISSUE-08). `PurgeAgedDeliveriesUseCase` +
+// `DeliveryRetentionScheduler` hard-`DELETE` rows past the horizon nightly, in bounded batches —
+// so `created_at` is a retention column, not just an audit timestamp. The coupling that buys:
+// purging a row retires its dedupe anchor with it, which is safe only because a broker will not
+// redeliver a message that old. See `INotificationDeliveryRepositoryPort.deleteOlderThan`, which
+// states it in full.
 //
 // `notification_template.version` is the BUSINESS version (a plain INT that climbs on
 // every edit — old rows retained for audit/rollback), part of the natural key, NOT an

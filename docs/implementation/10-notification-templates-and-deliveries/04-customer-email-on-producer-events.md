@@ -85,10 +85,18 @@ This slice adds a third instance per module:
 
 The two modules each get their **own** port + adapter rather than sharing one. Orders and
 returns are sibling bounded contexts behind the same isolation line, so returns cannot import
-the orders module's reader — the same constraint that forced a local copy of the
-`retry-then-log-for-replay` helper. The duplication is the deliberate cost of the
-bounded-context split; the two adapters are near-identical but each lives wholly inside its
-own module.
+the orders module's reader. The duplication is the deliberate cost of the bounded-context
+split; the two adapters are near-identical but each lives wholly inside its own module.
+
+This document originally cited the local copy of the `retry-then-log-for-replay` helper as
+the companion case of the same constraint. That is no longer the right comparison:
+[ADR-056](../../adr/056-lifting-the-post-commit-retry-helper.md) **lifted** that helper into
+`libs/common/resilience/` and deleted both copies. The test it wrote down is what separates
+the two cases — *does the signature name a module-owned type?* `retryThenLogForReplay` named
+none (it took a thunk and a structural logger), so it could be shared. The contact readers
+here implement a **module-owned port** (`ORDER_CUSTOMER_CONTACT_READER` /
+`RETURN_CUSTOMER_CONTACT_READER`), so they stay copies — deliberately, and by a rule rather
+than by inertia.
 
 A `customerId` that resolves no row returns `null` (a tombstoned or otherwise-missing
 customer). The reader never throws across the boundary in normal operation; the contact email

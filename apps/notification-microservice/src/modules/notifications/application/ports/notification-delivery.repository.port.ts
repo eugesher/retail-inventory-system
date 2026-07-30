@@ -55,11 +55,21 @@ export interface INotificationDeliveryPage {
 //   customer-facing notifications.
 // - `findById` is the by-id load path (Record Outcome / Retry resolve a delivery by id).
 // - `list` is the paged, filtered audit read (newest-first).
-// - `listRetryable` is the retry sweeper's scan: `status = failed AND attempt_count <
-//   maxAttempts`, oldest-attempt-first, capped at `limit` — served by the
-//   `(status, last_attempt_at)` index. It returns a bounded batch (not a page): the
-//   sweeper only iterates the rows and never needs a full match count, so it skips the
-//   `COUNT(*)` the paged `list` pays.
+// - `listRetryable` is the retry sweeper's scan, and it has **two arms**:
+//     * `status = failed AND attempt_count < maxAttempts` — the ordinary recorded failure;
+//     * `status = queued AND created_at < queuedStaleBefore` — a row ORPHANED between the
+//       persist and the dispatch (see `queued-staleness.ts` for why one exists and why the
+//       horizon is a threshold rather than "any queued row").
+//   Both are served by the `(status, last_attempt_at)` index on their `status` prefix; the
+//   queued arm's `created_at` bound is a filter on top, which costs nothing because a healthy
+//   system holds a `queued` row for the milliseconds of one dispatch — orphans are the only
+//   ones that linger.
+//   Ordered oldest-attempt-first and capped at `limit`. A queued row has a NULL
+//   `last_attempt_at`, and MySQL sorts NULLs FIRST ascending, so orphans lead the batch —
+//   which is the right priority: a `failed` row is a notification we know was attempted, an
+//   orphan may never have been sent at all.
+//   It returns a bounded batch (not a page): the sweeper only iterates the rows and never
+//   needs a full match count, so it skips the `COUNT(*)` the paged `list` pays.
 // - `deleteOlderThan` is **the port's only destructive verb, and it is a deliberate one** (ISSUE-08).
 //   Until it existed this seam was append-and-update-only, and `notification_delivery` grew for the
 //   life of the deployment: a row per notification on the hot path of every order, fulfillment,
@@ -94,6 +104,10 @@ export interface INotificationDeliveryRepositoryPort {
     filter: INotificationDeliveryListFilter,
     page: INotificationDeliveryPageRequest,
   ): Promise<INotificationDeliveryPage>;
-  listRetryable(maxAttempts: number, limit: number): Promise<NotificationDelivery[]>;
+  listRetryable(
+    maxAttempts: number,
+    limit: number,
+    queuedStaleBefore: Date,
+  ): Promise<NotificationDelivery[]>;
   deleteOlderThan(horizon: Date, limit: number): Promise<number>;
 }

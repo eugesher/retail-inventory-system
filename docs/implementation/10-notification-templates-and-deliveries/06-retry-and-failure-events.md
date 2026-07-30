@@ -13,7 +13,8 @@ Two re-dispatch paths share one mechanism:
 - **Manual** — `RetryDeliveryUseCase`, the `notification.delivery.retry` RPC an operator
   triggers to force one delivery to retry **now**.
 - **Scheduled** — `RetryFailedDeliveriesUseCase`, a sweeper driven by `@nestjs/schedule`
-  that periodically re-attempts `failed` rows on an exponential backoff.
+  that periodically re-attempts `failed` rows on an exponential backoff, **and rescues
+  deliveries orphaned in `queued`** (§1a).
 
 Both honor a hard cap, `MAX_DELIVERY_ATTEMPTS`. When a delivery reaches it and is still
 `failed`, the service emits `notifications.delivery.failed` — a reserved alerting surface.
@@ -36,27 +37,82 @@ single source of truth for "retry one delivery."
 | | Manual (`RetryDeliveryUseCase`) | Scheduled (`RetryFailedDeliveriesUseCase`) |
 |---|---|---|
 | Trigger | `notification.delivery.retry` RPC (operator) | `@nestjs/schedule` `@Interval`, every 60s |
-| Row selection | one delivery, by id | `listRetryable` scan (`failed` + `attempt_count < cap`, oldest-attempt-first) |
+| Row selection | one delivery, by id | `listRetryable` scan — two arms: `failed` + `attempt_count < cap`, **and** `queued` older than the staleness horizon (§1a); oldest-attempt-first |
 | Backoff gate | **ignored** — an operator forces it | **honored** — skips rows still inside their backoff window |
-| Not-retryable | `DELIVERY_NOT_FOUND` (404) / non-`failed` → `DELIVERY_INVALID_STATUS_TRANSITION` (409) | row simply not in the scan |
+| Not-retryable | `DELIVERY_NOT_FOUND` (404); anything that is neither `failed` nor an orphaned `queued` → `DELIVERY_INVALID_STATUS_TRANSITION` (409) | row simply not in the scan |
 | Returns | the `NotificationDeliveryView` | a `{ scanned, skipped, retried }` summary |
 
 The manual path is the precise tool: an operator who has fixed the underlying cause (a bad
 template, an expired credential) retries the affected delivery immediately instead of
-waiting for the backoff to elapse. It is gated only on **status** — only a `failed`
-delivery is retryable; a `queued` row is still awaiting its first dispatch and a
+waiting for the backoff to elapse. It is gated on **status, plus age for one status**: a
+`failed` delivery is retryable, and so is a `queued` one old enough to be an orphan (§1a). A
+FRESH `queued` row is refused — it is being dispatched at this moment — and a
 `sent`/`delivered`/`bounced` row already succeeded, so re-dispatching either would
-double-send.
+double-send. `skipped-no-consent` is refused too, and it is the sharpest case: retrying it
+would send the very message the consent gate suppressed.
 
-The scheduled path is the steady-state safety net: it drains the `failed` backlog without
-anyone watching. `listRetryable` orders oldest-attempt-first and the sweep processes a
-bounded batch, so a backlog larger than one page drains across successive sweeps (the
-longest-waiting delivery always retries first).
+The scheduled path is the steady-state safety net: it drains the backlog without anyone
+watching. `listRetryable` orders oldest-attempt-first and the sweep processes a bounded
+batch, so a backlog larger than one page drains across successive sweeps (the longest-waiting
+delivery always retries first). A `queued` orphan has no `last_attempt_at` at all, and MySQL
+sorts NULLs first ascending, so orphans lead the batch — the right priority, since a `failed`
+row is one we know was attempted while an orphan may never have been sent.
+
+### 1a. The orphaned `queued` row
+
+A delivery can be stranded in `queued`. The pipeline commits the row, calls the `NOTIFIER`,
+then flips the row — and anything that kills the process in that window, or merely makes the
+*second* save fail, leaves `queued` behind with nobody coming back for it.
+
+The second case is the likelier one and is worth spelling out. If the final
+`deliveryRepo.save` throws, the exception escapes the `@EventPattern` consumer and RabbitMQ
+redelivers the event — but the redelivery hits the dedupe pre-check, finds the `queued` row,
+and returns it **without dispatching**. The one path that looks like a second chance is the
+path that closes the door.
+
+[ADR-033](../../adr/033-notification-templates-deliveries-and-render-dispatch.md) §3 already
+decided what must happen here: *"a crash mid-send then still leaves an auditable row **the
+retry sweeper can pick up**."* For a long time it did not — the scan read `status = failed`
+alone and the manual retry refused everything else — so an orphan was unreachable by every
+path, automatic and human alike. The system paid persist-then-send's cost (a possible
+duplicate) without ever collecting its benefit (a recoverable record).
+
+Both paths now accept an orphan, under one shared rule in
+`application/use-cases/queued-staleness.ts`:
+
+- **`QUEUED_STALE_AFTER_MS` (5 minutes)** is the age at which a `queued` row stops counting
+  as in-flight and starts counting as orphaned. The threshold is the point: a row persisted
+  moments ago is being dispatched *right now*, and re-dispatching it is a race, not a
+  recovery. It is a safety margin around the longest plausible `NOTIFIER.send` — there is no
+  timeout on `send`, so "comfortably past" is the only bound available — and a module
+  constant rather than a DI token for that reason: it is not a value an operator should tune.
+- The sweeper's scan takes the horizon as a SQL bound (`created_at < ?`); the manual retry
+  compares against it directly, so a fresh `queued` row still gets its 409.
+- A rescued row is attempt **1**, not 2: nothing was ever recorded against it. If the rescue
+  fails it becomes an ordinary `failed` row with its full budget intact.
+- The backoff gate does not apply on top. An orphan has `lastAttemptAt = null`, so `isDue`
+  passes it immediately — correct, because the staleness horizon already made it wait.
+
+**The double-send this accepts is not new.** A rescued row is indistinguishable from outside:
+the send may have succeeded and only the status write been lost. That is the exact trade
+persist-then-send was chosen for — a possible duplicate is far cheaper than a possible silent
+drop — and leaving the row unreachable took the cost without the benefit.
 
 The scheduler itself (`DeliveryRetryScheduler`, under `infrastructure/scheduling/`) is a
 thin `@Interval`-annotated provider that `ScheduleModule.forRoot()` discovers; all retry
-logic lives in the use case. A thrown sweep is caught and logged so a transient fault never
-kills the scheduler loop.
+logic lives in the use case. A thrown sweep is caught and logged — **though not, as this
+document originally claimed, to keep the loop alive: the loop was never at risk.** Nest
+wraps a decorator-registered handler itself
+(`ScheduleExplorer.wrapFunctionInTryCatchBlocks`), so a rethrow would be caught there and
+the timer would fire again regardless. What the local `catch` buys is that the failure is
+**named** — Nest's wrapper logs a bare stack under a generic `Scheduler` context, so an
+operator would learn that *a* sweep died, not *which*. (Inventory's
+`ReservationSweepScheduler` is the one whose `catch` genuinely is load-bearing: it hands a
+raw `setInterval` to the registry, unwrapped, so a rejection there is an
+`unhandledRejection` — a dead process on Node ≥ 15.)
+
+`ScheduleModule.forRoot()` is wired once in `notifications.module.ts` and now serves **two**
+timers in this service: this `@Interval` and the retention sweep's `@Cron` (doc 02 §4).
 
 ## 2. Backoff policy + the `MAX_DELIVERY_ATTEMPTS` cap
 
@@ -99,7 +155,7 @@ retry use case emits one `notifications.delivery.failed` event:
 ```ts
 interface INotificationDeliveryFailedEvent extends ICorrelationPayload {
   deliveryId: number;
-  eventReferenceType: string; // 'order' | 'return-request' | 'stock-low' | 'fulfillment' | 'refund'
+  eventReferenceType: string; // 'order' | 'return-request' | 'stock-low' | 'fulfillment' | 'refund' | 'marketing'
   eventReferenceId: string;
   failureReason: string;      // the last NOTIFIER rejection
   eventVersion: 'v1';
@@ -109,10 +165,18 @@ interface INotificationDeliveryFailedEvent extends ICorrelationPayload {
 
 It is published through `NOTIFICATION_EVENTS_PUBLISHER` → `NotificationRabbitmqPublisher`
 (the notification service's sole outbound `ClientProxy` holder) onto the service's **own**
-`notification_events` queue. **No consumer binds it today** — it is a *reserved surface*,
-exactly like the `inventory.stock.*` reserved events elsewhere in the system. It exists so
-that a future capability — an ops-alerting bridge (page on-call, open a ticket), a metrics
-counter, or a dead-letter handler — can subscribe without the producer changing.
+`notification_events` queue. **No *business* consumer binds it** — it is a *reserved
+surface*, exactly like the `inventory.stock.*` reserved events elsewhere in the system. It
+exists so that a future capability — an ops-alerting bridge (page on-call, open a ticket), a
+metrics counter, or a dead-letter handler — can subscribe without the producer changing.
+
+It is not, however, unobserved. Since
+[ADR-035](../../adr/035-event-store-firehose-topic-exchange.md) every producer
+dual-publishes onto the `ris.events` topic exchange through `RisEventsMirrorPublisher`, and
+`event_store_firehose_queue` binds a lone `#` — so each emitted
+`notifications.delivery.failed` **is** ingested into the event store's `domain_event` log
+and is queryable there (`audit.event.query`). "Reserved" means nobody *acts* on it; it does
+not mean nobody records it.
 
 The payload is a thin header: `deliveryId` resolves the full audit row (subject, body,
 recipient, the whole attempt history) via the delivery-read RPCs, and
@@ -169,10 +233,12 @@ the fallback is dormant for now.
 - **A configurable backoff base + sweep interval.** Both are module constants (1s base,
   60s sweep) chosen to keep the system responsive and the tests fast; promoting them to
   env knobs is a small future change.
-- **`RETENTION_DELIVERY_DAYS` purge.** Delivery rows (including exhausted-and-failed ones)
-  are never deleted yet; the live-ephemeral retention policy is described in the
-  [delivery audit-trail doc](02-notification-delivery-as-audit-trail.md) and remains
-  deferred.
-- **The gateway manual-retry HTTP route.** `notification.delivery.retry` is reachable over
-  RMQ today; fronting it at the API gateway (the `notifications:write`-gated operator
-  endpoint that calls this RPC) is a later capability.
+- ~~**`RETENTION_DELIVERY_DAYS` purge.**~~ **Landed** (ISSUE-08). Delivery rows —
+  exhausted-and-failed ones included — are now hard-deleted past the horizon by
+  `PurgeAgedDeliveriesUseCase`, fired nightly by `DeliveryRetentionScheduler`. The policy,
+  and the dedupe coupling it accepts, are described in the
+  [delivery audit-trail doc](02-notification-delivery-as-audit-trail.md) §4.
+- ~~**The gateway manual-retry HTTP route.**~~ **Landed.**
+  `POST /api/notifications/deliveries/:id/retry`, gated on `notifications:write`, fronts
+  `notification.delivery.retry` — see the
+  [gateway API doc](07-notifications-api-and-http-file.md).
