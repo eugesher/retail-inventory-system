@@ -26,10 +26,16 @@ export interface IRetryThenLogForReplayOptions {
 // replay from — and **returns WITHOUT throwing**. The local write is already durable and must not be
 // unwound: the money is taken and the box has left (ADR-031).
 //
-// **The inventory operations behind this are idempotent against a SEQUENTIAL replay only.** Their
-// probes read outside their transactions and no UNIQUE backs them, so a retry that fires while the
-// original is still in flight — which is what a timeout produces — can apply twice. That is the
-// hazard this helper's `maxAttempts` sits on top of, and it is why raising it is not free.
+// **The inventory operations behind this are idempotent against a CONCURRENT redelivery too.** That
+// is load-bearing for this helper, because a retry fired after a **timeout** travels alongside the
+// original — a timeout does not cancel the RPC. Commit Sale and Restock From Return are held by
+// `UC_STOCK_MOVEMENT_DEDUPE`, the ledger UNIQUE (migration `1783872387242`); their
+// `existsByReference` probes are the fast path, not the guarantee. Cancel-Allocation is
+// idempotent-ish by shape (`releaseAllocated` only rejects an over-release).
+//
+// So `maxAttempts` is a **latency** budget, not a safety one: every caller awaits this inside its
+// own HTTP request, so a larger count holds the caller open against a broker that is already down.
+// It was previously justified as a safety bound, before the UNIQUE existed.
 export async function retryThenLogForReplay(
   operation: () => Promise<unknown>,
   options: IRetryThenLogForReplayOptions,

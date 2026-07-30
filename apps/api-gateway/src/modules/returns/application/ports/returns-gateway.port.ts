@@ -90,7 +90,10 @@ export interface IGetReturnQuery {
 }
 
 // `retail.return.list` — list one order's RMAs newest-first (owner-or-staff `order:read`
-// via `isStaff`; a non-staff caller is filtered to its own RMAs, no existence leak).
+// via `isStaff`). **A non-owner is refused with a 403, not filtered to an empty list** — the
+// answer every order-scoped list gives since ADR-051. This seam used to describe the filtered
+// behaviour, which is a different HTTP contract: a client written against it would branch on
+// `[]` and never see the refusal.
 export interface IListOrderReturnsQuery {
   orderId: number;
   actorId: string;

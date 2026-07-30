@@ -24,10 +24,16 @@ export interface IRetryThenLogForReplayOptions {
 // replay from — and **returns WITHOUT throwing**. The local write is already durable and must not be
 // unwound (ADR-032).
 //
-// **The restock is idempotent against a SEQUENTIAL replay only.** Inventory's probe on
-// `returnRequestId` reads outside its transaction and no UNIQUE backs it, so a retry that fires while
-// the original is still in flight — which is what a timeout produces — can credit the same return
-// twice. Raising `maxAttempts` widens that window, not the resilience.
+// **The restock is idempotent against a CONCURRENT redelivery too.** That is load-bearing here,
+// because a retry fired after a **timeout** travels alongside the original — a timeout does not
+// cancel the RPC. Inventory's probe on `returnRequestId` reads outside its write transaction and is
+// only the fast path; the guarantee is `UC_STOCK_MOVEMENT_DEDUPE` (migration `1783872387242`), the
+// ledger UNIQUE whose generated key is scoped to `type IN ('sale','return')` and reaches down to
+// `(variant_id, stock_location_id)` — so it holds a multi-line restock without rejecting its second
+// line. `test/concurrent-commit-sale.e2e-spec.ts` pins the restock half of that.
+//
+// So `maxAttempts` is a **latency** budget, not a safety one: the caller awaits this inside its own
+// HTTP request. It was previously justified as a safety bound, before the UNIQUE existed.
 //
 // This is a deliberate local copy of the orders module's `retry-then-log-for-replay`
 // helper: the returns bounded context cannot import the orders module (the boundaries

@@ -14,8 +14,15 @@ import { IOrderRepositoryPort } from '../ports';
 //
 // A missing order is `ORDER_NOT_FOUND`; a non-owner without the override is `ORDER_ACCESS_FORBIDDEN`.
 // **The two are deliberately distinguishable** — this surface confirms that an order exists to a
-// caller who may not read it. (`list-returns` takes the opposite posture and filters instead. Nothing
-// records which was intended.)
+// caller who may not read it.
+//
+// **That is the repository-wide answer, and it is written down now (ADR-051): a non-owner is refused
+// with a 403, never handed a filtered empty list.** `list-returns` used to dissent and filter; it no
+// longer does. The no-existence-leak posture the filter was reaching for is not available here
+// anyway — order-id existence is already confirmable by enumeration on the mutation routes, and a
+// mutation cannot be filtered. Adopting it honestly would mean turning every non-owner refusal in
+// retail into a 404. `test/order-scoped-list-refusal.e2e-spec.ts` pins all three order-scoped lists
+// to the same answer.
 export async function loadAuthorizedOrder(
   repository: IOrderRepositoryPort,
   orderId: number,

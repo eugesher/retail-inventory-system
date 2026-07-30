@@ -19,14 +19,14 @@ All six routes live on the existing gateway `OrdersController`
 (`apps/api-gateway/src/modules/orders/presentation/orders.controller.ts`,
 `@Controller('orders')`), beside the pre-existing Read / List / Capture routes.
 
-| Method | Path | Body | Auth | Result |
-| --- | --- | --- | --- | --- |
-| `POST` | `/api/orders/:orderId/fulfillments` | `{ stockLocationId?, lines: [{ orderLineId, quantity }] }` | staff `order:fulfill` | `FulfillmentView` `201` |
-| `GET` | `/api/orders/:orderId/fulfillments` | — | owner **or** staff `order:read` | `FulfillmentView[]` |
-| `POST` | `/api/orders/:orderId/fulfillments/:fulfillmentId/ship` | `{ trackingNumber?, carrier? }` + `Idempotency-Key` header | staff `order:fulfill` | `FulfillmentView` `200` |
-| `POST` | `/api/orders/:orderId/fulfillments/:fulfillmentId/deliver` | — | staff `order:fulfill` | `FulfillmentView` `200` |
-| `POST` | `/api/orders/:orderId/cancel` | `{ reason? }` | owner **or** staff `order:cancel` | `OrderView` `200` |
-| `POST` | `/api/orders/:orderId/lines/:lineId/cancel` | `{ quantity? }` | staff `order:cancel` | `OrderView` `200` |
+| Method | Path                                                       | Body                                                                      | Auth                              | Result                  |
+|--------|------------------------------------------------------------|---------------------------------------------------------------------------|-----------------------------------|-------------------------|
+| `POST` | `/api/orders/:orderId/fulfillments`                        | `{ stockLocationId?, lines: [{ orderLineId, quantity }] }`                | staff `order:fulfill`             | `FulfillmentView` `201` |
+| `GET`  | `/api/orders/:orderId/fulfillments`                        | —                                                                         | owner **or** staff `order:read`   | `FulfillmentView[]`     |
+| `POST` | `/api/orders/:orderId/fulfillments/:fulfillmentId/ship`    | `{ trackingNumber?, carrier? }` + a **required** `Idempotency-Key` header | staff `order:fulfill`             | `FulfillmentView` `200` |
+| `POST` | `/api/orders/:orderId/fulfillments/:fulfillmentId/deliver` | —                                                                         | staff `order:fulfill`             | `FulfillmentView` `200` |
+| `POST` | `/api/orders/:orderId/cancel`                              | `{ reason? }`                                                             | owner **or** staff `order:cancel` | `OrderView` `200`       |
+| `POST` | `/api/orders/:orderId/lines/:lineId/cancel`                | `{ quantity? }`                                                           | staff `order:cancel`              | `OrderView` `200`       |
 
 `orderId`, `fulfillmentId`, and `lineId` are all numeric (`BIGINT`) ids, parsed at the
 edge with `ParseIntPipe`.
@@ -75,6 +75,33 @@ the same fulfillment is a `409 FULFILLMENT_INVALID_STATUS_TRANSITION` regardless
 key. (The retail Ship use case is itself idempotent toward inventory via the
 `fulfillmentId` on Commit Sale, but that is a separate, downstream concern.) Key-based
 request dedupe is a later capability.
+
+> **That later capability landed**
+> ([ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md)), and Ship is one of
+> the four money-/stock-moving writes it covers. Every clause above is now historical:
+>
+> - the header is **required**, not optional. The route reads it with the reusable
+    > `@IdempotencyKey()` param decorator (`apps/api-gateway/src/common/decorators/`), which
+    > rejects a missing one at the edge with `400`; the retail use case keeps its own
+    > `ORDER_IDEMPOTENCY_KEY_REQUIRED` backstop for a direct RMQ caller that bypassed the
+    > gateway. `@ApiHeader({ required: true })` says so in Swagger.
+> - it **is** deduped. `ShipFulfillmentUseCase` fingerprints the canonical body (`orderId`,
+    > `fulfillmentId`, `trackingNumber`, `carrier` — transport and identity noise excluded, so
+    > a retry under a fresh `correlationId` still matches) and looks the pair
+    > `(scope='ship-fulfillment', key)` up in the `idempotency_key` table **before any side
+    > effect**. A same-key/same-body hit replays the stored `FulfillmentView` with no capture,
+    > no Commit Sale and no events; a same-key/*different*-body hit is
+    > `422 ORDER_IDEMPOTENCY_KEY_REUSED`.
+> - the RPC therefore resolves an envelope `{ view, replayed }` rather than a bare view, and
+    > the controller sets the marker header **`Idempotent-Replay: true`** on a served replay
+    > via `@Res({ passthrough: true })`. Ship stays a `200` route either way.
+>
+> The `pending`-only `409` survives underneath all of it as the backstop for a *new* key on
+> an already-shipped fulfillment. The `scope` is what keeps one client key from colliding
+> across operations — which is also why the `Idempotency-Key` **does not** help with the
+> capture race ADR-052 fixed: a ship and an explicit capture are different requests under
+> different scopes (`'ship-fulfillment'` vs `'capture-payment'`), and the store is right not
+> to conflate them.
 
 ### Error surfacing
 
@@ -136,9 +163,10 @@ the behavioral coverage, and the real end-to-end coverage is the e2e suite. The 
 Two [Kulala](https://github.com/mistweaverco/kulala.nvim) request files document the
 surface, following the conventions of the sibling files (`@baseUrl = {{ENV_BASE_URL}}`,
 `###` separators, `# @name <id>` per request, header comments citing the controller path
+
 + body shape, and a `# Prereqs:` block with the seeded logins). Variables chain through
-the captured response bodies, so each file runs top-to-bottom against a freshly seeded
-environment.
+  the captured response bodies, so each file runs top-to-bottom against a freshly seeded
+  environment.
 
 ### `http/kulala/fulfillment.http` — the happy create → ship → deliver flow
 
@@ -150,9 +178,15 @@ environment.
    `@lineOneQty`, `@lineTwoId`, `@lineTwoQty`).
 3. `createFulfillment` (one shipment covering both lines in full) → `@fulfillmentId`.
 4. `listFulfillments` (the staff `order:read` override).
-5. `shipFulfillment` (with an `Idempotency-Key`) — observe the inline auto-capture.
-6. `markDelivered` — the order rolls up to `delivered`.
-7. `getOrder` — observe all three advanced axes: `status=delivered`,
+5. `shipFulfillment` (with `@shipKey = {{$guid}}` as the `Idempotency-Key`) — observe the
+   inline auto-capture.
+6. `shipFulfillmentReplay` — the **same** key and body → `200` + `Idempotent-Replay: true`,
+   with no second capture and no second `commit-sale`; then
+   `shipFulfillmentDifferentBody` — the same key, a changed `trackingNumber` → `422`.
+   *(Both were added with [ADR-036](../../adr/036-idempotency-key-store-and-enforced-occ.md);
+   the file shipped with step 5 alone.)*
+7. `markDelivered` — the order rolls up to `delivered`.
+8. `getOrder` — observe all three advanced axes: `status=delivered`,
    `paymentStatus=captured`, `fulfillmentStatus=delivered`.
 
 ### `http/kulala/order-cancel.http` — the cancel cases
@@ -170,6 +204,11 @@ environment.
 The variable chaining (`@orderId` → `@fulfillmentId`, and the per-line ids captured from
 the place response) is what lets the files run unattended; nothing is hard-coded beyond
 the seeded variant ids and the seeded credentials.
+
+Both files have since acquired request-per-file [Posting](https://posting.sh) mirrors under
+`http/posting/fulfillment/` and `http/posting/order-cancel/` (one `*.posting.yaml` per
+request plus a shared `scripts.py`), for readers who prefer a TUI client to an editor
+plugin. The Kulala files remain the canonical description of the surface.
 
 ## 4. Honored ADRs
 
