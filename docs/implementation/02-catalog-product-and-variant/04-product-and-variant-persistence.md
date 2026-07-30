@@ -116,8 +116,15 @@ for its payload types.
 The adapter `infrastructure/persistence/catalog-typeorm.repository.ts`
 (`CatalogTypeormRepository`) implements the port, extends
 `BaseTypeormRepository<ProductEntity, Product>` for the `toDomain`/`toEntity`
-seam, and is the **only `@InjectRepository` site** in the context (it injects
-both the product and variant repositories).
+seam, and injects both the product and variant repositories. At this stage it is
+the context's **only `@InjectRepository` site**. (Since
+[ADR-029](../../adr/029-category-materialized-path-and-polymorphic-media.md) and
+[ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md) the module
+has three more — `CategoryTypeormRepository`, `MediaAssetTypeormRepository`, and
+the `ActivePriceProbeTypeormAdapter`. The rule that survived is the narrower and
+more useful one: **`@InjectRepository` appears only under
+`infrastructure/persistence/`, one adapter per aggregate seam**, never in a use
+case or a port.)
 
 `save` is overridden because the root and its variants persist explicitly
 (cascade off) and must commit atomically: it opens one transaction
@@ -148,34 +155,36 @@ tables in `up()` and drops them child-first in `down()`. `id` is
 tables already live with this same metadata/DDL split).
 
 ```sql
-CREATE TABLE product (
-  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  name        VARCHAR(255) NOT NULL,
-  slug        VARCHAR(255) NOT NULL,
-  description TEXT NULL,
-  status      ENUM('draft','active','archived') NOT NULL DEFAULT 'draft',
-  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_at  TIMESTAMP NULL,
-  CONSTRAINT UC_PRODUCT_SLUG UNIQUE (slug)
+CREATE TABLE product
+(
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(255) NOT NULL,
+    slug        VARCHAR(255) NOT NULL,
+    description TEXT NULL,
+    status      ENUM('draft','active','archived') NOT NULL DEFAULT 'draft',
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at  TIMESTAMP NULL,
+    CONSTRAINT UC_PRODUCT_SLUG UNIQUE (slug)
 );
 
-CREATE TABLE product_variant (
-  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  product_id    BIGINT UNSIGNED NOT NULL,
-  sku           VARCHAR(255) NOT NULL,
-  gtin          VARCHAR(64) NULL,
-  option_values JSON NOT NULL,
-  weight_g      INT NULL,
-  dimensions_mm JSON NULL,
-  status        ENUM('active','archived') NOT NULL DEFAULT 'active',
-  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_at    TIMESTAMP NULL,
-  CONSTRAINT UC_PRODUCT_VARIANT_SKU UNIQUE (sku),
-  CONSTRAINT UC_PRODUCT_VARIANT_GTIN UNIQUE (gtin),
-  CONSTRAINT FK_PRODUCT_VARIANT_PRODUCT FOREIGN KEY (product_id)
-    REFERENCES product (id) ON DELETE RESTRICT
+CREATE TABLE product_variant
+(
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    product_id    BIGINT UNSIGNED NOT NULL,
+    sku           VARCHAR(255) NOT NULL,
+    gtin          VARCHAR(64) NULL,
+    option_values JSON         NOT NULL,
+    weight_g      INT NULL,
+    dimensions_mm JSON NULL,
+    status        ENUM('active','archived') NOT NULL DEFAULT 'active',
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at    TIMESTAMP NULL,
+    CONSTRAINT UC_PRODUCT_VARIANT_SKU UNIQUE (sku),
+    CONSTRAINT UC_PRODUCT_VARIANT_GTIN UNIQUE (gtin),
+    CONSTRAINT FK_PRODUCT_VARIANT_PRODUCT FOREIGN KEY (product_id)
+        REFERENCES product (id) ON DELETE RESTRICT
 );
 ```
 
@@ -215,23 +224,37 @@ and reverse directions run cleanly on a seeded or unseeded schema.
 - `infrastructure/persistence/index.ts` is the barrel: it exports
   `catalogEntities = [ProductEntity, ProductVariantEntity]`, the entities, the
   mappers, and the repository (mirroring the inventory persistence barrel).
+  *(The const has since grown `CategoryEntity` and `MediaAssetEntity` —
+  ADR-029 — so it is four entries today. Adding an entity stays a one-line edit
+  in this file.)*
 - `modules/catalog/catalog.module.ts` imports
   `DatabaseModule.forFeature([ProductEntity, ProductVariantEntity])`, provides
   `CatalogTypeormRepository`, and binds `{ provide: CATALOG_REPOSITORY,
-  useExisting: CatalogTypeormRepository }` (mirroring `stock.module.ts`). The
-  `forFeature` argument is the entity-classes literal rather than the
-  `catalogEntities` const, whose looser `TypeOrmModuleOptions['entities']` type
-  does not satisfy `forFeature`'s `EntityClassOrSchema[]` parameter —
-  `forRoot` accepts the loose type, `forFeature` does not.
+  useExisting: CatalogTypeormRepository }` (mirroring `stock.module.ts`).
 - `app/app.module.ts` adds `DatabaseModule.forRoot(catalogEntities)`, so the
   service now boots with a live MySQL connection (mirroring the inventory
   `AppModule`).
+
+Both wiring lines changed later, in the same direction — **pass the const, do
+not re-list the classes**:
+
+- `catalog.module.ts` now calls `DatabaseModule.forFeature(catalogEntities)`.
+  That works because `catalogEntities` is left **unannotated**. Annotating it
+  with `TypeOrmModuleOptions['entities']` — a *parameter* type
+  (`MixedList | undefined`) — is what would stop it satisfying `forFeature`'s
+  `EntityClassOrSchema[]`; the inferred array type satisfies both. The rule is
+  therefore "never annotate the entity const", not "never pass it to
+  `forFeature`".
+- `app/app.module.ts` now calls
+  `DatabaseModule.forRoot([...catalogEntities, ...pricingEntities])` — one MySQL
+  connection shared by the two colocated modules (ADR-026).
 
 ## 6. Verification
 
 - `yarn lint` (`--max-warnings 0`) is clean: the port and domain stay
   TypeORM-free, and `CatalogTypeormRepository` is the only `InjectRepository`
-  site.
+  site (see §3 — later aggregates added one adapter each, all still under
+  `infrastructure/persistence/`).
 - `yarn test:unit` covers the mapper round-trip (domain → entity → domain
   preserves `optionValues`, `dimensionsMm`, and `status`) and the
   `existsBySlug` / `existsBySku` / `findById` behaviour, modelled on the stock
@@ -246,9 +269,20 @@ and reverse directions run cleanly on a seeded or unseeded schema.
 ## What this does not do
 
 No use cases, events, controllers, gateway routes, or cache — those build on
-this seam in later catalog work. There is no catalog seed yet; the tables are
-created empty. The `product_id` columns elsewhere in the schema
+this seam in later catalog work. There is no catalog seed at this stage; the
+tables are created empty. The `product_id` columns elsewhere in the schema
 (`product_stock`, `order_product`) are **not** reshaped onto a catalog
 `variantId` here — that cross-context reshape is owned by later inventory/retail
 work, as recorded in
 [02 — Removing the inventory `product` stub](./02-inventory-product-stub-removed.md).
+
+Both of those have since landed. `scripts/seeds/catalog-product.sql` and
+`catalog-product-variant.sql` seed two products (`aurora-desk-lamp`,
+`nimbus-office-chair`) and four variants (ids 1–4), which the stock, price and
+category seeds then key on; and the reshape onto `variantId` is complete —
+`stock_level.variant_id`, `cart_line.variant_id` and `order_line.variant_id` are
+all real FKs onto `product_variant (id)` (ADR-027 / ADR-028). The `product_variant`
+table also gained a nullable `tax_category_id` FK
+([ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md),
+`ON DELETE SET NULL`) — written by the *pricing* module through parameterized
+SQL, which is why it appears in the schema but **not** on `ProductVariantEntity`.

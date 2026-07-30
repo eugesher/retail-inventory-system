@@ -9,6 +9,12 @@
 # register/add-variant/archive, catalog:publish for publish); read routes are
 # @Public(), so an unauthenticated shopper can browse the catalogue.
 #
+# Two setPrice blocks (pricing:write) sit between add-variant and publish. They
+# are NOT part of the catalog surface — they are there because publish hard-fails
+# with 409 CATALOG_PRODUCT_PUBLISH_REQUIRES_PRICE unless every variant carries an
+# in-effect DEFAULT_CURRENCY price (ADR-026). Without them this file cannot run
+# top to bottom.
+#
 # All routes sit behind the global "api" prefix configured in main.ts via
 # app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
 # resolves to http://localhost:3000/api.
@@ -126,13 +132,60 @@ Content-Type: application/json
 }
 
 ###
+@variantIdGraphite = {{addVariantGraphite.response.body.$.id}}
+
+###
+
+# @name setPriceBlack
+# POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+# Publish hard-fails with 409 CATALOG_PRODUCT_PUBLISH_REQUIRES_PRICE unless EVERY
+# variant carries an in-effect price in DEFAULT_CURRENCY (USD), so the two blocks
+# here are a prerequisite of publishProduct below, not a pricing demo — the
+# pricing surface itself is exercised in http/kulala/pricing.http. validFrom is
+# omitted, so the domain stamps it to now and opens the row (validTo = null).
+# The seeded admin holds pricing:write alongside the catalog codes, so the same
+# @accessToken works. Response is PriceView.
+POST {{baseUrl}}/catalog/variants/{{variantId}}/prices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD",
+  "amountMinor": 129900,
+  "priority": 0
+}
+
+###
+
+# @name setPriceGraphite
+# POST /api/catalog/variants/:variantId/prices  (Bearer — pricing:write)
+# The second variant's price. One unpriced variant is enough to fail the whole
+# publish — the probe reports every variant that lacks a price, and a non-empty
+# result blocks the transition.
+POST {{baseUrl}}/catalog/variants/{{variantIdGraphite}}/prices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "currency": "USD",
+  "amountMinor": 134900,
+  "priority": 0
+}
+
+###
 
 # @name publishProduct
 # POST /api/catalog/products/:productId/publish  (Bearer — catalog:publish)
-# Transitions the product draft -> active (the domain enforces >= 1 variant).
-# Returns 200 (a state transition, not a creation) with ProductView
+# Transitions the product draft -> active. Two HARD preconditions gate it: the
+# domain requires >= 1 variant, and the use case requires an in-effect
+# DEFAULT_CURRENCY price on EVERY variant (ADR-026) — hence the two setPrice
+# blocks above. Returns 200 (a state transition, not a creation) with ProductView
 # { ..., status: 'active', publishedAt }. catalog:publish is a higher-trust code
 # than catalog:write — a role may hold write without publish.
+#
+# The response also carries warnings[] with CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA,
+# because no media asset was attached. That is a SOFT recommendation (ADR-029 §7),
+# checked after the save and unable to block: the publish still returns 200.
 POST {{baseUrl}}/catalog/products/{{productId}}/publish
 Authorization: Bearer {{accessToken}}
 

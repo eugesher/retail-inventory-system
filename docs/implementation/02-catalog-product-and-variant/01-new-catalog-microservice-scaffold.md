@@ -87,27 +87,39 @@ The `configModuleConfig` Joi schema in `libs/config` is shared by every service,
 so the catalog container must still satisfy its **required** keys even for keys
 catalog does not functionally use:
 
-| Variable | Why catalog sets it |
-| --- | --- |
-| `RABBITMQ_URL` | The transport the service binds to — its reason for existing. |
-| `DATABASE_URL` | Required by the shared schema; consumed once persistence lands. |
-| `REDIS_URL` | Required by the shared schema (`.required()`), even though catalog does not cache — it is set to keep validation passing, not because a Redis client is opened. |
-| `OTEL_SERVICE_NAME` | Required; set to `catalog-microservice` so its spans are distinguishable in Jaeger. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Required; the collector endpoint, must end in `/v1/traces`. |
+| Variable                      | Why catalog sets it                                                                                                                                             |
+|-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `RABBITMQ_URL`                | The transport the service binds to — its reason for existing.                                                                                                   |
+| `DATABASE_URL`                | Required by the shared schema; consumed once persistence lands.                                                                                                 |
+| `REDIS_URL`                   | Required by the shared schema (`.required()`), even though catalog does not cache — it is set to keep validation passing, not because a Redis client is opened. |
+| `OTEL_SERVICE_NAME`           | Required; set to `catalog-microservice` so its spans are distinguishable in Jaeger.                                                                             |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Required; the collector endpoint, must end in `/v1/traces`.                                                                                                     |
 
 `CACHE_TTL_MS_DEFAULT` is deliberately **omitted** from the catalog container's
 environment. Unlike `REDIS_URL`, that key is optional in the shared schema
 (`.default(60000)`), and the catalog service has no cache to tune — carrying it
 would imply a caching concern the service does not have. This is the one place
 the catalog compose block diverges from the notification block it is otherwise
-modelled on.
+modelled on. (It still is: the omission survives in `docker-compose.yml` today.)
+
+The table above is the key set **as of this scaffold**. The shared Joi schema has
+since gained two more keys the catalog container sets: `EVENTSTORE_DATABASE_URL`
+(required of every service by the schema, opened only by the event store —
+[ADR-034](../../adr/034-isolated-eventstore-database.md)) and `DEFAULT_CURRENCY`
+(the currency the publish precondition resolves against —
+[ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md), wired
+through the `CATALOG_DEFAULT_CURRENCY` token in `catalog.module.ts`).
 
 ## 3. Per-module hexagonal skeleton
 
 The service follows the per-module hexagonal layout that every service in this
 repository uses ([ADR-004](../../adr/004-adopt-hexagonal-architecture-per-service.md)),
-modelled on the notification microservice, which is the canonical template. Its
-single bounded context is `catalog`:
+modelled on the notification microservice, which is the canonical template. At
+this stage its single bounded context is `catalog`. (Since
+[ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md) the same
+deployable also hosts a colocated `modules/pricing/` sharing the one
+`catalog_queue` and the one MySQL connection — still one deployable, two
+modules.) The scaffold:
 
 ```
 apps/catalog-microservice/src/
@@ -135,6 +147,12 @@ the four canonical layers under `modules/catalog/`:
 
 Keeping the empty module on these exact paths means the boundaries lint (next
 section) classifies future files correctly the moment they are added.
+
+Two things later work added beside this skeleton, both outside any module:
+`app/health.controller.ts` (the deployable's liveness probe on
+`catalog.health.ping` — liveness belongs to the deployable, not a bounded
+context, [ADR-044](../../adr/044-system-health-fan-out.md)) and the `pricing`
+sibling under `modules/` noted above.
 
 ## 4. Monorepo + ops wiring
 
