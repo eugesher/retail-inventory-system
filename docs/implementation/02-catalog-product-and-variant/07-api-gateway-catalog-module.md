@@ -70,8 +70,7 @@ the module that imports `ClientProxy`. It implements `ICatalogGatewayPort` and
 materializes every RPC with `firstValueFrom(client.send(ROUTING_KEYS.CATALOG_*,
 { ...payload, correlationId }))` — the same shape `InventoryRabbitmqAdapter`
 uses. The dotted routing keys (`catalog.product.register`, …) come from
-`ROUTING_KEYS`, never from the legacy `MicroserviceMessagePatternEnum`
-([ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md)).
+`ROUTING_KEYS` ([ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md)).
 
 The port (`application/ports/catalog-gateway.port.ts`) declares its inputs as
 **business-shaped command/query interfaces** (`IRegisterProductCommand`,

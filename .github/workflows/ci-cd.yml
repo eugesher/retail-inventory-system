@@ -5,26 +5,26 @@ on: push
 jobs:
   lint:
     runs-on: ubuntu-latest
-    # Today this job runs `yarn lint` only. A later step in the architecture
-    # migration adds a sibling `yarn lint:architecture` step that enforces
-    # the hexagonal layer rules (domain → application → infrastructure /
-    # presentation) via `eslint-plugin-boundaries`. The plugin is already
-    # installed (see ADR-004) but intentionally not wired into
-    # eslint.config.mjs until services have reached the target shape.
+    # This job IS the architecture gate. `eslint-plugin-boundaries` is wired into
+    # `eslint.config.mjs` itself — ADR-017 §5 chose one config in one job and rejected the
+    # split-config / second-script shape — so a layer violation fails `yarn lint` like any
+    # other rule, under `--max-warnings 0`. There is no `yarn lint:architecture` step and
+    # none is planned: ADR-017 §5 keeps it only as an optional ergonomics add-on.
+    #
+    # Backstop: `spec/architecture-lint.spec.ts`, in the `unit` job below. It lints its
+    # fixtures against the RESOLVED production config (`eslint --print-config`), never a
+    # copy, so weakening a rule, downgrading a severity or reshuffling the element order
+    # turns that suite red. Drift is not detected there; it is impossible.
+    #
+    # So a `boundaries/*` failure in this job is a misplaced file, not a config bug — do not
+    # relax the rule to get green. The taxonomy is deliberately not restated here: it lives
+    # in `eslint.config.mjs` and ADR-017, and the comment this replaces is why. It described
+    # a migration plan instead of the file, and had claimed boundaries was NOT wired since
+    # 2026-05-14 — to the one reader who arrives here because `boundaries/*` just failed.
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.13.1
-          cache: 'yarn'
-
-      - name: Install Yarn
-        run: corepack enable
-
-      - name: Install dependencies
-        run: yarn install --immutable
+      - uses: ./.github/actions/setup
 
       - name: Lint
         run: yarn lint
@@ -35,17 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.13.1
-          cache: 'yarn'
-
-      - name: Install Yarn
-        run: corepack enable
-
-      - name: Install dependencies
-        run: yarn install --immutable
+      - uses: ./.github/actions/setup
 
       - name: Build
         run: yarn build
@@ -56,17 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.13.1
-          cache: 'yarn'
-
-      - name: Install Yarn
-        run: corepack enable
-
-      - name: Install dependencies
-        run: yarn install --immutable
+      - uses: ./.github/actions/setup
 
       - name: Run unit tests
         run: yarn test:unit
@@ -139,17 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.13.1
-          cache: 'yarn'
-
-      - name: Install Yarn
-        run: corepack enable
-
-      - name: Install dependencies
-        run: yarn install --immutable
+      - uses: ./.github/actions/setup
 
       # The MySQL service container auto-creates only `retail_db` (its `MYSQL_DATABASE`).
       # The event store's isolated `ris_eventstore` schema (ADR-034) — provisioned

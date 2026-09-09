@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 
 import { PermissionCodeEnum, RoleEnum } from '@retail-inventory-system/contracts';
+import { asReconstituted } from '@retail-inventory-system/ddd/testing';
 
 import { RoleAggregate } from '../../../domain';
 import { IRoleRepositoryPort } from '../../ports';
@@ -41,9 +42,12 @@ class InMemoryRoleRepository implements IRoleRepositoryPort {
     return Promise.resolve(Array.from(this.byName.values()));
   }
 
+  // Reconstituted, like the real adapter — see `asReconstituted` (ADR-060). `RoleAggregate`
+  // records no domain events today, so this changes nothing observable; the rule is applied
+  // anyway, because "records none today" is the state that quietly stops being true.
   public save(role: RoleAggregate): Promise<RoleAggregate> {
     this.register(role);
-    return Promise.resolve(role);
+    return Promise.resolve(asReconstituted(role));
   }
 
   public update(role: RoleAggregate, codes?: PermissionCodeEnum[]): Promise<RoleAggregate> {

@@ -1,7 +1,11 @@
 # ADR-018: NestJS monorepo with `apps/` and `libs/`
 
 - **Date**: 2026-05-14
-- **Status**: Accepted
+- **Status**: Accepted — the container clause below (*"its own container image, built by the
+  per-service Dockerfile"*) is **superseded** by
+  [ADR-061](061-one-parameterized-dockerfile.md): the four per-service Dockerfiles were replaced
+  by one root `Dockerfile` taking `ARG APP_NAME` in `d8e6bf9` (2026-04-03), six weeks before this
+  ADR was written. The `apps/` / `libs/` layout and the path-alias decision stand.
 
 ---
 

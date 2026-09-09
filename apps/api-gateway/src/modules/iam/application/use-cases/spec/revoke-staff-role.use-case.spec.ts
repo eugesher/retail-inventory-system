@@ -2,7 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { RoleAggregate, StaffUser, StaffUserRoleRevokedEvent } from '../../../../auth';
+import { RoleAggregate, StaffUser } from '../../../../auth';
 import { RevokeStaffRoleUseCase } from '../revoke-staff-role.use-case';
 import { FakeAuditLogPublisher, InMemoryStaffUserRepository } from './test-doubles';
 
@@ -29,7 +29,10 @@ describe('RevokeStaffRoleUseCase', () => {
     useCase = new RevokeStaffRoleUseCase(staffUsers, audit);
   });
 
-  it('revokes a role and records the event', async () => {
+  // The recorded `StaffUserRoleRevokedEvent` is asserted in `staff-user.model.spec.ts` — see the
+  // note in `assign-staff-role.use-case.spec.ts` for why it cannot honestly be asserted off a
+  // `save()` return.
+  it('revokes a role', async () => {
     staffUsers.seed(
       StaffUser.register('staff-1', {
         email: 'staff@example.com',
@@ -40,11 +43,6 @@ describe('RevokeStaffRoleUseCase', () => {
 
     const result = await useCase.execute({ staffUserId: 'staff-1', roleName: 'order-support' });
     expect(result.roles.map((r) => r.name)).toEqual(['admin']);
-    const events = result.pullDomainEvents();
-    const revokedEvent = events.find(
-      (e): e is StaffUserRoleRevokedEvent => e instanceof StaffUserRoleRevokedEvent,
-    );
-    expect(revokedEvent?.revokedRoleName).toBe('order-support');
   });
 
   it('throws NotFoundException when the staff user does not exist', async () => {

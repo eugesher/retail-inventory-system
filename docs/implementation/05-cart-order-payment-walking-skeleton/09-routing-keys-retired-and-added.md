@@ -10,8 +10,8 @@ leg survived the rebuild.
 
 Routing keys are the dotted `<service>.<aggregate>.<action>` constants in
 [`libs/messaging/routing-keys.constants.ts`](../../../libs/messaging/routing-keys.constants.ts),
-mirrored value-for-value in `MicroserviceMessagePatternEnum`
-([ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md)). Every queue binds the
+declared once, per the dotted convention of
+[ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md). Every queue binds the
 default exchange today, so an **event producer publishes onto the consumer's queue**,
 not its own — the producer-targets-consumer-queue pattern.
 

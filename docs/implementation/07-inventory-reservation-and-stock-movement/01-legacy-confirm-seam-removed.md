@@ -30,10 +30,8 @@ libraries:
    imported any of them, and the `libs/contracts/inventory` barrel no longer
    re-exports it.
 
-3. **The `inventory.order.confirm` routing key**, deleted from **both** mirrored
-   surfaces — `ROUTING_KEYS` in `libs/messaging` and
-   `MicroserviceMessagePatternEnum` in `libs/contracts/microservices` — and from
-   the lock-step spec that asserts the two agree value-for-value.
+3. **The `inventory.order.confirm` routing key**, deleted from `ROUTING_KEYS` in
+   `libs/messaging` and from the spec that covered it.
 
 4. **The old-shape reservation event stubs.** Two domain event classes,
    `StockReservedEvent` and `StockReleasedEvent`, were shaped on retired concepts
@@ -92,9 +90,8 @@ removal: delete the obsolete surface outright and update or delete every
 reference in the same change, so the final state carries exactly one shape per
 concept.
 
-The dotted-routing-key contract and its value-for-value mirror are upheld
-throughout — the key vanished from `ROUTING_KEYS` and
-`MicroserviceMessagePatternEnum` together, keeping the two surfaces in agreement
+The dotted-routing-key contract is upheld throughout — the key vanished from
+`ROUTING_KEYS`, the one place it was declared
 ([ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md)).
 
 ## Verification

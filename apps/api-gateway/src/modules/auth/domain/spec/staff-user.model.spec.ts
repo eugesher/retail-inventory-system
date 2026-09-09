@@ -1,5 +1,6 @@
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
+import { StaffUserRoleRevokedEvent, StaffUserRolesAssignedEvent } from '../events';
 import { RoleAggregate } from '../role.aggregate';
 import { IPasswordHasher, StaffUser } from '../staff-user.model';
 
@@ -109,6 +110,54 @@ describe('StaffUser', () => {
     it('revokeRole refuses to remove the last role', () => {
       const user = makeStaff({ roles: [adminRole()] });
       expect(() => user.revokeRole(adminRole())).toThrow(/last remaining role/);
+    });
+  });
+
+  // These live here, on the aggregate, and NOT on an IAM use case's `save()` return. Nothing in
+  // production drains this queue — `docs/implementation/01-…/05-iam-admin-endpoints.md` calls it
+  // latent scaffolding and names `AUDIT_LOG_PUBLISHER` as the effective audit surface — and a
+  // repository's `save` returns a reconstituted aggregate, which carries no events at all. Three
+  // use-case specs used to assert them off that return; they passed only because an in-memory
+  // double handed back its own argument.
+  //
+  // The diff itself is the use case's to compute (see `recordRolesAssigned`'s note in the model);
+  // what the aggregate owes is recording exactly what it was handed.
+  describe('recordRolesAssigned / recordRoleRevoked', () => {
+    // `register` records a `StaffUserRegisteredEvent`, so every case drains first.
+    const freshStaff = (): StaffUser => {
+      const user = makeStaff();
+      user.pullDomainEvents();
+      return user;
+    };
+
+    it('records StaffUserRolesAssigned carrying the supplied diff', () => {
+      const user = freshStaff();
+
+      user.recordRolesAssigned(['admin']);
+
+      const assigned = user
+        .pullDomainEvents()
+        .find((e): e is StaffUserRolesAssignedEvent => e instanceof StaffUserRolesAssignedEvent);
+      expect(assigned?.assignedRoleNames).toEqual(['admin']);
+    });
+
+    it('records nothing when the diff is empty — the idempotent re-assign', () => {
+      const user = freshStaff();
+
+      user.recordRolesAssigned([]);
+
+      expect(user.pullDomainEvents()).toHaveLength(0);
+    });
+
+    it('records StaffUserRoleRevoked carrying the revoked name', () => {
+      const user = freshStaff();
+
+      user.recordRoleRevoked('order-support');
+
+      const revoked = user
+        .pullDomainEvents()
+        .find((e): e is StaffUserRoleRevokedEvent => e instanceof StaffUserRoleRevokedEvent);
+      expect(revoked?.revokedRoleName).toBe('order-support');
     });
   });
 

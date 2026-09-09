@@ -176,9 +176,9 @@ decorators on DTOs are the documented lib-contracts exception —
   `IRetailCartLineAddedEvent`, `IRetailCartLineRemovedEvent`,
   `IRetailCartLineQuantityChangedEvent`, each `eventVersion: 'v1'`.
 
-Two families of routing key live in `ROUTING_KEYS` and the mirrored
-`MicroserviceMessagePatternEnum` (kept value-for-value, asserted by the
-routing-keys spec — [ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md)):
+Two families of routing key live in `ROUTING_KEYS` (the dotted convention of
+[ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md), asserted by the
+routing-keys spec):
 
 - the four **event** keys (`retail.cart.created`, `retail.cart.line-added`,
   `retail.cart.line-removed`, `retail.cart.line-quantity-changed`) — past-tense

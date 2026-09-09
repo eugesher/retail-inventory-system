@@ -1,320 +1,47 @@
-import { MicroserviceMessagePatternEnum } from '@retail-inventory-system/contracts';
-
 import { ROUTING_KEYS } from '../routing-keys.constants';
 
-// Wire-format alignment: the `ROUTING_KEYS` constants in `libs/messaging` and
-// the `MicroserviceMessagePatternEnum` values in `libs/contracts` must agree
-// — both libraries are imported by gateway and microservices and a drift
-// would silently route messages to the wrong queue.
+// **These are invariants, not a snapshot.** Nothing below names an individual routing key: add
+// one tomorrow and this file does not change.
+//
+// What it replaces was the opposite — 112 hand-written
+// `expect(ROUTING_KEYS.X).toBe(MicroserviceMessagePatternEnum.X)` lines, one per member of the
+// back-compat mirror enum that ADR-059 deleted. That suite could see exactly one failure mode:
+// a value changed under a name present on BOTH sides. A key added to only one side was
+// invisible to it, and five had been (`audit.staff.action` and the four consent / marketing
+// keys) — deliberately, since the enum existed only for callers predating `ROUTING_KEYS`. So
+// 112 green assertions were pinning a snapshot of 2026-06 and calling it lock-step.
 describe('ROUTING_KEYS', () => {
-  it('matches MicroserviceMessagePatternEnum values', () => {
-    expect(ROUTING_KEYS.INVENTORY_STOCK_LOW).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LOW,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_RECEIVED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RECEIVED,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_ADJUSTED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_ADJUSTED,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_GET).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_GET,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_RECEIVE).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_RECEIVE,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_ADJUST).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_ADJUST,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_TRANSFER).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_TRANSFER,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_LEVEL_INITIALIZED,
-    );
-    expect(ROUTING_KEYS.INVENTORY_LOCATION_LIST).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_LOCATION_LIST,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_LIST).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_MOVEMENT_LIST,
-    );
-    expect(ROUTING_KEYS.INVENTORY_RESERVATION_RESERVE).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_RESERVE,
-    );
-    expect(ROUTING_KEYS.INVENTORY_RESERVATION_RELEASE).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_RELEASE,
-    );
-    expect(ROUTING_KEYS.INVENTORY_RESERVATION_SWEEP).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_SWEEP,
-    );
-    expect(ROUTING_KEYS.INVENTORY_RESERVATION_ALLOCATE).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_RESERVATION_ALLOCATE,
-    );
-    expect(ROUTING_KEYS.INVENTORY_ALLOCATION_CANCEL).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_ALLOCATION_CANCEL,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_RESERVED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RESERVED,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_ALLOCATED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_ALLOCATED,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_RELEASED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RELEASED,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_RECORDED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_MOVEMENT_RECORDED,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_COMMIT_SALE).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_COMMIT_SALE,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_COMMITTED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_COMMITTED,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_RESTOCK_FROM_RETURN).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RESTOCK_FROM_RETURN,
-    );
-    expect(ROUTING_KEYS.INVENTORY_STOCK_RETURNED).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_STOCK_RETURNED,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRODUCT_REGISTER).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_REGISTER,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRODUCT_PUBLISH).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_PUBLISH,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRODUCT_ARCHIVE).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_ARCHIVE,
-    );
-    expect(ROUTING_KEYS.CATALOG_VARIANT_CREATE).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_VARIANT_CREATE,
-    );
-    expect(ROUTING_KEYS.CATALOG_VARIANT_CREATED).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_VARIANT_CREATED,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRODUCT_PUBLISHED).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_PUBLISHED,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRODUCT_ARCHIVED).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_ARCHIVED,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRODUCT_LIST).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_LIST,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRODUCT_GET).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_GET,
-    );
-    expect(ROUTING_KEYS.CATALOG_VARIANT_GET).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_VARIANT_GET,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRICE_SET).toBe(MicroserviceMessagePatternEnum.CATALOG_PRICE_SET);
-    expect(ROUTING_KEYS.CATALOG_PRICE_LIST).toBe(MicroserviceMessagePatternEnum.CATALOG_PRICE_LIST);
-    expect(ROUTING_KEYS.CATALOG_PRICE_SELECT).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRICE_SELECT,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRICE_CHANGED).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRICE_CHANGED,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRICE_SCHEDULED).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRICE_SCHEDULED,
-    );
-    expect(ROUTING_KEYS.CATALOG_TAX_CATEGORY_CREATE).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_TAX_CATEGORY_CREATE,
-    );
-    expect(ROUTING_KEYS.CATALOG_TAX_CATEGORY_LIST).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_TAX_CATEGORY_LIST,
-    );
-    expect(ROUTING_KEYS.CATALOG_VARIANT_SET_TAX_CATEGORY).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_VARIANT_SET_TAX_CATEGORY,
-    );
-    expect(ROUTING_KEYS.CATALOG_CATEGORY_CREATE).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_CATEGORY_CREATE,
-    );
-    expect(ROUTING_KEYS.CATALOG_CATEGORY_REPARENT).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_CATEGORY_REPARENT,
-    );
-    expect(ROUTING_KEYS.CATALOG_CATEGORY_LIST).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_CATEGORY_LIST,
-    );
-    expect(ROUTING_KEYS.CATALOG_CATEGORY_GET_TREE).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_CATEGORY_GET_TREE,
-    );
-    expect(ROUTING_KEYS.CATALOG_CATEGORY_LIST_PRODUCTS).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_CATEGORY_LIST_PRODUCTS,
-    );
-    expect(ROUTING_KEYS.CATALOG_PRODUCT_RECLASSIFY).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_PRODUCT_RECLASSIFY,
-    );
-    expect(ROUTING_KEYS.CATALOG_MEDIA_ATTACH).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_MEDIA_ATTACH,
-    );
-    expect(ROUTING_KEYS.CATALOG_MEDIA_REORDER).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_MEDIA_REORDER,
-    );
-    expect(ROUTING_KEYS.CATALOG_MEDIA_DETACH).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_MEDIA_DETACH,
-    );
-    expect(ROUTING_KEYS.CATALOG_MEDIA_LIST).toBe(MicroserviceMessagePatternEnum.CATALOG_MEDIA_LIST);
-    expect(ROUTING_KEYS.RETAIL_CART_CREATE).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_CREATE);
-    expect(ROUTING_KEYS.RETAIL_CART_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_GET);
-    expect(ROUTING_KEYS.RETAIL_CART_ADD_LINE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_CART_ADD_LINE,
-    );
-    expect(ROUTING_KEYS.RETAIL_CART_CHANGE_LINE_QUANTITY).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_CART_CHANGE_LINE_QUANTITY,
-    );
-    expect(ROUTING_KEYS.RETAIL_CART_REMOVE_LINE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_CART_REMOVE_LINE,
-    );
-    expect(ROUTING_KEYS.RETAIL_CART_CLAIM).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_CLAIM);
-    expect(ROUTING_KEYS.RETAIL_CART_PLACE).toBe(MicroserviceMessagePatternEnum.RETAIL_CART_PLACE);
-    expect(ROUTING_KEYS.RETAIL_ORDER_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_ORDER_GET);
-    expect(ROUTING_KEYS.RETAIL_ORDER_LIST).toBe(MicroserviceMessagePatternEnum.RETAIL_ORDER_LIST);
-    expect(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_PAYMENT_CAPTURE,
-    );
-    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_CREATE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_CREATE,
-    );
-    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_LIST).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_LIST,
-    );
-    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_SHIP).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_SHIP,
-    );
-    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_DELIVER).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_DELIVER,
-    );
-    expect(ROUTING_KEYS.RETAIL_ORDER_CANCEL).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCEL,
-    );
-    expect(ROUTING_KEYS.RETAIL_ORDER_CANCEL_LINE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCEL_LINE,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_OPEN).toBe(MicroserviceMessagePatternEnum.RETAIL_RETURN_OPEN);
-    expect(ROUTING_KEYS.RETAIL_RETURN_AUTHORIZE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_AUTHORIZE,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_REJECT).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_REJECT,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_RECEIVE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_RECEIVE,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_INSPECT).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_INSPECT,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_CLOSE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_CLOSE,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_GET).toBe(MicroserviceMessagePatternEnum.RETAIL_RETURN_GET);
-    expect(ROUTING_KEYS.RETAIL_RETURN_LIST).toBe(MicroserviceMessagePatternEnum.RETAIL_RETURN_LIST);
-    expect(ROUTING_KEYS.RETAIL_REFUND_ISSUE).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_REFUND_ISSUE,
-    );
-    expect(ROUTING_KEYS.RETAIL_REFUND_LIST).toBe(MicroserviceMessagePatternEnum.RETAIL_REFUND_LIST);
-    expect(ROUTING_KEYS.RETAIL_RETURN_REQUESTED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_REQUESTED,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_AUTHORIZED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_AUTHORIZED,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_REJECTED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_REJECTED,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_RECEIVED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_RECEIVED,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_INSPECTED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_INSPECTED,
-    );
-    expect(ROUTING_KEYS.RETAIL_RETURN_CLOSED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_RETURN_CLOSED,
-    );
-    expect(ROUTING_KEYS.RETAIL_REFUND_ISSUED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_REFUND_ISSUED,
-    );
-    expect(ROUTING_KEYS.RETAIL_REFUND_FAILED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_REFUND_FAILED,
-    );
-    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_CREATED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_CREATED,
-    );
-    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_SHIPPED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_SHIPPED,
-    );
-    expect(ROUTING_KEYS.RETAIL_FULFILLMENT_DELIVERED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_FULFILLMENT_DELIVERED,
-    );
-    expect(ROUTING_KEYS.RETAIL_ORDER_CANCELLED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_CANCELLED,
-    );
-    expect(ROUTING_KEYS.RETAIL_PAYMENT_CAPTURED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_PAYMENT_CAPTURED,
-    );
-    expect(ROUTING_KEYS.RETAIL_ORDER_PLACED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_ORDER_PLACED,
-    );
-    expect(ROUTING_KEYS.RETAIL_PAYMENT_AUTHORIZED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_PAYMENT_AUTHORIZED,
-    );
-    expect(ROUTING_KEYS.RETAIL_CART_CREATED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_CART_CREATED,
-    );
-    expect(ROUTING_KEYS.RETAIL_CART_LINE_ADDED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_CART_LINE_ADDED,
-    );
-    expect(ROUTING_KEYS.RETAIL_CART_LINE_REMOVED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_CART_LINE_REMOVED,
-    );
-    expect(ROUTING_KEYS.RETAIL_CART_LINE_QUANTITY_CHANGED).toBe(
-      MicroserviceMessagePatternEnum.RETAIL_CART_LINE_QUANTITY_CHANGED,
-    );
-    expect(ROUTING_KEYS.NOTIFICATION_HEALTH_PING).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATION_HEALTH_PING,
-    );
-    expect(ROUTING_KEYS.CATALOG_HEALTH_PING).toBe(
-      MicroserviceMessagePatternEnum.CATALOG_HEALTH_PING,
-    );
-    expect(ROUTING_KEYS.INVENTORY_HEALTH_PING).toBe(
-      MicroserviceMessagePatternEnum.INVENTORY_HEALTH_PING,
-    );
-    expect(ROUTING_KEYS.RETAIL_HEALTH_PING).toBe(MicroserviceMessagePatternEnum.RETAIL_HEALTH_PING);
-    expect(ROUTING_KEYS.AUDIT_HEALTH_PING).toBe(MicroserviceMessagePatternEnum.AUDIT_HEALTH_PING);
-    expect(ROUTING_KEYS.NOTIFICATION_TEMPLATE_AUTHOR).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATION_TEMPLATE_AUTHOR,
-    );
-    expect(ROUTING_KEYS.NOTIFICATION_TEMPLATE_SET_ACTIVE).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATION_TEMPLATE_SET_ACTIVE,
-    );
-    expect(ROUTING_KEYS.NOTIFICATION_TEMPLATE_LIST).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATION_TEMPLATE_LIST,
-    );
-    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_LIST).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_LIST,
-    );
-    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_GET).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_GET,
-    );
-    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_RECORD_OUTCOME).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_RECORD_OUTCOME,
-    );
-    expect(ROUTING_KEYS.NOTIFICATION_DELIVERY_RETRY).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATION_DELIVERY_RETRY,
-    );
-    expect(ROUTING_KEYS.NOTIFICATIONS_DELIVERY_FAILED).toBe(
-      MicroserviceMessagePatternEnum.NOTIFICATIONS_DELIVERY_FAILED,
-    );
-    expect(ROUTING_KEYS.AUDIT_EVENT_QUERY).toBe(MicroserviceMessagePatternEnum.AUDIT_EVENT_QUERY);
-    expect(ROUTING_KEYS.AUDIT_ENTRY_QUERY).toBe(MicroserviceMessagePatternEnum.AUDIT_ENTRY_QUERY);
-    expect(ROUTING_KEYS.AUDIT_TRACE_BY_CORRELATION).toBe(
-      MicroserviceMessagePatternEnum.AUDIT_TRACE_BY_CORRELATION,
-    );
+  const entries = Object.entries(ROUTING_KEYS);
+
+  // Guard: every loop below is vacuously green over an empty object. If the constants ever move
+  // or the import resolves to `{}`, this is the test that says so.
+  it('is a non-empty registry', () => {
+    expect(entries.length).toBeGreaterThan(50);
   });
 
-  it('uses dotted naming convention', () => {
-    for (const value of Object.values(ROUTING_KEYS)) {
+  // The invariant the deleted enum was standing in for. `INVENTORY_STOCK_LEVEL_GET` ⇄
+  // `'inventory.stock-level.get'`: the name is the value with `.` and `-` as `_`, upper-cased.
+  // It ties the two halves of every entry to each other, so a typo in EITHER half fails — and
+  // it does so for keys that do not exist yet, which is what a second table could never do.
+  it('derives every constant name from its wire value', () => {
+    for (const [name, value] of entries) {
+      expect(name).toBe(value.replace(/[.-]/g, '_').toUpperCase());
+    }
+  });
+
+  // Dotted `<service>.<aggregate>.<action>` (ADR-008). Not pinned to exactly three segments:
+  // `customer.erased` has two, and a rule with an exception list would be the hand-maintained
+  // table this suite just stopped being.
+  it('uses the dotted lower-case wire convention', () => {
+    for (const [, value] of entries) {
       expect(value).toMatch(/^[a-z]+(\.[a-z-]+)+$/);
     }
+  });
+
+  // Two names on one wire key would make two logical operations indistinguishable on the bus,
+  // and the consumer would answer whichever handler bound last.
+  it('maps no two names onto the same wire key', () => {
+    const values = entries.map(([, value]) => value);
+    expect(new Set(values).size).toBe(values.length);
   });
 });

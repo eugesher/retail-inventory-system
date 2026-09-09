@@ -126,10 +126,12 @@ Two new pieces in [`libs/messaging`](../../../libs/messaging) carry the producer
 A new routing key, `ROUTING_KEYS.AUDIT_STAFF_ACTION = 'audit.staff.action'`
 ([`routing-keys.constants.ts`](../../../libs/messaging/routing-keys.constants.ts)),
 names the first stream to ride the exchange. It is the cross-cutting staff-action audit
-stream, consumed only by the event store's audit-log ingest. The legacy
-`MicroserviceMessagePatternEnum` mirror is intentionally **not** extended for it — that
-enum is a back-compat surface only, and a brand-new event has no prior consumer to keep
-compatible.
+stream, consumed only by the event store's audit-log ingest. It was deliberately **not**
+added to the `MicroserviceMessagePatternEnum` mirror that still existed at the time — that
+enum was a back-compat surface only, and a brand-new event had no prior consumer to keep
+compatible. Four later keys were omitted on the same grounds, and
+[ADR-059](../../adr/059-deleting-the-routing-key-mirror-enum.md) eventually deleted the
+enum outright.
 
 ## 5. The audit publisher: the first producer onto `ris.events`
 

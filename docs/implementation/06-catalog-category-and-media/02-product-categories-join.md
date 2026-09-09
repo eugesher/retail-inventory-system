@@ -251,7 +251,7 @@ its own decision when a consumer exists.
 | Category-scoped product browse SQL                         | `infrastructure/persistence/catalog-typeorm.repository.ts` (`listActiveByCategoryIds`)                                                                                |
 | RPC handlers (4)                                           | `presentation/category.controller.ts`                                                                                                                                 |
 | Wire contracts                                             | `libs/contracts/catalog/dto/{category-tree,product-categories}.view.ts`, `interfaces/{category-list,category-tree,category-products,product-reclassify}.interface.ts` |
-| Routing keys                                               | `libs/messaging/routing-keys.constants.ts` + the mirrored `MicroserviceMessagePatternEnum`                                                                            |
+| Routing keys                                               | `libs/messaging/routing-keys.constants.ts`                                                                            |
 
 With these four operations, the category surface is **RPC-complete**:
 create, reparent, list, tree, browse, and reclassify all exist over RabbitMQ. What
