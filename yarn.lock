@@ -4763,6 +4763,12 @@ __metadata:
   languageName: node
   linkType: hard
 
+"catalog-microservice@workspace:apps/catalog-microservice":
+  version: 0.0.0-use.local
+  resolution: "catalog-microservice@workspace:apps/catalog-microservice"
+  languageName: unknown
+  linkType: soft
+
 "chalk@npm:4.1.2, chalk@npm:^4.0.0, chalk@npm:^4.1.0, chalk@npm:^4.1.2":
   version: 4.1.2
   resolution: "chalk@npm:4.1.2"
@@ -5852,6 +5858,12 @@ __metadata:
   checksum: 10c0/12be11ef62fb9817314d790089a0a49fae4e1b50594135dcb8076312b7d7e470884b5100d249b28c18581b7fd52f8b485689ffae22a11ed9ec17377a33a08f84
   languageName: node
   linkType: hard
+
+"event-store-microservice@workspace:apps/event-store-microservice":
+  version: 0.0.0-use.local
+  resolution: "event-store-microservice@workspace:apps/event-store-microservice"
+  languageName: unknown
+  linkType: soft
 
 "eventemitter3@npm:^5.0.1":
   version: 5.0.4

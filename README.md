@@ -45,9 +45,10 @@ Node 20+, Yarn, Docker Compose.
 ```bash
 cp .env.example .env.local          # host-side defaults for `yarn start:dev`
 
-docker compose -f docker-compose.yml -f docker-compose.observability.yml \
-  up -d mysql redis rabbitmq jaeger otel-collector
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d \
+  mysql redis rabbitmq jaeger otel-collector
 
+yarn install
 yarn migration:run                  # retail_db      (operational schema)
 yarn migration:run:eventstore       # ris_eventstore (isolated event-store schema)
 yarn test:seed                      # deterministic fixtures — users, catalog, stock, templates
@@ -69,7 +70,7 @@ on `:16686` (see [ADR-014](docs/adr/014-otel-exporter-otlp-http-and-jaeger.md) a
 ### Talk to it
 
 | What                              | Where                                                                                     |
-|-----------------------------------|-------------------------------------------------------------------------------------------|
+| --------------------------------- | ----------------------------------------------------------------------------------------- |
 | HTTP API                          | `http://localhost:3000/api`                                                               |
 | Interactive API reference         | `http://localhost:3000/api/reference`                                                     |
 | Request collections               | [`http/kulala/`](http/kulala/) (Kulala) and [`http/posting/`](http/posting/) (posting.sh) |
@@ -81,7 +82,7 @@ on `:16686` (see [ADR-014](docs/adr/014-otel-exporter-otlp-http-and-jaeger.md) a
 four staff, one per canonical role, and one customer.
 
 | Email                   | Password        | Role              | Subject kind |
-|-------------------------|-----------------|-------------------|--------------|
+| ----------------------- | --------------- | ----------------- | ------------ |
 | `admin@example.com`     | `admin1234`     | `admin`           | StaffUser    |
 | `catalog@example.com`   | `catalog1234`   | `catalog-manager` | StaffUser    |
 | `warehouse@example.com` | `warehouse1234` | `warehouse-staff` | StaffUser    |
@@ -160,7 +161,7 @@ legibility. Redis is used by **inventory** (stock availability) and **notificati
 ### Deployables
 
 | Service                     | Transport                                                    | Responsibility                                                                                                                                           |
-|-----------------------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| --------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `api-gateway`               | HTTP `:3000`                                                 | Single entry point; JWT + RBAC; owns the identity tables (`auth`) and two admin shells (`iam`, `customer-admin`)                                         |
 | `catalog-microservice`      | RMQ `catalog_queue`                                          | `Product` / `ProductVariant`, `Category` tree, polymorphic `MediaAsset`, plus the colocated **pricing** module (`Price` ledger, `TaxCategory`)           |
 | `inventory-microservice`    | RMQ `inventory_queue`                                        | `StockLevel` running totals, `StockLocation`, TTL `Reservation` holds, append-only `StockMovement` ledger                                                |
@@ -171,7 +172,7 @@ legibility. Redis is used by **inventory** (stock availability) and **notificati
 ### Two logical databases
 
 | Database         | Owner                     | Contents                                                                                                                                          |
-|------------------|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| ---------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `retail_db`      | every operational context | identity, catalog, pricing, inventory, cart, orders, fulfillment, returns, refunds, idempotency keys, notification templates + deliveries         |
 | `ris_eventstore` | event store only          | `domain_event`, `audit_log_entry` — append-only, high volume, independently truncatable ([ADR-034](docs/adr/034-isolated-eventstore-database.md)) |
 
@@ -183,7 +184,7 @@ deliberate monolith-of-schema with foreign keys across contexts (`cart.customer_
 
 Wire format is dotted `<service>.<aggregate>.<action>` ([ADR-008](docs/adr/008-rabbitmq-via-libs-messaging.md)).
 
-**Producer targets the consumer's queue.** An event is emitted onto the *consumer's*
+**Producer targets the consumer's queue.** An event is emitted onto the _consumer's_
 queue, not the producer's — catalog emits `catalog.variant.created` onto `inventory_queue`;
 retail emits customer-facing events onto `notification_events`. Events with no consumer sit
 on the producer's own queue as reserved surfaces.
@@ -191,7 +192,7 @@ on the producer's own queue as reserved surfaces.
 **Every producer dual-publishes** ([ADR-035](docs/adr/035-event-store-firehose-topic-exchange.md)).
 Beside the primary `emit`, each publisher mirrors the same routing key + payload onto the
 durable topic exchange `ris.events` via the shared `RisEventsMirrorPublisher`. The mirror is
-**non-throwing best-effort** and ordered *after* the primary emit, so a `ris.events` outage can
+**non-throwing best-effort** and ordered _after_ the primary emit, so a `ris.events` outage can
 never shadow the publish that feeds a real consumer. The event store binds a single queue to
 `ris.events` with the catch-all `#` and dispatches inside the consumer — no existing consumer
 was re-bound. Its second queue, `event_store_query_queue`, carries RPCs on the default
@@ -201,17 +202,17 @@ exchange and is not bound to this exchange at all.
 > `matchRmqPattern` rejects `#.#` for any multi-word routing key and nacks the message.
 
 | Event                                                                  | Consumer                                                   |
-|------------------------------------------------------------------------|------------------------------------------------------------|
+| ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `catalog.variant.created`                                              | inventory — auto-init a zeroed `StockLevel`                |
 | `inventory.stock.low`                                                  | notification — ops alert to `OPS_NOTIFICATIONS_EMAIL`      |
 | `retail.order.placed`                                                  | notification                                               |
-| `retail.order.cancelled`                                               | **dual-emitted** — retail (auto-refund) *and* notification |
+| `retail.order.cancelled`                                               | **dual-emitted** — retail (auto-refund) _and_ notification |
 | `retail.fulfillment.shipped` / `.delivered`                            | notification                                               |
 | `retail.return.requested` / `.authorized` / `.received` / `.inspected` | notification                                               |
 | `retail.refund.issued`                                                 | notification                                               |
 | `customer.consent.updated` / `customer.erased`                         | notification — consent-cache write-through / evict         |
 | `audit.staff.action`                                                   | event store → `audit_log_entry`                            |
-| *everything else on `ris.events`*                                      | event store → `domain_event`                               |
+| _everything else on `ris.events`_                                      | event store → `domain_event`                               |
 
 **Reserved surfaces** (published, captured by the firehose, no business consumer):
 `catalog.product.*`, `catalog.price.*`, `inventory.stock-level.initialized`,
@@ -229,12 +230,12 @@ every occurrence.
 
 Every synchronous call between services is an RMQ request-response on the callee's queue, keyed
 `<service>.<aggregate>.<action>`. The gateway fronts most of these over HTTP (§6); the ones that
-have **no HTTP route** are called by another *service*, never by a client.
+have **no HTTP route** are called by another _service_, never by a client.
 
 **Retail** (`retail_queue`)
 
 | Routing key                                                                                             | Use case                                                                                                                                                   | Controller              |
-|---------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
 | `retail.cart.create` / `.get` / `.add-line` / `.change-line-quantity` / `.remove-line` / `.claim`       | `CreateCart` / `GetCart` / `AddToCart` / `ChangeCartLineQuantity` / `RemoveFromCart` / `ClaimCart`                                                         | `cart.controller.ts`    |
 | `retail.cart.place`                                                                                     | `PlaceOrderUseCase`                                                                                                                                        | `orders.controller.ts`  |
 | `retail.payment.capture`                                                                                | `CapturePaymentUseCase`                                                                                                                                    | ″                       |
@@ -246,7 +247,7 @@ have **no HTTP route** are called by another *service*, never by a client.
 **Inventory** (`inventory_queue`) — all on `stock.controller.ts`
 
 | Routing key                                                           | Use case                                                                             | Gateway route?              |
-|-----------------------------------------------------------------------|--------------------------------------------------------------------------------------|-----------------------------|
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------- |
 | `inventory.stock-level.get` / `.receive` / `.adjust` / `.transfer`    | `QueryAvailability` / `ReceiveStock` / `AdjustStock` / `TransferStock`               | yes                         |
 | `inventory.location.list`                                             | `ListLocations`                                                                      | yes                         |
 | `inventory.stock-movement.list`                                       | `ListStockMovements`                                                                 | yes                         |
@@ -258,7 +259,7 @@ have **no HTTP route** are called by another *service*, never by a client.
 **Catalog** (`catalog_queue`) — the colocated `pricing` module shares this queue
 
 | Routing key                                                                                                            | Controller               |
-|------------------------------------------------------------------------------------------------------------------------|--------------------------|
+| ---------------------------------------------------------------------------------------------------------------------- | ------------------------ |
 | `catalog.product.register` / `.publish` / `.archive` / `.list` / `.get`, `catalog.variant.create` / `.get`             | `catalog.controller.ts`  |
 | `catalog.category.create` / `.reparent` / `.list` / `.get-tree` / `.list-products`, `catalog.product.reclassify`       | `category.controller.ts` |
 | `catalog.media.attach` / `.reorder` / `.detach` / `.list`                                                              | `media.controller.ts`    |
@@ -275,7 +276,7 @@ design — no gateway route.
 **Event store** (`event_store_query_queue`) — all on `audit-query.controller.ts`
 
 | Routing key                  | Use case                      |
-|------------------------------|-------------------------------|
+| ---------------------------- | ----------------------------- |
 | `audit.event.query`          | `QueryDomainEventsUseCase`    |
 | `audit.entry.query`          | `QueryAuditLogEntriesUseCase` |
 | `audit.trace.by-correlation` | `TraceByCorrelationUseCase`   |
@@ -324,7 +325,7 @@ spec/                # repository-integrity specs: architecture-lint fixtures,
 Imported via path aliases as `@retail-inventory-system/<name>`.
 
 | Library         | What it gives you                                                                                                                                                                                                                                                                                                               |
-|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `contracts`     | Wire contracts — `microservices/`, `auth/`, `audit/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs.                                                                                                                      |
 | `ddd`           | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.**                                                                                                                                                                                    |
 | `common`        | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token).                                                                                                                                                      |
@@ -357,7 +358,7 @@ The `@Module` file sits **beside** the hexagon, never inside a layer of it: bind
 the adapters and the controllers to the use cases means it must see all four at once, so it
 belongs to none of them ([ADR-041](docs/adr/041-nest-module-as-the-module-composition-root.md)).
 
-**Boundary rule.** `ClientProxy` from `@nestjs/microservices` is allowed *only* inside
+**Boundary rule.** `ClientProxy` from `@nestjs/microservices` is allowed _only_ inside
 `infrastructure/messaging/`. Controllers, use cases, and pipes inject the port symbol
 instead. This is **enforced in CI**, not reviewed: `eslint-plugin-boundaries` types elements
 by path and cannot see an imported symbol, so a `no-restricted-imports` rule with
@@ -366,7 +367,7 @@ by path and cannot see an imported symbol, so a `no-restricted-imports` rule wit
 
 Adapter filenames come in two forms: `<module>-rabbitmq.{adapter,publisher}.ts` for the
 module's own transport seam (`stock-rabbitmq.publisher.ts`), and
-`<seam>.rabbitmq.{adapter,publisher}.ts` for a *named* seam, mirroring the port it implements
+`<seam>.rabbitmq.{adapter,publisher}.ts` for a _named_ seam, mirroring the port it implements
 (`cart-catalog.rabbitmq.adapter.ts` ↔ `cart-catalog.gateway.port.ts`).
 
 ### Architecture lint
@@ -430,7 +431,7 @@ Reparenting recomputes the moved node and rebases every descendant's path in one
 `UPDATE`; a cycle is rejected in the domain. An archived intermediate hides its branch.
 
 `MediaAsset` is **polymorphic** over `(owner_type, owner_id)` — one table, images/videos/
-documents on a product *or* a variant, **no FK** on the polymorphic owner (the attach use
+documents on a product _or_ a variant, **no FK** on the polymorphic owner (the attach use
 case probes existence by hand; a composite `(owner_type, owner_id, sort_order)` index is
 the read-path compensation). `uri` is an opaque, already-uploaded reference. Detach is a
 state-guarded `active → archived` flip; the row survives.
@@ -442,11 +443,11 @@ category nor media operations emit events.
 **Two publish preconditions, deliberately asymmetric:**
 
 | Precondition                                               | Behaviour                                                                                                                                      |
-|------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Every variant has an in-effect price in `DEFAULT_CURRENCY` | **Hard** — `409 PRODUCT_PUBLISH_REQUIRES_PRICE`. A price-less product breaks checkout.                                                         |
 | Some owner has an active `MediaAsset`                      | **Soft** — publish proceeds, `ProductView.warnings[]` carries `CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA`. A media-less product only looks bare. |
 
-The colocated **`pricing`** module is *not* a separate deployable — a price attaches to a
+The colocated **`pricing`** module is _not_ a separate deployable — a price attaches to a
 `variantId` and shares `catalog_queue`. `price` is an append-only-for-history,
 `(variantId, currency)`-scoped, time-bounded ledger: a change appends a row and closes the
 predecessor's `[validFrom, validTo)` interval, with at most one open row per scope
@@ -468,7 +469,7 @@ Three aggregates plus one append-only ledger record, all keyed on the opaque cat
 `variantId`.
 
 | Aggregate       | Shape                                                                                                                                                                                                                                               |
-|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `StockLevel`    | Per-`(variantId, stockLocationId)` running totals: `quantityOnHand`, `quantityAllocated`, `quantityReserved`. `available = onHand − allocated − reserved` is a **pure getter**. A `version` column carries OCC.                                     |
 | `StockLocation` | Caller-assigned string PK, `StockLocationTypeEnum`, `active` flag. The migration auto-provisions `default-warehouse`.                                                                                                                               |
 | `Reservation`   | TTL-bounded, cart-scoped hold. App-generated `CHAR(36)` UUID. `active → committed / released / expired`, plus a `reactivate` row-reuse path so the all-statuses UNIQUE `(cartId, variantId, stockLocationId)` triple survives a remove-then-re-add. |
@@ -480,14 +481,14 @@ routes through `stockCache.withInvalidation(...)` (post-commit invalidation,
 `runWithStockWriteRetry`.
 
 | RPC                                   | Use case                          | Notes                                                                                                                                                    |
-|---------------------------------------|-----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inventory.stock-level.get`           | `QueryAvailabilityUseCase`        | cache-aside, per variant                                                                                                                                 |
 | `inventory.location.list`             | `ListLocationsUseCase`            | uncached                                                                                                                                                 |
 | `inventory.stock-movement.list`       | `ListStockMovementsUseCase`       | paginated, newest-first, uncached audit read                                                                                                             |
 | `inventory.stock-level.receive`       | `ReceiveStockUseCase`             | positive `receipt` movement                                                                                                                              |
 | `inventory.stock-level.adjust`        | `AdjustStockUseCase`              | signed delta + `reasonCode`; below-zero → `409`; re-fires `inventory.stock.low`                                                                          |
 | `inventory.stock-level.transfer`      | `TransferStockUseCase`            | atomic two-location on-hand move — two `StockLevel` writes + a paired `transfer-out`/`transfer-in` `adjustment` movement                                 |
-| `inventory.reservation.reserve`       | `ReserveStockUseCase`             | no-oversell guard; idempotent by *absolute* quantity on the triple; `expiresAt = now + RESERVATION_TTL_MINUTES`                                          |
+| `inventory.reservation.reserve`       | `ReserveStockUseCase`             | no-oversell guard; idempotent by _absolute_ quantity on the triple; `expiresAt = now + RESERVATION_TTL_MINUTES`                                          |
 | `inventory.reservation.release`       | `ReleaseReservationUseCase`       | selector is `reservationId` **or** `cartId` (+ optional facets); both/neither → `400`                                                                    |
 | `inventory.reservation.sweep`         | `SweepExpiredReservationsUseCase` | the on-demand twin of the sweep timer — same use case, plus a staff `actorId` on every ledger row; `batchSize` clamped to `RESERVATION_SWEEP_BATCH_SIZE` |
 | `inventory.reservation.allocate`      | `AllocateStockUseCase`            | cart holds → order allocation at place-time; per line refresh-then-commit, drift-rebalance, or `allocateDirect` fallback; all-lines-atomic               |
@@ -518,7 +519,7 @@ sibling line's change never re-prices it.
 Six RPCs, each re-asserting `cart.customerId === payload.customerId` (`403` on mismatch):
 
 | RPC                                | Inventory side effect                                                                                                       |
-|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `retail.cart.create` / `.get`      | none                                                                                                                        |
 | `retail.cart.add-line`             | snapshots price via `catalog.price.select` (unpriced → `409`); **reserves the line's absolute target quantity before save** |
 | `retail.cart.change-line-quantity` | re-reserves the absolute new quantity before save                                                                           |
@@ -539,7 +540,7 @@ session cookie, so a guest builds a cart through the same bearer-protected route
 The **immutable** side. Five sibling aggregates live here.
 
 | Aggregate                         | Id         | Why it lives here                                                                                                                                       |
-|-----------------------------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| --------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Order` + `OrderLine`             | `BIGINT`   | the root                                                                                                                                                |
 | `Address`                         | `CHAR(36)` | polymorphic over `ownerType ∈ {customer, order}`; an order's addresses are immutable **snapshot copies**, never references into a customer address book |
 | `Payment`                         | `BIGINT`   | its operations mutate `Order`                                                                                                                           |
@@ -550,7 +551,7 @@ The **immutable** side. Five sibling aggregates live here.
 `captured` payment legitimately coexists with `unfulfilled` fulfillment:
 
 | Axis                | Values                                                          |
-|---------------------|-----------------------------------------------------------------|
+| ------------------- | --------------------------------------------------------------- |
 | `status`            | `pending` → `confirmed` / `cancelled` / `shipped` / `delivered` |
 | `paymentStatus`     | `none` → `authorized` → `captured` → `refunded` (or `failed`)   |
 | `fulfillmentStatus` | `unfulfilled` → `partially-shipped` → `shipped` → `delivered`   |
@@ -593,7 +594,7 @@ an `authorized` payment is **voided**, a `captured` one is **flagged for refund*
 after commit, releases the allocation. It emits `retail.order.cancelled` carrying
 `paymentFlaggedForRefund`.
 
-**Auto-refund from cancel.** `OrderCancelledConsumer` subscribes to retail's *own* cancel
+**Auto-refund from cancel.** `OrderCancelledConsumer` subscribes to retail's _own_ cancel
 event on `retail_queue` and, when the payment was flagged, inline-calls `IssueRefundUseCase`
 for the still-refundable remainder with `reason: 'order-cancelled'`, a `null` (system) actor,
 and a **deterministic** idempotency key `order-cancelled:<orderId>:<paymentId>` — so a
@@ -628,7 +629,7 @@ domain model, or contract changes.
 #### Concurrency guards, side by side
 
 | Contended row                         | Guard                                      | Loser gets                                                                                        |
-|---------------------------------------|--------------------------------------------|---------------------------------------------------------------------------------------------------|
+| ------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
 | `fulfillment` (ship vs cancel)        | pessimistic `SELECT … FOR UPDATE` re-read  | its own terminal domain `409` (`FULFILLMENT_INVALID_STATUS_TRANSITION` / `ORDER_NOT_CANCELLABLE`) |
 | `order` header (two ships rolling up) | version-checked CAS inside a bounded retry | `409 VERSION_MISMATCH` + `details.currentVersion`                                                 |
 
@@ -649,12 +650,12 @@ requested ──► authorized ──► received ──► inspected ──► 
 
 `ReturnRequest` (`BIGINT`) owns `ReturnLine`. `rmaNumber` is `RMA-<year>-<pad8(id)>`.
 `customerId` is the gateway's **`CHAR(36)` UUID** (the buyer), mirroring `order.customer_id`
-— *not* a BIGINT, despite `orderId`/`orderLineId` being BIGINTs. A `ReturnLine`'s
+— _not_ a BIGINT, despite `orderId`/`orderLineId` being BIGINTs. A `ReturnLine`'s
 `condition` / `disposition` / `lineRefundAmountMinor` are null until inspection, then
 `inspect`-once.
 
 | Operation                  | Auth                                    | Behaviour                                                                                                                                                                                                                                      |
-|----------------------------|-----------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| -------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Open                       | owner-or-staff `order:return-authorize` | resolves the order via the raw-SQL `RETURN_ORDER_READER`; enforces the `RETURN_WINDOW_DAYS` window (a `delivered` order is always returnable; a `shipped` one only inside the window) and `requested ≤ ordered − cancelled − already-returned` |
 | Authorize / Reject / Close | staff `order:return-authorize`          | status walk; Reject appends its reason to `notes`                                                                                                                                                                                              |
 | Receive                    | warehouse `inventory:receive-return`    | status walk                                                                                                                                                                                                                                    |
@@ -677,7 +678,7 @@ RMQ-only, no HTTP surface of its own. Two aggregates in the shared `retail_db`
 
 **`RenderAndDispatchUseCase` is the single persist-then-send pipeline every consumer calls.**
 Given a channel-agnostic input it resolves the latest active template, renders it, runs the
-consent gate, **persists a `queued` row *before* the `NOTIFIER` call**, then flips it to
+consent gate, **persists a `queued` row _before_ the `NOTIFIER` call**, then flips it to
 `sent` or `failed`. A failure is recorded on the row and **never rethrown** — rethrowing
 inside an `@EventPattern` would make the broker blind-redeliver. A missing template
 warn-logs and persists nothing.
@@ -690,7 +691,7 @@ concurrent race.
 before the transport call, for customer-facing rows only (a null-recipient ops row skips it):
 
 | Channel + event type                           | Gated on                                                                                             |
-|------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | email, `eventType ∈ TRANSACTIONAL_EVENT_TYPES` | `transactionalEmail` — **the bypass**; an order confirmation is never blocked by a marketing opt-out |
 | email, anything else                           | `marketingEmail`                                                                                     |
 | sms                                            | `marketingSms`                                                                                       |
@@ -720,7 +721,7 @@ backoff gate. At the cap the service emits `notifications.delivery.failed` exact
 
 Rendering is Handlebars (`HandlebarsTemplateRendererAdapter`, the only `handlebars` import).
 `{{ }}` HTML-escapes the render context by default — the right posture for trusted,
-staff-authored template *source* over untrusted context *data*. No `{{{ triple-stache }}}`.
+staff-authored template _source_ over untrusted context _data_. No `{{{ triple-stache }}}`.
 
 `record-outcome` (`sent → delivered | bounced`) is the **ESP-webhook seam** — RPC-only, no
 gateway route; real webhook ingestion with signature verification is future work.
@@ -731,7 +732,7 @@ The sixth deployable — RMQ-only, no HTTP — is the append-only sink for two s
 **own** database `ris_eventstore`.
 
 | Table             | Purpose                                                                | Dedupe                                                                                                                                                                      |
-|-------------------|------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ----------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `domain_event`    | verbatim capture of every business event on the bus                    | composite UNIQUE `(producer, event_type, aggregate_id, occurred_at, correlation_id)` — an empty correlation id is coalesced to `''`, since MySQL treats `NULL`s as distinct |
 | `audit_log_entry` | who-did-what for every staff mutation, with `before`/`after` snapshots | **none** — two identical staff actions a second apart are two real events                                                                                                   |
 
@@ -771,14 +772,14 @@ They are served by the `AuditQueryController` on a **second queue**,
 `ris.events` topic exchange:
 
 | Routing key                  | Use case                      |
-|------------------------------|-------------------------------|
+| ---------------------------- | ----------------------------- |
 | `audit.event.query`          | `QueryDomainEventsUseCase`    |
 | `audit.entry.query`          | `QueryAuditLogEntriesUseCase` |
 | `audit.trace.by-correlation` | `TraceByCorrelationUseCase`   |
 
 `main.ts` is therefore a **hybrid app**: `NestFactory.create` + two `connectMicroservice`
 calls + `init()` + `startAllMicroservices()`. It never calls `listen()`, so the service still
-opens no TCP port. `audit.staff.action` remains the one `audit.` *event* — it rides
+opens no TCP port. `audit.staff.action` remains the one `audit.` _event_ — it rides
 `ris.events` into the firehose queue and is never routed here.
 
 The gateway's `modules/audit/` fronts all three at `GET /api/audit/events`,
@@ -804,7 +805,7 @@ POST /api/orders/:orderId/refunds
 Semantics are uniform:
 
 | Case                                 | Result                                                                                                                                                                                                               |
-|--------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Missing header**                   | `400`. Rejected at the gateway edge by the reusable `@IdempotencyKey()` decorator (`IDEMPOTENCY_KEY_REQUIRED`) before any RPC; retail carries an `ORDER_IDEMPOTENCY_KEY_REQUIRED` backstop for a direct-RMQ caller.  |
 | **Replay** (same key, same body)     | The stored response body, `200`, header `Idempotent-Replay: true`. Replayed **without re-executing** — no second charge, no second stock movement, no re-emitted events, and for refund no second `audit_log_entry`. |
 | **Reuse** (same key, different body) | `422 ORDER_IDEMPOTENCY_KEY_REUSED`, fired **before any side effect** (for refund, before the gateway call) — a changed amount can never slip through.                                                                |
@@ -815,12 +816,12 @@ owner-injected ids like `customerId`) is excluded, so a retry under a fresh corr
 still matches.
 
 The store is **one retail-owned `idempotency_key` table in `retail_db`** — local to the
-producing service, *not* a shared cross-service store. Inventory needs none: Reserve is
+producing service, _not_ a shared cross-service store. Inventory needs none: Reserve is
 natural-key idempotent on `(cartId, variantId, stockLocationId)`; Commit-sale and Restock are
 idempotency-first on `fulfillmentId` / `returnRequestId`.
 
 The store is **live-ephemeral**: `find` never filters by expiry, so a 10-minute
-`IdempotencyPurgeScheduler` sweep is the *sole* deleter of rows past
+`IdempotencyPurgeScheduler` sweep is the _sole_ deleter of rows past
 `IDEMPOTENCY_KEY_TTL_HOURS` — a single bounded `DELETE … WHERE expires_at < now` over the
 `expires_at` index.
 
@@ -834,9 +835,9 @@ token — never `process.env`). On exhaustion the write surfaces a uniform
 `409 { code: 'VERSION_MISMATCH', details: { currentVersion } }`.
 
 | Aggregate                                       | Exhaustion code                                                                      |
-|-------------------------------------------------|--------------------------------------------------------------------------------------|
+| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `StockLevel`, `Reservation`                     | `409 STOCK_WRITE_CONFLICT`                                                           |
-| `Cart`, `Order`, `Fulfillment`, `ReturnRequest` | `409 VERSION_MISMATCH` (member name is module-prefixed; the *wire* value is uniform) |
+| `Cart`, `Order`, `Fulfillment`, `ReturnRequest` | `409 VERSION_MISMATCH` (member name is module-prefixed; the _wire_ value is uniform) |
 
 The three cart line writes additionally honour an optional **`If-Match: <version>`**
 precondition (the `@IfMatch()` gateway decorator): a stale pin is an immediate `409` with
@@ -846,15 +847,15 @@ the header, last-writer-within-budget wins.
 The gateway also carries a global `OptimisticLockVersionMismatchError → 409` filter as
 defense-in-depth for gateway-local OCC.
 
-**Two legitimate 409s.** A *same-transition* CAS loss is retried within budget, then
-surfaces `VERSION_MISMATCH`. A *cross-transition* op that finds the state genuinely illegal
+**Two legitimate 409s.** A _same-transition_ CAS loss is retried within budget, then
+surfaces `VERSION_MISMATCH`. A _cross-transition_ op that finds the state genuinely illegal
 after serialization gets its terminal domain `409` (`ORDER_NOT_CANCELLABLE`,
 `FULFILLMENT_INVALID_STATUS_TRANSITION`) and is **never** retried.
 
 ### Inventory invariants
 
 **No-oversell.** `available` never goes negative. Reserve and the direct-allocate fallback
-check `quantity ≤ available` *before* moving a counter and reject the overflow with
+check `quantity ≤ available` _before_ moving a counter and reject the overflow with
 `409 INVENTORY_OUT_OF_STOCK` carrying `details.available`; Adjust and Transfer reject an
 on-hand result below zero with `409 INVENTORY_STOCK_RESULT_NEGATIVE`. Check and write run in
 **one transaction** under the version-checked retry protocol — which is what makes two carts
@@ -876,7 +877,7 @@ the same triple reuses the row. See
 **Audit, not balance.** `stock_movement` is an append-only audit trail; the running totals on
 `stock_level` are the source of truth, and **summing ledger rows never reconstructs on-hand**.
 `STOCK_MOVEMENT_REPOSITORY` exposes only `append`, `listByVariant`, and `existsByReference` —
-UPDATE and DELETE are inexpressible. The append runs *after* the version-checked persist in
+UPDATE and DELETE are inexpressible. The append runs _after_ the version-checked persist in
 the same transaction, so a lost race leaves no orphan row and a retry appends exactly once.
 Every counter-changing operation — Receive, Adjust, Transfer, Reserve's Release, Allocate,
 Cancel Allocation, Commit Sale, Restock — leaves its movement.
@@ -908,7 +909,7 @@ carries ids + `erasedAt` only, and the erase audit `before`/`after` is
 `{ id, status } → { status: 'deleted' }`.
 
 **Two permission codes, not three.** `customer:read-consent` and `customer:erase` are
-admin-only *staff overrides*. There is deliberately **no customer-facing consent code**: a
+admin-only _staff overrides_. There is deliberately **no customer-facing consent code**: a
 customer JWT carries no `permissions` claim, so a `@RequiresPermission('customer:…')` gate
 would reject the very customers it targets. The customer's own consent path is authorized by
 authentication + inherent ownership.
@@ -923,7 +924,7 @@ explicit opt-out. Interactive reference: `http://localhost:3000/api/reference`.
 ### Health
 
 | Method | Route         | Auth        |
-|--------|---------------|-------------|
+| ------ | ------------- | ----------- |
 | `GET`  | `/api/health` | `@Public()` |
 
 The system's liveness report ([ADR-044](docs/adr/044-system-health-fan-out.md)). The gateway
@@ -933,14 +934,14 @@ timeouts start.
 
 ```jsonc
 {
-  "status": "degraded",                            // 'ok' only if ALL five are ok
+  "status": "degraded", // 'ok' only if ALL five are ok
   "services": {
-    "catalog":      { "status": "ok", "latencyMs": 4 },
-    "inventory":    { "status": "ok", "latencyMs": 3 },
-    "retail":       { "status": "ok", "latencyMs": 5 },
-    "notification": { "status": "timeout" },       // down, wedged, or no consumer
-    "event-store":  { "status": "ok", "latencyMs": 2 }
-  }
+    "catalog": { "status": "ok", "latencyMs": 4 },
+    "inventory": { "status": "ok", "latencyMs": 3 },
+    "retail": { "status": "ok", "latencyMs": 5 },
+    "notification": { "status": "timeout" }, // down, wedged, or no consumer
+    "event-store": { "status": "ok", "latencyMs": 2 },
+  },
 }
 ```
 
@@ -950,8 +951,8 @@ Two things it deliberately is **not**:
   consuming the queue, nothing more. A service with a dead database still answers `ok`. Putting a
   DB round-trip in a health handler loads the hot path on every poll and lets one slow database
   report five services sick.
-- **It never returns 503.** `degraded` comes back as **200**. This is a report *about the
-  system*, not the gateway's own liveness — a 503 would make the gateway look dead when it is the
+- **It never returns 503.** `degraded` comes back as **200**. This is a report _about the
+  system_, not the gateway's own liveness — a 503 would make the gateway look dead when it is the
   one component provably alive. Monitors read `status`, not the HTTP code.
 
 `HEALTH_PROBE_TIMEOUT_MS` (default `2000`) bounds **one** probe; the fan-out is concurrent, so
@@ -960,7 +961,7 @@ one dead service costs one timeout, not five.
 ### Auth — staff
 
 | Method | Route               | Auth                          |
-|--------|---------------------|-------------------------------|
+| ------ | ------------------- | ----------------------------- |
 | `POST` | `/auth/staff/login` | public                        |
 | `POST` | `/auth/refresh`     | public                        |
 | `POST` | `/auth/logout`      | bearer                        |
@@ -970,7 +971,7 @@ one dead service costs one timeout, not five.
 ### Auth — customer
 
 | Method | Route                          | Auth                                             |
-|--------|--------------------------------|--------------------------------------------------|
+| ------ | ------------------------------ | ------------------------------------------------ |
 | `POST` | `/auth/customer/register`      | public                                           |
 | `POST` | `/auth/customer/login`         | public                                           |
 | `POST` | `/auth/customer/guest-session` | public — mints a guest-tier token + `customerId` |
@@ -981,7 +982,7 @@ one dead service costs one timeout, not five.
 ### Catalog
 
 | Method | Route                                   | Auth                                   |
-|--------|-----------------------------------------|----------------------------------------|
+| ------ | --------------------------------------- | -------------------------------------- |
 | `POST` | `/catalog/products`                     | `catalog:write`                        |
 | `POST` | `/catalog/products/:productId/variants` | `catalog:write`                        |
 | `POST` | `/catalog/products/:productId/publish`  | `catalog:publish`                      |
@@ -993,7 +994,7 @@ one dead service costs one timeout, not five.
 ### Pricing and tax categories
 
 | Method  | Route                                       | Auth                                             |
-|---------|---------------------------------------------|--------------------------------------------------|
+| ------- | ------------------------------------------- | ------------------------------------------------ |
 | `POST`  | `/catalog/variants/:variantId/prices`       | `pricing:write` — set or schedule                |
 | `GET`   | `/catalog/variants/:variantId/prices`       | public — `?currency=USD`, `?asOf`                |
 | `GET`   | `/catalog/variants/:variantId/price`        | public — single applicable price, or a null body |
@@ -1004,7 +1005,7 @@ one dead service costs one timeout, not five.
 ### Categories and media
 
 | Method   | Route                                                   | Auth                                                                |
-|----------|---------------------------------------------------------|---------------------------------------------------------------------|
+| -------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
 | `POST`   | `/catalog/categories`                                   | `catalog:write` — create a root or child                            |
 | `PATCH`  | `/catalog/categories/:slug/parent`                      | `catalog:write` — reparent (or demote to root) + rebase the subtree |
 | `GET`    | `/catalog/categories`                                   | public — flat active list, `?root`                                  |
@@ -1024,7 +1025,7 @@ An unknown media owner is a `200 []`, not a `404`.
 ### Inventory
 
 | Method | Route                                            | Auth                                                                   |
-|--------|--------------------------------------------------|------------------------------------------------------------------------|
+| ------ | ------------------------------------------------ | ---------------------------------------------------------------------- |
 | `GET`  | `/inventory/locations`                           | `inventory:read` — `?activeOnly`                                       |
 | `GET`  | `/inventory/variants/:variantId/stock`           | public — per-location availability + totals, `?locationIds=a,b`        |
 | `GET`  | `/inventory/variants/:variantId/movements`       | `inventory:read` — `?page`, `?pageSize`, `?type`, `?from`, `?to`       |
@@ -1048,7 +1049,7 @@ by-id release needs a `reservationId` — source it from the reserve-path logs, 
 Bearer plus an **owner-check**, no permission code — a customer touches only its own cart.
 
 | Method   | Route                         | Notes                                                                                                      |
-|----------|-------------------------------|------------------------------------------------------------------------------------------------------------|
+| -------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `POST`   | `/cart`                       | open a cart                                                                                                |
 | `GET`    | `/cart/:cartId`               |                                                                                                            |
 | `POST`   | `/cart/:cartId/lines`         | add a priced line — reserves stock; optional `If-Match: <version>`                                         |
@@ -1060,7 +1061,7 @@ Bearer plus an **owner-check**, no permission code — a customer touches only i
 ### Orders, fulfillment, refunds
 
 | Method | Route                                       | Auth                                                                         |
-|--------|---------------------------------------------|------------------------------------------------------------------------------|
+| ------ | ------------------------------------------- | ---------------------------------------------------------------------------- |
 | `GET`  | `/orders`                                   | bearer — own orders, paginated, newest-first                                 |
 | `GET`  | `/orders/:orderId`                          | owner **or** staff `order:read`                                              |
 | `POST` | `/orders/:orderId/payments/capture`         | owner **or** staff `order:capture` — `Idempotency-Key` required              |
@@ -1077,12 +1078,12 @@ Bearer plus an **owner-check**, no permission code — a customer touches only i
 `@RequiresPermission`** — that would block the owning customer, who holds no permissions;
 the staff override is computed at the gateway from `@CurrentUser().permissions` and the
 owner-check is enforced retail-side. Staff-only routes are gated with `@RequiresPermission`
-directly. A permission code is a *staff override over an owner-check*, never a customer gate.
+directly. A permission code is a _staff override over an owner-check_, never a customer gate.
 
 ### Returns (RMA)
 
 | Method | Route                       | Auth                                                                         |
-|--------|-----------------------------|------------------------------------------------------------------------------|
+| ------ | --------------------------- | ---------------------------------------------------------------------------- |
 | `POST` | `/orders/:orderId/returns`  | owner **or** staff `order:return-authorize` — `201`                          |
 | `GET`  | `/orders/:orderId/returns`  | owner **or** staff `order:read`                                              |
 | `GET`  | `/returns/:rmaId`           | owner **or** staff `order:read`                                              |
@@ -1095,7 +1096,7 @@ directly. A permission code is a *staff override over an owner-check*, never a c
 ### Notifications (staff-only admin/ops)
 
 | Method  | Route                                 | Auth                                                                                                                                              |
-|---------|---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`   | `/notifications/templates`            | `notifications:write` — every version, `?eventType`, `?channel`, `?locale`                                                                        |
 | `POST`  | `/notifications/templates`            | `notifications:write` — author/edit a version, `201`                                                                                              |
 | `PATCH` | `/notifications/templates/:id/active` | `notifications:write` — `{ active }`, the rollback lever                                                                                          |
@@ -1111,13 +1112,13 @@ input, not a cross-module lookup.
 ### Audit and event store (staff-only)
 
 | Method | Route                         | Auth                                                                                                                     |
-|--------|-------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| ------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `GET`  | `/audit/events`               | `audit:read` — `?eventType`, `?aggregateType`, `?aggregateId`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize`    |
 | `GET`  | `/audit/entries`              | `audit:read` — `?actorId`, `?entityType`, `?entityId`, `?action`, `?correlationId`, `?from`, `?to`, `?page`, `?pageSize` |
 | `GET`  | `/audit/trace/:correlationId` | `audit:read` — both logs for one request, each oldest-first                                                              |
 
-Three questions: *what did the system do* (`domain_event`), *what did a person do*
-(`audit_log_entry`), *what did this one request cause* (both, joined by correlation id). Every
+Three questions: _what did the system do_ (`domain_event`), _what did a person do_
+(`audit_log_entry`), _what did this one request cause_ (both, joined by correlation id). Every
 filter is optional and names an **indexed** column — the JSON bodies (`payload`, `before`,
 `after`) are returned but never searched.
 
@@ -1141,14 +1142,14 @@ GET /api/audit/trace/9f1c0e2a-7b4d-4c8e-9a11-6d3f5b2c0e77
 
 `aggregateType` and `aggregateId` are the routing key's **second token** and the payload id it
 names, resolved per event — so `?aggregateType=order` matches `retail.order.placed` and
-`retail.order.cancelled`, and *not* that order's payment, fulfillment or refund events, which are
+`retail.order.cancelled`, and _not_ that order's payment, fulfillment or refund events, which are
 extracted under their own type and their own id. Reassembling one order's whole story is what
 `?correlationId=` and the trace route are for.
 
 ### Admin
 
 | Method   | Route                            | Auth                                                                 |
-|----------|----------------------------------|----------------------------------------------------------------------|
+| -------- | -------------------------------- | -------------------------------------------------------------------- |
 | `GET`    | `/iam/roles`                     | `iam:role-edit`                                                      |
 | `POST`   | `/iam/roles`                     | `iam:role-edit`                                                      |
 | `PATCH`  | `/iam/roles/:id`                 | `iam:role-edit`                                                      |
@@ -1235,7 +1236,7 @@ Roles live in `role`, bound to codes through `role_permissions`; staff acquire r
 seeded bundles live in `scripts/test-db-seed.ts`.
 
 | Role              | Permission codes                                                                                                        |
-|-------------------|-------------------------------------------------------------------------------------------------------------------------|
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `admin`           | every code                                                                                                              |
 | `catalog-manager` | `catalog:read`, `catalog:write`, `catalog:publish`, `pricing:write`                                                     |
 | `warehouse-staff` | `inventory:read`, `inventory:adjust`, `inventory:transfer`, `inventory:receive-return`, `order:fulfill`, `order:cancel` |
@@ -1245,7 +1246,7 @@ seeded bundles live in `scripts/test-db-seed.ts`.
 <summary>Every seeded code and the roles it appears in</summary>
 
 | Code                       | Roles                                       |
-|----------------------------|---------------------------------------------|
+| -------------------------- | ------------------------------------------- |
 | `catalog:read`             | `admin`, `catalog-manager`                  |
 | `catalog:write`            | `admin`, `catalog-manager`                  |
 | `catalog:publish`          | `admin`, `catalog-manager`                  |
@@ -1305,7 +1306,7 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 ### Required
 
 | Variable                      | Notes                                                                                                                                                         |
-|-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_ENV`                    | `development` \| `production` \| `test`                                                                                                                       |
 | `API_GATEWAY_PORT`            | gateway HTTP port                                                                                                                                             |
 | `DATABASE_URL`                | `mysql://…/retail_db` — the shared operational schema                                                                                                         |
@@ -1320,7 +1321,7 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 ### Defaulted
 
 | Variable                                  | Default                     | Role                                                                                                                                                  |
-|-------------------------------------------|-----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ----------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `API_GATEWAY_PREFIX`                      | —                           | global route prefix (`api` in compose)                                                                                                                |
 | `API_GATEWAY_USE_API_REFERENCE`           | `NODE_ENV !== 'production'` | serve `/api/reference`                                                                                                                                |
 | `HEALTH_PROBE_TIMEOUT_MS`                 | `2000`                      | bounds **one** liveness probe, not the fan-out — the five run concurrently ([§6](#6-http-api))                                                        |
@@ -1361,7 +1362,7 @@ Six service names are valid everywhere a `<service>` appears: `api-gateway`,
 `catalog-microservice`, `event-store-microservice`.
 
 | Script                              | Description                                                                      |
-|-------------------------------------|----------------------------------------------------------------------------------|
+| ----------------------------------- | -------------------------------------------------------------------------------- |
 | `yarn start:dev`                    | Start all six services concurrently, watch reload (`scripts/bash/start-dev.sh`). |
 | `yarn start:dev:<service>`          | Start one service with watch reload.                                             |
 | `yarn start:prod:<service>`         | Run a built service from `dist/`.                                                |
@@ -1376,7 +1377,7 @@ Six service names are valid everywhere a `<service>` appears: `api-gateway`,
 Two pipelines, two `migrations` ledgers.
 
 | Script                                                                      | Target                                                 |
-|-----------------------------------------------------------------------------|--------------------------------------------------------|
+| --------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `yarn migration:create <Name>`                                              | scaffold under `migrations/`                           |
 | `yarn migration:run` / `:revert` / `:show`                                  | `retail_db`                                            |
 | `yarn migration:create:eventstore <Name>`                                   | scaffold under `migrations/eventstore/`                |
@@ -1391,7 +1392,7 @@ the driver would default to the Node host's local timezone.
 ### Testing
 
 | Script                         | Description                                                            |
-|--------------------------------|------------------------------------------------------------------------|
+| ------------------------------ | ---------------------------------------------------------------------- |
 | `yarn test:unit`               | Jest unit suite (`jest.unit.config.js`).                               |
 | `yarn test:e2e`                | `test:infra:reload`, then the full e2e suite against a clean database. |
 | `yarn test:e2e:run`            | e2e only — assumes infra is up.                                        |
@@ -1404,7 +1405,7 @@ public stock read, the uncached movements ledger, the delivery audit reads, and 
 "exactly one event" oracle) direct SQL against `ris_eventstore`. Never an event spy.
 
 | Capability                  | Suites                                                                                                                                                                         |
-|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Reservations + movements    | `cart-reserve-release`, `place-order-allocates`, `inventory-movements-audit`, **`concurrent-oversell`**                                                                        |
 | Reservation TTL sweep       | `reservation-sweeper`, `reservation-sweeper-cron`, **`concurrent-sweep-release`**                                                                                              |
 | Fulfillment + ship + cancel | `fulfillment-happy-path`, `fulfillment-partial-ship`, `cancel-order-pre-fulfillment`, `cancel-order-blocked-after-ship`, `ship-triggers-capture`, **`concurrent-ship-cancel`** |
@@ -1446,7 +1447,7 @@ seed runs, so there is always a location to read from and write to.
 <summary>Catalog: two products, four variants</summary>
 
 | Variant id | SKU            | Product (slug)        | Status |
-|------------|----------------|-----------------------|--------|
+| ---------- | -------------- | --------------------- | ------ |
 | 1          | `AURORA-WARM`  | `aurora-desk-lamp`    | active |
 | 2          | `AURORA-COOL`  | `aurora-desk-lamp`    | active |
 | 3          | `NIMBUS-BLACK` | `nimbus-office-chair` | active |
@@ -1457,18 +1458,18 @@ seed runs, so there is always a location to read from and write to.
 <details>
 <summary>Categories, memberships, media</summary>
 
-| id | Name        | Slug          | Parent | `path`                | Sort |
-|----|-------------|---------------|--------|-----------------------|------|
-| 1  | Electronics | `electronics` | —      | `/electronics`        | 0    |
-| 2  | Phones      | `phones`      | 1      | `/electronics/phones` | 0    |
-| 3  | Apparel     | `apparel`     | —      | `/apparel`            | 1    |
+| id  | Name        | Slug          | Parent | `path`                | Sort |
+| --- | ----------- | ------------- | ------ | --------------------- | ---- |
+| 1   | Electronics | `electronics` | —      | `/electronics`        | 0    |
+| 2   | Phones      | `phones`      | 1      | `/electronics/phones` | 0    |
+| 3   | Apparel     | `apparel`     | —      | `/apparel`            | 1    |
 
 Product 1 (`aurora-desk-lamp`) is a member of both `electronics` and `phones`, so
 `GET /api/catalog/categories/electronics/products?includeDescendants=true` returns it —
 directly and via the descendant.
 
 | Media id | Owner     | Type  | `sort_order` |
-|----------|-----------|-------|--------------|
+| -------- | --------- | ----- | ------------ |
 | 1        | product 1 | image | 0            |
 | 2        | product 1 | video | 1            |
 
@@ -1477,7 +1478,7 @@ directly and via the descendant.
 <details>
 <summary>Pricing, tax categories, stock</summary>
 
-Every variant carries one **open** `USD` price (`valid_to IS NULL`) with a fixed *past*
+Every variant carries one **open** `USD` price (`valid_to IS NULL`) with a fixed _past_
 `valid_from`, so the applicable-price read answers immediately after a seed: variants 1–2 at
 `4999` ($49.99), variants 3–4 at `19999` ($199.99).
 
@@ -1510,7 +1511,7 @@ template. Without a matching template the pipeline warn-logs and persists no del
 this seed is what makes a real `notification_delivery` row appear end to end.
 
 | `event_type`                   | Subject (Handlebars)                             |
-|--------------------------------|--------------------------------------------------|
+| ------------------------------ | ------------------------------------------------ |
 | `retail.order.placed`          | `Order #{{orderNumber}} confirmed`               |
 | `retail.order.cancelled`       | `Order #{{orderId}} cancelled`                   |
 | `retail.fulfillment.shipped`   | `Order #{{orderId}} has shipped`                 |
@@ -1540,7 +1541,7 @@ never touches these baseline rows.
 All services emit JSON logs via [Pino](https://github.com/pinojs/pino) through `nestjs-pino`.
 
 | Environment           | Format                               |
-|-----------------------|--------------------------------------|
+| --------------------- | ------------------------------------ |
 | `NODE_ENV=production` | JSON, one object per line, to stdout |
 | anything else         | human-readable via `pino-pretty`     |
 
@@ -1658,7 +1659,7 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml stop ja
 ```
 
 | Endpoint                 | Purpose                                           |
-|--------------------------|---------------------------------------------------|
+| ------------------------ | ------------------------------------------------- |
 | `http://localhost:16686` | Jaeger UI — filter by service, search by trace id |
 | `http://localhost:4317`  | OTLP/gRPC ingress                                 |
 | `http://localhost:4318`  | OTLP/HTTP ingress (the apps publish here)         |
@@ -1688,7 +1689,7 @@ ADRs: [001](docs/adr/001-structured-logging-with-pino.md),
 Two read paths use Redis today, both **cache-aside**:
 
 | Cached value                                                                               | Key                                          | Freshness                                                    |
-|--------------------------------------------------------------------------------------------|----------------------------------------------|--------------------------------------------------------------|
+| ------------------------------------------------------------------------------------------ | -------------------------------------------- | ------------------------------------------------------------ |
 | `VariantStockView` — per-location `StockLevelView` rows + `totalOnHand` / `totalAvailable` | `ris:inventory:stock:v3:<variantId>:<facet>` | post-commit invalidation on every write                      |
 | `ConsentRecordView` — a customer's channel-consent snapshot                                | `ris:notifications:consent:v1:<customerId>`  | event-driven write-through / evict; TTL is only a safety net |
 
@@ -1753,7 +1754,7 @@ Every cache operation is wrapped in a `try/catch` that logs a `warn` and swallow
 - **Invalidation failure** → swallowed; the entry lives until its TTL.
 
 A Redis outage degrades latency, never correctness. (The consent cache goes further: it
-resolves to *defaults* on error, so an unreadable consent state never blind-sends marketing.)
+resolves to _defaults_ on error, so an unreadable consent state never blind-sends marketing.)
 
 ### What is not cached
 
@@ -1786,13 +1787,13 @@ ADRs: [002](docs/adr/002-redis-cache-aside-product-stock.md),
 ## 13. Background jobs
 
 **Five** timers run inside three different services (retail and notification own two each). Each one
-only decides how *promptly* an already-due row is handled — none of them is load-bearing for
+only decides how _promptly_ an already-due row is handled — none of them is load-bearing for
 correctness. Each also wraps its tick in a `try` / `catch` that warn-logs and returns, but **that catch
 is not what keeps the loop alive, in four of the five**: a handler registered by a `@Cron` / `@Interval`
 decorator is already wrapped by Nest (`ScheduleExplorer.wrapFunctionInTryCatchBlocks`), so a rethrow
 would be caught there and the timer would fire again. What the local catch buys is that the failure is
 **named** — Nest's wrapper logs a bare stack under a generic `Scheduler` context, and an operator
-learns that *a* sweep died, not *which*.
+learns that _a_ sweep died, not _which_.
 
 The exception is inventory's `ReservationSweepScheduler`, and it is the exception because it bypasses
 the decorator: it hands a raw `setInterval(() => void this.sweep(), ms)` to `SchedulerRegistry`, which
@@ -1801,7 +1802,7 @@ process on Node ≥15 — so the catch is genuinely load-bearing**, and its spec
 asserts on it.
 
 | Job                                   | Registering file                                                                                           | Cadence                                             | What a missed tick costs                                                                                                                                                                                                                                                                                      |
-|---------------------------------------|------------------------------------------------------------------------------------------------------------|-----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Reservation TTL sweep                 | `apps/inventory-microservice/…/stock/infrastructure/scheduling/reservation-sweep.scheduler.ts`             | `RESERVATION_SWEEP_INTERVAL_SECONDS` (default `60`) | stranded holds keep depressing `available` — the system under-sells                                                                                                                                                                                                                                           |
 | Idempotency-key TTL purge             | `apps/retail-microservice/…/orders/infrastructure/idempotency/idempotency-purge.scheduler.ts`              | fixed `@Cron`, every 10 minutes                     | `idempotency_key` keeps rows past `IDEMPOTENCY_KEY_TTL_HOURS`; the table grows                                                                                                                                                                                                                                |
 | Notification delivery retry sweep     | `apps/notification-microservice/…/notifications/infrastructure/scheduling/delivery-retry.scheduler.ts`     | fixed `@Interval`, 60 s                             | a `failed` delivery waits one more interval for its next attempt                                                                                                                                                                                                                                              |
@@ -1842,13 +1843,13 @@ See [ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md).
 Deliberate gaps, each with the seam already in place:
 
 A row here names a **seam inside the core** that is built but unfilled — a port with one adapter, a
-column nothing reads, a mutator nothing calls. A capability that sits *outside* the core gets a
+column nothing reads, a mutator nothing calls. A capability that sits _outside_ the core gets a
 sketch in [`docs/extensions/`](docs/extensions/) instead
 ([§15](#15-extensions-and-future-expansion)). Where both apply, the row links the sketch and neither
 one restates the other.
 
 | Gap                                                                                 | Seam that exists                                                                                                                                                                                                                                                                                                                                                                                                                             |
-|-------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Free-text / JSON-path search over an event `payload` or an audit `before` / `after` | the columns are returned by `GET /api/audit/*` but no index can serve a predicate over them, so none is offered ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md))                                                                                                                                                                                                                                                             |
 | Keyset (cursor) pagination for deep offsets over `domain_event`                     | `clampPageWindow` bounds the page, not the offset; `skip((page - 1) * size)` still walks the skipped rows ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md))                                                                                                                                                                                                                                                                   |
 | Reservation retention / purge of `expired` rows                                     | the sweep flips a hold to `expired` and leaves the row; the `(status, expires_at)` index that finds the sweep's candidates would find a purge's, and `stock_movement` already carries the release trail ([ADR-038](docs/adr/038-reservation-ttl-sweep-and-bounded-batches.md))                                                                                                                                                               |
@@ -1878,7 +1879,7 @@ It is **not** a register of rejected features and **not** a backlog. Nothing in 
 a sketch carries no commitment that the capability will ever be built. A guide is deleted when its
 capability lands, rather than annotated as done.
 
-The difference from [§14](#14-not-built-yet) directly above is what the entry is *about*: a ledger
+The difference from [§14](#14-not-built-yet) directly above is what the entry is _about_: a ledger
 row names a seam that already exists in the code and has no filler, while a guide describes a
 capability that lives outside the core entirely. [ADR-055](docs/adr/055-where-deliberately-unbuilt-work-is-recorded.md)
 carries the admission question that routes a sentence to one or the other, and
@@ -1889,7 +1890,7 @@ carries the admission question that routes a sentence to one or the other, and
 ## 16. Documentation map
 
 | Where                                          | What it holds                                                                                                                                                                                                                                                          |
-|------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`docs/adr/`](docs/adr/)                       | The durable rationale — one decision per file, Nygard hybrid (Status, Context, Decision, Alternatives, Consequences). Start at [`index.md`](docs/adr/index.md). Numbering and slug rules are themselves an ADR ([003](docs/adr/003-record-architecture-decisions.md)). |
 | [`docs/implementation/`](docs/implementation/) | Per-capability walkthroughs, numbered by delivery order — the "how and why this specific thing works" notes an ADR is too coarse for.                                                                                                                                  |
 | [`docs/extensions/`](docs/extensions/)         | One sketch per capability the system deliberately does not have, grouped into nine clusters — how each would attach if it were ever wanted. See [§15](#15-extensions-and-future-expansion).                                                                            |

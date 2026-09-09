@@ -2,8 +2,7 @@
   "name": "retail-inventory-system",
   "private": true,
   "workspaces": [
-    "apps/*",
-    "libs/*"
+    "apps/*"
   ],
   "scripts": {
     "build": "nest build --all",
