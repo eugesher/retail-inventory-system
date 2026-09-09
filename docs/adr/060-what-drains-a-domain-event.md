@@ -1,7 +1,9 @@
 # ADR-060: What drains a domain event, and the test double that could not fail
 
 - **Date**: 2026-09-10
-- **Status**: Accepted
+- **Status**: Accepted — the *Open* item is **closed**: `asReconstituted` now lives in
+  `libs/ddd/testing/` and every in-memory double that returns an aggregate from `save` returns a
+  reconstituted one, so §3's rule holds repository-wide rather than in one folder
 
 ---
 

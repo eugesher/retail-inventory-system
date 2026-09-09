@@ -4,6 +4,7 @@ import {
   IJwtAccessPayload,
   IJwtRefreshPayload,
 } from '@retail-inventory-system/contracts';
+import { asReconstituted } from '@retail-inventory-system/ddd/testing';
 
 import { ConsentRecord, Customer, StaffUser } from '../../../domain';
 import {
@@ -43,9 +44,10 @@ export class InMemoryStaffUserRepository implements IStaffUserRepositoryPort {
     return Promise.resolve(this.byId.get(id)?.isActive ?? false);
   }
 
+  // Reconstituted, like the real adapter — see `asReconstituted` (ADR-060).
   public save(user: StaffUser): Promise<StaffUser> {
     this.byId.set(user.id, user);
-    return Promise.resolve(user);
+    return Promise.resolve(asReconstituted(user));
   }
 
   // Arrangement only — NOT on the port (ADR-049). Drops the row so a spec can assert
@@ -80,9 +82,10 @@ export class InMemoryCustomerRepository implements ICustomerRepositoryPort {
     return Promise.resolve(customer?.status === 'active' || customer?.status === 'guest');
   }
 
+  // Reconstituted, like the real adapter — see `asReconstituted` (ADR-060).
   public save(customer: Customer): Promise<Customer> {
     this.byId.set(customer.id, customer);
-    return Promise.resolve(customer);
+    return Promise.resolve(asReconstituted(customer));
   }
 }
 
