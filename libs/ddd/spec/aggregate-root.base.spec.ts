@@ -17,9 +17,9 @@ class FakeAggregate extends AggregateRoot<number> {
   }
 }
 
-// Pull semantics: after `pullDomainEvents()` the buffer is drained, so a
-// repository can dispatch the events exactly once on save without risk of
-// double-publishing on a subsequent `save`.
+// Pull semantics: after `pullDomainEvents()` the buffer is drained, so one aggregate cannot
+// publish the same event twice. WHO drains it is the use case, not the repository, and the
+// publish that follows is best-effort at-most-once — see the note on `AggregateRoot` itself.
 describe('AggregateRoot', () => {
   it('buffers added events and drains them on pull', () => {
     const aggregate = new FakeAggregate(1);

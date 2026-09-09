@@ -2,7 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 import { PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-import { RoleAggregate, StaffUser, StaffUserRolesAssignedEvent } from '../../../../auth';
+import { RoleAggregate, StaffUser } from '../../../../auth';
 import { AssignStaffRoleUseCase } from '../assign-staff-role.use-case';
 import {
   FakeAuditLogPublisher,
@@ -46,15 +46,14 @@ describe('AssignStaffRoleUseCase', () => {
     useCase = new AssignStaffRoleUseCase(staffUsers, roles, audit);
   });
 
-  it('assigns a new role and records the diff in the domain event', async () => {
+  // The recorded `StaffUserRolesAssignedEvent` is asserted in `staff-user.model.spec.ts`, not
+  // here: a repository's `save` returns a reconstituted aggregate and reconstitution records no
+  // events, so `result.pullDomainEvents()` is empty in production whatever the use case did. The
+  // effective audit surface is `AUDIT_LOG_PUBLISHER`, covered in full below.
+  it('assigns a new role', async () => {
     const result = await useCase.execute({ staffUserId: 'staff-1', roleNames: ['admin'] });
 
     expect(result.roles.map((r) => r.name).sort()).toEqual(['admin', 'order-support']);
-    const events = result.pullDomainEvents();
-    const assignedEvent = events.find(
-      (e): e is StaffUserRolesAssignedEvent => e instanceof StaffUserRolesAssignedEvent,
-    );
-    expect(assignedEvent?.assignedRoleNames).toEqual(['admin']);
   });
 
   it('is idempotent when re-assigning a role the user already has', async () => {
@@ -64,11 +63,6 @@ describe('AssignStaffRoleUseCase', () => {
     });
 
     expect(result.roles.map((r) => r.name)).toEqual(['order-support']);
-    const events = result.pullDomainEvents();
-    const assignedEvent = events.find(
-      (e): e is StaffUserRolesAssignedEvent => e instanceof StaffUserRolesAssignedEvent,
-    );
-    expect(assignedEvent).toBeUndefined();
   });
 
   it('throws BadRequestException on an unknown role name', async () => {
