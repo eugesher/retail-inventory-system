@@ -174,7 +174,7 @@ Non-obvious facts, each worth a debugging cycle.
 
 ## Cross-cutting conventions
 
-Four conventions bind code you may be touching. **Read the linked source before changing any
+Five conventions bind code you may be touching. **Read the linked source before changing any
 of them** — they are not restated here, on purpose.
 
 | Convention | Where it is specified |
@@ -183,6 +183,7 @@ of them** — they are not restated here, on purpose.
 | Version-checked OCC on every aggregate write, bounded by `OCC_RETRY_ATTEMPTS` | ADR-036/045; `runWithOccRetry` (`libs/common/concurrency/`) — the module's `*-write.ts` only binds to it |
 | No-oversell, reservation TTL, "audit not balance" | ADR-027 / ADR-030; `stock-mutation.ts` |
 | Privacy: tombstone-only erasure, **no PII in an event payload or an audit row**, default-transactional-on / default-marketing-off consent | ADR-037 |
+| Post-commit cross-service retry, then a poison record an operator replays | ADR-056 / ADR-057; `retryThenLogForReplay` (`libs/common/resilience/`) — safety is the caller's `operationKey` behind a UNIQUE index, never the attempt count |
 
 ## Architecture
 
@@ -396,7 +397,9 @@ Ports: `RETURN_REQUEST_REPOSITORY`, `RETURN_ORDER_READER` (raw SQL over `order` 
 `order_line` / `fulfillment` — never imports `orders/`), `RETURN_EVENTS_PUBLISHER`,
 `INVENTORY_RESTOCK_GATEWAY`, `RETURN_CUSTOMER_CONTACT_READER`, `TRANSACTION_PORT`,
 `RETURN_WINDOW_DAYS`, `OCC_RETRY_ATTEMPTS`.
-It keeps a **local copy** of `retry-then-log-for-replay.ts` — returns may not import `orders/`.
+Returns may not import `orders/`, so what looks duplicated between the two is deliberate.
+ADR-056's test decides what may be lifted — *does the signature name a module-owned type?* —
+and `retryThenLogForReplay` was lifted on it.
 
 **notification** `modules/notifications/` (ADR-011/033/037) — RMQ-only.
 Domain: `Notification` VO, `NotificationTemplate`, `NotificationDelivery`,
@@ -531,7 +534,8 @@ the sole cross-module-consumable barrel (`iam` / `customer-admin`).
 **The `EntityManager` downcast is an `infrastructure/` idiom, not a two-file exception** (ADR-054).
 The cast has **two directions and only one is confined**: *constructing* a scope happens in exactly
 one file (the `unique symbol` brand enforces it), while *consuming* one happens in **every repository
-that accepts a scope** — 14 sites, 11 files, and counting. That is the arithmetic of an opaque handle,
+that accepts a scope** — 14 sites in 11 repositories, and counting (ADR-054's own
+`grep` now also picks up the specs: 28 in 18). That is the arithmetic of an opaque handle,
 not drift. The rule ARCH-LINT-EX-01's closure actually bought is the one to keep: **`EntityManager`
 never reaches `application/`**, which the `application-use-case` / `application-port` denylists enforce
 and `spec/architecture-lint.spec.ts` guards.
