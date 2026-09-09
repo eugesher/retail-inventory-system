@@ -118,6 +118,23 @@ const sameApp = (/** @type {string} */ type) => ({
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 const lib = (/** @type {string} */ type) => ({ to: { type } });
 
+// The `@retail-inventory-system/apps/*` aliases resolve to an app's `AppModule`. They exist for
+// the e2e harness, which boots whole apps in-process; an import of one from anywhere else would
+// make a deployable depend on the composition root of another.
+//
+// **Declared once and referenced from both `no-restricted-imports` entries below.** The
+// `apps/**/*.ts` block has to restate this pattern because a flat-config rule entry REPLACES
+// rather than merges — but restating the OBJECT is forced, while restating the TEXT was not, and
+// that is how the previous message stayed wrong for three months in two places at once. It named
+// `test/system-api.e2e-spec.ts` as "the E2E test entry point"; that file was deleted in
+// `e284009` (2026-06-10), and the restriction is really "everything outside test/ and spec/",
+// where the rule is switched off wholesale. The copy was made a month AFTER it became false.
+const APP_MODULE_IMPORT_PATTERN = {
+  group: ['@retail-inventory-system/apps/*'],
+  message:
+    'An AppModule import is reserved for the e2e harness under test/ (and spec/), where this rule is switched off. Elsewhere it would make one deployable depend on the composition root of another — inject a port or import a lib instead.',
+};
+
 // Unified `boundaries/dependencies` rules (v6). With
 // `default: 'disallow'` + `checkAllOrigins: true` every dependency edge
 // — internal or external — must match an explicit allow rule. The
@@ -509,13 +526,7 @@ export default typescriptEslint.config(
       'no-restricted-imports': [
         'error',
         {
-          patterns: [
-            {
-              group: ['@retail-inventory-system/apps/*'],
-              message:
-                'AppModule imports are reserved for the E2E test entry point (test/system-api.e2e-spec.ts).',
-            },
-          ],
+          patterns: [APP_MODULE_IMPORT_PATTERN],
         },
       ],
 
@@ -613,7 +624,8 @@ export default typescriptEslint.config(
   //
   // This block re-states the base `no-restricted-imports` `patterns`: a flat-config rule
   // entry REPLACES rather than merges, so omitting them would silently drop the
-  // AppModule-import restriction for every file under `apps/`.
+  // AppModule-import restriction for every file under `apps/`. It restates the shared
+  // `APP_MODULE_IMPORT_PATTERN` object, not a second copy of its text — see the note there.
   {
     files: ['apps/**/*.ts'],
     ignores: ['apps/*/src/modules/*/infrastructure/messaging/**'],
@@ -629,13 +641,7 @@ export default typescriptEslint.config(
                 'A transport client belongs only in infrastructure/messaging/ (ADR-009). Controllers, use cases and pipes inject the port symbol instead.',
             },
           ],
-          patterns: [
-            {
-              group: ['@retail-inventory-system/apps/*'],
-              message:
-                'AppModule imports are reserved for the E2E test entry point (test/system-api.e2e-spec.ts).',
-            },
-          ],
+          patterns: [APP_MODULE_IMPORT_PATTERN],
         },
       ],
     },
