@@ -1,17 +1,15 @@
 # ── Build stage ───────────────────────────────────────
 # The base image floats on the major, and that is a gap worth stating rather than hiding.
-# `.nvmrc` holds the one declaration of the Node version (24.13.1) — CI reads it through
+# `.nvmrc` holds the one declaration of the Node version — CI reads it through
 # `node-version-file`, a developer reads it through `nvm use`. This file cannot: a `FROM` line
 # cannot read a file, and passing the version as a build arg would put a fourth copy into
 # `docker-compose.yml`. So the Node in these images is "latest 24.x at build time" and is not
 # guaranteed to equal the version CI tested on.
 #
-# Do not "fix" this by hard-coding 24.13.1 here without also deciding who keeps the two in step:
-# an unreconciled copy is worse than a stated gap.
-FROM node:24-alpine AS builder
-
-ARG APP_NAME
-RUN test -n "$APP_NAME" || (echo "APP_NAME build arg is required" && exit 1)
+# Do not "fix" this by hard-coding that version here without also deciding who keeps the two in
+# step: an unreconciled copy is worse than a stated gap. (The version is deliberately not repeated
+# in this comment either.)
+FROM node:24-alpine AS base
 
 WORKDIR /app
 
@@ -60,6 +58,12 @@ RUN YARN_BIN="$(sed -n 's/^yarnPath: *//p' .yarnrc.yml)" \
  && test -n "$YARN_BIN" \
  && node "$YARN_BIN" install --immutable
 
+# ── Build stage ───────────────────────────────────────
+FROM base AS builder
+
+ARG APP_NAME
+RUN test -n "$APP_NAME" || (echo "APP_NAME build arg is required" && exit 1)
+
 # Remaining sources. `apps/` is already present from the install layer above.
 COPY tsconfig.json nest-cli.json webpack.config.js ./
 COPY libs/ libs/
@@ -67,6 +71,24 @@ COPY libs/ libs/
 RUN YARN_BIN="$(sed -n 's/^yarnPath: *//p' .yarnrc.yml)" \
  && test -n "$YARN_BIN" \
  && node "$YARN_BIN" build:${APP_NAME}
+
+# ── Production dependencies ───────────────────────────
+# The bundle does NOT inline npm packages — `webpack.config.js` uses `webpack-node-externals`
+# with only `@retail-inventory-system/*` allowlisted — so `node_modules` genuinely has to ship.
+# The DEV half of it does not, and it dominates: before this stage the runtime image was 882 MB,
+# of which 541.7 MB was `node_modules` against 1.0 MB of `dist`.
+#
+# `yarn workspaces focus --production` re-installs the tree with `devDependencies` excluded.
+# It is a built-in of Yarn 4 (`workspace-tools`), so nothing has to be added to `.yarnrc.yml`.
+#
+# This stage derives from `base`, NOT from `builder`, on purpose: it does not depend on
+# `APP_NAME`, so all six images share one pruned tree and one layer. Deriving it from `builder`
+# would prune six times and cache none of it.
+FROM base AS prod-deps
+
+RUN YARN_BIN="$(sed -n 's/^yarnPath: *//p' .yarnrc.yml)" \
+ && test -n "$YARN_BIN" \
+ && node "$YARN_BIN" workspaces focus --all --production
 
 # ── Runtime stage ─────────────────────────────────────
 FROM node:24-alpine
@@ -76,9 +98,14 @@ ARG APP_NAME
 ENV NODE_ENV=production
 WORKDIR /app
 
-# Copy pre-installed node_modules from builder — no yarn install needed in runtime,
-# which also avoids the same workspace resolution issue.
-COPY --from=builder /app/node_modules ./node_modules
+# Production-only `node_modules` from the pruned stage, and just this app's bundle from the
+# builder. No install runs here, which also avoids the workspace-resolution problem entirely.
+#
+# `NODE_ENV=production` above is load-bearing now, not decorative: `LoggerModuleConfig` reaches
+# for the `pino-pretty` transport on every non-production boot, and `pino-pretty` is a
+# devDependency that this image no longer carries. Running this image without that variable
+# would fail at logger construction.
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist/apps/${APP_NAME}/ ./dist/
 
 CMD ["node", "dist/main.js"]

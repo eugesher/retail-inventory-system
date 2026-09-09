@@ -1,7 +1,10 @@
 # ADR-061: One Dockerfile for six deployables, parameterized by `APP_NAME`
 
 - **Date**: 2026-09-10
-- **Status**: Accepted
+- **Status**: Accepted — the *Open* item (dev dependencies in the runtime image) is **closed** by
+  [ADR-062](062-pruning-dev-dependencies.md), which also corrects it: the
+  `workspace-tools` plugin it named as a blocker is **built into Yarn 4**, so nothing had to be
+  installed
 
 ---
 
