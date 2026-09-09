@@ -24,17 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.13.1
-          cache: 'yarn'
-
-      - name: Install Yarn
-        run: corepack enable
-
-      - name: Install dependencies
-        run: yarn install --immutable
+      - uses: ./.github/actions/setup
 
       - name: Lint
         run: yarn lint
@@ -45,17 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.13.1
-          cache: 'yarn'
-
-      - name: Install Yarn
-        run: corepack enable
-
-      - name: Install dependencies
-        run: yarn install --immutable
+      - uses: ./.github/actions/setup
 
       - name: Build
         run: yarn build
@@ -66,17 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.13.1
-          cache: 'yarn'
-
-      - name: Install Yarn
-        run: corepack enable
-
-      - name: Install dependencies
-        run: yarn install --immutable
+      - uses: ./.github/actions/setup
 
       - name: Run unit tests
         run: yarn test:unit
@@ -149,17 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.13.1
-          cache: 'yarn'
-
-      - name: Install Yarn
-        run: corepack enable
-
-      - name: Install dependencies
-        run: yarn install --immutable
+      - uses: ./.github/actions/setup
 
       # The MySQL service container auto-creates only `retail_db` (its `MYSQL_DATABASE`).
       # The event store's isolated `ris_eventstore` schema (ADR-034) — provisioned

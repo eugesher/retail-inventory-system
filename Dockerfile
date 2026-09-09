@@ -1,4 +1,13 @@
 # ── Build stage ───────────────────────────────────────
+# The base image floats on the major, and that is a gap worth stating rather than hiding.
+# `.nvmrc` holds the one declaration of the Node version (24.13.1) — CI reads it through
+# `node-version-file`, a developer reads it through `nvm use`. This file cannot: a `FROM` line
+# cannot read a file, and passing the version as a build arg would put a fourth copy into
+# `docker-compose.yml`. So the Node in these images is "latest 24.x at build time" and is not
+# guaranteed to equal the version CI tested on.
+#
+# Do not "fix" this by hard-coding 24.13.1 here without also deciding who keeps the two in step:
+# an unreconciled copy is worse than a stated gap.
 FROM node:24-alpine AS builder
 
 ARG APP_NAME
