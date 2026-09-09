@@ -33,14 +33,31 @@ COPY .yarn/releases/ .yarn/releases/
 # Dockerfile frontend (pulled over the network at build time) for the finer cache.
 COPY apps/ apps/
 
-# Invoke the bundled Yarn 4 binary directly — avoids corepack downloading from registry
-RUN node .yarn/releases/yarn-4.12.0.cjs install --immutable
+# Invoke the bundled Yarn binary directly rather than through corepack, which would reach the
+# registry mid-build.
+#
+# The path is READ from `.yarnrc.yml`, not repeated here. `yarn set version` rewrites `yarnPath`,
+# `packageManager` and the file under `.yarn/releases/` in one command and knows nothing about this
+# Dockerfile — a literal copied into it survives that bump and then points at a binary that no
+# longer exists. The failure would land on whoever next builds an image, not on whoever upgraded
+# Yarn (their host build, lint and tests all stay green), and Docker builds are in neither the dev
+# loop nor CI, so the two can be far apart.
+#
+# The expression appears twice because a shell variable does not outlive a RUN. Two copies of a
+# derivation are not two copies of a fact: both always yield whatever the single source says.
+# `test -n` turns a missing or renamed key into a build failure that names itself, rather than
+# `node` being handed an empty path.
+RUN YARN_BIN="$(sed -n 's/^yarnPath: *//p' .yarnrc.yml)" \
+ && test -n "$YARN_BIN" \
+ && node "$YARN_BIN" install --immutable
 
 # Remaining sources. `apps/` is already present from the install layer above.
 COPY tsconfig.json nest-cli.json webpack.config.js ./
 COPY libs/ libs/
 
-RUN node .yarn/releases/yarn-4.12.0.cjs build:${APP_NAME}
+RUN YARN_BIN="$(sed -n 's/^yarnPath: *//p' .yarnrc.yml)" \
+ && test -n "$YARN_BIN" \
+ && node "$YARN_BIN" build:${APP_NAME}
 
 # ── Runtime stage ─────────────────────────────────────
 FROM node:24-alpine

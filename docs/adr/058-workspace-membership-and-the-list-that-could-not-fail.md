@@ -1,7 +1,9 @@
 # ADR-058: All six apps become workspace members, and no build file lists them
 
 - **Date**: 2026-09-09
-- **Status**: Accepted
+- **Status**: Accepted — the Yarn-pin item under *Open* is **closed**: the `Dockerfile` now reads
+  `yarnPath` from `.yarnrc.yml` instead of repeating the release path, so the only declarations
+  left are the two `yarn set version` maintains itself
 
 ---
 
