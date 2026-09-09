@@ -9,7 +9,7 @@ single row. It builds on the domain and persistence in
 and is governed by
 [ADR-026](../../adr/026-price-append-only-ledger-and-tax-category.md). It also
 honors [ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md) (dotted routing
-keys, `ROUTING_KEYS` in lock-step with `MicroserviceMessagePatternEnum`),
+keys, declared once in `ROUTING_KEYS`),
 [ADR-011](../../adr/011-notifier-port-and-adapters.md) /
 [ADR-020](../../adr/020-rabbitmq-as-inter-service-bus.md) (cross-service events
 are framework-free interfaces; `ClientProxy` lives only in
@@ -247,10 +247,9 @@ after the primary emit, and the event store's firehose consumes that exchange
 wholesale. A price event is durably captured today, in `ris_eventstore`. The
 mirror is best-effort and non-throwing, ordered *after* the primary emit — it can
 never fail a price write. The five routing keys
-(`catalog.price.set/list/select/changed/scheduled`) live in **both**
-`ROUTING_KEYS` (`libs/messaging`) and `MicroserviceMessagePatternEnum`
-(`libs/contracts`), kept value-for-value (asserted by
-`routing-keys.constants.spec.ts`).
+(`catalog.price.set/list/select/changed/scheduled`) live in `ROUTING_KEYS`
+(`libs/messaging`), whose naming invariants are asserted by
+`routing-keys.constants.spec.ts`.
 
 The wire contracts (`libs/contracts/catalog/`) are framework-free; events extend
 `ICorrelationPayload` + `occurredAt`, timestamps cross as ISO-8601 strings:

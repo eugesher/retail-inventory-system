@@ -21,8 +21,8 @@ Both honor a hard cap, `MAX_DELIVERY_ATTEMPTS`. When a delivery reaches it and i
 
 This honors [ADR-033](../../adr/033-notification-templates-deliveries-and-render-dispatch.md)
 (the retry + failure-event design),
-[ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md) (the new dotted producer key,
-mirrored value-for-value into `MicroserviceMessagePatternEnum`), and
+[ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md) (the new dotted producer key in
+`ROUTING_KEYS`), and
 [ADR-020](../../adr/020-rabbitmq-as-inter-service-bus.md) (the event is published only
 inside the `infrastructure/messaging/*-rabbitmq.publisher.ts` adapter, best-effort
 post-state).
@@ -195,9 +195,8 @@ The RPC commands are `notification.delivery.{list,get,record-outcome,retry}` (si
 The failure event is `notifications.delivery.failed` (plural). The plural marks it as the
 cross-cutting **alerting stream** — a fan-out surface for *any* downstream that cares about
 delivery health — distinct from the singular request/response RPCs that act on one
-delivery. Both forms are added to `ROUTING_KEYS` and mirrored value-for-value into
-`MicroserviceMessagePatternEnum` (ADR-008), with the agreement asserted by the
-routing-keys spec.
+delivery. Both forms are added to `ROUTING_KEYS` (ADR-008), with the naming invariants
+asserted by the routing-keys spec.
 
 ## 4. Why re-dispatch the already-rendered body (no template re-lookup)
 

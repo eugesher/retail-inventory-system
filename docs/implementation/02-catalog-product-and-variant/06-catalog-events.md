@@ -50,13 +50,12 @@ single responder, the other is a notification any number of consumers may
 subscribe to. (`catalog.product.register` is a command with no matching event —
 registration records no domain event; see [05](./05-catalog-use-cases.md) §2.)
 
-Each key is declared in two places that must agree value-for-value: the
-`ROUTING_KEYS` constants in `@retail-inventory-system/messaging` (the surface new
-callers use) and the `MicroserviceMessagePatternEnum` in
-`@retail-inventory-system/contracts` (the back-compat enum). A contract spec
-(`libs/messaging/spec/routing-keys.constants.spec.ts`) asserts the two are equal
-for every key and that every value matches the dotted regex, so a drift fails CI
-rather than silently routing a message to the wrong queue (ADR-008).
+Each key is declared once, in the `ROUTING_KEYS` constants in
+`@retail-inventory-system/messaging`. A contract spec
+(`libs/messaging/spec/routing-keys.constants.spec.ts`) asserts the invariants every
+entry obeys — the constant name derives from the wire value, the value matches the
+dotted regex, and no two names share a key — so a typo fails CI rather than silently
+routing a message to the wrong queue (ADR-008).
 
 ## 2. The wire-event payloads
 
@@ -247,8 +246,8 @@ TypeScript on the producer and the consumer alike.
 
 ## 6. Verification
 
-- `yarn test:unit` — the routing-keys spec asserts each catalog key equals its
-  `MicroserviceMessagePatternEnum` mirror; the Add Variant spec asserts the
+- `yarn test:unit` — the routing-keys spec asserts the naming invariants every key
+  obeys; the Add Variant spec asserts the
   emitted `catalog.variant.created` carries the persisted `variantId`; the Publish
   spec asserts `catalog.product.published` carries the right `variantIds`, slug,
   `eventVersion: 'v1'`, and `correlationId`; the Archive spec asserts

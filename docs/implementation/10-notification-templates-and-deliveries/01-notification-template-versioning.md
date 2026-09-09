@@ -206,9 +206,8 @@ pointer" column is needed.
 The operations are the notification microservice's **first non-health
 `@MessagePattern` surface** — until now it had only `@EventPattern` consumers and the
 `notification.health.ping` liveness probe. Three dotted routing keys
-([ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md), mirrored value-for-value in
-`ROUTING_KEYS` and `MicroserviceMessagePatternEnum`, asserted by
-`routing-keys.constants.spec.ts`):
+([ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md), declared in `ROUTING_KEYS`,
+with the naming invariants asserted by `routing-keys.constants.spec.ts`):
 
 | Routing key | Use case | Payload | Response |
 |---|---|---|---|

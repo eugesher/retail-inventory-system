@@ -1,7 +1,7 @@
 # ADR-009: Port-and-adapter split at the API gateway
 
 - **Date**: 2026-05-10
-- **Status**: Accepted — **amended on one point** by [ADR-041](041-nest-module-as-the-module-composition-root.md)
+- **Status**: Accepted — **amended on one point** by [ADR-041](041-nest-module-as-the-module-composition-root.md); the "later focused cleanup pass" its *Routing keys* section defers is closed by [ADR-059](059-deleting-the-routing-key-mirror-enum.md)
 
 ---
 
