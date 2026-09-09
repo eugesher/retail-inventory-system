@@ -344,9 +344,8 @@ The parent is addressed by **slug**, not id — the stable handle the gateway ho
 The contracts (`CategoryView` / `CategoryReparentView` / `ICreateCategoryPayload` /
 `IReparentCategoryPayload`) live in `@retail-inventory-system/contracts`, imported
 by both the gateway and the catalog microservice, so a drift fails TypeScript on
-both ends (ADR-005). The dotted RPC keys are mirrored value-for-value into
-`MicroserviceMessagePatternEnum`, locked by `routing-keys.constants.spec.ts`
-(ADR-008). The shared `toCategoryView` factory is the single projection from the
+both ends (ADR-005). The dotted RPC keys live in `ROUTING_KEYS`, whose naming
+invariants are asserted by `routing-keys.constants.spec.ts` (ADR-008). The shared `toCategoryView` factory is the single projection from the
 `Category` aggregate to the wire view (the `catalog-view.factory.ts` pattern).
 
 ### The use-case rejection matrix
@@ -377,4 +376,4 @@ that fronts them lands with the gateway category work.
   repository-level slug uniqueness, the typed `CatalogDomainException`) `Category`
   follows.
 - [ADR-008](../../adr/008-rabbitmq-via-libs-messaging.md) — the dotted routing-key
-  convention and the `ROUTING_KEYS` ⇆ `MicroserviceMessagePatternEnum` lock-step.
+  convention behind `ROUTING_KEYS`.

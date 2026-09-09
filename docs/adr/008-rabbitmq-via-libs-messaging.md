@@ -1,7 +1,7 @@
 # ADR-008: RabbitMQ wiring via `libs/messaging` and dotted routing keys
 
 - **Date**: 2026-05-10
-- **Status**: Accepted (client-module table extended by [ADR-011](011-notifier-port-and-adapters.md); `MessagingModule` removed by [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md); `RabbitmqClientFactory` removed by [ADR-046](046-libs-layout-and-dead-export-removal.md))
+- **Status**: Accepted (client-module table extended by [ADR-011](011-notifier-port-and-adapters.md); `MessagingModule` removed by [ADR-043](043-lifting-forced-duplicates-into-shared-libs.md); `RabbitmqClientFactory` removed by [ADR-046](046-libs-layout-and-dead-export-removal.md); the `MicroserviceMessagePatternEnum` back-compat surface this ADR kept is **deleted** by [ADR-059](059-deleting-the-routing-key-mirror-enum.md) — `ROUTING_KEYS` is now the sole declaration)
 
 ---
 

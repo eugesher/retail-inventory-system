@@ -27,8 +27,7 @@ and [
 ## 1. The `inventory.stock.restock-from-return` RPC
 
 The contract lives in `libs/contracts/inventory/restock-from-return/` and is mirrored as
-a routing key in `libs/messaging` (lock-step with `MicroserviceMessagePatternEnum`, the
-ADR-008 wire agreement):
+a routing key in `libs/messaging` (the ADR-008 dotted wire convention):
 
 ```ts
 // inventory.stock.restock-from-return  (RPC, Retail → Inventory)

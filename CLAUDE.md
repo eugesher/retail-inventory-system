@@ -217,7 +217,8 @@ volume by `scripts/mysql-init/01-create-eventstore-db.sql`.
 
 ## Message patterns
 
-`ROUTING_KEYS` (`libs/messaging`) mirrors `libs/contracts/microservices`. Wire format is dotted
+`ROUTING_KEYS` (`libs/messaging`) is the only declaration of a routing key (ADR-059 deleted the
+back-compat mirror enum). Wire format is dotted
 `<service>.<aggregate>.<action>` (ADR-008), and the namespace names the queue:
 
 | Namespace | Queue | Controller (`@MessagePattern`) |
@@ -519,7 +520,7 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `059`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `060`.** On a feature branch an ADR is still a draft.
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

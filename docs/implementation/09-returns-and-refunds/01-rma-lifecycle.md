@@ -351,9 +351,9 @@ context's events `ClientProxy` holder, `ReturnRabbitmqPublisher` (two clients, t
 
 Each event is a plain wire interface extending `ICorrelationPayload` + `occurredAt`
 (ADR-011 — a domain object is never serialized across services); the use case maps the saved
-aggregate onto it after persistence assigns the ids. The new dotted routing keys are mirrored
-value-for-value across `ROUTING_KEYS` (`libs/messaging`) and `MicroserviceMessagePatternEnum`
-(`libs/contracts`), asserted by the lock-step `routing-keys.constants.spec.ts` (ADR-008).
+aggregate onto it after persistence assigns the ids. The new dotted routing keys live in
+`ROUTING_KEYS` (`libs/messaging`), whose naming invariants are asserted by
+`routing-keys.constants.spec.ts` (ADR-008).
 
 ## 10. Related documents
 

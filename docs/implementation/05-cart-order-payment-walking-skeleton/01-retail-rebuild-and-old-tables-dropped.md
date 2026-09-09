@@ -38,9 +38,8 @@ in subsequent changes; this one only tears down and records the decision.
   one-line placeholder export so it stays importable until the rebuilt contracts
   repopulate it.
 - **The six `retail.order.*` routing keys** — `retail.order.create` / `.confirm`
-  / `.get` / `.created` / `.confirmed` / `.cancelled` are retired from both
-  `ROUTING_KEYS` and the mirrored `MicroserviceMessagePatternEnum` (the two stay
-  value-for-value, asserted by the routing-keys spec).
+  / `.get` / `.created` / `.confirmed` / `.cancelled` are retired from
+  `ROUTING_KEYS`, the one place they were declared.
 - **The order seeds** — `order.sql` and `order-product.sql` and their entries in
   the test seed file list.
 

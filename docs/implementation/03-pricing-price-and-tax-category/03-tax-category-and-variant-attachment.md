@@ -231,10 +231,9 @@ verbatim, so an operator immediately sees the variant's new classification.
 
 ## 6. The RPC surface
 
-Three routing keys join `catalog_queue`, registered lock-step in both
-`ROUTING_KEYS` (`libs/messaging`) and `MicroserviceMessagePatternEnum`
-(`libs/contracts`) — the alignment is asserted by `routing-keys.constants.spec.ts`
-(ADR-008):
+Three routing keys join `catalog_queue`, registered in `ROUTING_KEYS`
+(`libs/messaging`) — the dotted wire convention is asserted by
+`routing-keys.constants.spec.ts` (ADR-008):
 
 | Routing key                        | RPC                            | Use case                            |
 |------------------------------------|--------------------------------|-------------------------------------|
