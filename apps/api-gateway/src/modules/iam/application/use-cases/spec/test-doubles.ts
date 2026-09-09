@@ -3,6 +3,7 @@ import {
   IAuditLogPublisher,
   PermissionCodeEnum,
 } from '@retail-inventory-system/contracts';
+import { asReconstituted } from '@retail-inventory-system/ddd/testing';
 
 import {
   IPermissionRepositoryPort,
@@ -26,29 +27,6 @@ export class FakeAuditLogPublisher implements IAuditLogPublisher {
     return Promise.resolve();
   }
 }
-
-// The real adapters hand back a RECONSTITUTED aggregate — `StaffUserTypeormRepository.save`
-// ends in `StaffUserMapper.toDomain(reloaded)`, `BaseTypeormRepository.save` in
-// `toDomain(saved)` — and a reconstituted aggregate carries no domain events. A double that
-// returns its own argument therefore lets a spec assert something off a `save()` return that
-// production can never deliver, and three specs in this folder used to do exactly that: they
-// were green only because the double preserved object identity.
-//
-// The clone keeps the double honest and leaves the CALLER's aggregate untouched, which is also
-// what the real adapter does — so the correct pattern (keep the mutated aggregate in a local,
-// drain from that) still works here, and only the incorrect one fails.
-interface IDrainable {
-  pullDomainEvents(): unknown[];
-}
-
-const asReconstituted = <T extends IDrainable>(aggregate: T): T => {
-  const clone = Object.assign(
-    Object.create(Object.getPrototypeOf(aggregate) as object) as T,
-    aggregate,
-  );
-  clone.pullDomainEvents();
-  return clone;
-};
 
 export class InMemoryRoleRepository implements IRoleRepositoryPort {
   private byId = new Map<string, RoleAggregate>();

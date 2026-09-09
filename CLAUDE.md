@@ -440,8 +440,10 @@ What the map must carry that README does not:
   not in `database` because `application/ports` may import only `lib-ddd` / `lib-contracts`.
 - **`common/concurrency/`** holds `OCC_RETRY_ATTEMPTS` **and** `runWithOccRetry` — the one OCC
   retry protocol (ADR-045); a module's `*-write.ts` only binds to it.
-- **`observability/tracer` and `observability/testing` are deep-import paths** with their own
-  `tsconfig` aliases. `main.ts` must import the tracer first (see Landmines). Do not move them.
+- **`observability/tracer`, `observability/testing` and `ddd/testing` are deep-import paths** with
+  their own `tsconfig` aliases. `main.ts` must import the tracer first (see Landmines). Do not move
+  them. The two `testing` barrels are **excluded from their lib's `index.ts` on purpose**, so
+  production code cannot reach them; specs import the deep path.
 - **`CacheModule` is `@Global()`** — register once at the app root.
 - `contracts` is the only lib allowed `class-validator` / `class-transformer` /
   `@nestjs/swagger` (ADR-017 §4) — every `*View` is a **class**, never an `interface`.
