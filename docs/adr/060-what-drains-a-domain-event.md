@@ -138,10 +138,15 @@ identity coupling with an extra step; the assertion still cannot hold against th
 
 ### Open
 
-- **Ten more `save` methods in four double files still return their argument**
-  (`auth` ×4, `register-staff-user.use-case.spec.ts` ×3, catalog ×2, pricing ×1). None of them is
-  currently exploited — no other spec drains events off a `save` return — so this is a latent
-  mismatch, not a live defect, and it is left for its own change rather than folded in here.
+- **Two doubles still return their argument where it can matter**: `StaffUser` and `Customer` in
+  `apps/api-gateway/src/modules/auth/application/use-cases/spec/test-doubles.ts`. Exactly four
+  aggregates in this repository record domain events at all — `Cart`, `Customer`, `Product`,
+  `StaffUser` — and the other two doubles were already faithful without a rule to tell them:
+  `InMemoryCartRepository` clones on both `findById` and `save`, and `InMemoryCatalogRepository`
+  returns `Product.reconstitute(...)`. No auth use-case spec drains events off a `save` return
+  today, so this is latent rather than live, and it is left for its own change. The remaining nine
+  `save` methods across the doubles belong to aggregates that record no events, where returning the
+  argument is a cosmetic inconsistency and nothing more.
 
 ## References
 
