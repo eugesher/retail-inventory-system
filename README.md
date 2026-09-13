@@ -1393,6 +1393,8 @@ the driver would default to the Node host's local timezone.
 
 | Script                         | Description                                                            |
 | ------------------------------ | ---------------------------------------------------------------------- |
+| `yarn test`                    | `test:infra:reload`, then `test:run` against a clean database.         |
+| `yarn test:run`                | e2e + unit as one Jest run with one summary — assumes infra is up.     |
 | `yarn test:unit`               | Jest unit suite (`jest.unit.config.js`).                               |
 | `yarn test:e2e`                | `test:infra:reload`, then the full e2e suite against a clean database. |
 | `yarn test:e2e:run`            | e2e only — assumes infra is up.                                        |

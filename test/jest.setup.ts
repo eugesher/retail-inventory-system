@@ -11,6 +11,13 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env.local'), quiet: true }
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_LOGGING = 'false';
 
+// The e2e per-test and per-hook timeout. It is set here, not as `testTimeout` in
+// `jest.e2e.config.js`: that key is a GLOBAL Jest option, so under `yarn test:run`
+// (`--projects`) Jest discards it from the project config with only a validation warning,
+// and every suite that boots an AppModule falls back to the 5 s default. A setup file is
+// per-project, so this one value holds for `yarn test:e2e:run` and `yarn test:run` alike.
+jest.setTimeout(120_000);
+
 // A probe against a dead service must not idle for the 2 s production default (ADR-044).
 // It MUST be set here, not in a spec's `beforeAll`: `ConfigModule.forRoot(configModuleConfig)`
 // sits in a `@Module` decorator argument, so it loads dotenv and runs Joi at AppModule
