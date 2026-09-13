@@ -43,6 +43,8 @@ yarn migration:run:eventstore | migration:revert:eventstore | migration:show:eve
 yarn migration:create:eventstore <Name> # scaffolds into migrations/eventstore/
 
 # Testing
+yarn test                                             # test:infra:reload + test:run
+yarn test:run                                         # e2e + unit, one Jest run, one summary (infra must be up)
 yarn test:unit                                        # full Jest unit suite
 npx jest --config jest.unit.config.js -i <pattern>    # ONE spec — see Landmines
 yarn test:e2e                                         # test:infra:reload + full e2e
@@ -161,6 +163,9 @@ Non-obvious facts, each worth a debugging cycle.
   `['.env.local', '.env']` — so a host run needs `cp .env.example .env.local` first.
 - Bare `npx jest` fails with a Babel TypeScript parse error (not a code bug). Always pass
   `--config jest.unit.config.js`.
+- `testTimeout` is a **global** Jest option: under `--projects` (`yarn test:run`) it is dropped
+  from a project config with only a validation warning. Never put it back in
+  `jest.e2e.config.js` — the e2e timeout is `jest.setTimeout` in `test/jest.setup.ts`.
 - `yarn lint` is the **source of truth for where a file belongs**. Never weaken a
   `boundaries/*` rule to make code pass.
 - `boundaries` takes the **first** matching element pattern, so order in `boundariesElements`

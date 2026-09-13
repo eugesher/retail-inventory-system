@@ -46,7 +46,9 @@
     "test:infra:reload": "yarn test:infra:down && yarn test:infra:up && yarn migration:run && yarn migration:run:eventstore && yarn test:seed",
     "test:unit": "jest --config jest.unit.config.js -i",
     "test:e2e:run": "jest --config jest.e2e.config.js -i",
-    "test:e2e": "yarn test:infra:reload && yarn test:e2e:run"
+    "test:e2e": "yarn test:infra:reload && yarn test:e2e:run",
+    "test:run": "jest --projects jest.e2e.config.js jest.unit.config.js -i",
+    "test": "yarn test:infra:reload && yarn test:run"
   },
   "dependencies": {
     "@keyv/redis": "^5.1.6",

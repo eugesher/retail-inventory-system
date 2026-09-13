@@ -16,6 +16,7 @@ const { compilerOptions } = require('./tsconfig.json');
 // the copies instead of correcting them.
 /** @type {import('jest').Config} */
 module.exports = {
+  displayName: 'unit',
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
   testMatch: ['<rootDir>/**/*.spec.ts'],
