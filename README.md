@@ -317,7 +317,7 @@ migrations/          # retail_db migrations + migrations/eventstore/
 http/                # Kulala + posting.sh request collections
 test/                # e2e suites (gateway HTTP in, public state out)
 spec/                # repository-integrity specs: architecture-lint fixtures,
-                     #   transition windows, extension-guide contract
+                     #   transition windows, extension-guide contract, port-method callers
 ```
 
 ### Shared libraries
