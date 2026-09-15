@@ -1,7 +1,9 @@
 # ADR-049: The port methods nothing calls — and why a port is where that is expensive
 
 - **Date**: 2026-07-12
-- **Status**: Accepted
+- **Status**: Accepted — the *Open* item is **closed**: `spec/port-method-callers.spec.ts` now fails
+  when an `application/ports/` method has no caller outside a spec, so the check is no longer a
+  script someone has to think to run
 
 ---
 

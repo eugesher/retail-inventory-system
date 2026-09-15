@@ -553,3 +553,10 @@ with an owner and a `reviewBy` date — the test goes red on that date (ADR-053)
 (an unused `CACHE_KEYS` builder, an unused `EXCHANGES` member) and a `docs/extensions/` guide are
 **not** windows: nobody owes anything. The question is whether a future event is supposed to make
 somebody act.
+
+**Every `application/ports/` method needs a production caller** — `spec/port-method-callers.spec.ts`
+fails otherwise (ADR-049). A call from a spec, or an adapter's `this.` call into its own
+implementation, does not count; `repo['m']()` and a destructured method are not recognised (a
+false red — write the call plainly). A red means delete the method from port, adapter and spec, or
+make it private on the adapter. **Never allowlist.** The suite builds a TypeScript program over the
+whole repository, ~20 s.
