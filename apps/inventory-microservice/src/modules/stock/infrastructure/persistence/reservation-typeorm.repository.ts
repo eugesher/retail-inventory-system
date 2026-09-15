@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepPartial, EntityManager, LessThan, Repository } from 'typeorm';
+import { DeepPartial, LessThan, Repository } from 'typeorm';
 
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
+import { BaseTypeormRepository, entityManagerOf } from '@retail-inventory-system/database';
 
 import { Reservation, ReservationStatusEnum } from '../../domain';
 import { IReservationRepositoryPort, ITransactionScope } from '../../application/ports';
@@ -133,14 +133,13 @@ export class ReservationTypeormRepository
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (downcast back to the `EntityManager` the adapter brand-wraps — the
-  // one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
   // repository.
   private repo(scope?: ITransactionScope): Repository<ReservationEntity> {
     if (!scope) {
       return this.reservationRepository;
     }
-    const manager = scope as unknown as EntityManager;
+    const manager = entityManagerOf(scope);
     return manager.getRepository(ReservationEntity);
   }
 

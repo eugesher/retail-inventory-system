@@ -1,7 +1,10 @@
 # ADR-054: The `EntityManager` downcast is an idiom, not an exception — and ADR-017 §6 counted the wrong thing
 
 - **Date**: 2026-07-13
-- **Status**: Accepted
+- **Status**: Accepted — **amended**: the consuming downcast no longer repeats per repository; it is
+  `entityManagerOf(scope)` in `libs/database/typeorm-transaction.adapter.ts`, beside the constructing
+  cast, and a `no-restricted-syntax` rule rejects `as EntityManager` in `apps/` outside specs. The
+  invariant (`EntityManager` never reaches `application/`) and the *Open* items are unchanged
 
 ---
 

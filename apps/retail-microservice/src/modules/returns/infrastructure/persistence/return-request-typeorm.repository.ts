@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DeepPartial, EntityManager, Repository } from 'typeorm';
 
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
+import { BaseTypeormRepository, entityManagerOf } from '@retail-inventory-system/database';
 
 import { ReturnRequest } from '../../domain';
 import { IReturnRequestRepositoryPort, ITransactionScope } from '../../application/ports';
@@ -22,8 +22,8 @@ import { ReturnRequestMapper } from './return-request.mapper';
 // `save` / `findById` accept an optional `ITransactionScope` so Inspect can re-read and write the
 // RMA inside one attempt's transaction, under the OCC retry (ADR-017 §6 / ADR-032). The scope
 // spans the RMA root and its lines and **nothing else** — returns cannot reach the orders
-// module's `Refund` / `Payment`. The `EntityManager` downcast that unwraps the brand is confined
-// to `returnRequestRepo`.
+// module's `Refund` / `Payment`. The scope is un-opaqued only
+// through `entityManagerOf` (ADR-054).
 @Injectable()
 export class ReturnRequestTypeormRepository
   extends BaseTypeormRepository<ReturnRequestEntity, ReturnRequest>
@@ -61,11 +61,7 @@ export class ReturnRequestTypeormRepository
     let id: number;
     try {
       if (scope) {
-        id = await this.persistGraph(
-          scope as unknown as EntityManager,
-          returnRequest,
-          expectedVersion,
-        );
+        id = await this.persistGraph(entityManagerOf(scope), returnRequest, expectedVersion);
       } else {
         id = await this.returnRequestRepository.manager.transaction((manager) =>
           this.persistGraph(manager, returnRequest, expectedVersion),
@@ -215,14 +211,13 @@ export class ReturnRequestTypeormRepository
   }
 
   // Resolves the return-request repository bound to the caller's transaction when a
-  // `scope` is supplied (downcast back to the `EntityManager` the adapter brand-wraps —
-  // the one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // `scope` is supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
   // repository.
   private returnRequestRepo(scope?: ITransactionScope): Repository<ReturnRequestEntity> {
     if (!scope) {
       return this.returnRequestRepository;
     }
-    return (scope as unknown as EntityManager).getRepository(ReturnRequestEntity);
+    return entityManagerOf(scope).getRepository(ReturnRequestEntity);
   }
 
   private static formatRmaNumber(year: number, id: number): string {

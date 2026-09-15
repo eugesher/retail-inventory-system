@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, IsNull, LessThan, Repository } from 'typeorm';
+import { IsNull, LessThan, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
+
+import { entityManagerOf } from '@retail-inventory-system/database';
 
 import {
   IDEMPOTENCY_KEY_TTL_HOURS,
@@ -201,12 +203,12 @@ export class IdempotencyStoreTypeormRepository implements IIdempotencyStorePort 
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is supplied
-  // (the `EntityManager` downcast ADR-017 §6 permits here), else the default-manager
+  // (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
   // repository (the `RefundTypeormRepository.refundRepo` precedent).
   private idempotencyRepo(scope?: ITransactionScope): Repository<IdempotencyKeyEntity> {
     if (!scope) {
       return this.idempotencyKeyRepository;
     }
-    return (scope as unknown as EntityManager).getRepository(IdempotencyKeyEntity);
+    return entityManagerOf(scope).getRepository(IdempotencyKeyEntity);
   }
 }

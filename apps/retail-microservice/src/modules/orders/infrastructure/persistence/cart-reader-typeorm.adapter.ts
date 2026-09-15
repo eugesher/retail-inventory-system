@@ -3,6 +3,7 @@ import { InjectEntityManager } from '@nestjs/typeorm';
 import { EntityManager } from 'typeorm';
 
 import { CartStatusEnum } from '@retail-inventory-system/contracts';
+import { entityManagerOf } from '@retail-inventory-system/database';
 
 import {
   IOrderCartReaderPort,
@@ -87,7 +88,7 @@ export class CartReaderTypeormAdapter implements IOrderCartReaderPort {
     // commits, after which it matches 0 rows. The returned boolean surfaces that
     // (`affectedRows` is reliable here — the SET always changes a matched row), so
     // the caller can roll back instead of committing a duplicate order.
-    const manager = scope ? (scope as unknown as EntityManager) : this.entityManager;
+    const manager = scope ? entityManagerOf(scope) : this.entityManager;
     const result = await manager.query<{ affectedRows?: number }>(
       `UPDATE cart
           SET status = 'converted', version = version + 1, updated_at = CURRENT_TIMESTAMP

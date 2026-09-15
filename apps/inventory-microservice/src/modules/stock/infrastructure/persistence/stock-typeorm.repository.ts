@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepPartial, EntityManager, FindOptionsWhere, In, Repository } from 'typeorm';
+import { DeepPartial, FindOptionsWhere, In, Repository } from 'typeorm';
 
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
+import { BaseTypeormRepository, entityManagerOf } from '@retail-inventory-system/database';
 
 import { StockLevel, StockLocation } from '../../domain';
 import { IStockRepositoryPort, ITransactionScope } from '../../application/ports';
@@ -157,14 +157,13 @@ export class StockTypeormRepository
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (downcast back to the `EntityManager` the adapter brand-wraps — the
-  // one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
   // repository.
   private levelRepo(scope?: ITransactionScope): Repository<StockLevelEntity> {
     if (!scope) {
       return this.stockLevelRepository;
     }
-    const manager = scope as unknown as EntityManager;
+    const manager = entityManagerOf(scope);
     return manager.getRepository(StockLevelEntity);
   }
 
