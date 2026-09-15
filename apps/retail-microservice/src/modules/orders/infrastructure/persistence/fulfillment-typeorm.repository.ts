@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DeepPartial, EntityManager, Repository } from 'typeorm';
 
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
+import { BaseTypeormRepository, entityManagerOf } from '@retail-inventory-system/database';
 
 import { Fulfillment } from '../../domain';
 import { IFulfillmentRepositoryPort, ITransactionScope } from '../../application/ports';
@@ -21,8 +21,7 @@ import { FulfillmentMapper } from './fulfillment.mapper';
 // `save` / `findById` / `listByOrderId` accept an optional `ITransactionScope`: the
 // later Ship operation hands the same scope to the fulfillment, order, and payment
 // writes so they commit as one unit of work (ADR-017 §6 / ADR-031). The
-// `EntityManager` downcast that unwraps the brand lives only in `fulfillmentRepo` /
-// `scopedManager` (the place ADR-017 §6 permits it).
+// scope is un-opaqued only through `entityManagerOf` (ADR-054).
 @Injectable()
 export class FulfillmentTypeormRepository
   extends BaseTypeormRepository<FulfillmentEntity, Fulfillment>
@@ -52,7 +51,7 @@ export class FulfillmentTypeormRepository
     // fulfillment, order, and payment atomically — else open one.
     let id: number;
     if (scope) {
-      id = await this.persistGraph(scope as unknown as EntityManager, fulfillment);
+      id = await this.persistGraph(entityManagerOf(scope), fulfillment);
     } else {
       id = await this.fulfillmentRepository.manager.transaction((manager) =>
         this.persistGraph(manager, fulfillment),
@@ -154,13 +153,12 @@ export class FulfillmentTypeormRepository
   }
 
   // Resolves the fulfillment repository bound to the caller's transaction when a
-  // `scope` is supplied (downcast back to the `EntityManager` the adapter brand-wraps
-  // — the one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // `scope` is supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
   // repository.
   private fulfillmentRepo(scope?: ITransactionScope): Repository<FulfillmentEntity> {
     if (!scope) {
       return this.fulfillmentRepository;
     }
-    return (scope as unknown as EntityManager).getRepository(FulfillmentEntity);
+    return entityManagerOf(scope).getRepository(FulfillmentEntity);
   }
 }

@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, EntityManager, Repository } from 'typeorm';
+import { DeepPartial, Repository } from 'typeorm';
 
 import { PaymentStatusEnum } from '@retail-inventory-system/contracts';
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
+import { BaseTypeormRepository, entityManagerOf } from '@retail-inventory-system/database';
 
 import { Payment } from '../../domain';
 import { IPaymentRepositoryPort, ITransactionScope } from '../../application/ports';
@@ -49,13 +49,13 @@ export class PaymentTypeormRepository
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (the `EntityManager` downcast ADR-017 §6 permits here), else the
+  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the
   // default-manager repository.
   private paymentRepo(scope?: ITransactionScope): Repository<PaymentEntity> {
     if (!scope) {
       return this.paymentRepository;
     }
-    return (scope as unknown as EntityManager).getRepository(PaymentEntity);
+    return entityManagerOf(scope).getRepository(PaymentEntity);
   }
 
   public async findById(id: number): Promise<Payment | null> {

@@ -1,13 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  Between,
-  EntityManager,
-  FindOptionsWhere,
-  LessThanOrEqual,
-  MoreThanOrEqual,
-  Repository,
-} from 'typeorm';
+import { Between, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+
+import { entityManagerOf } from '@retail-inventory-system/database';
 
 import {
   IStockMovementListQuery,
@@ -100,14 +95,13 @@ export class StockMovementTypeormRepository implements IStockMovementRepositoryP
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (downcast back to the `EntityManager` the adapter brand-wraps — the
-  // one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
   // repository.
   private repo(scope?: ITransactionScope): Repository<StockMovementEntity> {
     if (!scope) {
       return this.stockMovementRepository;
     }
-    const manager = scope as unknown as EntityManager;
+    const manager = entityManagerOf(scope);
     return manager.getRepository(StockMovementEntity);
   }
 }

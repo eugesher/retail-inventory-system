@@ -539,14 +539,15 @@ have lives under [`docs/extensions/`](docs/extensions/), clustered and indexed b
 **One architectural exception: `ARCH-LINT-EX-02`** (ADR-017 §6) — the gateway `auth` barrel is
 the sole cross-module-consumable barrel (`iam` / `customer-admin`).
 
-**The `EntityManager` downcast is an `infrastructure/` idiom, not a two-file exception** (ADR-054).
-The cast has **two directions and only one is confined**: *constructing* a scope happens in exactly
-one file (the `unique symbol` brand enforces it), while *consuming* one happens in **every repository
-that accepts a scope** — 14 sites in 11 repositories, and counting (ADR-054's own
-`grep` now also picks up the specs: 28 in 18). That is the arithmetic of an opaque handle,
-not drift. The rule ARCH-LINT-EX-01's closure actually bought is the one to keep: **`EntityManager`
-never reaches `application/`**, which the `application-use-case` / `application-port` denylists enforce
-and `spec/architecture-lint.spec.ts` guards.
+**The `EntityManager` downcast lives in one file, in both directions** (ADR-054):
+`libs/database/typeorm-transaction.adapter.ts`. *Constructing* a scope is the adapter's own cast (the
+`unique symbol` brand confines it); *consuming* one is `entityManagerOf(scope)`, which every repository
+that joins a caller's transaction calls instead of casting — a `no-restricted-syntax` rule rejects
+`as EntityManager` anywhere in `apps/` outside a spec. A spec's `{ … } as unknown as EntityManager` builds
+a fake manager, not a downcast, and is exempt. The rule ARCH-LINT-EX-01's closure actually bought is
+still the one to keep: **`EntityManager` never reaches `application/`**, which the
+`application-use-case` / `application-port` denylists enforce and `spec/architecture-lint.spec.ts`
+guards.
 
 **An obligation queued behind a condition must be registered in `spec/transition-windows.spec.ts`**
 with an owner and a `reviewBy` date — the test goes red on that date (ADR-053). A *reserved surface*

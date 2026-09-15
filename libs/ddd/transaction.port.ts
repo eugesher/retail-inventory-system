@@ -16,18 +16,17 @@
 
 // The opaque scope handed to the work callback.
 //
-// **The cast has two directions, and only one of them is confined** (ADR-054 — ADR-017 §6 conflated
-// them and predicted the wrong number):
+// **The cast has two directions** (ADR-054 — ADR-017 §6 conflated them and predicted the wrong
+// number), **and both live in `libs/database/typeorm-transaction.adapter.ts`**:
 //
 //   * **CONSTRUCTING** a scope (`EntityManager` → `ITransactionScope`) happens in **exactly one place**,
-//     `libs/database/typeorm-transaction.adapter.ts`, and the `unique symbol` brand is what confines it:
-//     no object literal can satisfy this type, so nothing else can mint one. It has not grown and it
-//     cannot.
-//   * **CONSUMING** a scope (`ITransactionScope` → `EntityManager`) happens in **every repository that
-//     accepts one** — 14 sites, 11 files, and counting. That is not drift: an opaque handle that must
-//     be *used* has to be un-opaqued **once per user**, so the count is exactly the number of
-//     repositories that join a caller's transaction. It is an infrastructure **idiom**, not an
-//     exception, and it needs no ADR when the twelfth file appears.
+//     `TypeormTransactionAdapter.runInTransaction`, and the `unique symbol` brand is what confines it:
+//     no object literal can satisfy this type, so nothing else can mint one.
+//   * **CONSUMING** a scope (`ITransactionScope` → `EntityManager`) is needed by **every repository that
+//     accepts one** — an opaque handle that must be *used* has to be un-opaqued once per user. Each of
+//     them calls `entityManagerOf(scope)` rather than casting inline (it used to be 14 inline casts in
+//     11 files), and a `no-restricted-syntax` rule rejects a new `as EntityManager` in `apps/`. A new
+//     repository that joins a transaction calls the helper; that is the idiom, and it needs no ADR.
 //
 // **The invariant is not "few casts" — it is that `EntityManager` never reaches `application/`**, which
 // the `application-use-case` / `application-port` denylists enforce and `spec/architecture-lint.spec.ts`

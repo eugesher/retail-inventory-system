@@ -5,7 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { DeepPartial, EntityManager, Repository } from 'typeorm';
 
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
+import { BaseTypeormRepository, entityManagerOf } from '@retail-inventory-system/database';
 
 import { Order } from '../../domain';
 import {
@@ -30,8 +30,7 @@ import { OrderMapper } from './order.mapper';
 // `save` / `findById` / `attachAddresses` accept an optional `ITransactionScope`:
 // Place Order hands the same scope to the order, address, and cart-conversion writes
 // so they commit as one unit of work (ADR-017 §6 / ADR-028 §5). The
-// `EntityManager` downcast that unwraps the brand lives only in `scopedManager`
-// (the place ADR-017 §6 permits it).
+// scope is un-opaqued only through `entityManagerOf` (ADR-054).
 @Injectable()
 export class OrderTypeormRepository
   extends BaseTypeormRepository<OrderEntity, Order>
@@ -111,11 +110,7 @@ export class OrderTypeormRepository
     let orderId: number;
     try {
       if (scope) {
-        orderId = await this.persistGraph(
-          scope as unknown as EntityManager,
-          order,
-          expectedVersion,
-        );
+        orderId = await this.persistGraph(entityManagerOf(scope), order, expectedVersion);
       } else {
         orderId = await this.orderRepository.manager.transaction((manager) =>
           this.persistGraph(manager, order, expectedVersion),
@@ -274,14 +269,13 @@ export class OrderTypeormRepository
   }
 
   // Resolves the order repository bound to the caller's transaction when a `scope`
-  // is supplied (downcast back to the `EntityManager` the adapter brand-wraps — the
-  // one place that downcast is allowed, ADR-017 §6), else the default-manager
+  // is supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
   // repository.
   private orderRepo(scope?: ITransactionScope): Repository<OrderEntity> {
     if (!scope) {
       return this.orderRepository;
     }
-    return (scope as unknown as EntityManager).getRepository(OrderEntity);
+    return entityManagerOf(scope).getRepository(OrderEntity);
   }
 
   private static formatOrderNumber(year: number, id: number): string {

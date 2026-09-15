@@ -10,9 +10,9 @@ import { ITransactionPort, ITransactionScope } from '@retail-inventory-system/dd
 // cross-module isolation forbade sharing one; lifting it into a lib is what makes sharing
 // legal.
 //
-// This file is one of the two sanctioned homes for the `EntityManager` downcast (ADR-017 §6):
-// the scope the application layer passes around is opaque, and the cast back to the real
-// manager happens here and in the repository adapters that receive it. Nothing above
+// **Both directions of the `EntityManager` downcast live in this file** (ADR-054). The scope the
+// application layer passes around is opaque: `runInTransaction` is the only place that mints one,
+// and `entityManagerOf` below is the only place that un-opaques one. Nothing above
 // `infrastructure/` ever sees the TypeORM type.
 //
 // `@InjectEntityManager()` resolves the DEFAULT connection. The event store — the one service
@@ -28,4 +28,17 @@ export class TypeormTransactionAdapter implements ITransactionPort {
   public runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
     return this.entityManager.transaction(async (em) => work(em as unknown as ITransactionScope));
   }
+}
+
+// Un-opaques a transaction scope for a repository that joins its caller's transaction.
+//
+// Every repository accepting an `ITransactionScope` used to cast it inline — 14 copies of the same
+// `as unknown as EntityManager` in 11 files. They call this instead, and a `no-restricted-syntax`
+// rule in `eslint.config.mjs` rejects a new inline cast anywhere in `apps/`.
+//
+// **The cast is no safer for living here.** The brand proves a scope came from `runInTransaction`;
+// it does not prove it came from THIS transaction (ADR-054, Open). What moving it buys is one cast to
+// audit instead of fourteen, and one line to change if the manager behind the scope ever does.
+export function entityManagerOf(scope: ITransactionScope): EntityManager {
+  return scope as unknown as EntityManager;
 }

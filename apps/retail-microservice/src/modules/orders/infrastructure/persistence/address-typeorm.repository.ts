@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, EntityManager, Repository } from 'typeorm';
+import { DeepPartial, Repository } from 'typeorm';
 
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
+import { BaseTypeormRepository, entityManagerOf } from '@retail-inventory-system/database';
 
 import { Address } from '../../domain';
 import { IAddressRepositoryPort, ITransactionScope } from '../../application/ports';
@@ -48,12 +48,12 @@ export class AddressTypeormRepository
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (the `EntityManager` downcast ADR-017 §6 permits here), else the
+  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the
   // default-manager repository.
   private addressRepo(scope?: ITransactionScope): Repository<AddressEntity> {
     if (!scope) {
       return this.addressRepository;
     }
-    return (scope as unknown as EntityManager).getRepository(AddressEntity);
+    return entityManagerOf(scope).getRepository(AddressEntity);
   }
 }

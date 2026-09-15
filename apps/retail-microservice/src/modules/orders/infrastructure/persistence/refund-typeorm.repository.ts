@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, EntityManager, Repository } from 'typeorm';
+import { DeepPartial, Repository } from 'typeorm';
 
-import { BaseTypeormRepository } from '@retail-inventory-system/database';
+import { BaseTypeormRepository, entityManagerOf } from '@retail-inventory-system/database';
 
 import { Refund } from '../../domain';
 import { IRefundRepositoryPort, ITransactionScope } from '../../application/ports';
@@ -75,12 +75,12 @@ export class RefundTypeormRepository
   }
 
   // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (the `EntityManager` downcast ADR-017 §6 permits here), else the
+  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the
   // default-manager repository.
   private refundRepo(scope?: ITransactionScope): Repository<RefundEntity> {
     if (!scope) {
       return this.refundRepository;
     }
-    return (scope as unknown as EntityManager).getRepository(RefundEntity);
+    return entityManagerOf(scope).getRepository(RefundEntity);
   }
 }

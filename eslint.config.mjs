@@ -646,6 +646,28 @@ export default typescriptEslint.config(
       ],
     },
   },
+  // The `ITransactionScope` → `EntityManager` downcast has ONE home (ADR-054):
+  // `entityManagerOf(scope)` in `libs/database/typeorm-transaction.adapter.ts`, the same file that
+  // mints the scope. A repository that joins a caller's transaction calls it instead of casting.
+  //
+  // Without this rule the helper would be a convention, and the fifteenth repository would cast
+  // again exactly as the first fourteen did — the count grew from 1 to 14 without anyone deciding
+  // it should. Specs are exempt: a spec's `{ … } as unknown as EntityManager` builds a FAKE manager,
+  // which is a test double, not a downcast of a real scope.
+  {
+    files: ['apps/**/*.ts'],
+    ignores: ['**/spec/**', '**/*.spec.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'TSAsExpression[typeAnnotation.typeName.name="EntityManager"]',
+          message:
+            'Do not cast to EntityManager (ADR-054). Un-opaque a transaction scope with `entityManagerOf(scope)` from @retail-inventory-system/database.',
+        },
+      ],
+    },
+  },
   {
     files: ['test/**/*.ts', 'spec/**/*.ts'],
     rules: {
