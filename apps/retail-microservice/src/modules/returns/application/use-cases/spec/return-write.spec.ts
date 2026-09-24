@@ -6,11 +6,6 @@ import { ReturnDomainException, ReturnErrorCodeEnum } from '../../../domain';
 import { ReturnWriteConflictError } from '../return-write-conflict.error';
 import { runWithReturnWriteRetry } from '../return-write';
 
-// Pure unit test of the shared bounded return-write retry protocol (ADR-036) — the
-// mechanism every version-checked RMA lifecycle transition (authorize / reject /
-// receive / inspect / close) wraps its write in. Proves: a lost CAS retries then
-// succeeds; an exhausted budget surfaces the uniform `409 VERSION_MISMATCH` with
-// `details.currentVersion`; a terminal domain rejection is NOT retried.
 describe('runWithReturnWriteRetry', () => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
 

@@ -23,19 +23,6 @@ import { resolveCustomerEmail } from './resolve-customer-email';
 import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
-// Authorize Return walks a `requested` RMA → `authorized` (staff `order:return-authorize`,
-// gated at the gateway — the use case trusts the gate and only resolves the RMA by id,
-// `RETURN_NOT_FOUND` if missing). The domain `authorize(now)` enforces the legal
-// transition (`RETURN_INVALID_STATUS_TRANSITION` from any non-`requested` start) and
-// stamps `authorizedAt`. A policy re-check (window / condition) is deliberately NOT
-// repeated here — the substantive eligibility gate was Open; Authorize is the staff's
-// approval of an already-validated request. Emits `retail.return.authorized` best-effort
-// post-commit (ADR-020).
-//
-// **The read and the write are not in the same unit of work** (ADR-063): `loadReturnById`
-// reads off the plain read port, unscoped; the write is a self-contained version-checked
-// CAS on `returnsUow`. Sound because the write does not depend on the read having been
-// current — a stale read just loses the CAS and the retry loop re-reads.
 @Injectable()
 export class AuthorizeReturnUseCase {
   constructor(
@@ -58,10 +45,6 @@ export class AuthorizeReturnUseCase {
 
     this.logger.info({ correlationId, rmaId, actorId }, 'Authorizing return request');
 
-    // Version-checked CAS under the bounded OCC retry (ADR-036): re-read the RMA afresh
-    // each attempt, walk `requested → authorized`, and save with the version pinned. A
-    // concurrent transition that advanced the version makes the CAS lose and the attempt
-    // retry; a non-`requested` start is a terminal domain 409, never retried.
     const saved = await runWithReturnWriteRetry(
       { logger: this.logger, maxAttempts: this.maxAttempts },
       async () => {

@@ -25,18 +25,6 @@ import {
   RejectReturnUseCase,
 } from '../application/use-cases';
 
-// RPC surface for the return (RMA) operations (API Gateway → Retail over `retail_queue`).
-// The returns bounded context is its own module (ADR-032), so its eight `@MessagePattern`
-// handlers live on their own controller (the one-aggregate-shaped controller convention).
-// Each handler is a thin delegate; a `ReturnDomainException` is terminated by the
-// `ReturnRpcExceptionFilter` into the `{ statusCode, message, code }` wire shape the
-// gateway maps. The correlation id rides each payload and is logged inline by the use
-// cases (ADR-011 — `PinoLogger.assign` would throw outside request scope).
-//
-// `retail.return.open` is owner-or-staff; `retail.return.authorize` / `.reject` /
-// `.close` are staff `order:return-authorize`; `retail.return.receive` / `.inspect` are
-// warehouse `inventory:receive-return`; `retail.return.get` / `.list` are owner-or-staff
-// `order:read` (all gated at the gateway — the use cases trust the resolved flag).
 @Controller()
 export class ReturnsController {
   constructor(

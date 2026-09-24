@@ -89,7 +89,6 @@ describe('ReturnLine', () => {
             ReturnErrorCodeEnum.RETURN_INSPECTION_INVALID,
           );
         }
-        // A rejected inspection leaves the line's fields null.
         expect(line.lineRefundAmountMinor).toBeNull();
       },
     );

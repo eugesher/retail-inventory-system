@@ -23,14 +23,7 @@ const makeHarness = (): {
   const repository = new FakeReturnRequestRepository();
   const returnsUow = new FakeReturnsUnitOfWorkRunner(repository);
   const publisher = new SpyReturnEventsPublisher();
-  const useCase = new RejectReturnUseCase(
-    repository,
-    returnsUow,
-    publisher,
-    // OCC_RETRY_ATTEMPTS budget (ADR-036).
-    5,
-    logger,
-  );
+  const useCase = new RejectReturnUseCase(repository, returnsUow, publisher, 5, logger);
   return { useCase, repository, publisher };
 };
 
@@ -48,7 +41,6 @@ describe('RejectReturnUseCase', () => {
 
     expect(view.status).toBe(ReturnStatusEnum.REJECTED);
     expect(view.closedAt).not.toBeNull();
-    // The rejection reason is appended to notes (no schema change).
     expect(view.notes).toContain('outside policy');
 
     expect(publisher.rejected).toHaveLength(1);

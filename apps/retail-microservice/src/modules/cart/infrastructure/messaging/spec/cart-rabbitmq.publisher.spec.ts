@@ -14,10 +14,6 @@ import { makePinoLoggerMock } from '@retail-inventory-system/observability/testi
 
 import { CartRabbitmqPublisher } from '../cart-rabbitmq.publisher';
 
-// Proves the cart publisher dual-publishes (ADR-035): the four reserved
-// `retail.cart.*` events keep their primary `retail_queue` emit AND mirror the same
-// routing key + wire onto `ris.events` — the first half of a Place Order firehose
-// chain.
 describe('CartRabbitmqPublisher dual-publish', () => {
   let retailEmit: jest.Mock;
   let mirrorEmit: jest.Mock;

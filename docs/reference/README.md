@@ -52,7 +52,8 @@ placeholders.
 | [`wire-contracts.md`](wire-contracts.md)     | `libs/contracts` — payloads, views, enums, units                        |
 | [`shared-libraries.md`](shared-libraries.md) | the other `libs/*`                                                      |
 | [`retail-orders.md`](retail-orders.md)       | retail `modules/orders/`                                                |
-| `retail-cart.md`, `retail-returns.md`        | retail `modules/cart/`, `modules/returns/`                              |
+| [`retail-cart.md`](retail-cart.md)           | retail `modules/cart/`                                                  |
+| [`retail-returns.md`](retail-returns.md)     | retail `modules/returns/`                                               |
 | `inventory.md`                               | inventory `modules/stock/`                                              |
 | `catalog-and-pricing.md`                     | catalog `modules/catalog/`, `modules/pricing/`                          |
 | `notifications.md`                           | notification `modules/notifications/`                                   |

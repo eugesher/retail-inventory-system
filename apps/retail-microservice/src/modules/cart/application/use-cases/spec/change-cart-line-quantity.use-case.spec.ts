@@ -18,7 +18,6 @@ const OTHER_ID = '00000000-0000-4000-a000-000000000099';
 const LINE_ID = 5000;
 const VARIANT_ID = 1;
 const MAX_ATTEMPTS = 5;
-// The seeded cart starts at version 1 (see `seedCartWithLine`).
 const SEED_VERSION = 1;
 
 const seedCartWithLine = (repository: InMemoryCartRepository): void => {
@@ -77,8 +76,6 @@ describe('ChangeCartLineQuantityUseCase', () => {
     expect(view.lines[0].quantity).toBe(1);
     expect(view.subtotalMinor).toBe(4999);
 
-    // The reserve carried the ABSOLUTE new quantity (1), not a delta, keyed on the
-    // line's variant.
     expect(inventory.reserveCalls).toEqual([
       { variantId: VARIANT_ID, quantity: 1, cartId: CART_ID, correlationId: 'corr-1' },
     ]);
@@ -158,9 +155,6 @@ describe('ChangeCartLineQuantityUseCase', () => {
   });
 
   it('rejects quantity 0 before saving (the reserve RPC guards it; the gateway @Min(1) is the edge gate)', async () => {
-    // With reserve-before-mutate a `0` is rejected by the reserve RPC's positive-int
-    // guard before the domain backstop is reached; either way nothing is saved. In
-    // production the gateway DTO's `@Min(1)` rejects `0` at the edge first.
     await expect(
       useCase.execute({
         cartId: CART_ID,
@@ -212,7 +206,7 @@ describe('ChangeCartLineQuantityUseCase', () => {
           customerId: OWNER_ID,
           lineId: LINE_ID,
           quantity: 2,
-          expectedVersion: SEED_VERSION - 1, // stale — the cart is at SEED_VERSION
+          expectedVersion: SEED_VERSION - 1,
           correlationId: 'corr-stale',
         }),
       ).rejects.toMatchObject({

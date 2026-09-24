@@ -28,10 +28,6 @@ import {
 } from '../../ports';
 import { ReturnWriteConflictError } from '../return-write-conflict.error';
 
-// Re-reconstitutes a return request with a concrete id (and concrete line ids), the way a
-// real repository's save → re-read would. Used both to persist a freshly-opened request
-// and to hand back an independent copy on each read (so a use case mutating its loaded
-// aggregate cannot leak into the store before it saves).
 const reconstituteWithId = (request: ReturnRequest, id: number): ReturnRequest => {
   const year = request.requestedAt.getUTCFullYear();
   const rmaNumber = request.rmaNumber ?? `RMA-${year}-${String(id).padStart(8, '0')}`;
@@ -65,30 +61,15 @@ const reconstituteWithId = (request: ReturnRequest, id: number): ReturnRequest =
   });
 };
 
-// In-memory double satisfying BOTH `IReturnRequestRepositoryPort` (the plain read port)
-// and `IReturnRequestWriteRepositoryPort` (the UoW-only write port, ADR-063) — one shared
-// Map-backed store, since a fake needs no real transaction isolation between the two roles.
-// `save` assigns the BIGINT id + finalizes the RMA number on a new request (mirroring the
-// real repo's re-read-then-finalize), and re-persists an existing one; every read returns
-// an independent reconstituted copy.
 export class FakeReturnRequestRepository
   implements IReturnRequestRepositoryPort, IReturnRequestWriteRepositoryPort
 {
   private readonly store = new Map<number, ReturnRequest>();
   private sequence = 0;
   public readonly saved: ReturnRequest[] = [];
-  // OCC simulation (ADR-036): when > 0, the next N version-checked saves
-  // (`expectedVersion` supplied) reject with `ReturnWriteConflictError` and decrement —
-  // the retry helper re-reads + retries. Set it above the injected budget to prove
-  // retry-exhausted → `VERSION_MISMATCH`, or below it to prove retry-then-success.
   public conflictsBeforeSuccess = 0;
 
-  // Jest-free, non-`async` (returns `Promise.resolve(...)`) so the require-await /
-  // no-floating lint rules stay satisfied — the orders `test-doubles` convention.
   public save(request: ReturnRequest, expectedVersion?: number): Promise<ReturnRequest> {
-    // A version-checked CAS that loses the race — mirrors the real repo throwing
-    // `ReturnWriteConflictError`, which the retry helper catches. It rejects WITHOUT
-    // storing, so the retry re-reads the pristine (pre-transition) request.
     if (expectedVersion !== undefined && this.conflictsBeforeSuccess > 0) {
       this.conflictsBeforeSuccess -= 1;
       const current = this.store.get(request.id!);
@@ -117,8 +98,6 @@ export class FakeReturnRequestRepository
     );
   }
 
-  // Test helper: seed an already-persisted RMA (e.g. a previous return on the same order,
-  // or an RMA already at a given lifecycle status) directly into the store.
   public seed(request: ReturnRequest): ReturnRequest {
     const id = request.id ?? ++this.sequence;
     const persisted = reconstituteWithId(request, id);
@@ -127,14 +106,10 @@ export class FakeReturnRequestRepository
   }
 }
 
-// Configurable `IReturnOrderReaderPort` double — returns the snapshot it was handed, or
-// `null` to simulate a missing order.
 export class FakeReturnOrderReader implements IReturnOrderReaderPort {
   constructor(private snapshot: IReturnOrderSnapshot | null) {}
 
   public findOrderForReturn(orderId: number): Promise<IReturnOrderSnapshot | null> {
-    // Return the configured snapshot only when its order id matches the request — a
-    // mismatch (or a null snapshot) reads as a missing order. Uses the param meaningfully.
     if (this.snapshot?.orderId !== orderId) {
       return Promise.resolve(null);
     }
@@ -146,8 +121,6 @@ export class FakeReturnOrderReader implements IReturnOrderReaderPort {
   }
 }
 
-// Records every emitted event by type so a spec can assert the right one fired (the
-// `SpyOrderEventsPublisher` precedent).
 export class SpyReturnEventsPublisher implements IReturnEventsPublisherPort {
   public readonly requested: IRetailReturnRequestedEvent[] = [];
   public readonly authorized: IRetailReturnAuthorizedEvent[] = [];
@@ -182,15 +155,8 @@ export class SpyReturnEventsPublisher implements IReturnEventsPublisherPort {
   }
 }
 
-// The default email the `FakeReturnCustomerContactReader` returns, so specs can assert the
-// producing use case stamped exactly what the reader resolved.
 export const FAKE_CUSTOMER_EMAIL = 'buyer@example.com';
 
-// In-memory `RETURN_CUSTOMER_CONTACT_READER` double (the orders `FakeCustomerContactReader`
-// precedent — a local copy, returns cannot import the orders test-doubles). Records every
-// lookup so a spec can assert the producing use case consulted it; `email` is the value
-// returned for any resolvable id (default `FAKE_CUSTOMER_EMAIL`), `found=false` simulates a
-// customer id that resolves no row (→ `null`).
 export class FakeReturnCustomerContactReader implements IReturnCustomerContactReaderPort {
   public readonly calls: string[] = [];
 
@@ -205,10 +171,6 @@ export class FakeReturnCustomerContactReader implements IReturnCustomerContactRe
   }
 }
 
-// Runs the work immediately against the SAME `FakeReturnRequestRepository` instance the
-// spec injected as the plain read port — no real transaction, good enough for the use-case
-// unit tests, which assert orchestration, not atomicity (ADR-063; the `FakeTransactionPort`
-// precedent it replaces).
 export class FakeReturnsUnitOfWorkRunner implements IReturnsUnitOfWorkRunner {
   constructor(private readonly returnRequests: IReturnRequestWriteRepositoryPort) {}
 
@@ -217,10 +179,6 @@ export class FakeReturnsUnitOfWorkRunner implements IReturnsUnitOfWorkRunner {
   }
 }
 
-// In-memory `INVENTORY_RESTOCK_GATEWAY` double. Records every `restockFromReturn` call so a
-// spec can assert it fired exactly once with the right `{ returnRequestId, lines }`; can be
-// armed to reject (the after-commit retry-then-log posture — the inspection must still
-// succeed). The recording-gateway / `FakeOrderCommitSaleGateway` precedent.
 export class FakeInventoryRestockGateway implements IInventoryRestockGatewayPort {
   public readonly calls: IRestockFromReturnPayload[] = [];
   constructor(private readonly failure: Error | null = null) {}
@@ -241,8 +199,6 @@ export class FakeInventoryRestockGateway implements IInventoryRestockGatewayPort
   }
 }
 
-// A delivered-order snapshot (always returnable), the default the Open specs measure
-// against. `lines` default to one line (10) ordered 3, none cancelled.
 export const buildOrderSnapshot = (
   overrides: Partial<IReturnOrderSnapshot> = {},
 ): IReturnOrderSnapshot => ({
@@ -258,8 +214,6 @@ export const buildOrderSnapshot = (
 
 const RETURN_OWNER_ID = '11111111-1111-4111-8111-111111111111';
 
-// Builds a persisted RMA already at a given lifecycle `status` (id 7, one line) — the
-// fixture the authorize/reject/receive/close specs seed before exercising the transition.
 export const buildPersistedReturn = (
   status: ReturnStatusEnum,
   overrides: { id?: number; orderId?: number; customerId?: string } = {},

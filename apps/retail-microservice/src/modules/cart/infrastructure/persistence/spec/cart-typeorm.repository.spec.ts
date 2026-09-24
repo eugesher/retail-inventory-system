@@ -37,7 +37,6 @@ describe('cart mappers', () => {
 
       const entity = {
         ...CartLineMapper.toEntity(line, 'cart-uuid-1'),
-        // mysql2 returns BIGINT scalars as strings — assert the mapper coerces.
         variantId: '7' as unknown as number,
         unitPriceSnapshotMinor: '1500' as unknown as number,
         id: 42,
@@ -106,7 +105,7 @@ describe('cart mappers', () => {
       const cart = Cart.create({ customerId: null, currency: 'USD' });
       const partial = CartMapper.toEntity(cart);
 
-      expect(typeof partial.id).toBe('string'); // create generates a concrete UUID
+      expect(typeof partial.id).toBe('string');
       expect('version' in partial).toBe(false);
       expect(partial.status).toBe(CartStatusEnum.ACTIVE);
     });
@@ -185,7 +184,6 @@ describe('CartTypeormRepository', () => {
     it('upserts the root + lines in a transaction and re-reads the saved graph', async () => {
       const cart = buildDomainCartWithLine();
 
-      // Chainable delete-builder for the orphan reconciliation.
       const deleteBuilder = {
         delete: jest.fn().mockReturnThis(),
         from: jest.fn().mockReturnThis(),
@@ -204,7 +202,6 @@ describe('CartTypeormRepository', () => {
         async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
       );
 
-      // The post-commit re-read.
       const reloaded = {
         id: 'cart-uuid-1',
         customerId: 'cust-1',
@@ -233,20 +230,18 @@ describe('CartTypeormRepository', () => {
 
       const result = await repository.save(cart);
 
-      // Root upserted, orphans reconciled (kept id 42), survivor line saved.
       expect(txnCartRepo.save).toHaveBeenCalledTimes(1);
       expect(deleteBuilder.andWhere).toHaveBeenCalledWith('id NOT IN (:...keptIds)', {
         keptIds: [42],
       });
       expect(lineRepo.save).toHaveBeenCalledTimes(1);
-      // Returned aggregate carries the re-read concrete line id + committed version.
       expect(result.id).toBe('cart-uuid-1');
       expect(result.version).toBe(5);
       expect(result.lines[0].id).toBe(42);
     });
 
     it('version-checks the root with a CAS when expectedVersion is supplied (ADR-036)', async () => {
-      const cart = buildDomainCartWithLine(); // version 4
+      const cart = buildDomainCartWithLine();
 
       const deleteBuilder = {
         delete: jest.fn().mockReturnThis(),
@@ -258,7 +253,6 @@ describe('CartTypeormRepository', () => {
       lineRepo.createQueryBuilder.mockReturnValue(deleteBuilder as never);
       lineRepo.save.mockResolvedValue([] as never);
 
-      // The transaction-bound cart repo takes the CAS `update` path (not `save`).
       const txnCartRepo: { save: jest.Mock; update: jest.Mock } = {
         save: jest.fn(),
         update: jest.fn().mockResolvedValue({ affected: 1 }),
@@ -284,8 +278,6 @@ describe('CartTypeormRepository', () => {
 
       const result = await repository.save(cart, 4);
 
-      // The root UPDATE is conditioned on id + the expected version; the plain
-      // `save` insert path is NOT taken.
       expect(txnCartRepo.update).toHaveBeenCalledTimes(1);
       expect(txnCartRepo.update).toHaveBeenCalledWith(
         { id: 'cart-uuid-1', version: 4 },
@@ -296,7 +288,7 @@ describe('CartTypeormRepository', () => {
     });
 
     it('throws CartWriteConflictError carrying the current version when the CAS matches zero rows', async () => {
-      const cart = buildDomainCartWithLine(); // version 4
+      const cart = buildDomainCartWithLine();
 
       const txnCartRepo = {
         save: jest.fn(),
@@ -308,7 +300,6 @@ describe('CartTypeormRepository', () => {
       cartRepo.manager.transaction.mockImplementation(
         async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
       );
-      // The post-rollback fresh read of the committed current version.
       cartRepo.findOne.mockResolvedValue({ id: 'cart-uuid-1', version: 7 } as CartEntity);
 
       await expect(repository.save(cart, 4)).rejects.toMatchObject({ currentVersion: 7 });

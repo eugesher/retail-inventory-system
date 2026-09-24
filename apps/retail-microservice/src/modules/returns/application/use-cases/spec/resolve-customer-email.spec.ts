@@ -7,9 +7,6 @@ import { FAKE_CUSTOMER_EMAIL, FakeReturnCustomerContactReader } from './test-dou
 
 const CUSTOMER_ID = '11111111-1111-4111-8111-111111111111';
 
-// The returns copy of the orders helper — a deliberate duplicate, because the returns
-// bounded context may not import `orders/` (the boundaries lint, ADR-017). The behaviour it
-// guarantees is identical, so the spec is too.
 describe('resolveCustomerEmail (returns)', () => {
   let logger: PinoLoggerMock;
 
@@ -67,8 +64,6 @@ describe('resolveCustomerEmail (returns)', () => {
     expect(email).toBeNull();
   });
 
-  // An erased customer keeps its row but with `email` nulled in place (ADR-037), a
-  // different path from "no row at all".
   it('returns null when the resolved row has a nulled email', async () => {
     const reader = new FakeReturnCustomerContactReader(null);
 
@@ -82,9 +77,6 @@ describe('resolveCustomerEmail (returns)', () => {
     expect(email).toBeNull();
   });
 
-  // The contract the doc comment states in bold: **never throws**. This runs on the
-  // post-commit emit path, so a reader hiccup must degrade to `customerEmail: null`
-  // rather than fail an RMA transition that already committed.
   it('swallows a reader failure, warn-logs it, and degrades to null', async () => {
     const reader = new FakeReturnCustomerContactReader();
     const failure = new Error('connection reset');

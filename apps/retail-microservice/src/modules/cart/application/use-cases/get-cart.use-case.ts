@@ -7,10 +7,6 @@ import { CART_REPOSITORY, ICartRepositoryPort } from '../ports';
 import { loadOwnedCart } from './cart-access';
 import { toCartView } from './cart-view.factory';
 
-// Reads a cart by id, owner-checked. A missing cart is a 404 and a non-owner is a
-// 403 (both raised by `loadOwnedCart`). The gateway has already compared the
-// bearer subject to the cart owner; this retail-side assertion is the
-// defense-in-depth half (ADR-028 §7).
 @Injectable()
 export class GetCartUseCase {
   constructor(

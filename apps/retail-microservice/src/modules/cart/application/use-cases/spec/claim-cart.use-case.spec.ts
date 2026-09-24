@@ -13,9 +13,6 @@ const REGISTERED_ID = '00000000-0000-4000-a000-000000000002';
 
 describe('ClaimCartUseCase', () => {
   let repository: InMemoryCartRepository;
-  // The claim use case takes NO inventory gateway: reservations key on `cartId`,
-  // which a claim re-points the owner of but never changes, so the holds survive
-  // untouched. The fake is constructed only to assert it is never called.
   let inventory: InMemoryCartInventoryGateway;
   let logger: PinoLoggerMock;
   let useCase: ClaimCartUseCase;
@@ -49,11 +46,9 @@ describe('ClaimCartUseCase', () => {
     expect(view.id).toBe(CART_ID);
     expect(view.customerId).toBe(REGISTERED_ID);
 
-    // The repository now resolves the cart to the registered owner.
     const reloaded = await repository.findById(CART_ID);
     expect(reloaded?.customerId).toBe(REGISTERED_ID);
 
-    // The claim re-points ownership but touches no reservation (holds key on cartId).
     expect(inventory.reserveCalls).toHaveLength(0);
     expect(inventory.releaseCalls).toHaveLength(0);
   });
@@ -68,7 +63,6 @@ describe('ClaimCartUseCase', () => {
       }),
     ).rejects.toMatchObject({ code: CartErrorCodeEnum.CART_ACCESS_FORBIDDEN });
 
-    // Owner is unchanged.
     const reloaded = await repository.findById(CART_ID);
     expect(reloaded?.customerId).toBe(GUEST_ID);
   });

@@ -16,19 +16,6 @@ import {
 
 import { ICartEventsPublisherPort } from '../../application/ports';
 
-// The cart context's event publisher and the second of the module's two
-// `ClientProxy` holders (ADR-009 / ADR-020). The use case has already built the
-// versioned wire event; this adapter just emits it and waits for the broker ack.
-//
-// The `retail.cart.*` events are emitted through the `RETAIL_MICROSERVICE` client, so they land
-// on `retail_queue` — the producer's own queue. **They are reserved surfaces: no `@EventPattern`
-// binds any of them**, the same posture the `inventory.stock.{received,adjusted}` events take.
-//
-// A reserved surface is still **dual-published** (ADR-035): after the primary emit, the same
-// routing key + wire is mirrored onto the `ris.events` topic exchange via the shared
-// `RisEventsMirrorPublisher`, so the event-store firehose captures the full cart
-// lifecycle (the first half of a Place Order chain). The mirror is best-effort and
-// non-throwing, ordered after the primary emit.
 @Injectable()
 export class CartRabbitmqPublisher implements ICartEventsPublisherPort {
   constructor(
@@ -38,8 +25,6 @@ export class CartRabbitmqPublisher implements ICartEventsPublisherPort {
   ) {}
 
   public async publishCartCreated(event: IRetailCartCreatedEvent): Promise<void> {
-    // `ClientProxy.emit()` is a cold Observable; `firstValueFrom` materializes it
-    // and waits for the broker ack so callers depend on a plain Promise.
     await firstValueFrom(
       this.retailClient.emit<void, IRetailCartCreatedEvent>(
         ROUTING_KEYS.RETAIL_CART_CREATED,
