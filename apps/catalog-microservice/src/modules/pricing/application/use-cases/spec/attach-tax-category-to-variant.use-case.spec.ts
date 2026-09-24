@@ -38,7 +38,6 @@ describe('AttachTaxCategoryToVariantUseCase', () => {
       taxCategoryCode: 'STANDARD',
     });
 
-    // The FK write is durable: re-reading the header resolves the same category.
     const reread = await repository.findVariantTaxHeader(VARIANT_ID);
     expect(reread?.taxCategoryCode).toBe('STANDARD');
   });
@@ -72,7 +71,6 @@ describe('AttachTaxCategoryToVariantUseCase', () => {
       useCase.execute({ variantId: VARIANT_ID, taxCategoryCode: 'MISSING', correlationId: 'c' }),
     ).rejects.toMatchObject({ code: PricingErrorCodeEnum.TAX_CATEGORY_NOT_FOUND });
 
-    // The variant FK was never touched.
     const header = await repository.findVariantTaxHeader(VARIANT_ID);
     expect(header?.taxCategoryId).toBeNull();
   });

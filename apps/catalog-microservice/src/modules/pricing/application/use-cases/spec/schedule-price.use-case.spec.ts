@@ -8,9 +8,6 @@ import { SelectApplicablePriceUseCase } from '../select-applicable-price.use-cas
 import { SetPriceUseCase } from '../set-price.use-case';
 import { InMemoryPricingEventsPublisher, InMemoryPricingRepository } from './test-doubles';
 
-// Schedule is the same `SetPriceUseCase` with a future `validFrom`. These specs
-// run Set and Select against the *same* repository so the scheduling guarantee
-// (the current answer is unchanged until `validFrom`) is exercised end-to-end.
 describe('SetPriceUseCase (Schedule — future validFrom)', () => {
   const VARIANT_ID = 42;
   const CURRENCY = 'USD';
@@ -29,7 +26,6 @@ describe('SetPriceUseCase (Schedule — future validFrom)', () => {
     setPrice = new SetPriceUseCase(repository, publisher, logger as unknown as PinoLogger);
     selectPrice = new SelectApplicablePriceUseCase(repository, logger as unknown as PinoLogger);
 
-    // An existing, currently-in-effect open price (the "current" answer).
     repository.seed(
       Price.reconstitute({
         id: 1,
@@ -70,8 +66,6 @@ describe('SetPriceUseCase (Schedule — future validFrom)', () => {
   it('closes the predecessor exactly at the future validFrom', async () => {
     await setPrice.execute(schedulePayload);
 
-    // At a point before the changeover the predecessor is still in effect and now
-    // carries a concrete validTo equal to the scheduled validFrom.
     const [predecessor] = await repository.findInEffect(
       VARIANT_ID,
       CURRENCY,
@@ -84,7 +78,6 @@ describe('SetPriceUseCase (Schedule — future validFrom)', () => {
   it('leaves the current answer unchanged until validFrom, then switches', async () => {
     await setPrice.execute(schedulePayload);
 
-    // Before the changeover: the current price still resolves.
     const before = await selectPrice.execute({
       variantId: VARIANT_ID,
       currency: CURRENCY,
@@ -93,7 +86,6 @@ describe('SetPriceUseCase (Schedule — future validFrom)', () => {
     });
     expect(before?.amountMinor).toBe(1500);
 
-    // After the changeover: the scheduled price resolves.
     const after = await selectPrice.execute({
       variantId: VARIANT_ID,
       currency: CURRENCY,

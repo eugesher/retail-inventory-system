@@ -17,21 +17,11 @@ export interface IProductProps {
   updatedAt?: Date | null;
 }
 
-// `addVariant` takes the variant shape minus the fields the root owns — id and
-// productId are assigned at persistence, status is always `ACTIVE` at creation,
-// and timestamps are set by persistence.
 export type AddVariantInput = Omit<
   IProductVariantProps,
   'id' | 'productId' | 'status' | 'createdAt' | 'updatedAt'
 >;
 
-// Product is the catalog aggregate root: it owns its ProductVariant children,
-// the lifecycle state machine, and the cross-aggregate invariants. The
-// `number | null` id mirrors the Order aggregate — null before persistence
-// assigns one, concrete after `reconstitute`.
-//
-// No `version` column / optimistic lock: catalog is last-writer-wins, not in
-// the no-oversell critical path (ADR-025).
 export class Product extends AggregateRoot<number | null> {
   private readonly _name: string;
   private readonly _slug: string;
@@ -65,10 +55,6 @@ export class Product extends AggregateRoot<number | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // Creates a DRAFT product with no variants and records NO event. **There is no
-  // `ProductCreated` event** — creating a product announces nothing, because a product with no
-  // variants is not yet anything the rest of the platform can act on. The first announcement is
-  // `VariantCreatedEvent`, recorded per variant by `addVariant`.
   public static create(props: { name: string; slug: string; description?: string }): Product {
     return new Product({
       id: null,
@@ -80,7 +66,6 @@ export class Product extends AggregateRoot<number | null> {
     });
   }
 
-  // Rebuilds a persisted product from storage. Records no events.
   public static reconstitute(props: IProductProps): Product {
     return new Product(props);
   }
@@ -117,14 +102,6 @@ export class Product extends AggregateRoot<number | null> {
     return this._status === ProductStatusEnum.ARCHIVED;
   }
 
-  // Adds a child variant through the root and records `VariantCreatedEvent`.
-  // The variant id is null until persistence assigns it; the use case maps the
-  // recorded event to the wire `catalog.variant.created` AFTER save, re-reading
-  // the concrete id from the persisted aggregate (ADR-025).
-  //
-  // slug/sku global uniqueness is NOT checked here — the aggregate cannot see
-  // other aggregates. That is a repository-level guarantee, pinned in
-  // `spec/add-variant.use-case.spec.ts` against a repository double.
   public addVariant(input: AddVariantInput): ProductVariant {
     const variant = new ProductVariant({
       id: null,
@@ -146,14 +123,6 @@ export class Product extends AggregateRoot<number | null> {
     return variant;
   }
 
-  // draft → active. Precondition enforced here: at least one variant.
-  //
-  // A second precondition — "every variant has an ACTIVE Price" — is a
-  // cross-aggregate fact the `Product` cannot see, so it is deliberately NOT
-  // modelled in the domain. It is enforced in the publish *use case* via a
-  // catalog-side probe of the pricing-owned `price` table, which hard-fails the
-  // publish (409 `PRODUCT_PUBLISH_REQUIRES_PRICE`) when any variant is unpriced.
-  // The domain keeps only the variant-count guard (ADR-025 §6 / ADR-026).
   public publish(): void {
     if (!this.isDraft()) {
       throw new CatalogDomainException(
@@ -177,8 +146,6 @@ export class Product extends AggregateRoot<number | null> {
     );
   }
 
-  // active → archived. Archival is terminal — there is no archived → draft and
-  // no archived → active path. Soft-delete via status; no `deletedAt`.
   public archive(): void {
     if (!this.isActive()) {
       throw new CatalogDomainException(

@@ -14,18 +14,6 @@ import {
 
 import { IPricingEventsPublisherPort } from '../../application/ports';
 
-// The only place in the pricing module allowed to hold a `ClientProxy` (ADR-009 /
-// ADR-020). The use case has already built the versioned wire event from the
-// persisted `Price`; this adapter just emits it onto `catalog_queue` — pricing
-// colocates with catalog and shares its queue (ADR-026) — and waits for the
-// broker ack. No consumer is bound yet; emitting to a queue with no matching
-// handler is the same reserved-surface pattern the catalog events follow today.
-//
-// Every event is additionally **dual-published** (ADR-035): after the primary
-// emit, the same routing key + wire is mirrored onto the `ris.events` topic
-// exchange via the shared `RisEventsMirrorPublisher`, so the event-store firehose
-// captures the pricing stream. The mirror is best-effort and non-throwing, ordered
-// after the primary emit.
 @Injectable()
 export class PricingRabbitmqPublisher implements IPricingEventsPublisherPort {
   constructor(
@@ -35,8 +23,6 @@ export class PricingRabbitmqPublisher implements IPricingEventsPublisherPort {
   ) {}
 
   public async publishPriceChanged(event: ICatalogPriceChangedEvent): Promise<void> {
-    // `ClientProxy.emit()` is a cold Observable; `firstValueFrom` materializes it
-    // and waits for the broker ack so callers depend on a plain Promise.
     await firstValueFrom(
       this.catalogClient.emit<void, ICatalogPriceChangedEvent>(
         ROUTING_KEYS.CATALOG_PRICE_CHANGED,

@@ -428,7 +428,9 @@ priced, and sold.
 `Category` is a hierarchy on a **materialized `path`** (`/electronics/phones`):
 a subtree read is one indexed `path LIKE`, an ancestry test a string-prefix check.
 Reparenting recomputes the moved node and rebases every descendant's path in one bulk
-`UPDATE`; a cycle is rejected in the domain. An archived intermediate hides its branch.
+`UPDATE`; a cycle is rejected in the domain. An archived intermediate hides its branch from the
+tree read, though not from the category product list
+([`docs/reference/catalog-and-pricing.md`](docs/reference/catalog-and-pricing.md#categories)).
 
 `MediaAsset` is **polymorphic** over `(owner_type, owner_id)` — one table, images/videos/
 documents on a product _or_ a variant, **no FK** on the polymorphic owner (the attach use

@@ -2,8 +2,6 @@ import { MediaAssetTypeEnum, MediaOwnerTypeEnum } from '@retail-inventory-system
 
 import { CatalogDomainException, CatalogErrorCodeEnum, MediaAsset, MediaAssetStatusEnum } from '..';
 
-// A valid `create` input — specs override one field at a time to exercise an
-// invariant.
 const validInput = (
   overrides: Partial<Parameters<typeof MediaAsset.create>[0]> = {},
 ): Parameters<typeof MediaAsset.create>[0] => ({
@@ -15,8 +13,6 @@ const validInput = (
   ...overrides,
 });
 
-// Asserts the thrown error is a CatalogDomainException carrying the EXACT code,
-// never matching on the (free-text) message.
 const expectCode = (fn: () => unknown, code: CatalogErrorCodeEnum): void => {
   try {
     fn();

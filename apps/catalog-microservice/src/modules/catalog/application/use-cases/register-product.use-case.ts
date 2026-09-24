@@ -7,10 +7,6 @@ import { CatalogDomainException, CatalogErrorCodeEnum, Product } from '../../dom
 import { CATALOG_REPOSITORY, ICatalogRepositoryPort } from '../ports';
 import { toProductView } from './catalog-view.factory';
 
-// Register Product is the first catalog write operation: it creates a `draft`
-// product with no variants. Variants (and the eventual publish) are separate
-// operations. There is no `ProductCreated` event — the catalog model emits
-// events only for variant-created / published / archived (ADR-025).
 @Injectable()
 export class RegisterProductUseCase {
   constructor(
@@ -25,14 +21,8 @@ export class RegisterProductUseCase {
 
     this.logger.info({ correlationId, slug }, 'Received RPC: register product');
 
-    // Build first — the aggregate validates name/slug non-emptiness and throws
-    // a typed `CatalogDomainException` on a violation.
     const product = Product.create({ name, slug, description });
 
-    // Repository-level uniqueness pre-check: the domain cannot see other
-    // aggregates, so a duplicate slug is rejected here with a typed code before
-    // the INSERT would otherwise trip the UNIQUE constraint with a raw driver
-    // error (ADR-025).
     if (await this.repository.existsBySlug(slug)) {
       throw new CatalogDomainException(
         CatalogErrorCodeEnum.PRODUCT_SLUG_TAKEN,

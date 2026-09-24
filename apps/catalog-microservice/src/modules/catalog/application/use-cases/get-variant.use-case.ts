@@ -7,13 +7,6 @@ import { CatalogDomainException, CatalogErrorCodeEnum } from '../../domain';
 import { CATALOG_REPOSITORY, ICatalogRepositoryPort } from '../ports';
 import { toProductVariantView, toProductView } from './catalog-view.factory';
 
-// Get Variant resolves a single variant by id, together with its parent product
-// header. The variant is the downstream backbone key (inventory stock, pricing,
-// order lines key on `variantId` — ADR-025), so it is addressable on its own on
-// the read path even though it is only mutated through the `Product` root on the
-// write path. The fetch is **status-agnostic**: an archived variant (and an
-// archived parent product) stays resolvable so historical order/stock references
-// that key on `variantId` never dangle.
 @Injectable()
 export class GetVariantUseCase {
   constructor(
@@ -41,8 +34,6 @@ export class GetVariantUseCase {
       throw new Error('GetVariantUseCase: persisted variant is missing its productId');
     }
 
-    // The variant carries a non-null FK to its product (ON DELETE RESTRICT), so
-    // a missing parent here is a data-integrity breach rather than a not-found.
     const product = await this.repository.findById(productId);
     if (product === null) {
       throw new CatalogDomainException(

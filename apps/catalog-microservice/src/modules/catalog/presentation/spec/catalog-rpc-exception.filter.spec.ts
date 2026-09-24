@@ -4,10 +4,6 @@ import { firstValueFrom } from 'rxjs';
 import { CatalogDomainException, CatalogErrorCodeEnum } from '../../domain';
 import { CatalogRpcExceptionFilter } from '../catalog-rpc-exception.filter';
 
-// The filter is pure (no DI), so it is unit-tested directly. `catch` returns a
-// `throwError` observable; `firstValueFrom` rejects with the wire payload the
-// RMQ client would receive, which is exactly what the gateway's `throwRpcError`
-// reads. We assert the `statusCode` the gateway keys on for every domain code.
 describe('CatalogRpcExceptionFilter', () => {
   const filter = new CatalogRpcExceptionFilter();
 

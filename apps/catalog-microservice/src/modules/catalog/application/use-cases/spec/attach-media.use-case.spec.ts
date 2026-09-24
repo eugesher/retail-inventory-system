@@ -18,7 +18,6 @@ import {
 import { AttachMediaUseCase } from '../attach-media.use-case';
 import { InMemoryCatalogRepository, InMemoryMediaAssetRepository } from './test-doubles';
 
-// Seeds a persisted product (an attach owner of type `product`).
 const seedProduct = (id: number, variants: ProductVariant[] = []): Product =>
   Product.reconstitute({
     id,
@@ -28,7 +27,6 @@ const seedProduct = (id: number, variants: ProductVariant[] = []): Product =>
     variants,
   });
 
-// Seeds a persisted media row at a known slot/status (a pre-existing asset).
 const seedMedia = (overrides: {
   id: number;
   ownerType: MediaOwnerTypeEnum;
@@ -87,9 +85,6 @@ describe('AttachMediaUseCase', () => {
 
   it('appends at max+1, counting an ARCHIVED row into the max', async () => {
     catalogRepository.seed(seedProduct(42));
-    // Active slots 0 and 1, plus an ARCHIVED row at slot 2 (the highest). The next
-    // append must be 3, NOT 2 — archived rows count into the max so a detached
-    // slot is never reused.
     mediaRepository.seed(
       seedMedia({ id: 1, ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: 42, sortOrder: 0 }),
     );
@@ -114,7 +109,6 @@ describe('AttachMediaUseCase', () => {
   it('preserves per-owner ordering — attaching to owner B does not disturb owner A', async () => {
     catalogRepository.seed(seedProduct(42));
     catalogRepository.seed(seedProduct(99));
-    // Owner A (42) already has two assets at slots 0 and 1.
     mediaRepository.seed(
       seedMedia({ id: 1, ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: 42, sortOrder: 0 }),
     );
@@ -122,13 +116,11 @@ describe('AttachMediaUseCase', () => {
       seedMedia({ id: 2, ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId: 42, sortOrder: 1 }),
     );
 
-    // Attaching to owner B (99) — its first asset lands at slot 0, independent of A.
     const view = await useCase.execute(productPayload({ ownerId: 99 }));
 
     expect(view.ownerId).toBe(99);
     expect(view.sortOrder).toBe(0);
 
-    // Owner A's strip is untouched: its next append would still be slot 2.
     await expect(mediaRepository.maxSortOrder(MediaOwnerTypeEnum.PRODUCT, 42)).resolves.toBe(1);
   });
 

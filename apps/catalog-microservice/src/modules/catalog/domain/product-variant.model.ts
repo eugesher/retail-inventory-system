@@ -18,12 +18,6 @@ export interface IProductVariantProps {
   updatedAt?: Date | null;
 }
 
-// A ProductVariant is the sellable, stocked, priced unit and the downstream
-// backbone key (inventory stock, pricing, and order lines key on `variantId`,
-// not the product). On the write path it is a *child entity* of the Product
-// aggregate root — never persisted or mutated on its own; the Product root adds
-// and validates it (ADR-025). On the read path a variant is addressable
-// top-level, but that is a separate read model, not a second write aggregate.
 export class ProductVariant extends Entity<number | null> {
   private _productId: number | null;
   private readonly _sku: string;
@@ -56,13 +50,8 @@ export class ProductVariant extends Entity<number | null> {
     super(props.id);
     this._productId = props.productId;
     this._sku = props.sku;
-    // Normalize an empty/whitespace gtin to null. MySQL's `UNIQUE (gtin)` permits
-    // multiple NULLs but not multiple ''; an absent gtin arriving as '' (an
-    // optional field left blank at the edge) would otherwise be stored verbatim
-    // and collide on the second variant, surfacing as a raw driver 500 (ADR-025).
     const trimmedGtin = props.gtin?.trim() ?? '';
     this._gtin = trimmedGtin.length > 0 ? trimmedGtin : null;
-    // The VO constructors carry the non-empty-map and non-negative-mm invariants.
     this._optionValues = new OptionValues(props.optionValues);
     this._weightG = props.weightG ?? null;
     this._dimensions = props.dimensionsMm ? new Dimensions(props.dimensionsMm) : null;
@@ -83,8 +72,6 @@ export class ProductVariant extends Entity<number | null> {
     return this._gtin;
   }
 
-  // Exposes the raw map (the shape persistence and the read model want); the VO
-  // stays internal as the validated holder.
   public get optionValues(): Record<string, string> {
     return this._optionValues.value;
   }

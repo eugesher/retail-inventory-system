@@ -1,7 +1,5 @@
 import { CatalogDomainException, CatalogErrorCodeEnum, Category, CategoryStatusEnum } from '..';
 
-// Reconstitutes a category at a known path/status — the spec's stand-in for a
-// row already in the DB (factory `create` always starts `active` at version 0).
 const makeCategory = (
   overrides: Partial<{
     id: number | null;
@@ -23,8 +21,6 @@ const makeCategory = (
     status: overrides.status ?? CategoryStatusEnum.ACTIVE,
   });
 
-// Asserts the thrown error is a CatalogDomainException carrying the EXACT code,
-// never matching on the (free-text) message.
 const expectCode = (fn: () => unknown, code: CatalogErrorCodeEnum): void => {
   try {
     fn();
@@ -155,7 +151,6 @@ describe('Category', () => {
       const a = makeCategory({ id: 1, slug: 'a', path: '/a' });
 
       expectCode(() => a.reparentUnder(a), CatalogErrorCodeEnum.CATEGORY_CYCLE);
-      // Path is untouched after the rejected move.
       expect(a.path).toBe('/a');
     });
 

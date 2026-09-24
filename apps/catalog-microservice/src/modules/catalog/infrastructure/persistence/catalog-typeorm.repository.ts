@@ -17,15 +17,6 @@ import { ProductMapper } from './product.mapper';
 import { ProductVariantEntity } from './product-variant.entity';
 import { ProductVariantMapper } from './product-variant.mapper';
 
-// The `Product` aggregate's persistence adapter. `@InjectRepository` appears
-// ONLY under `infrastructure/persistence/`, one adapter per aggregate seam — this
-// one holds both the product and variant repositories because a variant is a
-// child of the root, never a seam of its own (ADR-025). `Category`, `MediaAsset`
-// and the active-price probe each own a sibling adapter here (ADR-029 / ADR-026).
-//
-// Extends `BaseTypeormRepository` for the `toDomain`/`toEntity` seam; `save` is
-// overridden because the root and its variants persist explicitly (cascade is
-// off) and must commit atomically (ADR-019).
 @Injectable()
 export class CatalogTypeormRepository
   extends BaseTypeormRepository<ProductEntity, Product>
@@ -51,11 +42,6 @@ export class CatalogTypeormRepository
   }
 
   public async save(product: Product): Promise<Product> {
-    // One transaction for the root + its children: a half-written graph (a
-    // product with some variants missing) would violate the publish invariant
-    // downstream. The unique-constraint violations (slug/sku) surface here as
-    // a driver error — the write use case pre-checks via `existsBy*` so the
-    // common case raises a typed domain error instead (ADR-025).
     const savedId = await this.productRepository.manager.transaction(async (manager) => {
       const productRepo = manager.getRepository(ProductEntity);
       const variantRepo = manager.getRepository(ProductVariantEntity);
@@ -77,9 +63,6 @@ export class CatalogTypeormRepository
       'Catalog product persisted',
     );
 
-    // Re-read the full graph so the returned aggregate carries the concrete
-    // variant ids and DB-assigned timestamps. The row was just committed, so a
-    // miss here is an invariant breach rather than a not-found.
     const reloaded = await this.findById(savedId);
     if (!reloaded) {
       throw new Error(`CatalogTypeormRepository.save: product ${savedId} vanished after commit`);
@@ -147,19 +130,10 @@ export class CatalogTypeormRepository
   public async listActiveByCategoryIds(query: ICatalogListByCategoryQuery): Promise<IProductPage> {
     const { categoryIds, page, size } = query;
 
-    // No ids → an empty page. The use case always passes at least the named
-    // category's own id, but an `IN ()` with no values is invalid SQL, so guard.
     if (categoryIds.length === 0) {
       return { items: [], total: 0, page, size };
     }
 
-    // Mirrors `listActive` (active products, newest first, variants eager-loaded)
-    // and adds a category-membership filter as a parameterized id-subselect
-    // against the bare `product_categories` table. `IN (subselect)` is implicitly
-    // DISTINCT — a product attached to two of the ids appears once — so no
-    // `.distinct()` is needed, and the to-many `variants` join still paginates
-    // correctly because TypeORM resolves the root ids first when `take`/`skip` meet
-    // a to-many join (the same shape `listActive` relies on).
     const [entities, total] = await this.productRepository
       .createQueryBuilder('Product')
       .leftJoinAndSelect('Product.variants', 'ProductVariant')

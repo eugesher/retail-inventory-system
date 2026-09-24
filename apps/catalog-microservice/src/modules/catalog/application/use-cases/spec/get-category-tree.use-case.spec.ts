@@ -39,12 +39,6 @@ describe('GetCategoryTreeUseCase', () => {
     logger = makePinoLoggerMock();
     useCase = new GetCategoryTreeUseCase(repository, logger as unknown as PinoLogger);
 
-    // electronics
-    //   ├─ laptops (sortOrder 0)
-    //   │    └─ gaming
-    //   ├─ phones (sortOrder 1)
-    //   └─ accessories (ARCHIVED)
-    //        └─ cables (active, but orphaned under an archived parent)
     repository.seed(
       seedCategory({
         id: 1,
@@ -108,8 +102,6 @@ describe('GetCategoryTreeUseCase', () => {
     const tree = await useCase.execute({ slug: 'electronics', correlationId: 'corr-1' });
 
     expect(tree.slug).toBe('electronics');
-    // Laptops (sortOrder 0) before Phones (sortOrder 1); the archived Accessories
-    // branch is dropped entirely.
     expect(childSlugs(tree)).toEqual(['laptops', 'phones']);
 
     const laptops = tree.children.find((child) => child.slug === 'laptops');
@@ -124,8 +116,6 @@ describe('GetCategoryTreeUseCase', () => {
       ...node.children.flatMap(allSlugs),
     ];
 
-    // accessories (archived) and its active child cables never appear: an archived
-    // intermediate hides its whole subtree.
     expect(allSlugs(tree)).not.toContain('accessories');
     expect(allSlugs(tree)).not.toContain('cables');
   });

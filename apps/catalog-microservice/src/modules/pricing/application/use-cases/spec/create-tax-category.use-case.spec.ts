@@ -33,7 +33,6 @@ describe('CreateTaxCategoryUseCase', () => {
     expect(view.name).toBe('Standard rate');
     expect(view.description).toBe('Default classification');
 
-    // It is now resolvable by code (the pre-check path a later create would hit).
     const persisted = await repository.findTaxCategoryByCode('STANDARD');
     expect(persisted?.id).toBe(view.id);
   });
@@ -64,7 +63,6 @@ describe('CreateTaxCategoryUseCase', () => {
       code: PricingErrorCodeEnum.TAX_CATEGORY_CODE_INVALID,
     });
 
-    // A malformed payload must never have reached the repository.
     expect(await repository.listTaxCategories()).toHaveLength(0);
   });
 });

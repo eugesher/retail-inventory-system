@@ -3,14 +3,6 @@ import { AggregateRoot } from '@retail-inventory-system/ddd';
 import { CatalogDomainException, CatalogErrorCodeEnum } from './catalog.exception';
 import { CategoryStatusEnum } from './category-status.enum';
 
-// Kebab-case: lowercase alphanumerics in `-`-separated segments, no leading or
-// trailing `-`, no doubled `--`. RE-DECLARED here rather than imported from the
-// gateway DTO because the domain imports nothing from the gateway (ADR-004 /
-// ADR-017) — the gateway's `register-product.request.dto.ts` carries the
-// identical literal. This rule is STRICTER than `Product.slug` (which only
-// requires non-empty): a category slug is a materialized-path segment, so a
-// malformed slug (a space, a slash, uppercase) would corrupt every descendant's
-// `path` (ADR-029).
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export interface ICategoryProps {
@@ -25,9 +17,6 @@ export interface ICategoryProps {
   updatedAt?: Date | null;
 }
 
-// `create` takes the human-supplied fields plus the optional in-memory parent
-// aggregate (not its id) — the factory reads `parent.path` to derive the child
-// path, so the caller must load the parent first.
 export interface ICreateCategoryInput {
   name: string;
   slug: string;
@@ -35,19 +24,6 @@ export interface ICreateCategoryInput {
   sortOrder?: number;
 }
 
-// Category is a catalog write aggregate (a sibling of `Product`, inside the same
-// module — not a new bounded context, ADR-029 / ADR-004). It models a node in a
-// hierarchy using a MATERIALIZED PATH: each row stores its full root-to-self
-// slug path (`/electronics/phones`), so a subtree read is a single
-// `path LIKE '/electronics/phones%'` rather than a recursive walk.
-//
-// The `number | null` id mirrors `Product`: null before persistence assigns one,
-// concrete after `reconstitute`.
-//
-// Records NO domain events. Category edits are not in the must-emit set, so
-// unlike `Product` this aggregate never calls `addDomainEvent`; `pullDomainEvents()`
-// always drains empty (ADR-029 §6). A future cache-invalidation event would be
-// additive.
 export class Category extends AggregateRoot<number | null> {
   private readonly _name: string;
   private readonly _slug: string;
@@ -89,10 +65,6 @@ export class Category extends AggregateRoot<number | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // Creates a new `active` category. `parentId` and `path` are DERIVED from the
-  // optional parent: a null/absent parent is a root (`path = '/' + slug`),
-  // otherwise the child hangs off the parent's path (`path = parent.path + '/' +
-  // slug`). Records no event.
   public static create(input: ICreateCategoryInput): Category {
     const parent = input.parent ?? null;
     return new Category({
@@ -106,9 +78,6 @@ export class Category extends AggregateRoot<number | null> {
     });
   }
 
-  // Rebuilds a persisted category from storage. The stored `path` is loaded
-  // as-is (no re-derivation) and there is no status guard — any status
-  // reconstitutes, including `archived`.
   public static reconstitute(props: ICategoryProps): Category {
     return new Category(props);
   }
@@ -145,25 +114,10 @@ export class Category extends AggregateRoot<number | null> {
     return this._status === CategoryStatusEnum.ARCHIVED;
   }
 
-  // Pure prefix-ancestry test. `true` when `other` IS this category (same path)
-  // or sits strictly below it (its path starts with `this.path + '/'`). The
-  // trailing `'/'` is what makes `/a` NOT an ancestor of `/ab` — the boundary
-  // matters, otherwise sibling prefixes would falsely register as ancestors.
-  // This is the cycle test `reparentUnder` (and the reparent use case) calls.
   public isAncestorOfOrSelf(other: Category): boolean {
     return other.path === this._path || other.path.startsWith(`${this._path}/`);
   }
 
-  // Recomputes THIS category's own `parentId` + `path` from the new parent
-  // (a null parent demotes it to a root). Rejects a cycle: you cannot reparent a
-  // category under itself or under any of its own descendants — caught by the
-  // path-prefix test before any state mutation.
-  //
-  // The DESCENDANTS' path rewrite is deliberately NOT done here: each category
-  // row is its own aggregate, so rebasing the subtree is a repository-transaction
-  // concern (`ICategoryRepositoryPort.reparentSubtree`). The caller snapshots the
-  // old `path` before calling this, then hands the mutated aggregate + the old
-  // path to the repository (ADR-029 §2).
   public reparentUnder(newParent: Category | null): void {
     if (newParent !== null && this.isAncestorOfOrSelf(newParent)) {
       throw new CatalogDomainException(
@@ -176,11 +130,6 @@ export class Category extends AggregateRoot<number | null> {
     this._path = Category.derivePath(newParent, this._slug);
   }
 
-  // active → archived status flip (soft-delete via `status`; no `deletedAt`).
-  // Archival is terminal — archiving an already-archived category is an illegal
-  // transition. No producer ships in this capability (there is no archive
-  // endpoint); the mutator exists because the soft-delete lifecycle is
-  // status-driven (ADR-025) and the seed/tests may exercise it.
   public archive(): void {
     if (!this.isActive()) {
       throw new CatalogDomainException(
@@ -191,9 +140,6 @@ export class Category extends AggregateRoot<number | null> {
     this._status = CategoryStatusEnum.ARCHIVED;
   }
 
-  // A path is `/` + the slugs from root to self joined by `/`. A root has no
-  // parent, so its path is just `/<slug>`; a child appends `/<slug>` to the
-  // parent's already-materialized path.
   private static derivePath(parent: Category | null, slug: string): string {
     return parent ? `${parent.path}/${slug}` : `/${slug}`;
   }

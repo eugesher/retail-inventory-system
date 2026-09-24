@@ -7,12 +7,6 @@ import { CatalogDomainException, CatalogErrorCodeEnum, Category } from '../../do
 import { CATEGORY_REPOSITORY, ICategoryRepositoryPort } from '../ports';
 import { toCategoryTreeNode } from './category-view.factory';
 
-// Pure assembly of the flat active subtree into a nested view. The rows are
-// indexed by `parentId`, then the tree is built top-down from the root. A node
-// whose parent is NOT in the active set (e.g. an archived intermediate, dropped
-// by `activeOnly`) never attaches — its branch is silently omitted, so an
-// archived intermediate hides its whole subtree (the pragmatic browse rule,
-// ADR-029 / doc 02). Siblings are ordered `sortOrder ASC, name ASC`.
 const assembleCategoryTree = (root: Category, nodes: Category[]): CategoryTreeNodeView => {
   const childrenByParentId = new Map<number, Category[]>();
   for (const node of nodes) {
@@ -35,10 +29,6 @@ const assembleCategoryTree = (root: Category, nodes: Category[]): CategoryTreeNo
   return build(root);
 };
 
-// Get Category Tree returns one category and its ACTIVE subtree as a nested
-// structure (the browse navigation drill-down). The root is addressed by slug; a
-// missing OR archived category is a 404 — the tree is a browse read and an
-// archived category is hidden from browse. Records no event (ADR-029 §6).
 @Injectable()
 export class GetCategoryTreeUseCase {
   constructor(
@@ -61,9 +51,6 @@ export class GetCategoryTreeUseCase {
       );
     }
 
-    // `listSubtree(root.path)` returns the root (self) plus its strict
-    // descendants; `activeOnly` keeps only the live nodes, so the assembly above
-    // drops any branch hanging off an archived intermediate.
     const nodes = await this.repository.listSubtree(root.path, { activeOnly: true });
 
     return assembleCategoryTree(root, nodes);

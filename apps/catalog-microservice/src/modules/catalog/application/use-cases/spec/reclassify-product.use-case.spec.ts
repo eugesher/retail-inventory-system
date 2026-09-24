@@ -14,7 +14,6 @@ import {
 import { ReclassifyProductUseCase } from '../reclassify-product.use-case';
 import { InMemoryCatalogRepository, InMemoryCategoryRepository } from './test-doubles';
 
-// A persisted product (any status — reclassify is status-agnostic on the product).
 const seedProduct = (id: number): Product =>
   Product.reconstitute({
     id,
@@ -25,9 +24,6 @@ const seedProduct = (id: number): Product =>
     variants: [],
   });
 
-// A persisted category to seed the in-memory repo (the reclassify resolves it by
-// slug). `create` always starts a fresh active root/child, so a seeded row uses
-// `reconstitute` to pin a known id/path/status.
 const seedCategory = (overrides: {
   id: number;
   slug: string;
@@ -84,7 +80,7 @@ describe('ReclassifyProductUseCase', () => {
   });
 
   it('attaches and detaches in one command and returns the full current membership', async () => {
-    await categoryRepository.attachProductCategories(PRODUCT_ID, [1]); // start in electronics
+    await categoryRepository.attachProductCategories(PRODUCT_ID, [1]);
 
     const view = await useCase.execute(
       payload({ attachCategorySlugs: ['phones'], detachCategorySlugs: ['electronics'] }),
@@ -96,16 +92,15 @@ describe('ReclassifyProductUseCase', () => {
   });
 
   it('is idempotent — re-attaching an existing membership and detaching a non-membership both succeed silently', async () => {
-    await categoryRepository.attachProductCategories(PRODUCT_ID, [1]); // already in electronics
+    await categoryRepository.attachProductCategories(PRODUCT_ID, [1]);
 
     const view = await useCase.execute(
       payload({
-        attachCategorySlugs: ['electronics'], // re-attach an existing membership
-        detachCategorySlugs: ['phones'], // detach a membership the product never had
+        attachCategorySlugs: ['electronics'],
+        detachCategorySlugs: ['phones'],
       }),
     );
 
-    // Membership is unchanged and the call did not throw.
     expect(view.categories.map((category) => category.slug)).toEqual(['electronics']);
   });
 
@@ -137,12 +132,11 @@ describe('ReclassifyProductUseCase', () => {
       useCase.execute(payload({ attachCategorySlugs: ['clearance'] })),
     ).rejects.toMatchObject({ code: CatalogErrorCodeEnum.CATEGORY_ARCHIVED });
 
-    // The reject happens before any membership write — electronics is untouched.
     expect([...(categoryRepository.productCategories.get(PRODUCT_ID) ?? [])]).toEqual([1]);
   });
 
   it('allows detaching an archived category — a historic membership must stay removable', async () => {
-    await categoryRepository.attachProductCategories(PRODUCT_ID, [1, 3]); // includes archived clearance
+    await categoryRepository.attachProductCategories(PRODUCT_ID, [1, 3]);
 
     const view = await useCase.execute(payload({ detachCategorySlugs: ['clearance'] }));
 
@@ -150,10 +144,6 @@ describe('ReclassifyProductUseCase', () => {
   });
 
   it('emits no event — the use case has no events-publisher dependency at all', () => {
-    // The cleanest "emits nothing" guarantee is structural: the constructor takes
-    // only the two repositories + the logger, so there is no publisher seam to
-    // call. This test pins that constructor arity so a later refactor that smuggles
-    // in a publisher fails loudly here.
     expect(ReclassifyProductUseCase.length).toBe(3);
   });
 });

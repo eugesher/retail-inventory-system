@@ -42,7 +42,6 @@ describe('ListMediaUseCase', () => {
     useCase.execute({ ownerType: MediaOwnerTypeEnum.PRODUCT, ownerId, correlationId: 'corr-1' });
 
   it('returns the ACTIVE media sorted by sortOrder, excluding archived', async () => {
-    // Seeded out of order, with one archived row.
     repository.seed(seedMedia(2, 1));
     repository.seed(seedMedia(1, 0));
     repository.seed(seedMedia(9, 2, MediaAssetStatusEnum.ARCHIVED));
@@ -50,7 +49,6 @@ describe('ListMediaUseCase', () => {
     const views = await list();
 
     expect(views.map((view) => view.id)).toEqual([1, 2]);
-    // The archived asset (id 9) is excluded; the remaining views are all active.
     expect(views.map((view) => view.status)).toEqual(['active', 'active']);
   });
 

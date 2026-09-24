@@ -42,7 +42,6 @@ describe('CategoryMapper', () => {
       id: 10,
       name: 'Phones',
       slug: 'phones',
-      // mysql2 surfaces a non-PK BIGINT as a string.
       parentId: '5' as unknown as number,
       path: '/electronics/phones',
       sortOrder: 2,
@@ -60,8 +59,6 @@ describe('CategoryMapper', () => {
 describe('CategoryTypeormRepository', () => {
   let queryMock: jest.Mock;
   let transactionMock: jest.Mock;
-  // `manager.query` is the membership-write path (INSERT IGNORE / DELETE),
-  // distinct from the transaction's inner `query` the reparent uses.
   let managerQueryMock: jest.Mock;
   let createQueryBuilderMock: jest.Mock;
   let categoryRepo: jest.Mocked<
@@ -77,8 +74,6 @@ describe('CategoryTypeormRepository', () => {
     queryMock = jest.fn();
     managerQueryMock = jest.fn();
     createQueryBuilderMock = jest.fn();
-    // `manager.transaction(cb)` invokes the callback with a manager exposing the
-    // same `query` mock, so the spec drives both UPDATEs through one stub.
     transactionMock = jest.fn(async (cb: (manager: EntityManager) => Promise<number>) =>
       cb({ query: queryMock } as unknown as EntityManager),
     );
@@ -106,7 +101,6 @@ describe('CategoryTypeormRepository', () => {
 
   describe('reparentSubtree', () => {
     it('issues the moved-row UPDATE then the single bulk rebase in one transaction and returns the affected count', async () => {
-      // A child currently at /electronics/phones, already recomputed under /gadgets.
       const moved = Category.reconstitute({
         id: 10,
         name: 'Phones',
@@ -118,23 +112,20 @@ describe('CategoryTypeormRepository', () => {
       });
 
       queryMock
-        .mockResolvedValueOnce({ affectedRows: 1 }) // moved-row UPDATE
-        .mockResolvedValueOnce({ affectedRows: 3 }); // bulk descendant rebase
+        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValueOnce({ affectedRows: 3 });
 
       const count = await repository.reparentSubtree(moved, '/electronics/phones');
 
       expect(count).toBe(3);
       expect(transactionMock).toHaveBeenCalledTimes(1);
 
-      // 1. The moved row: new parent_id + path, keyed on the id.
       expect(queryMock).toHaveBeenNthCalledWith(
         1,
         'UPDATE category SET parent_id = ?, path = ? WHERE id = ?',
         [7, '/gadgets/phones', 10],
       );
 
-      // 2. The bulk rebase: CONCAT(newPath, SUBSTRING(path, LENGTH(oldPath)+1))
-      //    over the `oldPath + '/%'` descendant set — all parameterized.
       expect(queryMock).toHaveBeenNthCalledWith(
         2,
         'UPDATE category SET path = CONCAT(?, SUBSTRING(path, ? + 1)) WHERE path LIKE ?',
@@ -143,8 +134,6 @@ describe('CategoryTypeormRepository', () => {
     });
 
     it('skips the transaction and returns 0 when the move is a no-op (path unchanged)', async () => {
-      // Same parent ⇒ the domain re-derives the identical path: there is nothing
-      // to rebase, so the repository must short-circuit before opening a tx.
       const moved = Category.reconstitute({
         id: 10,
         name: 'Phones',

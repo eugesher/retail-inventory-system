@@ -23,7 +23,6 @@ describe('SetPriceUseCase (immediate Set)', () => {
     useCase = new SetPriceUseCase(repository, publisher, logger as unknown as PinoLogger);
   });
 
-  // No `validFrom` → the domain defaults it to "now" → an immediate price.
   const immediatePayload: IPriceSetPayload = {
     variantId: VARIANT_ID,
     currency: CURRENCY,
@@ -42,10 +41,8 @@ describe('SetPriceUseCase (immediate Set)', () => {
     expect(view.validTo).toBeNull();
     expect(view.priority).toBe(0);
 
-    // First price for the scope — nothing was closed, exactly one row appended.
     expect(repository.appended).toHaveLength(1);
 
-    // An immediate price emits `changed`, never `scheduled`.
     expect(publisher.changed).toHaveLength(1);
     expect(publisher.scheduled).toHaveLength(0);
     const [{ event, correlationId }] = publisher.changed;
@@ -60,7 +57,6 @@ describe('SetPriceUseCase (immediate Set)', () => {
     expect(event.correlationId).toBe('corr-1');
     expect(correlationId).toBe('corr-1');
 
-    // The new row is the open row for the scope now.
     const open = await repository.findOpenPrice(VARIANT_ID, CURRENCY);
     expect(open?.amountMinor).toBe(1999);
   });
@@ -81,8 +77,6 @@ describe('SetPriceUseCase (immediate Set)', () => {
 
     const view = await useCase.execute({ ...immediatePayload, amountMinor: 1999 });
 
-    // The successor is the open row; the predecessor is closed at exactly the
-    // successor's validFrom (half-open intervals tile without overlap).
     const open = await repository.findOpenPrice(VARIANT_ID, CURRENCY);
     expect(open?.amountMinor).toBe(1999);
 
@@ -99,8 +93,6 @@ describe('SetPriceUseCase (immediate Set)', () => {
   });
 
   it('rejects with PRICE_SCHEDULE_CONFLICT when an open row starts at/after the new row', async () => {
-    // An open row scheduled in the far future already exists; an immediate price
-    // (validFrom = now) would start before it, which has no reschedule flow.
     repository.seed(
       Price.reconstitute({
         id: 9,
@@ -118,7 +110,6 @@ describe('SetPriceUseCase (immediate Set)', () => {
     });
     await expect(useCase.execute(immediatePayload)).rejects.toBeInstanceOf(PricingDomainException);
 
-    // Nothing appended, nothing emitted.
     expect(repository.appended).toHaveLength(0);
     expect(publisher.changed).toHaveLength(0);
     expect(publisher.scheduled).toHaveLength(0);
