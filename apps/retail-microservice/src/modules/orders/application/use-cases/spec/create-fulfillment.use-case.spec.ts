@@ -23,8 +23,6 @@ const STAFF_ID = '00000000-0000-4000-a000-000000000001';
 const OTHER_ID = '00000000-0000-4000-a000-000000000099';
 const ORDER_ID = 1;
 
-// A two-line order (line 10 ordered 3, line 20 ordered 5), placed-and-authorized and
-// owned by OWNER_ID — the default the cross-fulfillment math is measured against.
 const TWO_LINE_ORDER = (): Order =>
   buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
     { orderLineId: 10, quantity: 3 },
@@ -72,12 +70,10 @@ describe('CreateFulfillmentUseCase', () => {
     expect(view.id).toBeGreaterThan(0);
     expect(view.orderId).toBe(ORDER_ID);
     expect(view.status).toBe(FulfillmentStatusEnum.PENDING);
-    // No `stockLocationId` on the request → defaults to the warehouse.
     expect(view.stockLocationId).toBe(INVENTORY_DEFAULT_STOCK_LOCATION);
     expect(view.trackingNumber).toBeNull();
     expect(view.shippedAt).toBeNull();
     expect(view.lines).toEqual([expect.objectContaining({ orderLineId: 10, quantity: 2 })]);
-    // The line came back with a concrete BIGINT id (the saved graph is re-read).
     expect(view.lines[0].id).toBeGreaterThan(0);
 
     expect(publisher.fulfillmentCreated).toHaveLength(1);
@@ -133,7 +129,6 @@ describe('CreateFulfillmentUseCase', () => {
   it('rejects an over-quantity request with FULFILLMENT_QUANTITY_EXCEEDS_REMAINING (409)', async () => {
     const { useCase } = await makeHarness();
 
-    // Line 10 is ordered 3; requesting 4 exceeds the remaining.
     await expect(
       useCase.execute(createPayload({ lines: [{ orderLineId: 10, quantity: 4 }] })),
     ).rejects.toMatchObject({ code: OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING });
@@ -166,16 +161,12 @@ describe('CreateFulfillmentUseCase', () => {
   it('counts already-fulfilled quantities across creates (partial-ship math)', async () => {
     const { useCase } = await makeHarness();
 
-    // First shipment: 2 of line 10's 3 ordered units.
     await useCase.execute(createPayload({ lines: [{ orderLineId: 10, quantity: 2 }] }));
 
-    // A second shipment of 2 more would push line 10 to 4 > 3 — the remaining is now 1,
-    // not the original 3, proving the already-fulfilled remainder is measured.
     await expect(
       useCase.execute(createPayload({ lines: [{ orderLineId: 10, quantity: 2 }] })),
     ).rejects.toMatchObject({ code: OrderErrorCodeEnum.FULFILLMENT_QUANTITY_EXCEEDS_REMAINING });
 
-    // The exact remaining (1) is still acceptable.
     const second = await useCase.execute(
       createPayload({ lines: [{ orderLineId: 10, quantity: 1 }] }),
     );
@@ -185,8 +176,6 @@ describe('CreateFulfillmentUseCase', () => {
   it('sums duplicate line entries within one request before the remaining check', async () => {
     const { useCase } = await makeHarness();
 
-    // Line 10 is ordered 3; two entries of 2 sum to 4 > 3 — checked together, not each
-    // against the full remainder independently.
     await expect(
       useCase.execute(
         createPayload({
@@ -223,13 +212,8 @@ describe('CreateFulfillmentUseCase', () => {
     expect(view.stockLocationId).toBe('dropship-1');
   });
 
-  // Cancel Line has already released the cancelled units' allocation, so the shippable
-  // bound is the line's ACTIVE quantity (`ordered − cancelled`), not the place-time
-  // ordered count. Shipping past it would move stock inventory no longer holds against
-  // this order — the second consequence of the unrecorded-cancellation bug.
   describe('cancelled units are not shippable', () => {
     it('measures the remaining shippable quantity against the active quantity', async () => {
-      // Line 10 ordered 3, of which 1 is cancelled → only 2 may ship.
       const { useCase } = await makeHarness(
         buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [
           { orderLineId: 10, quantity: 3, cancelledQuantity: 1 },

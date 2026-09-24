@@ -31,9 +31,6 @@ export interface IOrderProps {
   updatedAt?: Date | null;
 }
 
-// Input to the place-time factory. Totals are NOT supplied — `place` derives them
-// from the (already-snapshotted) lines, so the header totals can never disagree
-// with the line totals at placement.
 export interface IPlaceOrderInput {
   orderNumber: string;
   customerId: string | null;
@@ -45,31 +42,8 @@ export interface IPlaceOrderInput {
   placedAt: Date;
 }
 
-// 3-letter ISO-4217-shaped currency code, validated so a malformed code never
-// reaches the CHAR(3) column.
 const CURRENCY_PATTERN = /^[A-Za-z]{3}$/;
 
-// `Order` is the retail **immutable** aggregate root: the placed record of what was
-// bought and at what price, the counterpart to the mutable `Cart`. Placing an order
-// is a one-shot conversion — the cart's lines are snapshotted into `OrderLine`s and
-// the cart is marked `converted`; no later cart edit can corrupt this snapshot
-// (ADR-028 §1).
-//
-// It carries **three orthogonal status axes** (ADR-028 §2) — `status`, `paymentStatus`,
-// `fulfillmentStatus` — and they evolve **independently**. `paymentStatus = captured` alongside
-// `fulfillmentStatus = unfulfilled` is not a broken state; it is a paid order that has not shipped.
-// **None of the three can be derived from another**, which is the whole reason there are three.
-//
-// All three have mutators here: `markPaymentAuthorized` / `markPaymentCaptured` (payment),
-// `advanceFulfillment` / `markDelivered` (fulfillment), `cancel` (lifecycle).
-//
-// The id is the auto-increment BIGINT assigned by persistence (`null` until then),
-// unlike the cart's in-app UUID. `orderNumber` is the human-facing label finalized
-// by the repository from the generated id (see `OrderTypeormRepository`).
-//
-// `version` is the OCC token, and **the guard is live**: `runWithOrderWriteRetry` re-reads under a
-// fresh transaction when a compare-and-swap is lost, and surfaces a `409` once the budget is spent
-// (ADR-036/045). The in-memory bump here exists so the model is testable without a database.
 export class Order extends AggregateRoot<number | null> {
   private readonly _orderNumber: string;
   private readonly _customerId: string | null;
@@ -114,11 +88,6 @@ export class Order extends AggregateRoot<number | null> {
     Order.requireNonNegativeMoney(shippingTotalMinor, 'shippingTotalMinor');
     Order.requireNonNegativeMoney(props.grandTotalMinor, 'grandTotalMinor');
 
-    // The total invariant: the header subtotal must equal the sum of the line
-    // totals, and the grand total must reconcile across all components. In this
-    // capability tax/discount/shipping are 0 (no tax/discount/shipping capability
-    // yet — the tax category is a classification label only, ADR-026), so
-    // `grandTotalMinor = subtotalMinor = Σ line.lineTotalMinor`.
     const lineSum = props.lines.reduce((sum, line) => sum + line.lineTotalMinor, 0);
     if (props.subtotalMinor !== lineSum) {
       throw new OrderDomainException(
@@ -165,17 +134,6 @@ export class Order extends AggregateRoot<number | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // The place-time factory: validates ≥ 1 line + currency, derives the totals from
-  // the (already-snapshotted) lines, and opens the order `PENDING` / `NONE` /
-  // `UNFULFILLED` at `version 0`. The lines arrive already snapshotted (the caller
-  // builds them from the cart at place-time) — the factory fetches nothing.
-  //
-  // `id` is null until persistence assigns the BIGINT, and `orderNumber` is a **provisional label**
-  // the repository finalizes from that id on first save — so the number an in-memory `Order` carries
-  // is not the number the buyer will see.
-  //
-  // Records no domain event: `retail.order.placed` is emitted by the place use case *after* the id
-  // exists, because the event carries it.
   public static place(input: IPlaceOrderInput): Order {
     const subtotalMinor = input.lines.reduce((sum, line) => sum + line.lineTotalMinor, 0);
     return new Order({
@@ -188,8 +146,6 @@ export class Order extends AggregateRoot<number | null> {
       fulfillmentStatus: OrderFulfillmentStatusEnum.UNFULFILLED,
       lines: input.lines,
       subtotalMinor,
-      // No tax/discount/shipping capability yet — these stay 0, so
-      // grandTotal = subtotal.
       taxTotalMinor: 0,
       discountTotalMinor: 0,
       shippingTotalMinor: 0,
@@ -202,9 +158,6 @@ export class Order extends AggregateRoot<number | null> {
     });
   }
 
-  // Rebuilds a persisted order from storage (any status / version). Records no
-  // events. The constructor re-asserts the total invariant, so a corrupted stored
-  // graph is rejected on read.
   public static reconstitute(props: IOrderProps): Order {
     return new Order(props);
   }
@@ -277,10 +230,6 @@ export class Order extends AggregateRoot<number | null> {
     return this._version;
   }
 
-  // Payment axis: `none → authorized`. Driven by the authorize-on-place capability;
-  // rejects any non-`none` start. Bumps the OCC token. Touches only the payment
-  // axis — the order lifecycle and fulfillment axes are untouched (orthogonality,
-  // ADR-028 §2).
   public markPaymentAuthorized(): void {
     if (this._paymentStatus !== OrderPaymentStatusEnum.NONE) {
       throw new OrderDomainException(
@@ -292,23 +241,6 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // Payment axis: `none → failed` — **the authorize was DECLINED, so no money was ever reserved and
-  // this order can never be paid for** (ISSUE-06 / ADR-052).
-  //
-  // Place commits the order, converts the cart and allocates the stock, and only *then* asks the
-  // gateway. A decline used to leave that commit standing with **nothing recording it**: an order
-  // reading `pending` / `none`, indistinguishable from a healthy one, that could never ship (Ship
-  // refuses an order with no `Payment` row) and that nothing cancelled. The stock stayed allocated
-  // forever, and the customer's retry was handed the dead order **as a success**.
-  //
-  // The member existed all along — `OrderPaymentStatusEnum.FAILED` is in the contract *and* in the
-  // `payment_status` ENUM column — and **nothing produced it.** Someone modelled the decline and
-  // never wired it.
-  //
-  // **It is only half the answer.** The other half is `cancel()`: this axis says *why* the order is
-  // dead, the lifecycle axis says *that* it is. That split is ADR-028 §2's orthogonality doing its
-  // job — a `payment-failed` member on the LIFECYCLE axis would fold payment information into the
-  // axis that exists not to carry it.
   public markPaymentFailed(): void {
     if (this._paymentStatus !== OrderPaymentStatusEnum.NONE) {
       throw new OrderDomainException(
@@ -320,15 +252,6 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // Payment axis: `authorized → captured`. Rejects any non-`authorized` start. Bumps the OCC
-  // token.
-  //
-  // **`captured` is where the FORWARD walk stops.** There is no `markPaymentRefunded`, and refunds
-  // have already shipped — so its absence is not a gap. A refund is recorded on the `Payment` row:
-  // `refundedAmountMinor`, and the payment's own status once it is fully refunded. The order header
-  // keeps reading `captured` forever. **Never read `order.paymentStatus` to learn whether an order
-  // was refunded.** (`failed` is not on the forward walk at all — it is the `none` branch's terminal,
-  // see `markPaymentFailed` above.)
   public markPaymentCaptured(): void {
     if (this._paymentStatus !== OrderPaymentStatusEnum.AUTHORIZED) {
       throw new OrderDomainException(
@@ -340,17 +263,6 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // Fulfillment axis: advances the order's **roll-up** fulfillment status along the
-  // forward chain `unfulfilled → partially-shipped → shipped → delivered`. Driven by
-  // the Ship operation (sets `partially-shipped` or `shipped`) and the Deliver
-  // operation (sets `delivered`); the use case computes the target from the order's
-  // fulfillments' shipped line quantities, so this mutator only guards the axis, not
-  // the arithmetic. A **strictly backward** move (e.g. `shipped → partially-shipped`)
-  // is rejected `ORDER_INVALID_FULFILLMENT_TRANSITION` (409); a forward-or-equal move
-  // is allowed (a single full ship goes `unfulfilled → shipped` directly, and a
-  // further partial ship that still does not complete the order stays
-  // `partially-shipped`). Bumps the OCC token. Touches **only** the fulfillment axis —
-  // the lifecycle and payment axes are untouched (orthogonality, ADR-028 §2).
   public advanceFulfillment(next: OrderFulfillmentStatusEnum): void {
     if (Order.fulfillmentRank(next) < Order.fulfillmentRank(this._fulfillmentStatus)) {
       throw new OrderDomainException(
@@ -362,17 +274,6 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // Lifecycle axis: `pending`/`confirmed → CANCELLED` (terminal). Driven by Cancel
-  // Order. Rejects an already-`cancelled` order and — crucially — a `shipped`/
-  // `delivered` one with `ORDER_NOT_CANCELLABLE` (409): an order whose lifecycle has
-  // advanced past placement can no longer be unwound here. (The Cancel Order use case
-  // ALSO guards on the presence of a `shipped`/`delivered` *fulfillment* before calling
-  // this — the lifecycle axis stays `pending` after a ship, so the fulfillment check is
-  // the real shipped-stock guard, and this mutator is the lifecycle backstop.) Bumps the
-  // OCC token. Touches **only** the lifecycle axis — the payment axis keeps its value
-  // (the `payment` row carries `voided`; the order's payment *axis* has no `voided`
-  // member, the deliberate orthogonality of ADR-028 §2), and the fulfillment axis is
-  // untouched.
   public cancel(): void {
     if (this._status !== OrderStatusEnum.PENDING && this._status !== OrderStatusEnum.CONFIRMED) {
       throw new OrderDomainException(
@@ -384,13 +285,6 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // Cancels `units` of ONE line (Cancel Line, ADR-031) — the narrower unwind that leaves
-  // the rest of the order standing. Routed through the root, not the child, for two
-  // reasons: an unknown `orderLineId` is the root's 404 to raise, and the cancelled count
-  // is aggregate state, so the write must bump the OCC token or a concurrent Cancel Line
-  // could read-modify-write the same units twice (ADR-036). Touches no status axis of the
-  // order itself and no money — the line records the cancellation, the order records the
-  // version.
   public cancelLineQuantity(orderLineId: number, units: number): OrderLine {
     const line = this._lines.find((candidate) => candidate.id === orderLineId);
     if (!line) {
@@ -404,13 +298,6 @@ export class Order extends AggregateRoot<number | null> {
     return line;
   }
 
-  // Delivery is the happy-path terminal: it advances **both** the lifecycle axis
-  // (`→ DELIVERED`) and the fulfillment axis (`→ DELIVERED`) in one mutation. Driven by
-  // Mark Delivered once every non-`cancelled` fulfillment of the order is delivered.
-  // Requires the order to be `shipped`-reachable — the fulfillment axis must be
-  // `partially-shipped` or `shipped` (something physically went out) and the lifecycle
-  // must not be `cancelled` — else `ORDER_INVALID_FULFILLMENT_TRANSITION` (409). Bumps
-  // the OCC token once.
   public markDelivered(): void {
     if (this._status === OrderStatusEnum.CANCELLED) {
       throw new OrderDomainException(
@@ -432,10 +319,6 @@ export class Order extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // The forward ordinal of each fulfillment-axis value. A move is legal iff it does
-  // not decrease this rank — encoding the `unfulfilled → partially-shipped → shipped
-  // → delivered` chain without forbidding the legitimate "skip" of a full single
-  // ship (`unfulfilled → shipped`).
   private static fulfillmentRank(status: OrderFulfillmentStatusEnum): number {
     switch (status) {
       case OrderFulfillmentStatusEnum.UNFULFILLED:
@@ -458,9 +341,6 @@ export class Order extends AggregateRoot<number | null> {
     }
   }
 
-  // Every mutation advances the OCC token so "version bumps on each mutation" is
-  // observable. Persistence delegates the stored value to TypeORM's
-  // `@VersionColumn`; this in-memory bump keeps the domain self-describing.
   private bumpVersion(): void {
     this._version += 1;
   }

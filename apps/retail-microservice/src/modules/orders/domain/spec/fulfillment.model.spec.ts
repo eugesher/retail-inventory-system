@@ -41,7 +41,6 @@ describe('Fulfillment', () => {
       expect(fulfillment.lines[0].orderLineId).toBe(10);
       expect(fulfillment.lines[0].quantity).toBe(2);
       expect(fulfillment.lines[1].orderLineId).toBe(11);
-      // The children are null-id / null-parent until persistence assigns the BIGINTs.
       expect(fulfillment.lines[0].id).toBeNull();
       expect(fulfillment.lines[0].fulfillmentId).toBeNull();
     });
@@ -94,7 +93,6 @@ describe('Fulfillment', () => {
             OrderErrorCodeEnum.FULFILLMENT_TRACKING_REQUIRED,
           );
         }
-        // A rejected ship leaves the fulfillment untouched (still pending, version 0).
         expect(fulfillment.status).toBe(FulfillmentStatusEnum.PENDING);
         expect(fulfillment.version).toBe(0);
       },
@@ -194,7 +192,6 @@ describe('Fulfillment', () => {
       expect(fulfillment.status).toBe(FulfillmentStatusEnum.SHIPPED);
       expect(fulfillment.trackingNumber).toBe('TRACK-1');
       expect(fulfillment.version).toBe(1);
-      // A reconstituted shipped fulfillment can still be delivered.
       fulfillment.markDelivered(new Date('2026-06-18T00:00:00Z'));
       expect(fulfillment.status).toBe(FulfillmentStatusEnum.DELIVERED);
     });

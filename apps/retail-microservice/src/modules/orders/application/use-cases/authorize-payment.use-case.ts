@@ -13,9 +13,6 @@ import {
   TRANSACTION_PORT,
 } from '../ports';
 
-// The business input to Authorize Payment. `orderId` / `amountMinor` / `currency`
-// describe the charge; `method` is the optional opaque method token from the caller
-// (forwarded to the gateway); `correlationId` threads the request id for logging.
 export interface IAuthorizePaymentInput {
   orderId: number;
   amountMinor: number;
@@ -24,19 +21,6 @@ export interface IAuthorizePaymentInput {
   correlationId?: string;
 }
 
-// Authorize Payment is the inline authorize-on-place half of Q5 (ADR-028 §3): it
-// calls the `PAYMENT_GATEWAY` (the always-approve fake by default; a real processor
-// by rebinding), and on approval persists a `Payment` in `AUTHORIZED` and advances
-// the order's payment axis to `authorized`.
-//
-// The external gateway call is an out-of-process request, so it runs **outside** the
-// DB transaction; only the two writes that follow it — persist the `Payment`, save
-// the `Order` with `markPaymentAuthorized()` — run together in a short follow-up
-// transaction (`TRANSACTION_PORT`). On a non-approval (unreachable with the fake,
-// but modeled) the order stays `paymentStatus=none` and a typed `409` is surfaced.
-//
-// It is its own use case (not inlined into Place Order) so it is unit-testable against a fake
-// `PAYMENT_GATEWAY` in isolation, and so it sits symmetrically beside `CapturePaymentUseCase`.
 @Injectable()
 export class AuthorizePaymentUseCase {
   constructor(
@@ -57,7 +41,6 @@ export class AuthorizePaymentUseCase {
 
     this.logger.info({ correlationId, orderId, amountMinor, currency }, 'Authorizing payment');
 
-    // Out-of-process gateway call — deliberately outside the DB transaction.
     const result = await this.paymentGateway.authorize({
       orderId,
       amountMinor,
@@ -67,8 +50,6 @@ export class AuthorizePaymentUseCase {
     });
 
     if (!result.approved) {
-      // The order is already placed (committed by Place Order's transaction); leave
-      // its payment axis `none` and surface a typed rejection.
       this.logger.warn({ correlationId, orderId }, 'Payment gateway declined authorize');
       throw new OrderDomainException(
         OrderErrorCodeEnum.ORDER_PAYMENT_NOT_APPROVED,
@@ -76,8 +57,6 @@ export class AuthorizePaymentUseCase {
       );
     }
 
-    // Short follow-up transaction: persist the Payment and advance the order's
-    // payment axis atomically.
     const payment = await this.transactionPort.runInTransaction(async (scope) => {
       const authorized = Payment.authorized({
         orderId,
@@ -97,12 +76,6 @@ export class AuthorizePaymentUseCase {
         );
       }
       order.markPaymentAuthorized();
-      // The plain managed save (no `expectedVersion`): authorize-on-place runs inline
-      // immediately after Place Order committed, on a brand-new order no second actor
-      // can yet reach, so there is no concurrent writer to lose a CAS to. `@VersionColumn`
-      // still advances the row's version. The version-checked CAS + retry is reserved for
-      // the transitions a second actor genuinely races (capture / ship / deliver / cancel,
-      // ADR-036).
       await this.orderRepository.save(order, scope);
 
       return savedPayment;

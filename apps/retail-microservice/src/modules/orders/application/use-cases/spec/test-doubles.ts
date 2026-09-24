@@ -59,27 +59,14 @@ import {
 } from '../../ports';
 import { OrderWriteConflictError } from '../order-write-conflict.error';
 
-// Jest-free so the production build (which excludes `*.spec.ts` but not
-// `test-doubles.ts`) stays clean — the catalog/inventory/cart convention. Methods
-// return `Promise.resolve(...)` rather than being `async`, so the no-floating /
-// require-await lint rules stay satisfied.
-
-// A throwaway brand value — the fakes ignore the scope (they share no real
-// transaction), so any object satisfies the opaque `ITransactionScope` here.
 export const FAKE_SCOPE = {} as unknown as ITransactionScope;
 
-// Runs the work immediately with the throwaway scope — no real transaction. Good
-// enough for the use-case unit tests, which assert orchestration, not atomicity.
 export class FakeTransactionPort implements ITransactionPort {
   public runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
     return work(FAKE_SCOPE);
   }
 }
 
-// Runs the work to completion, then throws — simulating the rare "the callback
-// succeeded but the COMMIT itself failed" case. The work's side effects (incl. the
-// allocate RPC the place use case fires as the final tx step) have already run, so
-// this exercises the place-failure compensation path.
 export class CommitFailingTransactionPort implements ITransactionPort {
   constructor(private readonly error: Error) {}
 
@@ -89,19 +76,10 @@ export class CommitFailingTransactionPort implements ITransactionPort {
   }
 }
 
-// A fake repository whose in-memory state can be snapshotted and restored — the seam a
-// rollback-aware transaction port needs to simulate a rolled-back attempt.
 export interface ISnapshotableFake {
   snapshot(): () => void;
 }
 
-// A rollback-aware transaction port for the OCC retry specs (ADR-036): it snapshots the
-// given fakes BEFORE running the work and restores them if the work throws — simulating
-// a real transaction's rollback. Without it a fake save that partially wrote (e.g. the
-// ship flow persisted the fulfillment + payment before the order CAS threw) would leave
-// that write visible to the retry, so the re-read domain object would be in a state its
-// mutator rejects. With it, a lost order CAS rolls the whole attempt back and the retry
-// re-reads pristine state — exactly as the real DB transaction behaves.
 export class RollbackFakeTransactionPort implements ITransactionPort {
   constructor(private readonly fakes: ISnapshotableFake[]) {}
 
@@ -118,10 +96,6 @@ export class RollbackFakeTransactionPort implements ITransactionPort {
   }
 }
 
-// Builds a wire-shaped RPC rejection: an `Error` (so it satisfies the
-// reject-with-Error lint rule) carrying the `{ statusCode, code, details }` fields
-// the inventory RPC filter emits. `toMatchObject({ code, details })` matches the
-// Error's own enumerable props.
 export const makeWireError = (
   code: string,
   statusCode: number,
@@ -130,15 +104,9 @@ export const makeWireError = (
 ): Error =>
   Object.assign(new Error(message), { statusCode, code, ...(details ? { details } : {}) });
 
-// In-memory order→inventory reservation gateway. Records every allocate/cancel call
-// so the place spec can assert the orderId + lines passed, and exposes programmable
-// rejections (`allocateError` / `cancelError`). The allocate default echoes each
-// requested line back as committed against the default location.
 export class FakeOrderInventoryGateway implements IOrderInventoryGatewayPort {
   public readonly allocateCalls: IReservationAllocatePayload[] = [];
   public readonly cancelCalls: IAllocationCancelPayload[] = [];
-  // Use `makeWireError` to build a wire-shaped rejection (an Error carrying
-  // `statusCode`/`code`/`details`), mirroring what the gateway surfaces.
   public allocateError: Error | null = null;
   public cancelError: Error | null = null;
 
@@ -166,9 +134,6 @@ export class FakeOrderInventoryGateway implements IOrderInventoryGatewayPort {
   }
 }
 
-// A mutable cart snapshot the place use case reads. `markConverted` flips the
-// in-memory status so a repeat place observes `converted` (the cart-state
-// idempotency path).
 export class FakeCartReader implements IOrderCartReaderPort {
   public convertedCount = 0;
 
@@ -184,8 +149,6 @@ export class FakeCartReader implements IOrderCartReaderPort {
     });
   }
 
-  // Mirrors the adapter's compare-and-swap: only an `active` snapshot flips, and
-  // the boolean reports whether the flip happened (false = lost the convert race).
   public markConverted(cartId: string): Promise<boolean> {
     if (this.snapshot?.cartId === cartId && this.snapshot.status === CartStatusEnum.ACTIVE) {
       this.snapshot = { ...this.snapshot, status: CartStatusEnum.CONVERTED };
@@ -196,15 +159,8 @@ export class FakeCartReader implements IOrderCartReaderPort {
   }
 }
 
-// The default email the `FakeCustomerContactReader` returns, so specs can assert the
-// producing use case stamped exactly what the reader resolved.
 export const FAKE_CUSTOMER_EMAIL = 'buyer@example.com';
 
-// In-memory `ORDER_CUSTOMER_CONTACT_READER` double. Records every lookup so a spec can
-// assert the producing use case consulted it, and is configurable: `email` is the value
-// returned for any resolvable id (default `FAKE_CUSTOMER_EMAIL`); `found=false` simulates a
-// customer id that resolves no row (a tombstoned/unknown customer → `null`). The two together
-// cover the "stamps the resolved email" and "missing customer → null email" cases.
 export class FakeCustomerContactReader implements IOrderCustomerContactReaderPort {
   public readonly calls: string[] = [];
 
@@ -219,8 +175,6 @@ export class FakeCustomerContactReader implements IOrderCustomerContactReaderPor
   }
 }
 
-// Resolves variant headers + applicable prices from in-memory maps. A variant with
-// no price entry (or an explicit `null`) drives the `ORDER_LINE_NO_PRICE` rejection.
 export class FakeCatalogGateway implements IOrderCatalogGatewayPort {
   constructor(
     private readonly variants: Map<number, VariantWithProductView>,
@@ -240,21 +194,13 @@ export class FakeCatalogGateway implements IOrderCatalogGatewayPort {
   }
 }
 
-// An in-memory order store that assigns BIGINT ids, derives `order_number` from the
-// id on first insert, tracks the attached snapshot-address ids, and re-reads the
-// merged state — enough to exercise the place + authorize orchestration.
 export class FakeOrderRepository implements IOrderRepositoryPort {
   public saveCount = 0;
-  // OCC simulation (ADR-036): when > 0, the next N version-checked saves
-  // (`expectedVersion` supplied) reject with `OrderWriteConflictError` and decrement —
-  // the retry helper re-reads + retries. Set it above the injected budget to prove
-  // retry-exhausted → `VERSION_MISMATCH`, or below it to prove retry-then-success.
   public conflictsBeforeSuccess = 0;
   private seq = 0;
   private readonly byId = new Map<number, Order>();
   private readonly addresses = new Map<number, { billing: string; shipping: string }>();
 
-  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
   public snapshot(): () => void {
     const copy = new Map(this.byId);
     const addrCopy = new Map(this.addresses);
@@ -282,8 +228,6 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
 
   public save(order: Order, _scope?: ITransactionScope, expectedVersion?: number): Promise<Order> {
     this.saveCount += 1;
-    // A version-checked CAS that loses the race (the simulated conflict) — mirrors the
-    // real repo throwing `OrderWriteConflictError`, which the retry helper catches.
     if (expectedVersion !== undefined && this.conflictsBeforeSuccess > 0) {
       this.conflictsBeforeSuccess -= 1;
       const current = this.byId.get(order.id!);
@@ -309,8 +253,6 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
   }
 
   public listByCustomer(customerId: string, page: IOrderPageRequest): Promise<IOrderPage> {
-    // Mirror the real repository's newest-first ordering (`placed_at DESC, id DESC`)
-    // so the use-case spec can assert it, then apply the page window.
     const all = [...this.byId.values()]
       .filter((order) => order.customerId === customerId)
       .sort((a, b) => {
@@ -322,9 +264,6 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
     return Promise.resolve({ items, total: all.length, page: page.page, size: page.size });
   }
 
-  // Reconstitutes an order with the stored billing/shipping ids folded back in, so a
-  // post-`attachAddresses` read carries the snapshot-address pointers (as the real
-  // repo's re-read does).
   private materialize(order: Order, id: number): Order {
     const addr = this.addresses.get(id);
     return this.rebuild(order, id, order.orderNumber, addr?.billing, addr?.shipping);
@@ -345,11 +284,6 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
       status: order.status,
       paymentStatus: order.paymentStatus,
       fulfillmentStatus: order.fulfillmentStatus,
-      // Deep-copy the child lines. A shallow `[...order.lines]` would hand the caller the
-      // very `OrderLine` objects the store holds, so a mutation (a line cancel, a
-      // `markFulfillment`) would be visible in the store BEFORE its `save` — and a
-      // rolled-back attempt could not undo it, because `snapshot()` only copies the Map.
-      // The real repository re-reads the graph from MySQL, so every read is independent.
       lines: order.lines.map(
         (line) =>
           new OrderLine({
@@ -380,7 +314,6 @@ export class FakeOrderRepository implements IOrderRepositoryPort {
   }
 }
 
-// In-memory address store keyed by the caller-assigned UUID.
 export class FakeAddressRepository implements IAddressRepositoryPort {
   public readonly saved: Address[] = [];
   private readonly byId = new Map<string, Address>();
@@ -392,8 +325,6 @@ export class FakeAddressRepository implements IAddressRepositoryPort {
   }
 }
 
-// In-memory payment store that assigns BIGINT ids and resolves the single payment
-// per order.
 export class FakePaymentRepository implements IPaymentRepositoryPort {
   public saveCount = 0;
   private seq = 0;
@@ -407,7 +338,6 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
     return Promise.resolve(stored);
   }
 
-  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
   public snapshot(): () => void {
     const copy = new Map(this.byId);
     return (): void => {
@@ -430,19 +360,10 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
     return Promise.resolve(latest);
   }
 
-  // The locked read (ADR-052). **An in-memory double cannot simulate a row lock, and must not
-  // pretend to.** What it can do — and what the use-case specs actually need — is return the CURRENT
-  // stored state, which is what `FOR UPDATE` guarantees and a snapshot read does not. The mutual
-  // exclusion itself is only provable against a real database, and it is:
-  // `test/concurrent-capture-double-charge.e2e-spec.ts` counts the gateway calls.
   public findByOrderIdForUpdate(orderId: number): Promise<Payment | null> {
     return this.findByOrderId(orderId);
   }
 
-  // The stranded-claim query (ADR-052). `updatedAt` is null on an in-memory `Payment` that was never
-  // round-tripped through the mapper, so a row with no stamp is treated as **not yet stale** — the
-  // conservative direction: this report's whole point is that a false positive sends an operator to
-  // reconcile a payment that is merely young.
   public listStaleCaptureClaims(olderThan: Date): Promise<Payment[]> {
     const stale = [...this.byId.values()].filter(
       (payment) =>
@@ -464,24 +385,13 @@ export class FakePaymentRepository implements IPaymentRepositoryPort {
       gatewayReference: payment.gatewayReference,
       authorizedAt: payment.authorizedAt,
       capturedAt: payment.capturedAt,
-      // Preserve the refund flag + refunded total across the save/re-read round-trip so
-      // the Cancel Order captured-payment path (`flagForRefund`) and the Issue Refund path
-      // (`refund` → `refunded_amount_minor` + the status flip) are observable in the
-      // re-read view (the real `PaymentMapper` round-trips both directions).
       flaggedForRefund: payment.flaggedForRefund,
       refundedAmountMinor: payment.refundedAmountMinor,
-      // The real `PaymentMapper` round-trips `updated_at`, and the stranded-capture-claim report
-      // measures its horizon from it (ADR-052). Dropping it here made every saved payment look
-      // brand-new, which would have silently disarmed that report's specs.
       updatedAt: payment.updatedAt,
     });
   }
 }
 
-// A configurable payment gateway fake — approves or declines, minting a distinct
-// `gatewayReference` per authorize (the UNIQUE column relies on it). `refundOk` arms a
-// decline so the Issue Refund spec can exercise the `failed` path; `refundCount` lets it
-// assert the natural-idempotency guard makes only one gateway call.
 export class FakePaymentGateway implements IPaymentGatewayPort {
   public authorizeCount = 0;
   public captureCount = 0;
@@ -526,7 +436,6 @@ export class FakePaymentGateway implements IPaymentGatewayPort {
   }
 }
 
-// Records the published wire events so a spec can assert each fired.
 export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   public readonly placed: unknown[] = [];
   public readonly authorized: unknown[] = [];
@@ -584,8 +493,6 @@ export class SpyOrderEventsPublisher implements IOrderEventsPublisherPort {
   }
 }
 
-// Records published audit events so the Issue Refund spec can assert the always-audit
-// money-movement rule (ADR-032) — the event name + the before/after payment snapshot.
 export class SpyAuditLogPublisher implements IAuditLogPublisher {
   public readonly events: IAuditLogEvent[] = [];
 
@@ -595,10 +502,6 @@ export class SpyAuditLogPublisher implements IAuditLogPublisher {
   }
 }
 
-// An in-memory refund store that assigns BIGINT ids + committed timestamps on save and
-// serves `findByOrderId` / `findByPaymentId` newest-first (mirroring the real repo's
-// `issued_at DESC, id DESC`). Enough to exercise the Issue Refund accounting + the
-// natural-idempotency guard + the List Refunds read without a test DB.
 export class FakeRefundRepository implements IRefundRepositoryPort {
   public saveCount = 0;
   private seq = 0;
@@ -630,8 +533,6 @@ export class FakeRefundRepository implements IRefundRepositoryPort {
       .map((refund) => this.rebuild(refund, refund.id!));
   }
 
-  // Re-reads the saved graph the way the real repo does: concrete id + committed
-  // `createdAt` / `updatedAt` timestamps (the view factory's `!` assertions rely on them).
   private rebuild(refund: Refund, id: number): Refund {
     const now = new Date('2026-06-12T00:00:00.000Z');
     return Refund.reconstitute({
@@ -650,8 +551,6 @@ export class FakeRefundRepository implements IRefundRepositoryPort {
   }
 }
 
-// A persisted-refund fixture (via `Refund.reconstitute`) for the List Refunds spec + the
-// idempotency-duplicate case.
 export const buildRefundFixture = (
   id: number,
   orderId: number,
@@ -674,14 +573,8 @@ export const buildRefundFixture = (
     updatedAt: new Date('2026-06-12T00:00:00.000Z'),
   });
 
-// In-memory order→inventory commit-sale gateway. Records every commitSale call so the
-// ship spec can assert the `{ orderId, fulfillmentId, lines }` passed, and exposes a
-// programmable rejection (`commitError`) to exercise the retry / log-and-replay path.
-// The default echoes each requested line back as committed.
 export class FakeOrderCommitSaleGateway implements IOrderCommitSaleGatewayPort {
   public readonly calls: ICommitSalePayload[] = [];
-  // Use `makeWireError` to build a wire-shaped rejection. When set, every attempt
-  // rejects — exercising the bounded retry then the swallow-and-log poison path.
   public commitError: Error | null = null;
 
   public commitSale(payload: ICommitSalePayload): Promise<ICommitSaleResult> {
@@ -699,10 +592,6 @@ export class FakeOrderCommitSaleGateway implements IOrderCommitSaleGatewayPort {
   }
 }
 
-// An in-memory fulfillment store that assigns BIGINT ids to the root + each line on
-// save, and serves `listByOrderId` newest-first (`shipped_at DESC, id DESC`, mirroring
-// the real repo's ordering). Enough to exercise the create cross-fulfillment math + the
-// list ordering without a test DB (the module's pure-unit-doubles convention).
 export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
   public saveCount = 0;
   private seq = 0;
@@ -717,7 +606,6 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
     return Promise.resolve(this.rebuild(stored, id));
   }
 
-  // Snapshot/restore for the rollback-aware transaction port (the OCC retry specs).
   public snapshot(): () => void {
     const copy = new Map(this.byId);
     return (): void => {
@@ -731,9 +619,6 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
     return Promise.resolve(fulfillment ? this.rebuild(fulfillment, id) : null);
   }
 
-  // The pessimistic-lock load path. In-memory there is no real row lock to take (a
-  // single-process unit test has no concurrent transaction), so it is just a current
-  // read — identical to `findById`. The real serialisation is exercised end-to-end.
   public findByIdForUpdate(id: number): Promise<Fulfillment | null> {
     return this.findById(id);
   }
@@ -750,9 +635,6 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
     );
   }
 
-  // Re-reads the saved graph the way the real repo does: concrete root id + concrete
-  // line ids. A line that already carries an id (a re-read of a stored row) keeps it;
-  // a freshly built line (id null) gets the next BIGINT.
   private rebuild(fulfillment: Fulfillment, id: number): Fulfillment {
     return Fulfillment.reconstitute({
       id,
@@ -777,24 +659,11 @@ export class FakeFulfillmentRepository implements IFulfillmentRepositoryPort {
   }
 }
 
-// A stored row in the fake — pending-aware: a reserved-but-not-finalized row (ADR-036
-// reserve-first) carries a `null` response until `finalize` fills it in, mirroring the real
-// table's nullable `response_status` / `response_body`.
 interface IFakeStoredRow extends Omit<IIdempotencyRecord, 'responseStatus' | 'responseBody'> {
   responseStatus: number | null;
   responseBody: Record<string, unknown> | null;
 }
 
-// In-memory `IDEMPOTENCY_STORE` double. Supports BOTH idempotency flows:
-//  - `find`/`save` (place/capture/ship): `find` returns a completed record or null; `save`
-//    inserts unless the `(scope, key)` PK already holds a row, swallowing the duplicate (the
-//    real adapter's ER_DUP_ENTRY behavior). Arm a pre-committed "winner" via
-//    `armConcurrentWinner` for the concurrent-first-writer specs: the FIRST `find` misses,
-//    our `save` collides and is swallowed, and the post-save `find` reveals the winner's body.
-//  - `reserve`/`finalize`/`release` (refund, ADR-036 concurrency hardening): `reserve` inserts
-//    a pending row and returns `reserved` on a fresh key, `replay` on a matching-fingerprint
-//    completed row, `mismatch` on a different fingerprint, `in-progress` on a still-pending
-//    row; `finalize` fills the response in; `release` drops a still-pending row.
 export class FakeIdempotencyStore implements IIdempotencyStorePort {
   public readonly saved: IIdempotencyRecordInput[] = [];
   public readonly reserved: IIdempotencyReserveInput[] = [];
@@ -809,13 +678,10 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
     return `${scope}::${key}`;
   }
 
-  // Seed a completed record visible immediately — the straightforward replay / 422 cases.
   public seed(record: IIdempotencyRecord): void {
     this.rows.set(FakeIdempotencyStore.keyOf(record.scope, record.key), { ...record });
   }
 
-  // Arm a concurrent winner: hidden from the first `find` (the miss), revealed on the
-  // post-save `find`, and holding the PK so our own `save` is swallowed.
   public armConcurrentWinner(record: IIdempotencyRecord): void {
     this.winner = record;
   }
@@ -830,7 +696,6 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
     if (!row) {
       return Promise.resolve(null);
     }
-    // A pending (reserved, not finalized) row is not a replayable record — a miss for `find`.
     if (row.responseBody === null) {
       return Promise.resolve(null);
     }
@@ -840,8 +705,6 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
   public save(record: IIdempotencyRecordInput): Promise<void> {
     this.saved.push(record);
     const k = FakeIdempotencyStore.keyOf(record.scope, record.key);
-    // A concurrent winner (or a prior row) holds the PK → swallow the duplicate as a
-    // no-op, exactly as the real adapter swallows ER_DUP_ENTRY.
     if (this.winner || this.rows.has(k)) {
       return Promise.resolve();
     }
@@ -853,7 +716,6 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
     return Promise.resolve();
   }
 
-  // Reserve-first (ADR-036): the atomic INSERT-a-pending-row front door the refund flow uses.
   public reserve(input: IIdempotencyReserveInput): Promise<IIdempotencyReservation> {
     this.reserveCalls += 1;
     this.reserved.push(input);
@@ -893,16 +755,12 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
   public release(scope: string, key: string): Promise<void> {
     const k = FakeIdempotencyStore.keyOf(scope, key);
     this.released.push(k);
-    // Only a still-pending row is released (the real adapter guards `response_body IS NULL`).
     if (this.rows.get(k)?.responseBody === null) {
       this.rows.delete(k);
     }
     return Promise.resolve();
   }
 
-  // The TTL purge: drop every row whose `expiresAt` is strictly before `now`, returning the
-  // count removed — the in-memory mirror of the real adapter's bounded
-  // `DELETE … WHERE expires_at < now`. A row exactly at `now` is retained (strict `<`).
   public deleteExpired(now: Date): Promise<number> {
     let deleted = 0;
     for (const [k, record] of this.rows) {
@@ -927,10 +785,6 @@ export class FakeIdempotencyStore implements IIdempotencyStorePort {
   }
 }
 
-// Builds a stored idempotency record fixture for the replay / reuse / concurrent specs.
-// `responseBody` is an `OrderView`-shaped object (only the fields the specs assert are
-// populated); `requestFingerprint` defaults to a canonical placeholder the tests can
-// match or deliberately diverge from.
 export const buildIdempotencyRecord = (
   overrides: Partial<IIdempotencyRecord> = {},
 ): IIdempotencyRecord => ({
@@ -944,7 +798,6 @@ export const buildIdempotencyRecord = (
   ...overrides,
 });
 
-// A `VariantWithProductView` fixture builder for the snapshot assertions.
 export const buildVariant = (
   variantId: number,
   sku: string,
@@ -968,7 +821,6 @@ export const buildVariant = (
   },
 });
 
-// A `PriceView` fixture builder.
 export const buildPrice = (
   variantId: number,
   amountMinor: number,
@@ -983,9 +835,6 @@ export const buildPrice = (
   priority: 0,
 });
 
-// A persisted-order fixture (via `Order.reconstitute`, the load path) for the
-// read/capture specs — a one-line order at any `paymentStatus` keyed to a concrete
-// id, so a fake repo can serve it directly without replaying the place flow.
 export const buildOrderFixture = (
   id: number,
   customerId: string | null,
@@ -1026,11 +875,6 @@ export const buildOrderFixture = (
     version: 2,
   });
 
-// A persisted-order fixture with explicit line ids + quantities and tunable
-// lifecycle/payment statuses — the Create/List Fulfillment specs need multi-line
-// orders with known order-line ids to exercise the cross-fulfillment quantity math and
-// the fulfillable-state preconditions (the single-line `buildOrderFixture` is too thin
-// for that). Each line is priced at `unitPriceMinor` so the header totals reconcile.
 export const buildOrderWithLinesFixture = (
   id: number,
   customerId: string | null,
@@ -1055,7 +899,6 @@ export const buildOrderWithLinesFixture = (
       unitPriceMinor,
       taxAmountMinor: 0,
       discountAmountMinor: 0,
-      // A line seeded fully cancelled is terminal, exactly as `cancelQuantity` leaves it.
       status:
         cancelledQuantity === line.quantity
           ? OrderLineStatusEnum.CANCELLED
@@ -1085,7 +928,6 @@ export const buildOrderWithLinesFixture = (
   });
 };
 
-// A persisted-payment fixture (via `Payment.reconstitute`) for the read/capture specs.
 export const buildPaymentFixture = (
   id: number,
   orderId: number,

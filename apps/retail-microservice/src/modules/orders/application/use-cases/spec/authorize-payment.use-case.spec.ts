@@ -14,7 +14,6 @@ import {
 
 const CUSTOMER_ID = '00000000-0000-4000-a000-000000000002';
 
-// Seeds a placed order (paymentStatus `none`) in the fake repo and returns its id.
 const seedOrder = async (orderRepository: FakeOrderRepository): Promise<number> => {
   const line = new OrderLine({
     id: null,

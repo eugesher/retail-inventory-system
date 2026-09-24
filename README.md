@@ -576,7 +576,10 @@ and `order.customer_id` is **nullable** so an erased customer leaves a tombstone
 whole place back (`409 INVENTORY_OUT_OF_STOCK`, no order row, cart stays `active`), and a
 rare post-allocate commit failure fires a best-effort `inventory.allocation.cancel`
 compensation. Payment is authorized inline afterwards, in a short follow-up transaction —
-so money is never authorized for unallocatable stock.
+so money is never authorized for unallocatable stock. A failed authorization releases the
+allocation and leaves the order `cancelled` with `paymentStatus: failed`, while the cart stays
+`converted`, so re-placing it is refused
+([`docs/reference/retail-orders.md`](docs/reference/retail-orders.md#place-order)).
 
 **Ship Fulfillment** is the pivot that moves stock and money together:
 
@@ -621,15 +624,17 @@ calls the gateway **outside** the transaction, then runs `Payment.refund` +
 
 #### Payment gateway
 
-Authorize, capture, void, and refund all run behind `IPaymentGatewayPort`
+Authorize, capture, and refund run behind `IPaymentGatewayPort`
 (DI symbol `PAYMENT_GATEWAY`) — declared in `application/ports/`, importing no transport
 package, the same shape as `NotifierPort`. The default binding is
 `FakePaymentGatewayAdapter`: an in-process stand-in that **always approves** and mints
-deterministic `fake_<uuid>` / `fake_refund_<uuid>` references.
+deterministic `fake_<uuid>` / `fake_refund_<uuid>` references. **Void is not on the port**:
+Cancel Order's void only rewrites the `payment` row, and no processor call is made.
 
 Swapping in Stripe/Adyen is a **single provider rebind** in `orders.module.ts` plus a new
 HTTP-doing sibling adapter under `infrastructure/payment-gateway/`. No use case, controller,
-domain model, or contract changes.
+domain model, or contract changes for authorize, capture, and refund. Releasing an
+authorization at the processor on cancel would need a new port method, called from Cancel Order.
 
 #### Concurrency guards, side by side
 

@@ -34,8 +34,6 @@ const placeOrder = (lines: OrderLine[] = [makeLine(null, 7, 1500, 2)]): Order =>
     placedAt: new Date('2026-06-10T00:00:00Z'),
   });
 
-// A persisted order at any combination of the three status axes — the lifecycle/cancel
-// mutators need a starting state other than the place-time `pending`/`unfulfilled`.
 const reconstituteOrder = (opts: {
   status?: OrderStatusEnum;
   fulfillmentStatus?: OrderFulfillmentStatusEnum;
@@ -72,7 +70,6 @@ describe('Order', () => {
       expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.UNFULFILLED);
       expect(order.version).toBe(0);
       expect(order.id).toBeNull();
-      // 1500×2 + 999×3 = 3000 + 2997 = 5997
       expect(order.subtotalMinor).toBe(5997);
       expect(order.grandTotalMinor).toBe(5997);
       expect(order.taxTotalMinor).toBe(0);
@@ -106,8 +103,6 @@ describe('Order', () => {
 
   describe('three orthogonal status axes', () => {
     it('lets paymentStatus=captured coexist with fulfillmentStatus=unfulfilled and status=pending', () => {
-      // The three axes evolve independently (ADR-028 §2): a captured payment does
-      // not imply the order has shipped or moved off the pending lifecycle.
       const order = Order.reconstitute({
         id: 1,
         orderNumber: 'ORD-2026-00000001',
@@ -138,7 +133,6 @@ describe('Order', () => {
       order.markPaymentCaptured();
 
       expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.CAPTURED);
-      // Untouched — orthogonality.
       expect(order.status).toBe(OrderStatusEnum.PENDING);
       expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.UNFULFILLED);
     });
@@ -163,8 +157,8 @@ describe('Order', () => {
           orderNumber: 'ORD-2026-00000001',
           customerId: null,
           currency: 'USD',
-          lines: [makeLine(10, 7, 1000, 2)], // Σ lineTotal = 2000
-          subtotalMinor: 1999, // disagrees
+          lines: [makeLine(10, 7, 1000, 2)],
+          subtotalMinor: 1999,
           grandTotalMinor: 1999,
           billingAddressId: null,
           shippingAddressId: null,
@@ -181,12 +175,12 @@ describe('Order', () => {
           orderNumber: 'ORD-2026-00000001',
           customerId: null,
           currency: 'USD',
-          lines: [makeLine(10, 7, 1000, 2)], // Σ lineTotal = 2000
+          lines: [makeLine(10, 7, 1000, 2)],
           subtotalMinor: 2000,
           taxTotalMinor: 100,
           shippingTotalMinor: 50,
           discountTotalMinor: 30,
-          grandTotalMinor: 2000, // should be 2000 + 100 + 50 − 30 = 2120
+          grandTotalMinor: 2000,
           billingAddressId: null,
           shippingAddressId: null,
           sourceCartId: null,
@@ -201,7 +195,7 @@ describe('Order', () => {
         orderNumber: 'ORD-2026-00000001',
         customerId: null,
         currency: 'USD',
-        lines: [makeLine(10, 7, 1000, 2)], // Σ lineTotal = 2000
+        lines: [makeLine(10, 7, 1000, 2)],
         subtotalMinor: 2000,
         taxTotalMinor: 100,
         shippingTotalMinor: 50,
@@ -393,9 +387,6 @@ describe('Order', () => {
     });
   });
 
-  // Cancel Line routes through the root so the OCC token advances: the cancelled count is
-  // aggregate state, and two concurrent cancels reading the same version must not both
-  // commit their own increment (ADR-036).
   describe('cancelLineQuantity', () => {
     it('cancels the units on the addressed line and bumps the version', () => {
       const order = reconstituteOrder({});
@@ -416,7 +407,6 @@ describe('Order', () => {
       expect(order.status).toBe(OrderStatusEnum.PENDING);
       expect(order.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.UNFULFILLED);
       expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.AUTHORIZED);
-      // No money mutation — the order's totals stand.
       expect(order.grandTotalMinor).toBe(3000);
     });
 
@@ -430,7 +420,6 @@ describe('Order', () => {
       const order = reconstituteOrder({});
       const versionBefore = order.version;
 
-      // The line is ordered 2 — cancelling 3 breaches its own bound.
       expect(() => order.cancelLineQuantity(10, 3)).toThrow(OrderDomainException);
       expect(order.version).toBe(versionBefore);
       expect(order.lines[0].cancelledQuantity).toBe(0);
