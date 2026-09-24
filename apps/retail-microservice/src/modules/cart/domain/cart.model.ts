@@ -24,9 +24,6 @@ export interface ICartProps {
   updatedAt?: Date | null;
 }
 
-// Input for `addLine`: the variant + quantity plus the price snapshot captured
-// at add-time. The line id and the owning cart id are not part of the input —
-// id is assigned by persistence, the cart id is the root's own.
 export interface IAddLineInput {
   variantId: number;
   quantity: number;
@@ -34,23 +31,8 @@ export interface IAddLineInput {
   currencySnapshot: string;
 }
 
-// 3-letter ISO-4217-shaped currency code (the cart currency + line snapshot
-// currency). Validated here so a malformed code never reaches the CHAR(3) column.
 const CURRENCY_PATTERN = /^[A-Za-z]{3}$/;
 
-// `Cart` is the retail mutable aggregate root: the shopper's editable working set
-// of `CartLine` children. It is the counterpart to the immutable `Order` snapshot
-// — keeping the two distinct means a placed order can never be corrupted by a
-// later edit of the (now-converted) cart (ADR-028 §1).
-//
-// The id is a CHAR(36) UUID string generated in-app at `create` (caller-assigned),
-// or reloaded from the DB on `reconstitute`. The `string | null` generic matches
-// the other aggregates' `<TId | null>` shape; in practice a live cart always
-// carries a concrete id.
-//
-// `version` is the OCC token, and **the guard is live**: `runWithCartWriteRetry` re-reads under a
-// fresh transaction when a compare-and-swap is lost, and surfaces a `409` once the budget is spent
-// (ADR-036/045). The in-memory bump here exists so the model is testable without a database.
 export class Cart extends AggregateRoot<string | null> {
   private readonly _customerId: string | null;
   private readonly _currency: string;
@@ -87,10 +69,6 @@ export class Cart extends AggregateRoot<string | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // Opens a new `active` cart with no lines at `version 0`, generating the
-  // CHAR(36) UUID in-app, and records `CartCreatedEvent`. The id is concrete
-  // immediately (unlike the catalog variant id, which is null until persistence),
-  // so the recorded event carries the real cart id.
   public static create(props: {
     customerId: string | null;
     currency: string;
@@ -112,8 +90,6 @@ export class Cart extends AggregateRoot<string | null> {
     return cart;
   }
 
-  // Rebuilds a persisted cart from storage (any status / version). Records no
-  // events.
   public static reconstitute(props: ICartProps): Cart {
     return new Cart(props);
   }
@@ -146,20 +122,11 @@ export class Cart extends AggregateRoot<string | null> {
     return this._status === CartStatusEnum.ACTIVE;
   }
 
-  // Pure subtotal projection (Σ `unitPriceSnapshotMinor × quantity`) for the cart
-  // view. Money lives in minor units (integer cents); a cart never mixes
-  // currencies, so the cart's own `currency` rides along.
   public get total(): { subtotalMinor: number; currency: string } {
     const subtotalMinor = this._lines.reduce((sum, line) => sum + line.lineSubtotalMinor, 0);
     return { subtotalMinor, currency: this._currency };
   }
 
-  // Appends a line for `variantId`, or — if a line for that variant already
-  // exists — increments the existing line's quantity (increment-existing is the
-  // cleaner cart UX, ADR-028 §1). On the increment path the existing line's price
-  // snapshot is preserved (the line is never re-priced); the incoming snapshot
-  // fields are used only when a brand-new line is created. Records
-  // `CartLineAddedEvent` carrying the quantity added in this call.
   public addLine(input: IAddLineInput): void {
     this.assertActive();
 
@@ -188,9 +155,6 @@ export class Cart extends AggregateRoot<string | null> {
     );
   }
 
-  // Sets a line's quantity to a new positive integer (`0` is rejected — removal
-  // is the explicit op, enforced in `CartLine.changeQuantity`). Records
-  // `CartLineQuantityChangedEvent`.
   public changeLineQuantity(lineId: number, quantity: number): void {
     this.assertActive();
     const line = this.requireLine(lineId);
@@ -202,7 +166,6 @@ export class Cart extends AggregateRoot<string | null> {
     );
   }
 
-  // Drops the line with `lineId`. Records `CartLineRemovedEvent`.
   public removeLine(lineId: number): void {
     this.assertActive();
     const index = this._lines.findIndex((line) => line.id === lineId);
@@ -218,30 +181,10 @@ export class Cart extends AggregateRoot<string | null> {
     this.addDomainEvent(new CartLineRemovedEvent({ cartId: this.requireId(), lineId }));
   }
 
-  // **Neither status mutator below has a caller, yet both statuses are reached.** The `Cart`
-  // aggregate does not drive its own terminal transitions: each one is performed by *another*
-  // module, in **raw SQL**, because neither module may import `cart/`.
-  //
-  //   converted  ← `orders/`, via `ORDER_CART_READER`:
-  //                `UPDATE cart SET status='converted' … WHERE id=? AND status='active'`
-  //   abandoned  ← the gateway's `auth/`, via `CUSTOMER_ERASURE_WRITER`:
-  //                `UPDATE cart SET status='abandoned' … WHERE customer_id=? AND status='active'`
-  //
-  // Both bump `version` in the same statement, so a concurrent cart writer loses its CAS and
-  // retries against the changed row.
-
-  // active → converted. Terminal. **Do not call this, and do not "wire it up" to Place Order.**
-  // The reader's `WHERE status = 'active'` is not a filter — it is the compare-and-swap that
-  // serialises two concurrent places into one order. Setting the status through the aggregate
-  // instead would write the same value **without that CAS**, and the racing second place would
-  // succeed.
   public markConverted(): void {
     this.transitionFromActive(CartStatusEnum.CONVERTED, 'markConverted');
   }
 
-  // active → abandoned. Terminal. Reached only by a customer erasure (ADR-037), which abandons
-  // every active cart the erased customer owns — a cart is a disposable working set, not a record
-  // to preserve. Place Order reads the status and rejects it.
   public markAbandoned(): void {
     this.transitionFromActive(CartStatusEnum.ABANDONED, 'markAbandoned');
   }
@@ -257,9 +200,6 @@ export class Cart extends AggregateRoot<string | null> {
     this.bumpVersion();
   }
 
-  // A non-`active` cart is frozen — no line edits. (The terminal-state transition
-  // methods raise `CART_INVALID_STATE_TRANSITION` instead, so the two rejection
-  // reasons stay distinct for the HTTP mapping.)
   private assertActive(): void {
     if (!this.isActive()) {
       throw new CartDomainException(
@@ -280,8 +220,6 @@ export class Cart extends AggregateRoot<string | null> {
     return line;
   }
 
-  // A live cart (created or reconstituted) always carries a concrete id; a null
-  // here is an invariant breach, not a domain rejection.
   private requireId(): string {
     if (this.id === null) {
       throw new Error('Cart: id is unexpectedly null on a live aggregate');
@@ -289,9 +227,6 @@ export class Cart extends AggregateRoot<string | null> {
     return this.id;
   }
 
-  // Every mutation advances the OCC token so "version bumps on each mutation" is
-  // observable. Persistence delegates the stored value to TypeORM's
-  // `@VersionColumn`; this in-memory bump keeps the domain self-describing.
   private bumpVersion(): void {
     this._version += 1;
   }

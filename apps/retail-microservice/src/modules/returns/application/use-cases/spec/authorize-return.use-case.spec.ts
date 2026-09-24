@@ -35,7 +35,6 @@ const makeHarness = (): {
     returnsUow,
     publisher,
     customerContactReader,
-    // OCC_RETRY_ATTEMPTS budget (ADR-036).
     5,
     logger,
   );
@@ -57,7 +56,7 @@ describe('AuthorizeReturnUseCase', () => {
 
     expect(view.status).toBe(ReturnStatusEnum.AUTHORIZED);
     expect(view.authorizedAt).not.toBeNull();
-    expect(view.version).toBe(2); // seeded at version 1, the transition bumps to 2
+    expect(view.version).toBe(2);
 
     expect(publisher.authorized).toHaveLength(1);
     expect(publisher.authorized[0]).toMatchObject({
@@ -66,8 +65,6 @@ describe('AuthorizeReturnUseCase', () => {
       orderId: seeded.orderId,
       eventVersion: 'v1',
       correlationId: 'corr-auth',
-      // The buyer's email was resolved from the RMA's customerId and stamped on the event
-      // (ADR-033); locale ships null.
       customerEmail: FAKE_CUSTOMER_EMAIL,
       customerLocale: null,
     });
@@ -92,15 +89,11 @@ describe('AuthorizeReturnUseCase', () => {
     expect(publisher.authorized).toHaveLength(0);
   });
 
-  // Optimistic concurrency (ADR-036): the transition is a version-checked CAS; a
-  // concurrent writer that advanced the version makes it lose. A lost race within budget
-  // retries (re-read → re-transition → save); exhausting the budget surfaces the uniform
-  // `409 VERSION_MISMATCH`.
   describe('optimistic concurrency', () => {
     it('retries a lost version CAS then authorizes successfully', async () => {
       const { useCase, repository, publisher } = makeHarness();
       const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.REQUESTED));
-      repository.conflictsBeforeSuccess = 2; // < budget → converges
+      repository.conflictsBeforeSuccess = 2;
 
       const view = await useCase.execute(payload(seeded.id!));
 
@@ -111,14 +104,12 @@ describe('AuthorizeReturnUseCase', () => {
     it('surfaces 409 VERSION_MISMATCH with details.currentVersion when the budget is exhausted', async () => {
       const { useCase, repository, publisher } = makeHarness();
       const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.REQUESTED));
-      repository.conflictsBeforeSuccess = 99; // > budget → exhausted
+      repository.conflictsBeforeSuccess = 99;
 
       await expect(useCase.execute(payload(seeded.id!))).rejects.toMatchObject({
         code: ReturnErrorCodeEnum.RETURN_VERSION_MISMATCH,
-        // The RMA's current committed version (the seed, never advanced — every CAS lost).
         details: { currentVersion: 1 },
       });
-      // No event fired — the transition never committed.
       expect(publisher.authorized).toHaveLength(0);
     });
   });

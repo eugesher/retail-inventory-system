@@ -18,7 +18,6 @@ const LINE_ID = 5000;
 const LINE_VARIANT_ID = 1;
 const OTHER_LINE_ID = 5001;
 const MAX_ATTEMPTS = 5;
-// The seeded cart starts at version 2 (see `seedCartWithTwoLines`).
 const SEED_VERSION = 2;
 
 const seedCartWithTwoLines = (repository: InMemoryCartRepository): void => {
@@ -85,7 +84,6 @@ describe('RemoveFromCartUseCase', () => {
     expect(view.lines).toHaveLength(1);
     expect(view.lines[0].id).toBe(OTHER_LINE_ID);
 
-    // Release was called by cartId + the removed line's variant, reason cart-removed.
     expect(inventory.releaseCalls).toEqual([
       {
         cartId: CART_ID,
@@ -94,7 +92,6 @@ describe('RemoveFromCartUseCase', () => {
         correlationId: 'corr-1',
       },
     ]);
-    // Release runs AFTER the cart write (the cart write is the primary outcome).
     expect(releaseSpy.mock.invocationCallOrder[0]).toBeGreaterThan(
       saveSpy.mock.invocationCallOrder[0],
     );
@@ -116,11 +113,9 @@ describe('RemoveFromCartUseCase', () => {
       correlationId: 'corr-1',
     });
 
-    // The remove succeeded despite the release failure.
     expect(view.lines).toHaveLength(1);
     expect(view.lines[0].id).toBe(OTHER_LINE_ID);
     expect(repository.saved).toHaveLength(1);
-    // The failure was warn-logged, not raised.
     expect(logger.warn).toHaveBeenCalled();
   });
 
@@ -172,7 +167,7 @@ describe('RemoveFromCartUseCase', () => {
           cartId: CART_ID,
           customerId: OWNER_ID,
           lineId: LINE_ID,
-          expectedVersion: SEED_VERSION - 1, // stale
+          expectedVersion: SEED_VERSION - 1,
           correlationId: 'corr-stale',
         }),
       ).rejects.toMatchObject({
@@ -196,8 +191,6 @@ describe('RemoveFromCartUseCase', () => {
       });
 
       expect(view.lines).toHaveLength(1);
-      // Exactly one successful persist; the best-effort release runs once, outside
-      // the retry loop, so a retried attempt never double-releases.
       expect(repository.saved).toHaveLength(1);
       expect(inventory.releaseCalls).toHaveLength(1);
       expect(publisher.lineRemoved).toHaveLength(1);

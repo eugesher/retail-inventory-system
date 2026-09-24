@@ -21,11 +21,6 @@ import {
   RemoveFromCartUseCase,
 } from '../application/use-cases';
 
-// RPC surface for the cart operations (API Gateway → Retail over `retail_queue`).
-// Each handler is a thin delegate to its use case; a `CartDomainException` is
-// terminated by the `CartRpcExceptionFilter` into the `{ statusCode, ... }` wire
-// shape the gateway maps. Every use case returns the `CartView` the gateway
-// surfaces unchanged.
 @Controller()
 export class CartController {
   constructor(

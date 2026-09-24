@@ -16,10 +16,6 @@ import { makePinoLoggerMock } from '@retail-inventory-system/observability/testi
 
 import { ReturnRabbitmqPublisher } from '../return-rabbitmq.publisher';
 
-// Proves the returns publisher dual-publishes (ADR-035): the whole RMA lifecycle
-// keeps its primary emit (buyer-facing four onto `notification_events`, internal
-// two onto `retail_queue`) AND mirrors the same routing key + wire onto
-// `ris.events`.
 describe('ReturnRabbitmqPublisher dual-publish', () => {
   let notificationEmit: jest.Mock;
   let retailEmit: jest.Mock;

@@ -16,7 +16,6 @@ const openInput = (overrides: Partial<IOpenReturnRequestInput> = {}): IOpenRetur
   ...overrides,
 });
 
-// Walks the request to a given status by replaying the lifecycle transitions.
 const authorizedRequest = (): ReturnRequest => {
   const request = ReturnRequest.open(openInput());
   request.authorize(new Date('2026-06-19T10:00:00Z'));
@@ -55,10 +54,8 @@ describe('ReturnRequest', () => {
       expect(request.lines).toHaveLength(2);
       expect(request.lines[0].orderLineId).toBe(10);
       expect(request.lines[0].quantity).toBe(2);
-      // The children are null-id / null-parent until persistence assigns the BIGINTs.
       expect(request.lines[0].id).toBeNull();
       expect(request.lines[0].returnRequestId).toBeNull();
-      // No condition/disposition/refund until inspection.
       expect(request.lines[0].condition).toBeNull();
       expect(request.lines[0].disposition).toBeNull();
       expect(request.lines[0].lineRefundAmountMinor).toBeNull();
@@ -147,7 +144,6 @@ describe('ReturnRequest', () => {
           ReturnErrorCodeEnum.RETURN_INVALID_STATUS_TRANSITION,
         );
       }
-      // A rejected transition leaves the request untouched.
       expect(request.status).toBe(ReturnStatusEnum.REQUESTED);
       expect(request.version).toBe(0);
     });

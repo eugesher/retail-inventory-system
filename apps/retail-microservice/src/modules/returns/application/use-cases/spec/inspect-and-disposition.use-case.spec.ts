@@ -25,9 +25,6 @@ import {
 const WAREHOUSE_ID = '88888888-8888-4888-8888-888888888888';
 const RETURN_OWNER_ID = '11111111-1111-4111-8111-111111111111';
 
-// A two-line RMA at a given status (id 7; line 71 → orderLine 10 qty 2, line 72 → orderLine
-// 20 qty 1) — the fixture the inspect specs seed. Concrete line ids so the inspect payload
-// can address them.
 const buildReturnAt = (status: ReturnStatusEnum): ReturnRequest =>
   ReturnRequest.reconstitute({
     id: 7,
@@ -63,8 +60,6 @@ const buildReturnAt = (status: ReturnStatusEnum): ReturnRequest =>
     version: 3,
   });
 
-// The order snapshot the reader hands back: orderLine 10 → variant 100, orderLine 20 →
-// variant 200 (so a `restock` line resolves its variant).
 const buildSnapshot = (): IReturnOrderSnapshot => ({
   orderId: 1,
   customerId: RETURN_OWNER_ID,
@@ -103,15 +98,12 @@ const makeHarness = (
     restockGateway,
     publisher,
     customerContactReader,
-    // OCC_RETRY_ATTEMPTS budget (ADR-036).
     5,
     logger,
   );
   return { useCase, repository, restockGateway, publisher, customerContactReader };
 };
 
-// Inspect payload covering both lines. Disposition per line is configurable so a spec can
-// mix restock / scrap.
 const payload = (
   rmaId: number,
   line71Disposition: ReturnDispositionEnum,
@@ -146,7 +138,7 @@ describe('InspectAndDispositionUseCase', () => {
     );
 
     expect(view.status).toBe(ReturnStatusEnum.INSPECTED);
-    expect(view.version).toBe(4); // seeded at version 3, markInspected bumps to 4
+    expect(view.version).toBe(4);
 
     const line71 = view.lines.find((line) => line.id === 71)!;
     const line72 = view.lines.find((line) => line.id === 72)!;
@@ -171,13 +163,11 @@ describe('InspectAndDispositionUseCase', () => {
     expect(restockGateway.calls).toHaveLength(1);
     const sent = restockGateway.calls[0];
     expect(sent.returnRequestId).toBe(7);
-    // Only the restock line (71 → variant 100, qty 2) — the scrapped line is excluded.
     expect(sent.lines).toEqual([
       { returnLineId: 71, variantId: 100, stockLocationId: 'default-warehouse', quantity: 2 },
     ]);
     expect(sent.actorId).toBe(WAREHOUSE_ID);
 
-    // The inspected event carries the restocked-line count.
     expect(publisher.inspected).toHaveLength(1);
     expect(publisher.inspected[0]).toMatchObject({
       rmaId: 7,
@@ -185,8 +175,6 @@ describe('InspectAndDispositionUseCase', () => {
       restockedLineCount: 1,
       eventVersion: 'v1',
       correlationId: 'corr-inspect',
-      // The buyer's email was resolved from the RMA's customerId and stamped on the event
-      // (ADR-033); locale ships null.
       customerEmail: FAKE_CUSTOMER_EMAIL,
       customerLocale: null,
     });
@@ -289,15 +277,12 @@ describe('InspectAndDispositionUseCase', () => {
     });
     repository.seed(buildReturnAt(ReturnStatusEnum.RECEIVED));
 
-    // The restock fails (and is retried-then-logged), but the inspection is committed and
-    // the view comes back inspected — the after-commit eventual-consistency posture.
     const view = await useCase.execute(
       payload(7, ReturnDispositionEnum.RESTOCK, ReturnDispositionEnum.SCRAP),
     );
 
     expect(view.status).toBe(ReturnStatusEnum.INSPECTED);
     expect(repository.saved.at(-1)?.status).toBe(ReturnStatusEnum.INSPECTED);
-    // The inspected event still fires post-commit.
     expect(publisher.inspected).toHaveLength(1);
   });
 });

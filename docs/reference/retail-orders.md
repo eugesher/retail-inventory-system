@@ -440,10 +440,12 @@ two emits can land while the other fails.
 - **Retail consumes `retail_queue` with Nest's default `noAck: true`.** The retail `main.ts` sets no
   `noAck`, unlike the notification and event-store services, so the broker counts a message as
   delivered as soon as it hands it over. Nothing on `retail_queue` is ever redelivered.
-- **The four reserved events that retail emits onto its own queue are received by retail and
+- **The four reserved events that `orders/` emits onto retail's own queue are received by retail and
   discarded.** No handler matches, so Nest logs its "no matching event handler" message at `error`
   and the message is gone (`@nestjs/microservices` 11.1.19, `ServerRMQ.handleEvent` falling through
-  to `Server.handleEvent`). They survive only as their `ris.events` mirror.
+  to `Server.handleEvent`). They survive only as their `ris.events` mirror. The same happens to the `retail.cart.*`
+  events ([`retail-cart.md`](retail-cart.md#events)) and to `retail.return.rejected` / `.closed`
+  ([`retail-returns.md`](retail-returns.md#events-and-the-buyers-email)).
 - **`OrderCancelledConsumer` is the only event handler on `retail_queue`.** Given an event with
   `paymentFlaggedForRefund: true` (`infrastructure/consumers/order-cancelled.consumer.ts`):
   1. It reads the payment. If there is none, it logs at `warn` and stops.

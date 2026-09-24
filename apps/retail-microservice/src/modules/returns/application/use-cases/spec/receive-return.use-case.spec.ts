@@ -32,7 +32,6 @@ const makeHarness = (): {
     returnsUow,
     publisher,
     customerContactReader,
-    // OCC_RETRY_ATTEMPTS budget (ADR-036).
     5,
     logger,
   );
@@ -53,7 +52,7 @@ describe('ReceiveReturnUseCase', () => {
     const view = await useCase.execute(payload(seeded.id!));
 
     expect(view.status).toBe(ReturnStatusEnum.RECEIVED);
-    expect(view.version).toBe(2); // seeded at version 1, receive bumps to 2
+    expect(view.version).toBe(2);
 
     expect(publisher.received).toHaveLength(1);
     expect(publisher.received[0]).toMatchObject({
@@ -61,7 +60,6 @@ describe('ReceiveReturnUseCase', () => {
       rmaNumber: seeded.rmaNumber,
       eventVersion: 'v1',
       correlationId: 'corr-recv',
-      // The buyer's email was resolved from the RMA's customerId (ADR-033); locale ships null.
       customerEmail: FAKE_CUSTOMER_EMAIL,
       customerLocale: null,
     });

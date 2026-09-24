@@ -9,12 +9,6 @@ import { IReturnRequestRepositoryPort } from '../../application/ports';
 import { ReturnRequestEntity } from './return-request.entity';
 import { ReturnRequestMapper } from './return-request.mapper';
 
-// The NON-transactional read side of the `ReturnRequest` aggregate (ADR-063), bound to the
-// default connection via `@InjectRepository`. The write-capable half —
-// `save`, and the in-transaction `findById` Inspect & Disposition needs — lives on
-// `ReturnRequestWriteTypeormRepository`, constructed fresh per unit of work by
-// `ReturnsUnitOfWorkAdapter`; this class never opens a transaction and never accepts one.
-// Returns domain types only — no TypeORM leak past this file (ADR-017).
 @Injectable()
 export class ReturnRequestTypeormRepository
   extends BaseTypeormRepository<ReturnRequestEntity, ReturnRequest>
@@ -39,15 +33,11 @@ export class ReturnRequestTypeormRepository
     const entity = await this.returnRequestRepository.findOne({
       where: { id },
       relations: { lines: true },
-      // Deterministic line order so the view is stable across reads.
       order: { lines: { id: 'ASC' } },
     });
     return entity ? ReturnRequestMapper.toDomain(entity) : null;
   }
 
-  // An order's return requests, newest-first by `requested_at` then `id` (the
-  // `(order_id, requested_at)` index supports it). Backs both the list read and the
-  // Open use case's already-returned-quantity sum.
   public async listByOrderId(orderId: number): Promise<ReturnRequest[]> {
     const entities = await this.returnRequestRepository.find({
       where: { orderId },

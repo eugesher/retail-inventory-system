@@ -66,16 +66,12 @@ describe('AddToCartUseCase', () => {
     const [line] = view.lines;
     expect(line.variantId).toBe(1);
     expect(line.quantity).toBe(2);
-    // Snapshot price comes from catalog.price.select (default $49.99), not the caller.
     expect(line.unitPriceSnapshotMinor).toBe(4999);
     expect(line.currencySnapshot).toBe('USD');
     expect(view.subtotalMinor).toBe(9998);
 
-    // The price was resolved in the cart's currency.
     expect(catalog.calls).toEqual([{ variantId: 1, currency: 'USD', correlationId: 'corr-1' }]);
 
-    // A fresh line reserves exactly the payload quantity (absolute target), keyed
-    // on the cart, with no explicit location (inventory defaults it).
     expect(inventory.reserveCalls).toEqual([
       { variantId: 1, quantity: 2, cartId: CART_ID, correlationId: 'corr-1' },
     ]);
@@ -116,7 +112,6 @@ describe('AddToCartUseCase', () => {
       correlationId: 'corr-1',
     });
 
-    // The single line is now 5 units, and the reserve carried the absolute 5 (3 + 2).
     expect(view.lines).toHaveLength(1);
     expect(view.lines[0].quantity).toBe(5);
     expect(inventory.reserveCalls).toEqual([
@@ -156,7 +151,6 @@ describe('AddToCartUseCase', () => {
       }),
     ).rejects.toMatchObject({ code: 'INVENTORY_OUT_OF_STOCK', details: { available: 1 } });
 
-    // The reserve was attempted, but nothing was persisted or emitted.
     expect(inventory.reserveCalls).toHaveLength(1);
     expect(repository.saved).toHaveLength(0);
     expect(publisher.lineAdded).toHaveLength(0);
@@ -175,7 +169,6 @@ describe('AddToCartUseCase', () => {
       }),
     ).rejects.toMatchObject({ code: CartErrorCodeEnum.CART_VARIANT_NOT_PRICED });
 
-    // The price gate fires before the reserve; nothing persisted, nothing emitted.
     expect(inventory.reserveCalls).toHaveLength(0);
     expect(repository.saved).toHaveLength(0);
     expect(publisher.lineAdded).toHaveLength(0);
@@ -192,7 +185,6 @@ describe('AddToCartUseCase', () => {
       }),
     ).rejects.toMatchObject({ code: CartErrorCodeEnum.CART_ACCESS_FORBIDDEN });
 
-    // The owner-check fires before the catalog AND the inventory are consulted.
     expect(catalog.calls).toHaveLength(0);
     expect(inventory.reserveCalls).toHaveLength(0);
     expect(publisher.lineAdded).toHaveLength(0);
@@ -200,7 +192,6 @@ describe('AddToCartUseCase', () => {
 
   describe('optimistic concurrency (ADR-036)', () => {
     it('honors a matching If-Match version and persists at the bumped version', async () => {
-      // Seeded cart is at version 0; pin it and the write proceeds.
       const view = await useCase.execute({
         cartId: CART_ID,
         customerId: OWNER_ID,
@@ -233,7 +224,7 @@ describe('AddToCartUseCase', () => {
           customerId: OWNER_ID,
           variantId: 1,
           quantity: 1,
-          expectedVersion: 2, // stale — the cart moved to 3
+          expectedVersion: 2,
           correlationId: 'corr-stale',
         }),
       ).rejects.toMatchObject({
@@ -241,7 +232,6 @@ describe('AddToCartUseCase', () => {
         details: { currentVersion: 3 },
       });
 
-      // The precondition fires at load, before any catalog/inventory call or save.
       expect(catalog.calls).toHaveLength(0);
       expect(inventory.reserveCalls).toHaveLength(0);
       expect(repository.saved).toHaveLength(0);
@@ -249,7 +239,7 @@ describe('AddToCartUseCase', () => {
     });
 
     it('retries a lost race (no If-Match) and succeeds within the budget', async () => {
-      repository.conflictsBeforeSuccess = 1; // first save loses, retry wins
+      repository.conflictsBeforeSuccess = 1;
 
       const view = await useCase.execute({
         cartId: CART_ID,
@@ -261,15 +251,13 @@ describe('AddToCartUseCase', () => {
 
       expect(view.lines).toHaveLength(1);
       expect(view.lines[0].quantity).toBe(2);
-      // Two attempts: the reserve (re-computed from a fresh read) ran on each.
       expect(inventory.reserveCalls).toHaveLength(2);
-      // Exactly one successful persist + one emitted event.
       expect(repository.saved).toHaveLength(1);
       expect(publisher.lineAdded).toHaveLength(1);
     });
 
     it('surfaces 409 VERSION_MISMATCH with the current version after the retry budget is exhausted', async () => {
-      repository.conflictsBeforeSuccess = 99; // every attempt loses
+      repository.conflictsBeforeSuccess = 99;
 
       await expect(
         useCase.execute({
@@ -284,7 +272,6 @@ describe('AddToCartUseCase', () => {
         details: { currentVersion: MAX_ATTEMPTS },
       });
 
-      // One reserve per burned attempt; nothing persisted or emitted.
       expect(inventory.reserveCalls).toHaveLength(MAX_ATTEMPTS);
       expect(repository.saved).toHaveLength(0);
       expect(publisher.lineAdded).toHaveLength(0);

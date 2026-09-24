@@ -41,13 +41,10 @@ describe('GetReturnUseCase', () => {
     });
     expect(view.lines).toHaveLength(1);
     expect(view.lines[0]).toMatchObject({ orderLineId: 10, quantity: 2 });
-    // The three Date columns are serialized to ISO-8601 (null until stamped).
     expect(view.requestedAt).toBe(seeded.requestedAt.toISOString());
     expect(view.closedAt).toBeNull();
   });
 
-  // A staff caller carries the `order:read` override (folded into `isStaff`), so it reaches
-  // an RMA it does not own — the staff override layers over the owner-check (ADR-024).
   it('resolves any RMA for a staff caller', async () => {
     const { useCase, repository } = makeHarness();
     const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.REQUESTED));
@@ -76,8 +73,6 @@ describe('GetReturnUseCase', () => {
     ).rejects.toMatchObject({ code: ReturnErrorCodeEnum.RETURN_ACCESS_FORBIDDEN });
   });
 
-  // Not-found precedes the owner-check, so a probe for someone else's RMA id cannot
-  // distinguish "missing" from "not yours" by status code alone.
   it('rejects a missing RMA with RETURN_NOT_FOUND (404)', async () => {
     const { useCase } = makeHarness();
 
