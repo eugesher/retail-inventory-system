@@ -1432,7 +1432,8 @@ direct SQL even though `GET /api/audit/*` could answer the same questions: a sui
 
 Every endpoint is authored in **both** libraries, in lockstep: Kulala `*.http` files under
 [`http/kulala/`](http/kulala/) and the [posting.sh](https://posting.sh) collection under
-[`http/posting/`](http/posting/). See [`http.md`](http.md).
+[`http/posting/`](http/posting/). How to run the Posting collection:
+[`http/posting/README.md`](http/posting/README.md).
 
 ---
 
@@ -1891,14 +1892,15 @@ carries the admission question that routes a sentence to one or the other, and
 
 ## 16. Documentation map
 
-| Where                                          | What it holds                                                                                                                                                                                                                                                          |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`docs/adr/`](docs/adr/)                       | The durable rationale — one decision per file, Nygard hybrid (Status, Context, Decision, Alternatives, Consequences). Start at [`index.md`](docs/adr/index.md). Numbering and slug rules are themselves an ADR ([003](docs/adr/003-record-architecture-decisions.md)). |
-| [`docs/implementation/`](docs/implementation/) | Per-capability walkthroughs, numbered by delivery order — the "how and why this specific thing works" notes an ADR is too coarse for.                                                                                                                                  |
-| [`docs/extensions/`](docs/extensions/)         | One sketch per capability the system deliberately does not have, grouped into nine clusters — how each would attach if it were ever wanted. See [§15](#15-extensions-and-future-expansion).                                                                            |
-| [`docs/audits/`](docs/audits/)                 | Point-in-time review findings.                                                                                                                                                                                                                                         |
-| `eslint.config.mjs`                            | The authoritative answer to "where does this file belong".                                                                                                                                                                                                             |
-| The `*RpcExceptionFilter` of each module       | The authoritative error-code → HTTP-status tables.                                                                                                                                                                                                                     |
+| Where                                          | What it holds                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/adr/`](docs/adr/)                       | The durable rationale — one decision per file, Nygard hybrid (Status, Context, Decision, Alternatives, Consequences). Start at [`index.md`](docs/adr/index.md). Numbering and slug rules are themselves an ADR ([003](docs/adr/003-record-architecture-decisions.md)).                   |
+| [`docs/reference/`](docs/reference/)           | The living reference of current behaviour the code does not make plain — invariants, ordering, failure modes, units, cross-service contracts — each claim anchored to a path and symbol and kept current in the change that alters it. Start at [`README.md`](docs/reference/README.md). |
+| [`docs/implementation/`](docs/implementation/) | Per-capability walkthroughs, numbered by delivery order — the "how and why this specific thing works" notes an ADR is too coarse for.                                                                                                                                                    |
+| [`docs/extensions/`](docs/extensions/)         | One sketch per capability the system deliberately does not have, grouped into nine clusters — how each would attach if it were ever wanted. See [§15](#15-extensions-and-future-expansion).                                                                                              |
+| [`docs/audits/`](docs/audits/)                 | Point-in-time review findings.                                                                                                                                                                                                                                                           |
+| `eslint.config.mjs`                            | The authoritative answer to "where does this file belong".                                                                                                                                                                                                                               |
+| The `*RpcExceptionFilter` of each module       | The authoritative error-code → HTTP-status tables.                                                                                                                                                                                                                                       |
 
 When you make an architectural decision, **write an ADR** — next free 3-digit number,
 allocated at first commit. If a decision is later reversed, write a new ADR that
