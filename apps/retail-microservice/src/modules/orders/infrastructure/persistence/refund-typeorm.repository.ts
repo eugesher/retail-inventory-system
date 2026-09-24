@@ -9,16 +9,6 @@ import { IRefundRepositoryPort, ITransactionScope } from '../../application/port
 import { RefundEntity } from './refund.entity';
 import { RefundMapper } from './refund.mapper';
 
-// The single `@InjectRepository` site for the `Refund` aggregate. A single-row upsert
-// (no owned children, no `@VersionColumn`), re-reading by id so the returned aggregate
-// carries the generated BIGINT id + committed timestamps (the "re-read the saved graph"
-// idiom the payment/order repos follow). Returns domain types only — no TypeORM leak
-// (ADR-017).
-//
-// `save` / `findByPaymentId` are scope-aware so Issue Refund can persist
-// the `Refund` and re-check/advance the `Payment` in one short follow-up transaction;
-// `findByOrderId` is a default-manager read (the order-scoped history surfaces after
-// commit).
 @Injectable()
 export class RefundTypeormRepository
   extends BaseTypeormRepository<RefundEntity, Refund>
@@ -42,9 +32,6 @@ export class RefundTypeormRepository
   public async save(refund: Refund, scope?: ITransactionScope): Promise<Refund> {
     const repo = this.refundRepo(scope);
     const saved = await repo.save(RefundMapper.toEntity(refund));
-    // Re-read (within the same scope when transactional) so the returned aggregate
-    // carries the concrete generated id + the committed DB timestamps. The row was
-    // just written, so a miss is an invariant breach.
     const reloaded = await repo.findOne({ where: { id: Number(saved.id) } });
     if (!reloaded) {
       throw new Error(`RefundTypeormRepository.save: refund ${saved.id} vanished after commit`);
@@ -52,9 +39,6 @@ export class RefundTypeormRepository
     return RefundMapper.toDomain(reloaded);
   }
 
-  // An order's refunds, newest-first by `issued_at` then `id` (a pending refund has a
-  // null `issued_at`, so the `id` tiebreaker keeps the ordering total). The
-  // order-scoped history read.
   public async findByOrderId(orderId: number): Promise<Refund[]> {
     const entities = await this.refundRepository.find({
       where: { orderId },
@@ -63,9 +47,6 @@ export class RefundTypeormRepository
     return entities.map((entity) => RefundMapper.toDomain(entity));
   }
 
-  // A payment's refunds, newest-first — the per-payment history that backs the
-  // over-refund guard at issue time (scope-aware so the guard reads the same
-  // transaction Issue Refund writes in).
   public async findByPaymentId(paymentId: number, scope?: ITransactionScope): Promise<Refund[]> {
     const entities = await this.refundRepo(scope).find({
       where: { paymentId },
@@ -74,9 +55,6 @@ export class RefundTypeormRepository
     return entities.map((entity) => RefundMapper.toDomain(entity));
   }
 
-  // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the
-  // default-manager repository.
   private refundRepo(scope?: ITransactionScope): Repository<RefundEntity> {
     if (!scope) {
       return this.refundRepository;

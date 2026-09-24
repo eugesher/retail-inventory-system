@@ -16,8 +16,6 @@ const buildPendingFulfillment = (): Fulfillment =>
     lines: [{ orderLineId: 10, quantity: 2 }],
   });
 
-// A persisted-fulfillment entity graph (mysql2 returns non-PK BIGINT scalars as
-// strings — the mappers coerce them), used as the post-commit re-read.
 const reloadedEntity = (overrides: Partial<FulfillmentEntity> = {}): FulfillmentEntity =>
   ({
     id: 5,
@@ -54,7 +52,6 @@ describe('fulfillment mappers', () => {
     expect(fulfillment.lines).toHaveLength(1);
     expect(fulfillment.lines[0].id).toBe(50);
     expect(fulfillment.lines[0].orderLineId).toBe(10);
-    // The parent id is threaded into each child on load.
     expect(fulfillment.lines[0].fulfillmentId).toBe(5);
   });
 
@@ -118,10 +115,8 @@ describe('FulfillmentTypeormRepository', () => {
       const result = await repository.save(fulfillment);
 
       expect(txnFulfillmentRepo.save).toHaveBeenCalledTimes(1);
-      // The line is inserted owning the generated fulfillment id.
       const [lineEntities] = txnLineRepo.save.mock.calls[0] as [{ fulfillment: { id: number } }[]];
       expect(lineEntities[0].fulfillment.id).toBe(5);
-      // The returned aggregate carries the re-read concrete ids + version.
       expect(result.id).toBe(5);
       expect(result.lines[0].id).toBe(50);
       expect(result.version).toBe(0);
@@ -164,7 +159,6 @@ describe('FulfillmentTypeormRepository', () => {
 
       const result = await repository.save(fulfillment);
 
-      // The root save carries the concrete id; the lines are untouched on a re-save.
       const [savedPartial] = txnFulfillmentRepo.save.mock.calls[0] as [{ id: number }];
       expect(savedPartial.id).toBe(5);
       expect(txnLineRepo.save).not.toHaveBeenCalled();

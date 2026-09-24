@@ -34,8 +34,6 @@ const buildPlacedOrder = (): Order =>
     placedAt: new Date('2026-06-10T00:00:00Z'),
   });
 
-// A persisted-order entity graph (mysql2 returns BIGINT scalars as strings — the
-// mappers coerce them), used as the post-commit re-read.
 const reloadedOrderEntity = (overrides: Partial<OrderEntity> = {}): OrderEntity =>
   ({
     id: 1,
@@ -171,16 +169,13 @@ describe('OrderTypeormRepository', () => {
 
       const result = await repository.save(order);
 
-      // First insert carries a unique provisional token, never the binding number.
       const [insertedPartial] = txnOrderRepo.save.mock.calls[0] as [{ orderNumber: string }];
       expect(insertedPartial.orderNumber).toMatch(/^TMP-[0-9a-f]{16}$/);
-      // The binding number is derived from the generated id (year from placedAt).
       expect(txnOrderRepo.update).toHaveBeenCalledWith(
         { id: 1 },
         { orderNumber: 'ORD-2026-00000001' },
       );
       expect(txnLineRepo.save).toHaveBeenCalledTimes(1);
-      // The returned aggregate carries the re-read concrete ids + finalized number.
       expect(result.id).toBe(1);
       expect(result.orderNumber).toBe('ORD-2026-00000001');
       expect(result.lines[0].id).toBe(10);
@@ -223,7 +218,6 @@ describe('OrderTypeormRepository', () => {
 
       const result = await repository.save(order);
 
-      // The root partial passed to save carries no order_number (immutable).
       const [savedPartial] = txnOrderRepo.save.mock.calls[0] as [{ orderNumber?: string }];
       expect(savedPartial.orderNumber).toBeUndefined();
       expect(txnOrderRepo.update).not.toHaveBeenCalled();
@@ -268,11 +262,8 @@ describe('OrderTypeormRepository', () => {
       );
       orderRepo.findOne.mockResolvedValue(reloadedOrderEntity({ version: 2 }));
 
-      // Pass the loaded version (1) as the expected CAS anchor.
       const result = await repository.save(order, undefined, 1);
 
-      // The CAS targets the exact (id, version) row and increments the version by a SQL
-      // expression — never the managed `save` (which would not version-check).
       expect(txnOrderRepo.save).not.toHaveBeenCalled();
       expect(txnOrderRepo.update).toHaveBeenCalledTimes(1);
       const [where, patch] = txnOrderRepo.update.mock.calls[0] as [
@@ -300,7 +291,6 @@ describe('OrderTypeormRepository', () => {
       orderRepo.manager.transaction.mockImplementation(
         async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
       );
-      // The conflict re-read (default manager) reveals the version the winner left behind.
       orderRepo.findOne.mockResolvedValue(reloadedOrderEntity({ version: 9 }));
 
       await expect(repository.save(order, undefined, 1)).rejects.toBeInstanceOf(
@@ -310,7 +300,6 @@ describe('OrderTypeormRepository', () => {
         orderId: 1,
         currentVersion: 9,
       });
-      // A losing attempt never writes the lines.
       expect(txnLineRepo.save).not.toHaveBeenCalled();
     });
   });

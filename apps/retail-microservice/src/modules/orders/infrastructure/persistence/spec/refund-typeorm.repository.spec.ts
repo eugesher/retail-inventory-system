@@ -7,8 +7,6 @@ import { RefundEntity } from '../refund.entity';
 import { RefundMapper } from '../refund.mapper';
 import { RefundTypeormRepository } from '../refund-typeorm.repository';
 
-// A persisted-refund entity (mysql2 returns BIGINT scalars as strings — the mapper
-// coerces them), used as the post-commit re-read.
 const refundEntity = (overrides: Partial<RefundEntity> = {}): RefundEntity =>
   ({
     id: 42,
@@ -35,7 +33,6 @@ describe('RefundMapper', () => {
     expect(refund.paymentId).toBe(7);
     expect(refund.amountMinor).toBe(5997);
     expect(refund.status).toBe(RefundStatusEnum.PENDING);
-    // A pending refund carries null gateway_reference / issued_at.
     expect(refund.gatewayReference).toBeNull();
     expect(refund.issuedAt).toBeNull();
   });

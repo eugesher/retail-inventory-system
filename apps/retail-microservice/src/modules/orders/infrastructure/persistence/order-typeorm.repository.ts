@@ -20,17 +20,6 @@ import { OrderLineEntity } from './order-line.entity';
 import { OrderLineMapper } from './order-line.mapper';
 import { OrderMapper } from './order.mapper';
 
-// The single `@InjectRepository` site for the order context. Extends
-// `BaseTypeormRepository` for the `toDomain`/`toEntity` seam over the `Order`
-// aggregate; `save` is overridden because the root + its lines persist explicitly
-// inside one transaction and the human-facing `order_number` is finalized from the
-// generated id (the "re-read the saved graph, then finalize a derived field"
-// idiom). Returns domain types only — no TypeORM leak past this file (ADR-017).
-//
-// `save` / `findById` / `attachAddresses` accept an optional `ITransactionScope`:
-// Place Order hands the same scope to the order, address, and cart-conversion writes
-// so they commit as one unit of work (ADR-017 §6 / ADR-028 §5). The
-// scope is un-opaqued only through `entityManagerOf` (ADR-054).
 @Injectable()
 export class OrderTypeormRepository
   extends BaseTypeormRepository<OrderEntity, Order>
@@ -59,15 +48,11 @@ export class OrderTypeormRepository
     const entity = await this.orderRepo(scope).findOne({
       where: { id },
       relations: { lines: true },
-      // Deterministic line order so the view is stable across reads.
       order: { lines: { id: 'ASC' } },
     });
     return entity ? OrderMapper.toDomain(entity) : null;
   }
 
-  // Repeat-place idempotency seam (the place capability): a cart that already
-  // converted resolves to the order it converted into. Returns the most recent
-  // match defensively, though a converted cart maps to exactly one order.
   public async findBySourceCartId(cartId: string): Promise<Order | null> {
     const entity = await this.orderRepository.findOne({
       where: { sourceCartId: cartId },
@@ -77,8 +62,6 @@ export class OrderTypeormRepository
     return entity ? OrderMapper.toDomain(entity) : null;
   }
 
-  // The customer's order history (owner-checked at the use case, ADR-028 §7).
-  // Newest first; one page of orders with their lines.
   public async listByCustomer(customerId: string, page: IOrderPageRequest): Promise<IOrderPage> {
     const [entities, total] = await this.orderRepository.findAndCount({
       where: { customerId },
@@ -100,13 +83,6 @@ export class OrderTypeormRepository
     scope?: ITransactionScope,
     expectedVersion?: number,
   ): Promise<Order> {
-    // One transaction for the root + its lines: a half-written graph (the header
-    // committed but a line missing) would corrupt the totals the order view reports.
-    // When the caller already owns a transaction (`scope`), join it — the place flow
-    // commits the order, addresses, and cart conversion atomically — else open one.
-    // When `expectedVersion` is supplied (a status transition on an existing order) the
-    // root write is an optimistic compare-and-swap (ADR-036); otherwise it is a plain
-    // insert (place) or a managed save (the inline authorize-on-place write).
     let orderId: number;
     try {
       if (scope) {
@@ -118,12 +94,6 @@ export class OrderTypeormRepository
       }
     } catch (error) {
       if (error instanceof OrderWriteConflictError) {
-        // The transaction rolled back on the lost CAS. Read the row's now-current
-        // version on a fresh query (the default manager, NOT the rolled-back scope's
-        // snapshot — a plain SELECT never blocks on the zero-row UPDATE's row lock) so
-        // the conflict signal carries the accurate committed version the caller should
-        // refetch. A vanished row (never in practice — an order is not deleted) falls
-        // back to the version we targeted.
         const current = await this.orderRepository.findOne({ where: { id: error.orderId } });
         throw new OrderWriteConflictError(
           error.orderId,
@@ -133,10 +103,6 @@ export class OrderTypeormRepository
       throw error;
     }
 
-    // Re-read the full graph (within the same scope when transactional) so the
-    // returned aggregate carries the concrete generated `order_line.id`s, the
-    // finalized `order_number`, the committed version, and the DB timestamps. The
-    // row was just written, so a miss is an invariant breach.
     const reloaded = await this.findById(orderId, scope);
     if (!reloaded) {
       throw new Error(`OrderTypeormRepository.save: order ${orderId} vanished after commit`);
@@ -144,11 +110,6 @@ export class OrderTypeormRepository
     return reloaded;
   }
 
-  // Finalizes the two snapshot-address FK columns once both `address` rows exist
-  // (the order was inserted with NULL address ids — they FK onto `address`, so the
-  // rows must precede the pointer). A targeted UPDATE, the same "finalize a derived
-  // column after the row is written" idiom `order_number` uses; it does not advance
-  // `@VersionColumn` (a persistence-finalization detail, not a domain mutation).
   public async attachAddresses(
     orderId: number,
     billingAddressId: string,
@@ -158,16 +119,6 @@ export class OrderTypeormRepository
     await this.orderRepo(scope).update({ id: orderId }, { billingAddressId, shippingAddressId });
   }
 
-  // Persists the root + its lines on the given manager and returns the order id.
-  // On a NEW order (`id===null`) the first insert needs a non-null UNIQUE
-  // `order_number`, but the binding value derives from the not-yet-assigned id — so
-  // insert with a guaranteed-unique provisional token, read the generated id, then
-  // finalize the real number and UPDATE. The provisional never commits (it is
-  // overwritten before the transaction closes). On a re-save (a payment-status /
-  // fulfillment-status / version bump) `order_number` is immutable, so update the root
-  // without touching `order_number`; the lines are re-persisted too because a line's
-  // `status` advances as shipments go out (the Ship operation, ADR-031), so a re-save
-  // is no longer guaranteed to leave the lines untouched.
   private async persistGraph(
     manager: EntityManager,
     order: Order,
@@ -194,28 +145,11 @@ export class OrderTypeormRepository
     const existingId = order.id;
     await this.persistRoot(orderRepo, order, existingId, expectedVersion);
 
-    // The line money/identity columns are immutable place-time snapshots, but a
-    // line's `status` advances as the order ships (`OrderLine.markFulfillment`, the
-    // Ship operation — ADR-031). Each line already carries its concrete id, so
-    // re-persisting upserts in place (a status-column UPDATE) without inserting
-    // duplicates — the price snapshot is re-written with identical values. This runs
-    // only after the root CAS succeeded, so a losing attempt writes no lines.
     await this.persistLines(lineRepo, order, existingId);
     this.logger.debug({ orderId: existingId }, 'Order updated');
     return existingId;
   }
 
-  // Persists the order root on a re-save. When `expectedVersion` is supplied it is an
-  // optimistic compare-and-swap on the root `version` (ADR-036): the root version is
-  // the aggregate's OCC anchor, so every status transition bumps it via
-  // `version = version + 1`, and the `WHERE id = ? AND version = expectedVersion`
-  // predicate makes a concurrent writer (who already bumped it) match zero rows — a
-  // retryable `OrderWriteConflictError` rather than a silent lost update. Two
-  // concurrent order writes therefore serialize through this single UPDATE. When
-  // `expectedVersion` is absent the write is the plain managed save (the inline
-  // authorize-on-place path, running on a brand-new order with no concurrent writer)
-  // — TypeORM still advances `@VersionColumn`. `order_number` is immutable, so it is
-  // never written on a re-save.
   private async persistRoot(
     orderRepo: Repository<OrderEntity>,
     order: Order,
@@ -251,8 +185,6 @@ export class OrderTypeormRepository
     );
 
     if (!result.affected) {
-      // Signal a lost race; the outer `save` re-reads the committed version and
-      // rethrows a conflict carrying it (kept out of this snapshot-bound tx).
       throw new OrderWriteConflictError(existingId, expectedVersion);
     }
   }
@@ -268,9 +200,6 @@ export class OrderTypeormRepository
     }
   }
 
-  // Resolves the order repository bound to the caller's transaction when a `scope`
-  // is supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
-  // repository.
   private orderRepo(scope?: ITransactionScope): Repository<OrderEntity> {
     if (!scope) {
       return this.orderRepository;
