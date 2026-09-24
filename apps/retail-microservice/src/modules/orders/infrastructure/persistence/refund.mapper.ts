@@ -4,8 +4,6 @@ import { Refund } from '../../domain';
 import { RefundEntity } from './refund.entity';
 
 export class RefundMapper {
-  // `id` is omitted when null so TypeORM inserts; present so it updates. A refund has
-  // no owned children and no `@VersionColumn`, so the whole row maps directly.
   public static toEntity(domain: Refund): DeepPartial<RefundEntity> {
     const entity: DeepPartial<RefundEntity> = {
       orderId: domain.orderId,
@@ -27,9 +25,6 @@ export class RefundMapper {
 
   public static toDomain(entity: RefundEntity): Refund {
     return Refund.reconstitute({
-      // The BIGINT PK comes back as a number; coerce defensively, like the
-      // `order_id` / `payment_id` / `amount_minor` BIGINT scalars below (mysql2
-      // returns non-PK BIGINTs as strings — the `PaymentMapper` precedent).
       id: Number(entity.id),
       orderId: Number(entity.orderId),
       paymentId: Number(entity.paymentId),

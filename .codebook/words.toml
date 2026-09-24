@@ -8,5 +8,6 @@ words = [
     "nestjs",
     "occ",
     "pino",
+    "rabbitmq",
     "reparent",
 ]

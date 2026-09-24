@@ -1,8 +1,9 @@
 # Retail orders
 
 What the retail `orders` module (`apps/retail-microservice/src/modules/orders/`) does today, beyond
-what its names and types say: the five aggregates, the order use cases, and how they fail. Paths
-below are relative to that folder unless they start at the repository root. The rationale lives in
+what its names and types say: the five aggregates, the order use cases, how they are stored and
+wired, and how they fail. Paths below are relative to that folder unless they start at the
+repository root. The rationale lives in
 the ADRs: [ADR-028](../adr/028-cart-order-payment-and-address-chain.md) (the chain and the three
 status axes), [ADR-031](../adr/031-fulfillment-aggregate-and-ship-triggered-capture.md)
 (fulfillment and ship-triggered capture),
@@ -25,7 +26,8 @@ code-to-status table is `presentation/order-rpc-exception.filter.ts`.
 - `Order.place` derives the totals from the lines and opens the order `pending` / `none` /
   `unfulfilled` at version 0. The `orderNumber` it carries is the placeholder `'PENDING'`
   (`PlaceOrderUseCase`, `PROVISIONAL_ORDER_NUMBER`); the repository replaces it with
-  `ORD-<year>-<pad8(id)>` on the first insert, so only the re-read order has the real number
+  `ORD-<year>-<pad8(id)>` inside the insert's transaction (see [Writes](#writes)), so only the
+  re-read order has the real number
   (`infrastructure/persistence/order-typeorm.repository.ts`, `OrderTypeormRepository.save`).
 - Loading an order re-checks every invariant the constructors check: `subtotalMinor = Σ lineTotalMinor`,
   the grand-total formula, each line's total formula, and `0 ≤ cancelledQuantity ≤ quantity`. A stored
@@ -326,6 +328,188 @@ own id.
   hiccup at emit time therefore means the buyer gets no email for that event
   (`apps/notification-microservice/src/modules/notifications/infrastructure/consumers/dispatch-customer-email.ts`).
 
+## Persistence
+
+Paths in this section are under `infrastructure/persistence/` unless they say otherwise.
+
+### Reads, locks and versions
+
+- **A read inside a transaction sees that transaction's snapshot.** Nothing in `libs/database` changes
+  InnoDB's default `REPEATABLE READ`, so `findById`, `findByOrderId` and `listByOrderId` called with a
+  scope do not see a row that another transaction commits later. The two locking reads,
+  `FulfillmentTypeormRepository.findByIdForUpdate` and `PaymentTypeormRepository.findByOrderIdForUpdate`,
+  are `SELECT … FOR UPDATE`: they wait for a concurrent writer and return what it committed. Both
+  require a scope, because the lock ends with the transaction. The fulfillment read also locks the
+  `fulfillment_line` rows it joins.
+- **Only the order is version-checked.** `OrderTypeormRepository.save` with an `expectedVersion`
+  issues one `UPDATE` of every root column plus `version = version + 1`, under
+  `WHERE id = ? AND version = ?`. The lines are written only after that succeeds. When it matches no
+  row, `save` reads the row's current version on the default manager, outside the rolled-back
+  transaction, and throws `OrderWriteConflictError` carrying it. `runWithOrderWriteRetry` retries on
+  that, and when the retries run out the caller gets `409 VERSION_MISMATCH` with
+  `details.currentVersion`.
+  - Without `expectedVersion` the write is TypeORM's managed `save`: it writes the whole root and
+    compares nothing. On an existing order only `AuthorizePaymentUseCase` calls it that way.
+  - `fulfillment.version` goes up on every save and nothing ever compares it. Fulfillment
+    transitions are serialised by `findByIdForUpdate` instead. `payment`, `refund` and `address` have
+    no version column.
+- **An order's `version` also moves on internal writes.** TypeORM appends `version = version + 1` to
+  every `Repository.update` that does not set the version itself (`UpdateQueryBuilder` in
+  `typeorm` 0.3.28). The `order_number` finalize and `attachAddresses` therefore each bump it, so a
+  newly placed order is already several versions past its insert.
+
+### Writes
+
+- **A new order is inserted with a provisional `order_number`**: `TMP-` plus 16 hex characters, which
+  exactly fills `order_number VARCHAR(20)`. The same transaction then sets `ORD-<year>-<pad8(id)>`,
+  where `year` is the UTC year of `placedAt`, so the provisional value never commits
+  (`OrderTypeormRepository.persistGraph`).
+- **An order re-save rewrites every line row**, because a line's `status` moves as shipments go out.
+  A fulfillment re-save writes the root only, since its lines never change after creation
+  (`FulfillmentTypeormRepository.persistGraph`).
+- **An `address` row is always an order snapshot.** Place writes `owner_type = 'order'` with
+  `owner_id = String(orderId)`. Nothing writes a `customer`-owned address, and `owner_id` has no
+  foreign key (`AddressTypeormRepository.save`, `domain/address.model.ts`).
+- **An entity is registered by adding it to `orderEntities`** (`infrastructure/persistence/index.ts`).
+  `orders.module.ts` passes that array to `DatabaseModule.forFeature`, and the retail
+  `app/app.module.ts` spreads it into the connection. `IdempotencyKeyEntity` lives in
+  `infrastructure/idempotency/` but is registered through the same array.
+
+### The cart and customer tables
+
+- **The cart is read with raw SQL, outside the place transaction and with no lock.**
+  `CartReaderTypeormAdapter.findCart` filters `deleted_at IS NULL` on `cart` and on `cart_line`.
+  `markConverted` then runs on the place transaction as
+  `UPDATE cart SET status = 'converted', version = version + 1 … WHERE id = ? AND status = 'active'`.
+  It compares the status and not the version. It does bump the version, so a cart-side writer holding
+  the old version fails its own compare-and-swap afterwards.
+- **The customer's email is read with no status filter** (`customer-contact-reader.typeorm.adapter.ts`,
+  `SELECT email FROM customer WHERE id = ?`). A suspended or deleted customer still resolves. An erased
+  customer resolves to a `null` email, because erasure nulls the column in place
+  ([ADR-037](../adr/037-consent-record-and-tombstone-erasure.md)), so that customer's orders send no
+  more buyer emails. No row at all also gives no contact.
+
+### The idempotency store
+
+`infrastructure/idempotency/idempotency-store.typeorm.repository.ts`, `IdempotencyStoreTypeormRepository`.
+It implements the port directly, not through `BaseTypeormRepository`. The flows are in
+[ADR-036](../adr/036-idempotency-key-store-and-enforced-occ.md) and `README.md` §5; what follows is
+what the table rows actually hold.
+
+- **A row with a `NULL` `response_body` is a pending reservation.** Only Issue Refund's `reserve`
+  writes one. `find` treats a pending row as a miss, and `release` deletes a row only while its
+  `response_body` is still `NULL`, so a completed record is never released.
+- **`reserve` classifies a key that is already taken, in this order:**
+  1. a different fingerprint is `mismatch` (`422`), even while the holder is still pending;
+  2. a pending row is `in-progress` (`409`);
+  3. a completed row is `replay`.
+
+  If the row disappears between the failed `INSERT` and the re-read (a release or the purge), the
+  answer is `in-progress`, so the client retries.
+
+- **`finalize` updates the row by `(scope, key)` and does not check that it is pending.**
+- **`save`, used by the find/save flows, swallows a duplicate key.** The first stored response wins,
+  and the concurrent loser returns its own result without storing it. A duplicate is recognised by
+  MySQL errno `1062` / `ER_DUP_ENTRY` on the error or on its `driverError`.
+- **`expires_at` is the Node clock plus `IDEMPOTENCY_KEY_TTL_HOURS` at insert time.** `created_at` is
+  the database's `CURRENT_TIMESTAMP`. Neither `find` nor `reserve` looks at `expires_at`: a row keeps
+  answering until the purge deletes it.
+- **`scope` and `key` are `VARCHAR(64)`.** The gateway's `@IdempotencyKey()` trims the header and
+  rejects it only when empty; it does not bound its length.
+
+## Messaging
+
+### Where each event goes
+
+`infrastructure/messaging/order-rabbitmq.publisher.ts`, `OrderRabbitmqPublisher`.
+
+| Primary emit onto     | Events                                                                                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `notification_events` | `retail.order.placed`, `retail.fulfillment.shipped`, `retail.fulfillment.delivered`, `retail.refund.issued`             |
+| `retail_queue`        | `retail.payment.authorized`, `retail.payment.captured`, `retail.fulfillment.created`, `retail.refund.failed`            |
+| both                  | `retail.order.cancelled`: the two emits run concurrently (`Promise.all`), and the `ris.events` mirror is published once |
+
+Every method awaits the broker's acknowledgement of the primary emit, then mirrors onto `ris.events`.
+If the primary emit rejects, the method throws before the mirror is published. Every use case catches
+a publish failure after its commit and logs it at `warn`; there is no outbox and no retry, so the
+event is lost from the queue and from the firehose alike. For `retail.order.cancelled`, one of the
+two emits can land while the other fails.
+
+### What `retail_queue` does with an event
+
+- **Retail consumes `retail_queue` with Nest's default `noAck: true`.** The retail `main.ts` sets no
+  `noAck`, unlike the notification and event-store services, so the broker counts a message as
+  delivered as soon as it hands it over. Nothing on `retail_queue` is ever redelivered.
+- **The four reserved events that retail emits onto its own queue are received by retail and
+  discarded.** No handler matches, so Nest logs its "no matching event handler" message at `error`
+  and the message is gone (`@nestjs/microservices` 11.1.19, `ServerRMQ.handleEvent` falling through
+  to `Server.handleEvent`). They survive only as their `ris.events` mirror.
+- **`OrderCancelledConsumer` is the only event handler on `retail_queue`.** Given an event with
+  `paymentFlaggedForRefund: true` (`infrastructure/consumers/order-cancelled.consumer.ts`):
+  1. It reads the payment. If there is none, it logs at `warn` and stops.
+  2. If `amountMinor − refundedAmountMinor ≤ 0`, it logs at `info` and stops.
+  3. Otherwise it calls `IssueRefundUseCase.execute` once for that remainder. Any throw, including
+     `ORDER_IDEMPOTENCY_KEY_IN_PROGRESS` from a concurrent duplicate, is logged at `warn` and
+     swallowed.
+
+  Because the queue auto-acknowledges, a duplicate reaches the consumer only if the event is
+  published twice. A process that dies inside the handler loses the auto-refund for good (see
+  [Failure modes](#failure-modes)).
+
+### Outbound RPCs and the audit seam
+
+- **Allocate, Cancel Allocation and Commit Sale go through `sendPreservingRpcError`, but the two
+  catalog calls do not** (`order-catalog.rabbitmq.adapter.ts`). A catalog rejection during Place
+  therefore reaches the caller as a bare `Internal server error`, without its code; see
+  [`shared-libraries.md`](shared-libraries.md#messaging).
+- **`catalog.price.select` is sent without `asOf`**, so the catalog resolves the price as of its own
+  current time. `null` means that no price is in effect (`OrderCatalogRabbitmqAdapter.selectApplicablePrice`).
+- **`AUDIT_LOG_PUBLISHER` is bound to a mirror-only emit.** `AuditLogRabbitmqPublisher.publish` maps
+  the event with `toAuditStaffActionEvent` and hands it to `RisEventsMirrorPublisher.mirror`, which
+  never throws (`infrastructure/audit/audit-log.rabbitmq.publisher.ts`). A refund whose audit emit fails
+  still succeeds, and has no `audit_log_entry`; the lost event is in the `warn` log, payload
+  included.
+
+### The payment gateway binding
+
+`infrastructure/payment-gateway/fake-payment-gateway.adapter.ts`, `FakePaymentGatewayAdapter`, is the
+only `PAYMENT_GATEWAY` binding (`orders.module.ts`).
+
+- **It approves every call.**
+  - `authorize` returns a random `fake_<uuid>` reference, and the request's `method` or, when that is
+    absent, `fake-card`.
+  - `capture` echoes the reference it was given.
+  - `refund` ignores its request and returns a random `fake_refund_<uuid>` reference.
+
+  Every timestamp it returns is the Node clock at the call. The references must be unique, because
+  `payment.gateway_reference` carries a UNIQUE constraint.
+
+- **The decline paths are reachable only by replacing a method on the bound instance**:
+  `test/declined-authorization.e2e-spec.ts` does that with a Jest spy. These paths are:
+  - the declined-authorization compensation in Place;
+  - `ORDER_PAYMENT_NOT_CAPTURED`;
+  - `releaseCapture`;
+  - a `failed` refund.
+
+## RPC surface
+
+`presentation/orders.controller.ts` serves the twelve `retail.{cart.place,order,payment,fulfillment,refund}.*`
+keys listed in `README.md` §2, one use case each, with no logic of its own.
+
+- **The four idempotent handlers return the envelope `{ view, replayed }`**: Place, Capture, Ship and
+  Issue Refund. The gateway turns `replayed` into `Idempotent-Replay: true` and, for Place and Issue
+  Refund, turns `201` into `200`.
+- **`OrderRpcExceptionFilter` catches `OrderDomainException` and nothing else**
+  (`presentation/order-rpc-exception.filter.ts`). It is registered with `APP_FILTER`, so it applies
+  across the retail app, but it matches only order exceptions. It forwards `details` only when the
+  exception has one.
+  - Nest turns anything else into a bare `Internal server error`. That covers a plain `Error` from the
+    domain or a repository, and a catalog rejection relayed by Place. The gateway shows it as a `500`.
+- **A well-formed request that asks for something retail refuses is `422`, not `400`**:
+  `PARTIAL_CAPTURE_UNSUPPORTED` (a valid integer that is not the order total) and
+  `ORDER_IDEMPOTENCY_KEY_REUSED`. `400` is kept for malformed input. The domain's shape codes answer
+  `400` too, as a backstop for a direct RMQ caller that the gateway DTOs did not screen.
+
 ## Failure modes
 
 - **Money moved, recording failed.** On the capture and ship paths, if the gateway approved but the
@@ -359,3 +543,15 @@ own id.
   allocations.
 - A failed release or Commit Sale after a commit is retried and then logged for replay; the local
   write is never rolled back ([`shared-libraries.md`](shared-libraries.md#retrythenlogforreplay)).
+- **A lost auto-refund.** If the `retail_queue` copy of `retail.order.cancelled` is not published, or
+  the process dies inside `OrderCancelledConsumer`, nothing retries: the queue auto-acknowledges and
+  the publish failure was only logged. The payment stays `captured` with `flagged_for_refund` set.
+  No report lists flagged payments, so the money goes back only through a manual Issue Refund.
+- **A refund key stuck in flight.** If the process dies between Issue Refund's `reserve` and its
+  `finalize` or `release`, the pending row stays. That key answers `409 ORDER_IDEMPOTENCY_KEY_IN_PROGRESS`
+  until the purge deletes the row, which is at least `IDEMPOTENCY_KEY_TTL_HOURS` later. A request
+  under a new key is not held back by it.
+- **A cart edited during Place.** The cart's lines are read before the place transaction and without
+  a lock, and the conversion checks only `status = 'active'`. A line change that commits between the
+  read and the conversion is therefore missing from the order, and the order is built from the lines
+  as first read.

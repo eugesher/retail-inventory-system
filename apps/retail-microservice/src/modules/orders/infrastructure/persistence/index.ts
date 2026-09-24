@@ -7,13 +7,6 @@ import { OrderLineEntity } from './order-line.entity';
 import { PaymentEntity } from './payment.entity';
 import { RefundEntity } from './refund.entity';
 
-// A concrete entity array — UNANNOTATED on purpose (see the note on `DatabaseModule.forRoot`)
-// — so it is spreadable and retail `app.module.ts` can merge it with
-// `cartEntities` into the one `DatabaseModule.forRoot([...])` connection. Adding a row
-// here is what registers its table at the root connection — `app.module.ts` spreads
-// `orderEntities`, so no edit there is needed. The `IdempotencyKeyEntity` (the
-// retail-owned request-level idempotency store, ADR-036) lives under
-// `infrastructure/idempotency/` but registers through this array like the rest.
 export const orderEntities = [
   OrderEntity,
   OrderLineEntity,

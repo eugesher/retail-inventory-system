@@ -3,9 +3,6 @@ import { ROUTING_KEYS, RisEventsMirrorPublisher } from '@retail-inventory-system
 
 import { AuditLogRabbitmqPublisher } from '../audit-log.rabbitmq.publisher';
 
-// Mirrors the shape `IssueRefundUseCase.writeAudit` produces: a `RefundIssued`
-// event with `targetKind` null (no audit target-kind member fits a refund, so the
-// ids ride the payload) and the refund detail in the structured payload.
 const buildRefundEvent = (overrides: Partial<IAuditLogEvent> = {}): IAuditLogEvent => ({
   name: 'RefundIssued',
   actorId: 'staff-7',
@@ -30,8 +27,6 @@ describe('AuditLogRabbitmqPublisher (retail orders)', () => {
   let publisher: AuditLogRabbitmqPublisher;
 
   beforeEach(() => {
-    // The shared mirror publisher owns the emit + best-effort swallow (covered by its own
-    // spec); here we only assert this adapter maps + delegates to it.
     mirror = jest.fn().mockResolvedValue(undefined);
     risEvents = { mirror } as unknown as RisEventsMirrorPublisher;
     publisher = new AuditLogRabbitmqPublisher(risEvents);
@@ -72,8 +67,6 @@ describe('AuditLogRabbitmqPublisher (retail orders)', () => {
     await publisher.publish(buildRefundEvent({ name: 'RefundIssued', actorId: null }));
 
     const wire = mirroredWire();
-    // The refund use case audits with actorKind 'staff' even for the system path,
-    // so the wire actorType stays 'staff-user'; the null actorId signals the origin.
     expect(wire.actorType).toBe('staff-user');
     expect(wire.actorId).toBeNull();
   });

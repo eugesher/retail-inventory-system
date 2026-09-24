@@ -627,8 +627,8 @@ calls the gateway **outside** the transaction, then runs `Payment.refund` +
 Authorize, capture, and refund run behind `IPaymentGatewayPort`
 (DI symbol `PAYMENT_GATEWAY`) — declared in `application/ports/`, importing no transport
 package, the same shape as `NotifierPort`. The default binding is
-`FakePaymentGatewayAdapter`: an in-process stand-in that **always approves** and mints
-deterministic `fake_<uuid>` / `fake_refund_<uuid>` references. **Void is not on the port**:
+`FakePaymentGatewayAdapter`: an in-process stand-in that **always approves** and mints a
+random `fake_<uuid>` / `fake_refund_<uuid>` reference per call. **Void is not on the port**:
 Cancel Order's void only rewrites the `payment` row, and no processor call is made.
 
 Swapping in Stripe/Adyen is a **single provider rebind** in `orders.module.ts` plus a new
@@ -837,17 +837,22 @@ The store is **live-ephemeral**: `find` never filters by expiry, so a 10-minute
 
 ### Optimistic concurrency (OCC)
 
-Every operational aggregate write is a read-version → mutate →
+Every version-checked aggregate write (the table below) is a read-version → mutate →
 `UPDATE … SET version = version + 1 WHERE id = ? AND version = ?` compare-and-swap. Zero rows
 affected means a concurrent writer won: the attempt re-reads under a **fresh transaction**
 and retries up to `OCC_RETRY_ATTEMPTS` (default 5, injected as a per-module value-provider
 token — never `process.env`). On exhaustion the write surfaces a uniform
 `409 { code: 'VERSION_MISMATCH', details: { currentVersion } }`.
 
-| Aggregate                                       | Exhaustion code                                                                      |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `StockLevel`, `Reservation`                     | `409 STOCK_WRITE_CONFLICT`                                                           |
-| `Cart`, `Order`, `Fulfillment`, `ReturnRequest` | `409 VERSION_MISMATCH` (member name is module-prefixed; the _wire_ value is uniform) |
+| Aggregate                        | Exhaustion code                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `StockLevel`, `Reservation`      | `409 STOCK_WRITE_CONFLICT`                                                           |
+| `Cart`, `Order`, `ReturnRequest` | `409 VERSION_MISMATCH` (member name is module-prefixed; the _wire_ value is uniform) |
+
+`Fulfillment` has a `version` column that every save increments and nothing compares: its
+transitions are serialised by a `SELECT … FOR UPDATE` re-read instead (§4, "Concurrency guards,
+side by side"). `Payment` and `Refund` have no version column
+([`docs/reference/retail-orders.md`](docs/reference/retail-orders.md#reads-locks-and-versions)).
 
 The three cart line writes additionally honour an optional **`If-Match: <version>`**
 precondition (the `@IfMatch()` gateway decorator): a stale pin is an immediate `409` with
