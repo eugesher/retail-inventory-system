@@ -7,10 +7,6 @@ interface IRequestWithUser {
   user?: ICurrentUser;
 }
 
-// Shared body for the claim-array guards (`RolesGuard`, `PermissionsGuard`).
-// Reads the route's `@Roles` / `@RequiresPermission` metadata, lets routes that
-// declare none through, then requires the request subject to carry at least one
-// of the demanded values. Extracted so the two guards cannot drift apart.
 export function enforceRequiredClaim(
   reflector: Reflector,
   context: ExecutionContext,

@@ -1,5 +1,3 @@
-// Equality is structural; props must be JSON-stable (no Date / Map / cycles)
-// because comparison uses JSON.stringify. Immutability is enforced via freeze.
 export abstract class ValueObject<TProps extends Record<string, unknown>> {
   protected readonly props: TProps;
 

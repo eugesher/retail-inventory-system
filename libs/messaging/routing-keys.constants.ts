@@ -1,20 +1,3 @@
-// The wire format is `<service>.<aggregate>.<action>` (ADR-008), and the namespace names the
-// queue: an `inventory.*` key rides `inventory_queue`, a `retail.*` key rides `retail_queue`.
-// The exception is an event, which is emitted onto the queue of whoever CONSUMES it rather than
-// the producer's own (ADR-008/020) — so a `retail.*` event with a notification consumer is
-// published on `notification_events`.
-//
-// Every key is additionally mirrored onto the `ris.events` topic exchange, where the event-store
-// firehose binds `#` (ADR-035). A key with no business consumer is therefore a **reserved
-// surface**, not a dead one: still captured, still queryable. That is a decision, not an
-// omission — do not "fix" it by deleting the key.
-//
-// Which use case serves a key, which controller answers it, whether it has an HTTP route, and
-// which keys are reserved surfaces: **README §2**. None of it is restated here. A second copy of
-// that table would drift from the first, and the copy nobody maintains is the one the next
-// reader believes.
-//
-// The comments below record only what the key itself will not tell you.
 export const ROUTING_KEYS = {
   INVENTORY_STOCK_LOW: 'inventory.stock.low',
   INVENTORY_STOCK_RECEIVED: 'inventory.stock.received',
@@ -29,8 +12,6 @@ export const ROUTING_KEYS = {
   INVENTORY_RESERVATION_RESERVE: 'inventory.reservation.reserve',
   INVENTORY_RESERVATION_RELEASE: 'inventory.reservation.release',
   INVENTORY_RESERVATION_SWEEP: 'inventory.reservation.sweep',
-  // `allocation` is an RPC-subject noun — the counters and ledger rows the operation acts on —
-  // not a persisted aggregate. The pseudo-aggregate naming precedent (ADR-030 §5).
   INVENTORY_RESERVATION_ALLOCATE: 'inventory.reservation.allocate',
   INVENTORY_ALLOCATION_CANCEL: 'inventory.allocation.cancel',
   INVENTORY_STOCK_RESERVED: 'inventory.stock.reserved',
@@ -59,17 +40,11 @@ export const ROUTING_KEYS = {
   CATALOG_TAX_CATEGORY_CREATE: 'catalog.tax-category.create',
   CATALOG_TAX_CATEGORY_LIST: 'catalog.tax-category.list',
   CATALOG_VARIANT_SET_TAX_CATEGORY: 'catalog.variant.set-tax-category',
-  // The category and media capabilities emit NO events. There is no past-tense
-  // `catalog.category.*` / `catalog.media.*` key to pair with these commands, and its absence is
-  // the decision, not an oversight (ADR-029 §6) — an absence no comment on an existing key can
-  // record, which is why it is recorded here.
   CATALOG_CATEGORY_CREATE: 'catalog.category.create',
   CATALOG_CATEGORY_REPARENT: 'catalog.category.reparent',
   CATALOG_CATEGORY_LIST: 'catalog.category.list',
   CATALOG_CATEGORY_GET_TREE: 'catalog.category.get-tree',
   CATALOG_CATEGORY_LIST_PRODUCTS: 'catalog.category.list-products',
-  // A `product.*` key served by the CATEGORY controller: the operation's subject is the category
-  // membership, not the product header (the `retail.cart.place` precedent below).
   CATALOG_PRODUCT_RECLASSIFY: 'catalog.product.reclassify',
   CATALOG_MEDIA_ATTACH: 'catalog.media.attach',
   CATALOG_MEDIA_REORDER: 'catalog.media.reorder',
@@ -81,8 +56,6 @@ export const ROUTING_KEYS = {
   RETAIL_CART_CHANGE_LINE_QUANTITY: 'retail.cart.change-line-quantity',
   RETAIL_CART_REMOVE_LINE: 'retail.cart.remove-line',
   RETAIL_CART_CLAIM: 'retail.cart.claim',
-  // A `cart.*` key served by the ORDERS controller: it acts on the cart, but what it produces is
-  // an `Order` (ADR-028 §1).
   RETAIL_CART_PLACE: 'retail.cart.place',
   RETAIL_ORDER_GET: 'retail.order.get',
   RETAIL_ORDER_LIST: 'retail.order.list',
@@ -122,8 +95,6 @@ export const ROUTING_KEYS = {
   RETAIL_RETURN_CLOSED: 'retail.return.closed',
   RETAIL_REFUND_ISSUED: 'retail.refund.issued',
   RETAIL_REFUND_FAILED: 'retail.refund.failed',
-  // Liveness probes, one per RMQ deployable — each rides that service's existing queue rather
-  // than one of its own (ADR-044).
   NOTIFICATION_HEALTH_PING: 'notification.health.ping',
   CATALOG_HEALTH_PING: 'catalog.health.ping',
   INVENTORY_HEALTH_PING: 'inventory.health.ping',
@@ -136,22 +107,11 @@ export const ROUTING_KEYS = {
   NOTIFICATION_DELIVERY_GET: 'notification.delivery.get',
   NOTIFICATION_DELIVERY_RECORD_OUTCOME: 'notification.delivery.record-outcome',
   NOTIFICATION_DELIVERY_RETRY: 'notification.delivery.retry',
-  // Plural `notifications.*`, deliberately: the cross-cutting alerting stream, not one of the
-  // singular `notification.delivery.*` RPC commands (ADR-033).
   NOTIFICATIONS_DELIVERY_FAILED: 'notifications.delivery.failed',
   NOTIFICATION_MARKETING_SEND: 'notification.marketing.send',
-  // NOT a queue subject — the one entry in this map that is not a routing key. It is a
-  // template-registry key: the `eventType` half of the `(eventType, channel, locale)` natural key
-  // the marketing template is authored under (`scripts/seeds/notification-template.sql`). It lives
-  // in a shared lib precisely so the seed and the gateway's default cannot disagree — they are the
-  // same constant. Deliberately absent from `TRANSACTIONAL_EVENT_TYPES`, so the consent gate
-  // treats a send of it as marketing (ADR-037).
   MARKETING_EMAIL_PROMO: 'marketing.email.promo',
   CUSTOMER_CONSENT_UPDATED: 'customer.consent.updated',
   CUSTOMER_ERASED: 'customer.erased',
-  // The one `audit.*` EVENT. It rides the `ris.events` exchange rather than a service queue, and
-  // it is the only key the firehose dispatches to `audit_log_entry` instead of `domain_event`
-  // (ADR-035/039). The three `audit.*` keys below it are RPCs and never travel the exchange.
   AUDIT_STAFF_ACTION: 'audit.staff.action',
   AUDIT_EVENT_QUERY: 'audit.event.query',
   AUDIT_ENTRY_QUERY: 'audit.entry.query',

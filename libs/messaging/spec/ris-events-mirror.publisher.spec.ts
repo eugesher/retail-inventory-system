@@ -7,11 +7,6 @@ import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/obs
 
 import { RisEventsMirrorPublisher } from '../ris-events-mirror.publisher';
 
-// The shared `ris.events` mirror seam every domain-event publisher reuses for the
-// firehose dual-publish (ADR-035). These tests lock its two load-bearing
-// guarantees at the source: it emits onto the topic-exchange client under the
-// caller's routing key, and it **swallows its own rejection** (warn-log, no throw)
-// so the dozens of call sites need no `try/catch`.
 describe('RisEventsMirrorPublisher', () => {
   let emit: jest.Mock;
   let client: ClientProxy;
@@ -42,10 +37,6 @@ describe('RisEventsMirrorPublisher', () => {
     expect(logger.error).not.toHaveBeenCalled();
   });
 
-  // A down broker does NOT reject the emit — amqp-connection-manager buffers the publish
-  // and the Observable stays pending. The bounded `timeout` is what stops that from hanging
-  // the already-committed mutation (above all a staff login/refund whose only publish is
-  // this mirror). Simulated with `NEVER` (an emit that never settles) + fake timers.
   it('bounds a hanging emit with a timeout and swallows it (never blocks the caller)', async () => {
     jest.useFakeTimers();
     try {

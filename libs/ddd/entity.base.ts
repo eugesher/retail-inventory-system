@@ -1,5 +1,3 @@
-// Equality is by id within the same concrete subtype — two different
-// aggregates with the same numeric id are not equal.
 export abstract class Entity<TId> {
   protected readonly _id: TId;
 

@@ -1,10 +1,5 @@
 import { bodyFingerprint } from '../body-fingerprint.util';
 
-// Locks the request-body fingerprint contract that the idempotency store relies
-// on to tell a safe replay (same key + same body) from key-reuse (same key +
-// different body → 422). The digest MUST be a pure function of the *logical*
-// content: independent of object key order, sensitive to every value / type /
-// structure change, and stable enough to persist in a CHAR(64) column.
 describe('bodyFingerprint', () => {
   describe('determinism across key order (the replay guarantee)', () => {
     it('produces the same digest regardless of top-level key order', () => {
@@ -88,8 +83,6 @@ describe('bodyFingerprint', () => {
     });
 
     it('emits a well-defined digest even for edge inputs', () => {
-      // Top-level undefined/null both canonicalize to a stable string, so the
-      // helper never throws and always returns a 64-hex digest.
       expect(bodyFingerprint(undefined)).toMatch(/^[0-9a-f]{64}$/);
       expect(bodyFingerprint(null)).toMatch(/^[0-9a-f]{64}$/);
       expect(bodyFingerprint({})).toMatch(/^[0-9a-f]{64}$/);
@@ -97,9 +90,6 @@ describe('bodyFingerprint', () => {
     });
 
     it('matches the known SHA-256 digest of the canonical form', () => {
-      // Canonical form of { b: 2, a: 1 } is '{"a":1,"b":2}'; this pins the exact
-      // wire bytes so a change to the canonicalization is caught, not just its
-      // self-consistency.
       const knownDigest = '43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777';
       expect(bodyFingerprint({ b: 2, a: 1 })).toBe(knownDigest);
     });
@@ -125,7 +115,6 @@ describe('bodyFingerprint', () => {
     });
 
     it('digests the same value regardless of how the object was assembled', () => {
-      // Same logical body, keys assembled in a different order at every level.
       const reordered = {
         lines: [
           { quantity: 2, variantId: 'v-1' },

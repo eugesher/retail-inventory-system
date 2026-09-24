@@ -47,22 +47,22 @@ names the place it describes, so a reader can check it again.
 One file per area. A file is created when its area has something to say; there are no empty
 placeholders.
 
-| File                                     | Area                                                                    |
-| ---------------------------------------- | ----------------------------------------------------------------------- |
-| [`wire-contracts.md`](wire-contracts.md) | `libs/contracts` — payloads, views, enums, units                        |
-| `shared-libraries.md`                    | the other `libs/*`                                                      |
-| `retail-orders.md`                       | retail `modules/orders/`                                                |
-| `retail-cart.md`, `retail-returns.md`    | retail `modules/cart/`, `modules/returns/`                              |
-| `inventory.md`                           | inventory `modules/stock/`                                              |
-| `catalog-and-pricing.md`                 | catalog `modules/catalog/`, `modules/pricing/`                          |
-| `notifications.md`                       | notification `modules/notifications/`                                   |
-| `event-store.md`                         | event store `modules/audit-and-events/`                                 |
-| `api-gateway.md`                         | `apps/api-gateway`                                                      |
-| `testing.md`                             | the e2e harness under `test/` and the repository self-checks in `spec/` |
-| `architecture-lint.md`                   | the rules in `eslint.config.mjs`                                        |
-| `persistence.md`                         | schema facts from `migrations/` and the seeds under `scripts/`          |
-| `build-and-ci.md`                        | Dockerfile, CI workflow, compose files, `.env.example`                  |
-| `http-api.md`                            | the request collections under `http/`                                   |
+| File                                         | Area                                                                    |
+| -------------------------------------------- | ----------------------------------------------------------------------- |
+| [`wire-contracts.md`](wire-contracts.md)     | `libs/contracts` — payloads, views, enums, units                        |
+| [`shared-libraries.md`](shared-libraries.md) | the other `libs/*`                                                      |
+| `retail-orders.md`                           | retail `modules/orders/`                                                |
+| `retail-cart.md`, `retail-returns.md`        | retail `modules/cart/`, `modules/returns/`                              |
+| `inventory.md`                               | inventory `modules/stock/`                                              |
+| `catalog-and-pricing.md`                     | catalog `modules/catalog/`, `modules/pricing/`                          |
+| `notifications.md`                           | notification `modules/notifications/`                                   |
+| `event-store.md`                             | event store `modules/audit-and-events/`                                 |
+| `api-gateway.md`                             | `apps/api-gateway`                                                      |
+| `testing.md`                                 | the e2e harness under `test/` and the repository self-checks in `spec/` |
+| `architecture-lint.md`                       | the rules in `eslint.config.mjs`                                        |
+| `persistence.md`                             | schema facts from `migrations/` and the seeds under `scripts/`          |
+| `build-and-ci.md`                            | Dockerfile, CI workflow, compose files, `.env.example`                  |
+| `http-api.md`                                | the request collections under `http/`                                   |
 
 ## Shape of an area file
 

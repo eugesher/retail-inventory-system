@@ -9,9 +9,6 @@ import { PermissionsGuard } from './guards/permissions.guard';
 import { RolesGuard } from './guards/roles.guard';
 
 export interface IAuthModuleOptions {
-  // Extra providers contributed by the host app — typically the binding for
-  // `AUTH_USER_VALIDATOR` and any persistence repository the validator
-  // depends on. The lib is intentionally agnostic to how these are produced.
   imports?: DynamicModule['imports'];
   providers?: Provider[];
   exports?: DynamicModule['exports'];
