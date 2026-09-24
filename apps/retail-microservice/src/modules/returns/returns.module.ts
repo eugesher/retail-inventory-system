@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
 
-import { DatabaseModule, TypeormTransactionAdapter } from '@retail-inventory-system/database';
+import { DatabaseModule } from '@retail-inventory-system/database';
 import {
   MicroserviceClientInventoryModule,
   MicroserviceClientNotificationModule,
@@ -18,7 +18,7 @@ import {
   RETURN_ORDER_READER,
   RETURN_REQUEST_REPOSITORY,
   RETURN_WINDOW_DAYS,
-  TRANSACTION_PORT,
+  RETURNS_UNIT_OF_WORK,
 } from './application/ports';
 import {
   AuthorizeReturnUseCase,
@@ -38,6 +38,7 @@ import {
   CustomerContactReaderTypeormAdapter,
   ReturnOrderReaderTypeormAdapter,
   ReturnRequestTypeormRepository,
+  ReturnsUnitOfWorkAdapter,
   returnEntities,
 } from './infrastructure/persistence';
 import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';
@@ -65,10 +66,11 @@ import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';
 // the `RisEventsMirrorPublisher` dual-publish). `RETURN_WINDOW_DAYS` is a
 // `ConfigService`-backed value provider resolving `RETURN_WINDOW_DAYS` (Joi default 30) so
 // the Open use case injects a plain number (the inventory `RESERVATION_TTL_MINUTES`
-// precedent). `TRANSACTION_PORT` is now wired (the Inspect use case records the per-line
-// outcome + walks the status in one unit of work). The `ReturnRpcExceptionFilter` is
-// registered via `APP_FILTER` so it maps every handler's `ReturnDomainException` onto the
-// wire status the gateway resolves.
+// precedent). `RETURNS_UNIT_OF_WORK` (ADR-063) is the seam every transactional write goes
+// through: Open / Authorize / Reject / Receive / Close each wrap a single `save` in one
+// `run()` call, and Inspect & Disposition records the per-line outcome + walks the status
+// inside one. The `ReturnRpcExceptionFilter` is registered via `APP_FILTER` so it maps
+// every handler's `ReturnDomainException` onto the wire status the gateway resolves.
 @Module({
   imports: [
     DatabaseModule.forFeature(returnEntities),
@@ -82,6 +84,9 @@ import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';
     ReturnRequestTypeormRepository,
     { provide: RETURN_REQUEST_REPOSITORY, useExisting: ReturnRequestTypeormRepository },
 
+    ReturnsUnitOfWorkAdapter,
+    { provide: RETURNS_UNIT_OF_WORK, useExisting: ReturnsUnitOfWorkAdapter },
+
     ReturnOrderReaderTypeormAdapter,
     { provide: RETURN_ORDER_READER, useExisting: ReturnOrderReaderTypeormAdapter },
 
@@ -92,9 +97,6 @@ import { ReturnsController, ReturnRpcExceptionFilter } from './presentation';
     // module type).
     CustomerContactReaderTypeormAdapter,
     { provide: RETURN_CUSTOMER_CONTACT_READER, useExisting: CustomerContactReaderTypeormAdapter },
-
-    TypeormTransactionAdapter,
-    { provide: TRANSACTION_PORT, useExisting: TypeormTransactionAdapter },
 
     ReturnRabbitmqPublisher,
     { provide: RETURN_EVENTS_PUBLISHER, useExisting: ReturnRabbitmqPublisher },

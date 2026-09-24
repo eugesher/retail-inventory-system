@@ -18,7 +18,7 @@ import {
   FakeReturnCustomerContactReader,
   FakeReturnOrderReader,
   FakeReturnRequestRepository,
-  FakeTransactionPort,
+  FakeReturnsUnitOfWorkRunner,
   SpyReturnEventsPublisher,
 } from './test-doubles';
 
@@ -88,8 +88,8 @@ const makeHarness = (
   customerContactReader: FakeReturnCustomerContactReader;
 } => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
-  const transactionPort = new FakeTransactionPort();
   const repository = new FakeReturnRequestRepository();
+  const returnsUow = new FakeReturnsUnitOfWorkRunner(repository);
   const orderReader = new FakeReturnOrderReader(
     options.snapshot === undefined ? buildSnapshot() : options.snapshot,
   );
@@ -97,7 +97,7 @@ const makeHarness = (
   const publisher = new SpyReturnEventsPublisher();
   const customerContactReader = new FakeReturnCustomerContactReader();
   const useCase = new InspectAndDispositionUseCase(
-    transactionPort,
+    returnsUow,
     repository,
     orderReader,
     restockGateway,

@@ -1,10 +1,9 @@
-import { EntityManager, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { ReturnReasonCategoryEnum, ReturnStatusEnum } from '@retail-inventory-system/contracts';
 
 import { ReturnRequest } from '../../../domain';
 import { ReturnRequestEntity } from '../return-request.entity';
-import { ReturnLineEntity } from '../return-line.entity';
 import { ReturnLineMapper } from '../return-line.mapper';
 import { ReturnRequestMapper } from '../return-request.mapper';
 import { ReturnRequestTypeormRepository } from '../return-request-typeorm.repository';
@@ -25,8 +24,8 @@ const buildOpenRequest = (): ReturnRequest =>
 
 // A persisted-request entity graph (mysql2 returns non-PK BIGINT scalars as strings —
 // the mappers coerce them; `customer_id` is a CHAR(36) string, untouched), used as the
-// post-commit re-read. The `rma_number` is the value the repository's finalize-UPDATE
-// wrote.
+// re-read result. The `rma_number` is the value the write repository's finalize-UPDATE
+// would have written.
 const reloadedEntity = (overrides: Partial<ReturnRequestEntity> = {}): ReturnRequestEntity =>
   ({
     id: 1,
@@ -117,117 +116,18 @@ describe('return-request mappers', () => {
   });
 });
 
+// The NON-transactional read side only (ADR-063) — `save` and its transactional-manager
+// plumbing moved to `ReturnRequestWriteTypeormRepository`, covered by its own spec.
 describe('ReturnRequestTypeormRepository', () => {
-  let requestRepo: jest.Mocked<Pick<Repository<ReturnRequestEntity>, 'findOne' | 'find'>> & {
-    manager: { transaction: jest.Mock };
-  };
-  let lineRepo: jest.Mocked<Pick<Repository<ReturnLineEntity>, 'save'>>;
+  let requestRepo: jest.Mocked<Pick<Repository<ReturnRequestEntity>, 'findOne' | 'find'>>;
   let repository: ReturnRequestTypeormRepository;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    lineRepo = { save: jest.fn() } as never;
-    requestRepo = {
-      findOne: jest.fn(),
-      find: jest.fn(),
-      manager: { transaction: jest.fn() },
-    } as never;
+    requestRepo = { findOne: jest.fn(), find: jest.fn() } as never;
     repository = new ReturnRequestTypeormRepository(
       requestRepo as unknown as Repository<ReturnRequestEntity>,
-      lineRepo as unknown as Repository<ReturnLineEntity>,
     );
-  });
-
-  describe('save (new request)', () => {
-    it('inserts the root, finalizes the RMA number from the generated id, persists lines, then re-reads', async () => {
-      const request = buildOpenRequest();
-
-      const txnRequestRepo = {
-        save: jest.fn().mockResolvedValue({ id: 1 }),
-        update: jest.fn().mockResolvedValue(undefined),
-      };
-      const txnLineRepo = { save: jest.fn().mockResolvedValue([]) };
-      const manager = {
-        getRepository: jest.fn((entity) =>
-          entity === ReturnLineEntity ? txnLineRepo : txnRequestRepo,
-        ),
-      } as unknown as EntityManager;
-      requestRepo.manager.transaction.mockImplementation(
-        async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
-      );
-      requestRepo.findOne.mockResolvedValue(reloadedEntity());
-
-      const result = await repository.save(request);
-
-      // The root is inserted, then the RMA number is finalized via a targeted UPDATE
-      // keyed on the generated id (the order-number idiom; year from requestedAt).
-      expect(txnRequestRepo.save).toHaveBeenCalledTimes(1);
-      const [whereArg, setArg] = txnRequestRepo.update.mock.calls[0] as [
-        { id: number },
-        { rmaNumber: string },
-      ];
-      expect(whereArg).toEqual({ id: 1 });
-      expect(setArg.rmaNumber).toBe('RMA-2026-00000001');
-      // The line is inserted owning the generated request id.
-      const [lineEntities] = txnLineRepo.save.mock.calls[0] as [
-        { returnRequest: { id: number } }[],
-      ];
-      expect(lineEntities[0].returnRequest.id).toBe(1);
-      // The returned aggregate carries the re-read concrete ids + rma + version.
-      expect(result.id).toBe(1);
-      expect(result.rmaNumber).toBe('RMA-2026-00000001');
-      expect(result.lines[0].id).toBe(50);
-      expect(result.version).toBe(0);
-    });
-  });
-
-  describe('save (existing request)', () => {
-    it('strips the immutable rma_number, updates the root, and re-persists the lines (inspection advances them)', async () => {
-      const request = ReturnRequest.reconstitute({
-        id: 1,
-        rmaNumber: 'RMA-2026-00000001',
-        orderId: 1,
-        customerId: CUSTOMER_ID,
-        status: ReturnStatusEnum.AUTHORIZED,
-        reasonCategory: ReturnReasonCategoryEnum.DEFECTIVE,
-        notes: 'box crushed',
-        requestedAt: new Date('2026-06-19T09:00:00Z'),
-        authorizedAt: new Date('2026-06-19T10:00:00Z'),
-        closedAt: null,
-        lines: buildOpenRequest().lines.slice(),
-        version: 1,
-      });
-
-      const txnRequestRepo = {
-        save: jest.fn().mockResolvedValue({ id: 1 }),
-        update: jest.fn(),
-      };
-      const txnLineRepo = { save: jest.fn().mockResolvedValue([]) };
-      const manager = {
-        getRepository: jest.fn((entity) =>
-          entity === ReturnLineEntity ? txnLineRepo : txnRequestRepo,
-        ),
-      } as unknown as EntityManager;
-      requestRepo.manager.transaction.mockImplementation(
-        async (cb: (m: EntityManager) => Promise<unknown>) => cb(manager),
-      );
-      requestRepo.findOne.mockResolvedValue(
-        reloadedEntity({ status: ReturnStatusEnum.AUTHORIZED, version: 1 }),
-      );
-
-      const result = await repository.save(request);
-
-      // The root save carries the concrete id but NOT the immutable rma_number.
-      const [savedPartial] = txnRequestRepo.save.mock.calls[0] as [
-        { id: number; rmaNumber?: string },
-      ];
-      expect(savedPartial.id).toBe(1);
-      expect('rmaNumber' in savedPartial).toBe(false);
-      // No re-finalize UPDATE on an existing row; the lines ARE re-persisted.
-      expect(txnRequestRepo.update).not.toHaveBeenCalled();
-      expect(txnLineRepo.save).toHaveBeenCalledTimes(1);
-      expect(result.status).toBe(ReturnStatusEnum.AUTHORIZED);
-    });
   });
 
   describe('findById', () => {

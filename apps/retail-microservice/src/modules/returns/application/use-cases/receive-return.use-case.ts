@@ -8,10 +8,12 @@ import {
   IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  IReturnsUnitOfWorkRunner,
   OCC_RETRY_ATTEMPTS,
   RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
+  RETURNS_UNIT_OF_WORK,
 } from '../ports';
 import { loadReturnById } from './return-access';
 import { resolveCustomerEmail } from './resolve-customer-email';
@@ -25,11 +27,16 @@ import { toReturnRequestView } from './return-view.factory';
 // outcome is recorded here — that is the Inspect step. Emits
 // `retail.return.received` best-effort post-commit (ADR-020); `receivedAt` is the moment
 // the transition ran (the model stamps no dedicated column).
+//
+// **The read and the write are not in the same unit of work** (ADR-063) — see
+// `AuthorizeReturnUseCase`'s note; the shape is identical for every simple transition.
 @Injectable()
 export class ReceiveReturnUseCase {
   constructor(
     @Inject(RETURN_REQUEST_REPOSITORY)
     private readonly repository: IReturnRequestRepositoryPort,
+    @Inject(RETURNS_UNIT_OF_WORK)
+    private readonly returnsUow: IReturnsUnitOfWorkRunner,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
     @Inject(RETURN_CUSTOMER_CONTACT_READER)
@@ -54,7 +61,7 @@ export class ReceiveReturnUseCase {
         const request = await loadReturnById(this.repository, rmaId);
         const versionAtLoad = request.version;
         request.receive();
-        return this.repository.save(request, undefined, versionAtLoad);
+        return this.returnsUow.run((uow) => uow.returnRequests.save(request, versionAtLoad));
       },
       { rmaId, correlationId },
     );

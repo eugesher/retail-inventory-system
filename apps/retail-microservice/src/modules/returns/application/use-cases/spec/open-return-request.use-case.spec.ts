@@ -17,6 +17,7 @@ import {
   FakeReturnCustomerContactReader,
   FakeReturnOrderReader,
   FakeReturnRequestRepository,
+  FakeReturnsUnitOfWorkRunner,
   SpyReturnEventsPublisher,
 } from './test-doubles';
 import { IReturnOrderSnapshot } from '../../ports';
@@ -37,11 +38,13 @@ interface IHarness {
 const makeHarness = (snapshot: IReturnOrderSnapshot | null = buildOrderSnapshot()): IHarness => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const repository = new FakeReturnRequestRepository();
+  const returnsUow = new FakeReturnsUnitOfWorkRunner(repository);
   const reader = new FakeReturnOrderReader(snapshot);
   const publisher = new SpyReturnEventsPublisher();
   const customerContactReader = new FakeReturnCustomerContactReader();
   const useCase = new OpenReturnRequestUseCase(
     repository,
+    returnsUow,
     reader,
     publisher,
     customerContactReader,

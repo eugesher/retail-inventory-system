@@ -8,6 +8,7 @@ import { CloseReturnUseCase } from '../close-return.use-case';
 import {
   buildPersistedReturn,
   FakeReturnRequestRepository,
+  FakeReturnsUnitOfWorkRunner,
   SpyReturnEventsPublisher,
 } from './test-doubles';
 
@@ -20,9 +21,11 @@ const makeHarness = (): {
 } => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const repository = new FakeReturnRequestRepository();
+  const returnsUow = new FakeReturnsUnitOfWorkRunner(repository);
   const publisher = new SpyReturnEventsPublisher();
   const useCase = new CloseReturnUseCase(
     repository,
+    returnsUow,
     publisher,
     // OCC_RETRY_ATTEMPTS budget (ADR-036).
     5,

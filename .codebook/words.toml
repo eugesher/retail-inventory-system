@@ -1,0 +1,7 @@
+words = [
+    "ADR",
+    "EVENTSTORE",
+    "Typeorm",
+    "dto",
+    "nestjs",
+]
