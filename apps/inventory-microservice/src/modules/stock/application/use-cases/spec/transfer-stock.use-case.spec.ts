@@ -26,7 +26,7 @@ import {
 } from './test-doubles';
 
 const VARIANT_ID = 42;
-const FROM = INVENTORY_DEFAULT_STOCK_LOCATION; // 'default-warehouse'
+const FROM = INVENTORY_DEFAULT_STOCK_LOCATION;
 const TO = 'backup-store';
 const CORRELATION_ID = 'corr-transfer-1';
 
@@ -78,13 +78,11 @@ describe('TransferStockUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
   });
 
-  // The default transfer is variant 42, 5 units default-warehouse → backup-store,
-  // with the correlation id threaded. Each test overrides only what it asserts on.
   const transfer = (
     overrides: Partial<IStockTransferPayload> = {},
   ): Promise<IStockTransferResult> =>
@@ -99,7 +97,6 @@ describe('TransferStockUseCase', () => {
 
   it('moves on-hand source→destination (lazy-initing the destination) and returns both views', async () => {
     seedLevel(repository, FROM, 20);
-    // No destination level seeded — the transfer lazy-inits it to 0, then credits it.
 
     const result = await transfer({ actorId: 'staff-9' });
 
@@ -110,7 +107,6 @@ describe('TransferStockUseCase', () => {
     expect(result.to.quantityOnHand).toBe(5);
     expect(result.to.available).toBe(5);
 
-    // One transaction; the persisted source and destination rows reflect the move.
     expect(transaction.calls).toBe(1);
     const persistedSource = await repository.findStockLevel(VARIANT_ID, FROM);
     const persistedDest = await repository.findStockLevel(VARIANT_ID, TO);
@@ -126,7 +122,6 @@ describe('TransferStockUseCase', () => {
     expect(movements.appended).toHaveLength(2);
     const [out, incoming] = movements.appended;
 
-    // Source leg: a negative `adjustment`, reason transfer-out, at the source.
     expect(out.type).toBe(StockMovementTypeEnum.ADJUSTMENT);
     expect(out.quantity).toBe(-5);
     expect(out.reasonCode).toBe('transfer-out');
@@ -134,7 +129,6 @@ describe('TransferStockUseCase', () => {
     expect(out.referenceType).toBe('transfer');
     expect(out.actorId).toBe('staff-9');
 
-    // Destination leg: a positive `adjustment`, reason transfer-in, at the destination.
     expect(incoming.type).toBe(StockMovementTypeEnum.ADJUSTMENT);
     expect(incoming.quantity).toBe(5);
     expect(incoming.reasonCode).toBe('transfer-in');
@@ -142,11 +136,9 @@ describe('TransferStockUseCase', () => {
     expect(incoming.referenceType).toBe('transfer');
     expect(incoming.actorId).toBe('staff-9');
 
-    // The pairing key: both legs carry the SAME non-null transfer reference id.
     expect(out.referenceId).not.toBeNull();
     expect(out.referenceId).toBe(incoming.referenceId);
 
-    // Both appends joined the counter's transaction (same scope).
     expect(movements.appendScopes[0]).toBe(transaction.lastScope);
     expect(movements.appendScopes[1]).toBe(transaction.lastScope);
   });
@@ -162,7 +154,6 @@ describe('TransferStockUseCase', () => {
       { variantId: VARIANT_ID, stockLocationId: TO },
     ]);
 
-    // One recorded event per appended ledger row, correlation id threaded.
     expect(publisher.movementsRecorded).toHaveLength(2);
     expect(publisher.movementsRecorded[0].movement).toBe(movements.appended[0]);
     expect(publisher.movementsRecorded[1].movement).toBe(movements.appended[1]);
@@ -180,8 +171,6 @@ describe('TransferStockUseCase', () => {
 
   it('re-runs the whole two-leg write on an optimistic conflict, appending exactly two movements once', async () => {
     seedLevel(repository, FROM, 20);
-    // The first two persists lose the CAS; the appends sit after the persists, so a
-    // losing attempt never reaches them — only the third (winning) attempt appends.
     repository.conflictsBeforeSuccess = 2;
 
     const result = await transfer();
@@ -195,9 +184,6 @@ describe('TransferStockUseCase', () => {
 
   it('leaves NO partial state when the optimistic write exhausts its retry budget', async () => {
     seedLevel(repository, FROM, 20);
-    // Every attempt's persist loses the race (the conflict rejects before the map is
-    // mutated), so neither counter moves and nothing is appended — proof the two
-    // persists + two appends are one unit of work, not a half-applied transfer.
     repository.conflictsBeforeSuccess = 5;
 
     await expect(transfer()).rejects.toMatchObject({
@@ -226,7 +212,6 @@ describe('TransferStockUseCase', () => {
         code: InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
       });
 
-      // The destination was never persisted and no ledger row / invalidation fired.
       expect(await repository.findStockLevel(VARIANT_ID, TO)).toBeNull();
       expect(movements.appended).toHaveLength(0);
       expect(cache.invalidations).toHaveLength(0);
@@ -272,14 +257,12 @@ describe('TransferStockUseCase', () => {
   });
 
   it('emits inventory.stock.low for the SOURCE when its post-transfer on-hand falls at/below the threshold', async () => {
-    // Threshold is 5; source 10 − 6 = 4 ≤ 5 → the low-stock alert fires for the source.
     seedLevel(repository, FROM, INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD + 5);
 
     await transfer({ quantity: 6 });
 
     expect(publisher.low).toHaveLength(1);
     const [low] = publisher.low;
-    // The alert is for the SOURCE location, never the destination (which only gained).
     expect(low.event.stockLocationId).toBe(FROM);
     expect(low.event.aggregateId).toBe(VARIANT_ID);
     expect(low.event.quantity).toBe(INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD - 1);
@@ -301,7 +284,6 @@ describe('TransferStockUseCase', () => {
 
     const result = await transfer();
 
-    // The transfer still succeeds and both ledger rows still landed in the tx.
     expect(result.from.quantityOnHand).toBe(15);
     expect(result.to.quantityOnHand).toBe(5);
     expect(movements.appended).toHaveLength(2);

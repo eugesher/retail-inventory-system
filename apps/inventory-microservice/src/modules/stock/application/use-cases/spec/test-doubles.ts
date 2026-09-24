@@ -34,23 +34,15 @@ import {
 } from '../../ports';
 import { StockWriteConflictError } from '../stock-write-conflict.error';
 
-// In-memory `IStockRepositoryPort` over two maps — stock levels keyed on
-// `(variantId, stockLocationId)` and locations keyed on the string id. Domain
-// types only, mirroring the real repository's port contract.
 export class InMemoryStockRepository implements IStockRepositoryPort {
   public readonly levels = new Map<string, StockLevel>();
   public readonly locations = new Map<string, StockLocation>();
-  // Test hook: reject the next N `persistStockLevelChange` calls with a
-  // `StockWriteConflictError`, to drive the optimistic-retry loop.
   public conflictsBeforeSuccess = 0;
 
   private key(variantId: number, stockLocationId: string): string {
     return `${variantId}:${stockLocationId}`;
   }
 
-  // A fresh aggregate per read, mirroring the real repository (which maps a new
-  // object out of each DB row). Essential for the retry path: a failed attempt's
-  // in-place `changeOnHand` must not mutate the stored row the next read returns.
   private clone(level: StockLevel): StockLevel {
     return new StockLevel({
       id: level.id,
@@ -116,8 +108,6 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
       );
     }
 
-    // Mirror the real compare-and-swap: a stale `expectedVersion` (a concurrent
-    // writer bumped the stored row first) loses. `null` is a first-touch insert.
     const stored = this.levels.get(this.key(stockLevel.variantId, stockLevel.stockLocationId));
     if (expectedVersion !== null && stored && stored.version !== expectedVersion) {
       return Promise.reject(
@@ -131,10 +121,6 @@ export class InMemoryStockRepository implements IStockRepositoryPort {
   }
 }
 
-// In-memory `IStockCachePort` mirroring the real adapter's cache-aside +
-// invalidation contract (ADR-021 / ADR-023) without Redis. `available = false`
-// simulates a Redis-down read so the use case's fallback path can be exercised
-// (CACHE-005).
 export class InMemoryStockCache implements IStockCachePort {
   public readonly store = new Map<string, VariantStockView>();
   public readonly setCalls: IStockCacheSetPayload[] = [];
@@ -202,16 +188,8 @@ export class InMemoryStockCache implements IStockCachePort {
   }
 }
 
-// Runs the transactional `work` immediately with an opaque sentinel scope. The
-// real adapter opens a MySQL transaction and the mutator now threads the scope
-// into the repository read + persist; the in-memory repository ignores it (a
-// single map, no isolation to model), so a pass-through double still faithfully
-// exercises the find → changeOnHand → persist call path the write use cases take.
 export class ImmediateTransactionPort implements ITransactionPort {
   public calls = 0;
-  // The opaque sentinel scope handed to the most recent `work`. Specs assert that
-  // the movement repository's `append` received this exact reference — proof the
-  // ledger write joined the same transaction as the counter persist.
   public lastScope: ITransactionScope | null = null;
 
   public runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
@@ -222,9 +200,6 @@ export class ImmediateTransactionPort implements ITransactionPort {
   }
 }
 
-// Records every publish so the write-use-case specs can assert which events fired
-// (and, for low-stock, that it fires only at/below the threshold). All methods
-// resolve — the post-commit emit is best-effort (ADR-020).
 export class RecordingStockEventsPublisher implements IStockEventsPublisherPort {
   public readonly low: { event: StockLowEvent; correlationId?: string }[] = [];
   public readonly received: { event: StockReceivedEvent; correlationId?: string }[] = [];
@@ -294,10 +269,6 @@ export class RecordingStockEventsPublisher implements IStockEventsPublisherPort 
   }
 }
 
-// In-memory `IReservationRepositoryPort` keyed on the reservation UUID. Clones on
-// every read (the `InMemoryStockRepository` precedent) so a retried use-case
-// attempt — which mutates the returned hold in place (`refresh`/`reactivate`/
-// `release`) — never leaks into the stored row.
 export class InMemoryReservationRepository implements IReservationRepositoryPort {
   public readonly rows = new Map<string, Reservation>();
 
@@ -359,8 +330,6 @@ export class InMemoryReservationRepository implements IReservationRepositoryPort
     return Promise.resolve(matching.map((row) => this.clone(row)));
   }
 
-  // Mirrors the real scan: `active` + strict `expiresAt < now`, oldest first with an id
-  // tiebreaker, capped at `limit`.
   public listExpiredActive(now: Date, limit: number): Promise<Reservation[]> {
     const matching = [...this.rows.values()]
       .filter(
@@ -384,23 +353,12 @@ export class InMemoryReservationRepository implements IReservationRepositoryPort
   }
 }
 
-// In-memory append-only `IStockMovementRepositoryPort`. `append` assigns a
-// monotonic id and stores the frozen record; `listByVariant` is a minimal
-// newest-first page so the seam is fully implemented.
 export class InMemoryStockMovementRepository implements IStockMovementRepositoryPort {
   public readonly appended: StockMovement[] = [];
-  // The transaction scope each `append` was called with, in append order. Specs
-  // assert it matches the scope the transaction port opened (the movement joined
-  // the counter's transaction, ADR-030 §2).
   public readonly appendScopes: (ITransactionScope | undefined)[] = [];
   private nextId = 1;
   private duplicateOnNextAppend = false;
 
-  // Arms the next `append` to fail the way MySQL fails it when the writer loses the
-  // `UC_STOCK_MOVEMENT_DEDUPE` race — the ONLY way a unit spec can reach that path,
-  // since an in-memory double has no UNIQUE to break. The shape (not the class) is the
-  // contract `isDuplicateEntryError` duck-types against, and the real driver nests the
-  // errno under `driverError`, so reproduce that nesting rather than a flat object.
   public failNextAppendWithDuplicateEntry(): void {
     this.duplicateOnNextAppend = true;
   }

@@ -13,8 +13,6 @@ import { ListStockMovementsUseCase } from '../list-stock-movements.use-case';
 
 const correlationId = 'corr-movements-1';
 
-// A persisted (load-path) movement with sensible defaults; overrides let a test
-// pin the field under assertion.
 const movement = (props: {
   id: number;
   variantId?: number;
@@ -32,7 +30,6 @@ const movement = (props: {
     variantId: props.variantId ?? 7,
     stockLocationId: props.stockLocationId ?? 'default-warehouse',
     type: props.type ?? StockMovementTypeEnum.ADJUSTMENT,
-    // ADJUSTMENT accepts either sign; pick a non-zero default.
     quantity: props.quantity ?? -3,
     reasonCode: props.reasonCode ?? null,
     referenceType: props.referenceType ?? null,
@@ -43,10 +40,6 @@ const movement = (props: {
   });
 
 describe('ListStockMovementsUseCase', () => {
-  // The repository's `listByVariant` is held as a standalone, typed `jest.fn()`
-  // (not accessed off the object in assertions) so the `unbound-method` lint rule
-  // stays happy and `mock.calls[0][0]` is typed `IStockMovementListQuery` (no
-  // unsafe-any). The use case only ever calls this one method.
   let listByVariant: jest.Mock<Promise<IStockMovementPage>, [IStockMovementListQuery]>;
   let repository: IStockMovementRepositoryPort;
   let logger: PinoLoggerMock;
@@ -64,11 +57,9 @@ describe('ListStockMovementsUseCase', () => {
 
     const result = await useCase.execute({ variantId: 7, page: 2, size: 5, correlationId });
 
-    // Paging math passes straight through to the repository...
     expect(listByVariant).toHaveBeenCalledWith(
       expect.objectContaining({ variantId: 7, page: 2, size: 5 }),
     );
-    // ...and the applied page/size are echoed back alongside the repo's total.
     expect(result.page).toBe(2);
     expect(result.size).toBe(5);
     expect(result.total).toBe(42);
@@ -115,7 +106,6 @@ describe('ListStockMovementsUseCase', () => {
     const occurredAt = new Date('2026-06-10T08:30:00.000Z');
     listByVariant.mockResolvedValue({
       items: [
-        // A system adjustment: nullable reference/actor fields stay null.
         movement({
           id: 11,
           type: StockMovementTypeEnum.ADJUSTMENT,
@@ -123,7 +113,6 @@ describe('ListStockMovementsUseCase', () => {
           reasonCode: 'damaged',
           occurredAt,
         }),
-        // An order allocation: the polymorphic reference + actor are populated.
         movement({
           id: 10,
           type: StockMovementTypeEnum.ALLOCATION,
@@ -164,7 +153,6 @@ describe('ListStockMovementsUseCase', () => {
       actorId: 'staff-1',
       occurredAt: occurredAt.toISOString(),
     });
-    // `occurredAt` is a string on the wire, never a Date.
     expect(typeof result.items[0].occurredAt).toBe('string');
   });
 

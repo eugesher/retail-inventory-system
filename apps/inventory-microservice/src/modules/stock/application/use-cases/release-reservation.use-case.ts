@@ -36,17 +36,6 @@ import { emitReservationReleased, IReleasedReservationRow } from './stock-releas
 
 const DEFAULT_RELEASE_REASON: ReservationReleaseReason = 'cart-removed';
 
-// Release Reservation returns held units to `available` and leaves an audit trail
-// (ADR-030 §4). It accepts EXACTLY one selector family — `reservationId` (one row)
-// or `cartId` (+ optional `variantId` / `stockLocationId`, all matching active
-// rows) — rejecting both/neither with `RESERVATION_SELECTOR_INVALID`. The by-id
-// path 404s on an unknown id and 409s a non-active hold; the by-cart path treats
-// an empty match as an idempotent no-op. The matched rows are released atomically
-// inside one `withInvalidation(runWithStockWriteRetry(...))`: per row it loads the
-// `StockLevel`, `releaseReserved`s the held quantity, flips the row to `released`,
-// version-checked-persists the level, saves the row, and appends a **negative
-// `release` movement** (`referenceType 'cart'`). Released + movement-recorded
-// events fire post-commit, best-effort.
 @Injectable()
 export class ReleaseReservationUseCase {
   constructor(
@@ -88,7 +77,6 @@ export class ReleaseReservationUseCase {
       'Received RPC: release reservation',
     );
 
-    // Exactly one selector family — both present or neither is a 400.
     if (hasById === hasByCart) {
       throw new InventoryDomainException(
         InventoryErrorCodeEnum.RESERVATION_SELECTOR_INVALID,
@@ -96,13 +84,8 @@ export class ReleaseReservationUseCase {
       );
     }
 
-    // Resolve which holds to release (a pre-tx read that decides the 404 / empty
-    // no-op). The transaction re-reads each by id, so a retry never operates on a
-    // stale in-memory row.
     const targetIds = await this.resolveTargetIds(payload);
     if (targetIds.length === 0) {
-      // Selector B with no active match — idempotent no-op (remove-after-remove
-      // must not error). Selector A would have 404'd above instead.
       this.logger.info(
         { correlationId, cartId: payload.cartId },
         'Release: no active holds matched — no-op',
@@ -121,8 +104,6 @@ export class ReleaseReservationUseCase {
           (scope) => this.releaseAll(scope, targetIds, reason, actorId),
           { correlationId },
         ),
-      // `withInvalidation` dedupes by variantId and wipes a per-variant prefix
-      // covering every location facet, so the raw per-row items are enough.
       (rows) =>
         rows.map((row) => ({
           variantId: row.reservation.variantId,
@@ -136,7 +117,6 @@ export class ReleaseReservationUseCase {
       'Reservations released — counters returned to available',
     );
 
-    // Post-commit, best-effort (ADR-020), per released row.
     await Promise.all(
       releasedRows.map((row) =>
         emitReservationReleased(this.publisher, this.logger, row, reason, correlationId),
@@ -146,9 +126,6 @@ export class ReleaseReservationUseCase {
     return { released: releasedRows.map((row) => toReservationView(row.reservation)) };
   }
 
-  // The by-id selector resolves to a single id (404 missing, 409 non-active); the
-  // by-cart selector resolves to all matching active ids (an empty list is the
-  // no-op the caller returns early on).
   private async resolveTargetIds(payload: IReservationReleasePayload): Promise<string[]> {
     if (payload.reservationId !== undefined && payload.reservationId !== null) {
       const found = await this.reservationRepository.findById(payload.reservationId);
@@ -169,7 +146,6 @@ export class ReleaseReservationUseCase {
 
     const cartId = payload.cartId;
     if (cartId === undefined || cartId === null) {
-      // Unreachable: the selector check guarantees a cartId on this branch.
       throw new Error('Release: selector resolution reached the by-cart branch without a cartId');
     }
 
@@ -186,9 +162,6 @@ export class ReleaseReservationUseCase {
     return scoped.map((row) => row.id).filter((id): id is string => id !== null);
   }
 
-  // One transactional attempt: release every matched hold atomically. Re-reads
-  // each reservation + its level fresh under the scope so a retried attempt never
-  // double-applies. Each release writes one negative `release` movement.
   private async releaseAll(
     scope: ITransactionScope,
     targetIds: string[],
@@ -200,15 +173,11 @@ export class ReleaseReservationUseCase {
     for (const id of targetIds) {
       const row = await this.reservationRepository.findById(id, scope);
       if (row === null) {
-        // Resolved present pre-tx; a vanished row is an invariant breach (FKs are
-        // ON DELETE RESTRICT), not a client error.
         throw new Error(`Release: reservation ${id} vanished mid-transaction`);
       }
 
       const level = await this.repository.findStockLevel(row.variantId, row.stockLocationId, scope);
       if (level === null) {
-        // An active hold whose level is gone is corruption — the reserve path that
-        // created the hold also created/raised the level.
         throw new Error(
           `Release: stock level for variant ${row.variantId} @ ${row.stockLocationId} is missing`,
         );
@@ -216,8 +185,6 @@ export class ReleaseReservationUseCase {
 
       const expectedVersion = level.version;
       level.releaseReserved(row.quantity);
-      // `release()` re-asserts the active state inside the tx — a hold a concurrent
-      // writer already released throws `RESERVATION_INVALID_STATE` here.
       row.release();
       await this.repository.persistStockLevelChange(level, expectedVersion, scope);
       const savedRow = await this.reservationRepository.save(row, scope);

@@ -1,11 +1,5 @@
 import { DomainEvent } from '@retail-inventory-system/ddd';
 
-// **The one event on which stock physically leaves.** A commit decrements `quantity_on_hand` *and*
-// `quantity_allocated` together (ADR-031); every earlier event in the reserve → allocate chain only
-// moved counters between columns.
-//
-// `fulfillmentId` is the idempotency anchor — the `sale` movement references it, so replaying a
-// commit for the same shipment decrements nothing.
 export class StockCommittedEvent extends DomainEvent<number> {
   public readonly stockLocationId: string;
   public readonly quantity: number;

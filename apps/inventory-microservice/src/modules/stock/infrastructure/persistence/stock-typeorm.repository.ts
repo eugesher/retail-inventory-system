@@ -14,11 +14,6 @@ import { StockLevelMapper } from './stock-level.mapper';
 import { StockLocationEntity } from './stock-location.entity';
 import { StockLocationMapper } from './stock-location.mapper';
 
-// The only `@InjectRepository` site for the inventory context. Extends
-// `BaseTypeormRepository` for the `toDomain`/`toEntity` seam over the primary
-// `StockLevel` aggregate; `StockLocation` is the secondary read model (its own
-// repository, like `TaxCategory` in pricing). Returns domain types only — no
-// TypeORM leak past this file (ADR-017).
 @Injectable()
 export class StockTypeormRepository
   extends BaseTypeormRepository<StockLevelEntity, StockLevel>
@@ -80,9 +75,6 @@ export class StockTypeormRepository
   public async saveStockLevel(stockLevel: StockLevel): Promise<StockLevel> {
     const partial = StockLevelMapper.toEntity(stockLevel);
 
-    // A detached level (id null) for an existing `(variant_id, stock_location_id)`
-    // pair must UPDATE that row, not collide with the UNIQUE constraint on
-    // INSERT — resolve to the live id first so `save` takes the update path.
     if (partial.id === undefined) {
       const existing = await this.stockLevelRepository.findOne({
         where: { variantId: stockLevel.variantId, stockLocationId: stockLevel.stockLocationId },
@@ -109,10 +101,6 @@ export class StockTypeormRepository
   ): Promise<StockLevel> {
     const repo = this.levelRepo(scope);
 
-    // First-touch: no row existed at read time. A plain INSERT lets the UNIQUE
-    // constraint arbitrate — a concurrent writer that created the row first turns
-    // ours into a retryable conflict (the loser re-reads on retry and takes the
-    // update path).
     if (expectedVersion === null) {
       const partial = StockLevelMapper.toEntity(stockLevel);
       let savedId: number;
@@ -128,10 +116,6 @@ export class StockTypeormRepository
       return this.reload(repo, savedId);
     }
 
-    // Existing row: optimistic compare-and-swap. `version = version + 1` is the
-    // DB's authoritative increment; the `WHERE ... AND version = :expectedVersion`
-    // predicate makes a concurrent writer (who already bumped the version) match
-    // zero rows — a retryable conflict rather than a silent lost update.
     const result = await repo.update(
       { id: stockLevel.id!, version: expectedVersion },
       {
@@ -143,9 +127,6 @@ export class StockTypeormRepository
     );
 
     if (!result.affected) {
-      // Carry the `from` version we lost the CAS against onto the retry signal (ADR-036)
-      // — the conflict path stays deliberately query-free (no re-read of the winning
-      // version), so only `expectedVersion` is surfaced.
       throw new StockWriteConflictError(
         stockLevel.variantId,
         stockLevel.stockLocationId,
@@ -156,9 +137,6 @@ export class StockTypeormRepository
     return this.reload(repo, stockLevel.id!);
   }
 
-  // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
-  // repository.
   private levelRepo(scope?: ITransactionScope): Repository<StockLevelEntity> {
     if (!scope) {
       return this.stockLevelRepository;
@@ -167,9 +145,6 @@ export class StockTypeormRepository
     return manager.getRepository(StockLevelEntity);
   }
 
-  // Re-read so the returned aggregate carries the concrete generated id, the
-  // committed version, and the DB timestamps. The row was just written in this
-  // unit of work, so a miss here is an invariant breach rather than a not-found.
   private async reload(repo: Repository<StockLevelEntity>, id: number): Promise<StockLevel> {
     const reloaded = await repo.findOne({ where: { id } });
     if (!reloaded) {

@@ -67,26 +67,23 @@ describe('StockTypeormRepository', () => {
   describe('saveStockLevel', () => {
     it('inserts a new level and re-reads for the concrete id', async () => {
       const level = StockLevel.initialAt(1, 'default-warehouse');
-      // No existing row → the lookup returns null; save assigns id 10; re-read.
       levelRepo.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(makeLevelEntity());
       levelRepo.save.mockResolvedValue(makeLevelEntity());
 
       const result = await repository.saveStockLevel(level);
 
-      // The first save argument carries no id → INSERT path.
       const savedArg = levelRepo.save.mock.calls[0][0] as Partial<StockLevelEntity>;
       expect(savedArg.id).toBeUndefined();
       expect(result.id).toBe(10);
       expect(result.quantityOnHand).toBe(7);
-      // Re-read keyed on the generated id.
       expect(levelRepo.findOne).toHaveBeenLastCalledWith({ where: { id: 10 } });
     });
 
     it('resolves a detached level to the existing row id so save updates instead of colliding', async () => {
       const level = StockLevel.initialAt(1, 'default-warehouse');
       levelRepo.findOne
-        .mockResolvedValueOnce(makeLevelEntity({ id: 7 })) // existing lookup
-        .mockResolvedValueOnce(makeLevelEntity({ id: 7, version: 5 })); // re-read
+        .mockResolvedValueOnce(makeLevelEntity({ id: 7 }))
+        .mockResolvedValueOnce(makeLevelEntity({ id: 7, version: 5 }));
       levelRepo.save.mockResolvedValue(makeLevelEntity({ id: 7, version: 5 }));
 
       const result = await repository.saveStockLevel(level);
@@ -138,7 +135,6 @@ describe('StockTypeormRepository', () => {
     });
 
     it('version-checks the UPDATE and re-reads on a winning compare-and-swap', async () => {
-      // Loaded version was 2; `changeOnHand` bumped the in-memory token to 3.
       const level = new StockLevel({
         id: 7,
         variantId: 1,

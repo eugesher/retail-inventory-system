@@ -59,7 +59,6 @@ describe('ListLocationsUseCase', () => {
         active: true,
       },
     ]);
-    // `address` is deliberately omitted from the view.
     expect(result[0]).not.toHaveProperty('address');
   });
 

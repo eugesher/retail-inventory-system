@@ -8,37 +8,25 @@ import { IStockRepositoryPort, ITransactionScope } from '../ports';
 
 const MS_PER_MINUTE = 60_000;
 
-// A request line with its optional location already resolved to the default. Every all-lines-atomic
-// operation normalizes at the edge, so the write path below never sees an unresolved location.
 export interface INormalizedReservationLine {
   variantId: number;
   stockLocationId: string;
   quantity: number;
 }
 
-// A distinct `(variantId, stockLocationId)` level loaded once per attempt, with the
-// optimistic token captured BEFORE any mutation. Several lines may share it.
 export interface ILoadedStockLevel {
   level: StockLevel;
   expectedVersion: number | null;
 }
 
-// The map key for a `(variantId, stockLocationId)` pair — lines sharing a level
-// resolve to the same entry so it is loaded and persisted exactly once per attempt.
 export function levelKey(variantId: number, stockLocationId: string): string {
   return `${variantId}:${stockLocationId}`;
 }
 
-// The TTL instant, computed in one place so a hold minted by Reserve and a hold refreshed by
-// Allocate cannot disagree about when it lapses.
 export function reservationExpiresAt(now: Date, ttlMinutes: number): Date {
   return new Date(now.getTime() + ttlMinutes * MS_PER_MINUTE);
 }
 
-// Backstop for the directly-reachable RMQ path (the gateway DTO validates first):
-// a non-empty line list, each with a positive-integer quantity, the optional
-// location resolved to the default. `label` prefixes the rejection message so the
-// caller sees which operation rejected (e.g. `Allocate` / `Cancel allocation`).
 export function normalizeReservationLines(
   lines: IAllocationLine[] | undefined,
   label: string,
@@ -65,27 +53,6 @@ export function normalizeReservationLines(
   });
 }
 
-// The precondition of the LEDGER-BACKED idempotency guard (`UC_STOCK_MOVEMENT_DEDUPE`).
-// Commit Sale and Restock From Return are made idempotent by a UNIQUE over
-// `(type, referenceType, referenceId, variantId, stockLocationId)`, so each of them
-// catches the duplicate-key error and reads it as *"a concurrent redelivery of this
-// request lost the race"* — a successful no-op.
-//
-// **That reading is only sound while one request cannot collide with ITSELF.** Two
-// lines of one payload sharing a `(variantId, stockLocationId)` would produce the same
-// key, and the use case would then mistake its own malformed payload for a replay and
-// report a commit that never happened. So reject it here, at the edge, and the
-// duplicate-key error keeps exactly one meaning.
-//
-// Nothing upstream can produce such a payload — a cart merges lines by `variantId`
-// (`Cart.addLine`), so an order carries one line per variant, and a fulfillment ships
-// from one location. But that invariant lives in ANOTHER service and no constraint
-// holds it, and both RPCs are directly reachable over RabbitMQ. This is the backstop
-// that makes the guard's meaning local (the `normalizeReservationLines` precedent).
-//
-// Deliberately NOT folded into `normalizeReservationLines`: Allocate and Cancel
-// Allocation share that helper, are not ledger-deduped, and legitimately tolerate
-// lines that share a level (`loadDistinctLevels` sums them).
 export function requireDistinctLevels(lines: INormalizedReservationLine[], label: string): void {
   const seen = new Set<string>();
   for (const line of lines) {
@@ -101,11 +68,6 @@ export function requireDistinctLevels(lines: INormalizedReservationLine[], label
   }
 }
 
-// Phase 1 of an all-lines-atomic write: load each distinct `(variantId, location)`
-// level exactly once and capture its optimistic token before any counter moves, so
-// lines sharing a level mutate the one in-memory instance and it persists with a
-// single version bump. A missing row lazy-inits to a zeroed level (token null marks
-// the first-touch INSERT).
 export async function loadDistinctLevels(
   repository: IStockRepositoryPort,
   lines: INormalizedReservationLine[],

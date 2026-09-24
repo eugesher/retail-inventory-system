@@ -42,7 +42,7 @@ describe('RestockFromReturnUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
   });
@@ -110,26 +110,22 @@ describe('RestockFromReturnUseCase', () => {
       ],
     });
 
-    // On-hand rose by the restocked quantity; allocated/reserved untouched; so
-    // available rose by the same amount (10−3−2=5 → 14−3−2=9).
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(level?.quantityOnHand).toBe(14);
     expect(level?.quantityAllocated).toBe(3);
     expect(level?.quantityReserved).toBe(2);
     expect(level?.available).toBe(9);
 
-    // Exactly one `return` movement, strictly positive, referencing the request.
     expect(movements.appended).toHaveLength(1);
     const movement = movements.appended[0];
     expect(movement.type).toBe(StockMovementTypeEnum.RETURN);
     expect(movement.quantity).toBe(4);
-    expect(movement.quantity).toBeGreaterThan(0); // the sign invariant, explicit
+    expect(movement.quantity).toBeGreaterThan(0);
     expect(movement.referenceType).toBe('return-request');
     expect(movement.referenceId).toBe(String(RETURN_REQUEST_ID));
     expect(movement.reasonCode).toBeNull();
     expect(movement.actorId).toBeNull();
 
-    // returned event + recorded event, both correlated.
     expect(publisher.returned).toHaveLength(1);
     expect(publisher.returned[0].event.aggregateId).toBe(VARIANT_ID);
     expect(publisher.returned[0].event.quantity).toBe(4);
@@ -138,13 +134,11 @@ describe('RestockFromReturnUseCase', () => {
     expect(publisher.returned[0].correlationId).toBe(CORRELATION_ID);
     expect(publisher.movementsRecorded).toHaveLength(1);
 
-    // Cache invalidated for the touched (variant, location).
     expect(cache.invalidations).toHaveLength(1);
     expect(cache.invalidations[0].items).toEqual([
       { variantId: VARIANT_ID, stockLocationId: LOCATION },
     ]);
 
-    // The movement joined the counter's transaction (same scope reference).
     expect(transaction.calls).toBe(1);
     expect(movements.appendScopes[0]).toBe(transaction.lastScope);
   });
@@ -158,7 +152,6 @@ describe('RestockFromReturnUseCase', () => {
   });
 
   it('lazy-inits a missing level (a returned variant with no level at the location)', async () => {
-    // No level seeded for VARIANT_ID at LOCATION.
     const result = await restock([line({ quantity: 5 })]);
 
     expect(result.restocked).toHaveLength(1);
@@ -173,16 +166,12 @@ describe('RestockFromReturnUseCase', () => {
   it('is idempotent on returnRequestId — a replay increments nothing and re-returns the lines', async () => {
     seedLevel({ onHand: 10 });
 
-    // First restock.
     await restock([line({ quantity: 4 })]);
     const afterFirst = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(afterFirst?.quantityOnHand).toBe(14);
     expect(movements.appended).toHaveLength(1);
     const callsAfterFirst = transaction.calls;
 
-    // Replay (same returnRequestId): a return movement already references it, so the
-    // restock short-circuits — no second increment, no new movement, no new
-    // transaction, no cache invalidation — but it re-returns the request's lines.
     const replay = await restock([line({ quantity: 4 })]);
     expect(replay).toEqual({
       restocked: [
@@ -196,11 +185,11 @@ describe('RestockFromReturnUseCase', () => {
     });
 
     const afterReplay = await repository.findStockLevel(VARIANT_ID, LOCATION);
-    expect(afterReplay?.quantityOnHand).toBe(14); // unchanged
-    expect(movements.appended).toHaveLength(1); // no second movement
-    expect(transaction.calls).toBe(callsAfterFirst); // no second transaction
-    expect(cache.invalidations).toHaveLength(1); // only the first restock invalidated
-    expect(publisher.returned).toHaveLength(1); // no second returned event
+    expect(afterReplay?.quantityOnHand).toBe(14);
+    expect(movements.appended).toHaveLength(1);
+    expect(transaction.calls).toBe(callsAfterFirst);
+    expect(cache.invalidations).toHaveLength(1);
+    expect(publisher.returned).toHaveLength(1);
   });
 
   it('restocks multiple lines atomically with a return movement + returned event per line', async () => {
@@ -229,8 +218,6 @@ describe('RestockFromReturnUseCase', () => {
   it('rolls the whole restock back when the write conflict exhausts the retry budget (all-lines-atomic)', async () => {
     seedLevel({ variantId: 1, onHand: 10 });
     seedLevel({ variantId: 2, onHand: 20 });
-    // The first persist of every attempt loses the optimistic race; the 5-attempt
-    // budget is exhausted, so nothing is persisted for ANY line.
     repository.conflictsBeforeSuccess = 5;
 
     const error = await restock([
@@ -242,7 +229,6 @@ describe('RestockFromReturnUseCase', () => {
     expect((error as InventoryDomainException).code).toBe(
       InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
     );
-    // Neither level's on-hand changed; no movement, no event, no invalidation.
     expect((await repository.findStockLevel(1, LOCATION))?.quantityOnHand).toBe(10);
     expect((await repository.findStockLevel(2, LOCATION))?.quantityOnHand).toBe(20);
     expect(movements.appended).toHaveLength(0);
@@ -258,14 +244,10 @@ describe('RestockFromReturnUseCase', () => {
 
     expect(transaction.calls).toBe(2);
     expect((await repository.findStockLevel(VARIANT_ID, LOCATION))?.quantityOnHand).toBe(14);
-    // Exactly one movement despite the burned attempt (the append runs after the
-    // version-checked persist, so a lost CAS leaves no orphan row).
     expect(movements.appended).toHaveLength(1);
   });
 
   it('never fires low-stock — a restock only raises on-hand', async () => {
-    // End below the threshold (5): start at 1, restock +2 → 3 ≤ 5. A Commit Sale /
-    // Adjust would alert here; Restock skips the check entirely.
     seedLevel({ onHand: 1 });
 
     await restock([line({ quantity: 2 })]);
@@ -293,8 +275,6 @@ describe('RestockFromReturnUseCase', () => {
     });
   });
 
-  // The inverted twin of Commit Sale's guard. A double-credit does not lose stock — it
-  // INVENTS stock that never came back, and phantom inventory oversells.
   describe('losing a concurrent race must be a successful no-op, never a throw', () => {
     it('translates the ledger duplicate-key error into the same replay result', async () => {
       seedLevel({ onHand: 10 });
@@ -304,17 +284,9 @@ describe('RestockFromReturnUseCase', () => {
 
       expect(result.restocked).toHaveLength(1);
       expect(movements.appended).toHaveLength(0);
-      // NOT asserted here: that the level write rolled back. `ImmediateTransactionPort`
-      // just runs the callback — it has no rollback, so the in-memory level keeps the
-      // credit even though a real transaction would undo it. What this spec owns is the
-      // TRANSLATION (no throw, replay result, no ledger row); that the counter is
-      // restored is the transaction's job, and it is proven against real MySQL in
-      // `test/concurrent-commit-sale.e2e-spec.ts`.
     });
   });
 
-  // Two lines on one level share a dedupe key, which would make the duplicate-key catch
-  // above misread the payload's own collision as a replay — see the Commit Sale twin.
   it('rejects two lines that share a (variant, location) level', async () => {
     seedLevel({ onHand: 10 });
 

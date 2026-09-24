@@ -55,16 +55,12 @@ describe('SweepExpiredReservationsUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       batchSize,
       transactionSize,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
 
-  // Seeds a stranded `active` hold — its TTL already elapsed — plus the level whose
-  // reserved counter holds exactly it. `Reservation.create` refuses a past `expiresAt`
-  // (a forward-computed TTL is an invariant), so the load path is the only way to build
-  // one, exactly as the repository would return it.
   const seedExpiredHold = (
     id: string,
     variantId: number,
@@ -95,7 +91,6 @@ describe('SweepExpiredReservationsUseCase', () => {
     return hold;
   };
 
-  // A copy of `hold` in some other state — what a competing writer would have left behind.
   const variantOf = (
     hold: Reservation,
     overrides: { status?: ReservationStatusEnum; expiresAt?: Date },
@@ -142,10 +137,6 @@ describe('SweepExpiredReservationsUseCase', () => {
     const scan = jest.spyOn(reservations, 'listExpiredActive');
     const useCase = makeUseCase();
 
-    // `null` reaches here through the gateway: `@IsOptional()` skips its validators for
-    // `null` as well as `undefined`. The rest reach here through a direct RPC, which no
-    // pipe guards. None of them may collapse to a one-row sweep (`Math.trunc(null) === 0`)
-    // or to `take: NaN`.
     for (const batchSize of [null, 'abc', NaN, Infinity, {}, []] as unknown as number[]) {
       await useCase.execute({ batchSize });
     }
@@ -163,7 +154,6 @@ describe('SweepExpiredReservationsUseCase', () => {
 
     const result = await makeUseCase(BATCH_SIZE, 3).execute();
 
-    // 7 candidates at 3 rows per transaction → 3 / 3 / 1.
     expect(transaction.calls).toBe(3);
     expect(withInvalidation).toHaveBeenCalledTimes(3);
     expect(result).toMatchObject({ scanned: 7, expired: 7, skipped: 0 });
@@ -177,7 +167,6 @@ describe('SweepExpiredReservationsUseCase', () => {
     await makeUseCase().execute();
 
     expect(releaseReserved).toHaveBeenCalledWith(3);
-    // `expectedVersion` is the token read BEFORE `releaseReserved` bumped it to 1.
     const [persistedLevel, expectedVersion] = persist.mock.calls[0];
     expect(expectedVersion).toBe(0);
     expect(persistedLevel.version).toBe(1);
@@ -202,7 +191,6 @@ describe('SweepExpiredReservationsUseCase', () => {
     expect(movement.referenceType).toBe('cart');
     expect(movement.referenceId).toBe(CART_ID);
     expect(movement.actorId).toBe('ops-1');
-    // The ledger row joined the counter's transaction.
     expect(movements.appendScopes[0]).toBe(transaction.lastScope);
   });
 
@@ -216,7 +204,6 @@ describe('SweepExpiredReservationsUseCase', () => {
       .mockImplementation((level, expectedVersion) => {
         if (firstAttempt) {
           firstAttempt = false;
-          // The winning writer released the hold and returned the counter under us.
           reservations.rows.set(
             'res-1',
             variantOf(hold, { status: ReservationStatusEnum.RELEASED }),
@@ -232,7 +219,6 @@ describe('SweepExpiredReservationsUseCase', () => {
 
     expect(transaction.calls).toBe(2);
     expect(result).toMatchObject({ scanned: 1, expired: 0, skipped: 1 });
-    // No double-decrement, and no orphaned ledger row from the losing attempt.
     expect(movements.appended).toHaveLength(0);
     expect(publisher.released).toHaveLength(0);
   });
@@ -261,8 +247,6 @@ describe('SweepExpiredReservationsUseCase', () => {
   it('invalidates through `withInvalidation`, resolving items only once the write has landed', async () => {
     seedExpiredHold('res-1', 42, 3);
 
-    // Capture what the repository holds at the instant `resolveItems` runs — ADR-023's
-    // ordering says the transaction has already resolved by then.
     let statusWhenResolved: ReservationStatusEnum | undefined;
     const realWithInvalidation = cache.withInvalidation.bind(cache);
     jest
@@ -317,7 +301,6 @@ describe('SweepExpiredReservationsUseCase', () => {
 
     expect(result).toMatchObject({ scanned: 1, expired: 1, skipped: 0 });
     expect(reservations.rows.get('res-1')?.status).toBe(ReservationStatusEnum.EXPIRED);
-    // The movement announce still fires — a failed released-event never short-circuits it.
     expect(publisher.movementsRecorded).toHaveLength(1);
   });
 

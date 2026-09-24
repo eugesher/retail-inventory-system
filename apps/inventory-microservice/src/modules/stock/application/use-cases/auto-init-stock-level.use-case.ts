@@ -15,18 +15,6 @@ import {
 } from '../ports';
 import { isDuplicateEntryError } from './mysql-error.util';
 
-// Auto-init turns a catalog `variant.created` event into a zeroed `stock_level`
-// row for the new variant at the default warehouse, so the inventory read path
-// has a figure to serve as soon as a variant exists (ADR-027). It is the first
-// cross-service event consumer beyond notification.
-//
-// Idempotent by design — a repeat event for an already-initialized variant is a
-// no-op (no duplicate row, no second `inventory.stock-level.initialized`):
-//   1. Fast path: `findStockLevel` short-circuits when the row already exists.
-//   2. Backstop: if two events race past the find, the UNIQUE constraint rejects
-//      the loser's INSERT; the duplicate-key driver error is swallowed as the
-//      already-exists no-op.
-// The event fires only when a genuinely new row is created.
 @Injectable()
 export class AutoInitStockLevelUseCase {
   constructor(
@@ -42,15 +30,11 @@ export class AutoInitStockLevelUseCase {
     const { variantId, correlationId } = event;
     const stockLocationId = INVENTORY_DEFAULT_STOCK_LOCATION;
 
-    // `@EventPattern` handlers are not request-scoped, so `correlationId` rides
-    // inline on each log line — `PinoLogger.assign()` would throw here (ADR-011).
     this.logger.info(
       { correlationId, variantId, stockLocationId },
       'Received event: catalog.variant.created — auto-initializing stock level',
     );
 
-    // Fast-path idempotency: an existing row means a prior event already
-    // initialized this variant. No save, no event.
     const existing = await this.repository.findStockLevel(variantId, stockLocationId);
     if (existing !== null) {
       this.logger.debug(
@@ -63,8 +47,6 @@ export class AutoInitStockLevelUseCase {
     try {
       await this.repository.saveStockLevel(StockLevel.initialAt(variantId, stockLocationId));
     } catch (error) {
-      // Backstop idempotency: a concurrent event won the INSERT; the UNIQUE
-      // constraint rejected ours. Treat as the already-exists no-op — no event.
       if (isDuplicateEntryError(error)) {
         this.logger.debug(
           { correlationId, variantId, stockLocationId },

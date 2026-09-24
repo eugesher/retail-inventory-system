@@ -6,11 +6,6 @@ import { IStockLocationsListPayload, StockLocationView } from '@retail-inventory
 import { IStockRepositoryPort, STOCK_REPOSITORY } from '../ports';
 import { toStockLocationView } from './stock-view.factory';
 
-// List Locations returns the stock locations as wire views. `activeOnly: true`
-// drops deactivated locations (soft-delete is the `active` flag — ADR-027). This
-// is a thin pass-through read (not cached): the location set is small and changes
-// rarely, so it does not meet the caching threshold the per-variant availability
-// read does.
 @Injectable()
 export class ListLocationsUseCase {
   constructor(

@@ -6,8 +6,6 @@ import {
   ReservationStatusEnum,
 } from '../reservation.model';
 
-// A point comfortably in the future / past so `create`'s strict-future guard and
-// the `commit` / `isExpired` boundary checks are unambiguous.
 const future = (msAhead = 60_000): Date => new Date(Date.now() + msAhead);
 const past = (msBehind = 60_000): Date => new Date(Date.now() - msBehind);
 
@@ -24,8 +22,6 @@ const makeCreateProps = (
   ...overrides,
 });
 
-// Reconstitution lets a spec place a hold in ANY status/version without driving it
-// through the lifecycle — the load path the mappers use.
 const reconstitute = (overrides: Partial<IReservationProps> = {}): Reservation =>
   Reservation.reconstitute({
     id: '22222222-2222-2222-2222-222222222222',
@@ -39,8 +35,6 @@ const reconstitute = (overrides: Partial<IReservationProps> = {}): Reservation =
     ...overrides,
   });
 
-// Asserts a call throws an `InventoryDomainException` carrying the given typed
-// code — never matching on the (human, unstable) message.
 const expectCode = (fn: () => void, code: InventoryErrorCodeEnum): void => {
   let caught: unknown;
   try {
@@ -89,7 +83,6 @@ describe('Reservation', () => {
 
     it('rejects a non-future expiresAt with a plain Error (an internal caller bug, not user input)', () => {
       expect(() => Reservation.create(makeCreateProps({ expiresAt: past() }))).toThrow(Error);
-      // It is deliberately NOT a typed domain exception the filter would surface.
       expect(() => Reservation.create(makeCreateProps({ expiresAt: past() }))).not.toThrow(
         InventoryDomainException,
       );
@@ -139,8 +132,6 @@ describe('Reservation', () => {
   });
 
   describe('transitions rejected from a non-active state', () => {
-    // The four active-only mutators, each wrapped so the table is uniform despite
-    // their differing signatures (release/expire take no args).
     const activeOnlyMutators: readonly [string, (r: Reservation) => void][] = [
       ['refresh', (r): void => r.refresh(3, future())],
       ['release', (r): void => r.release()],
@@ -210,7 +201,6 @@ describe('Reservation', () => {
       const at = new Date('2026-06-13T12:00:00.000Z');
       const reservation = reconstitute({ expiresAt: at });
 
-      // Equal timestamps are NOT expired (strict `<`).
       expect(reservation.isExpired(new Date(at.getTime()))).toBe(false);
       expect(reservation.isExpired(new Date(at.getTime() - 1))).toBe(false);
       expect(reservation.isExpired(new Date(at.getTime() + 1))).toBe(true);
