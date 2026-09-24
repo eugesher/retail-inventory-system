@@ -12,9 +12,6 @@ import {
 import { CreateCategoryUseCase } from '../create-category.use-case';
 import { InMemoryCategoryRepository } from './test-doubles';
 
-// Reconstitutes a persisted category to seed the in-memory repo (a parent the
-// create resolves by slug). `create` always starts a fresh `active` root/child,
-// so a seeded row uses `reconstitute` to pin a known id/path/status.
 const seedCategory = (overrides: {
   id: number;
   name?: string;

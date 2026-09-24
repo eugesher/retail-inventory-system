@@ -60,8 +60,6 @@ describe('AddVariantUseCase', () => {
     expect(view.dimensionsMm).toEqual({ l: 680, w: 680, h: 1040 });
     expect(view.status).toBe(ProductVariantStatusEnum.ACTIVE);
 
-    // The wire event carries the concrete, persisted variantId — re-read from
-    // the saved aggregate, not the null id the in-process event recorded.
     expect(publisher.published).toHaveLength(1);
     const [{ event, correlationId }] = publisher.published;
     expect(event.productId).toBe(SEEDED_PRODUCT_ID);

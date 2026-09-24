@@ -17,10 +17,6 @@ export interface IMediaAssetProps {
   updatedAt?: Date | null;
 }
 
-// `create` takes the human-supplied fields plus the `sortOrder` SLOT the attach
-// use case computed (`max(sort_order) + 1` across the owner's media). The caller
-// owns the slot arithmetic, not the aggregate — the model only enforces that the
-// slot is a non-negative integer.
 export interface ICreateMediaAssetInput {
   ownerType: MediaOwnerTypeEnum;
   ownerId: number;
@@ -30,24 +26,6 @@ export interface ICreateMediaAssetInput {
   sortOrder: number;
 }
 
-// MediaAsset is a catalog write aggregate (a sibling of `Product` / `Category`,
-// inside the same module — not a new bounded context, ADR-029 / ADR-004). It is
-// POLYMORPHIC over its owner: `(ownerType, ownerId)` points at EITHER a `product`
-// or a single `product-variant` row, with no foreign key (an FK cannot target two
-// tables) — owner existence is the use case's job, not a DB constraint (ADR-029
-// §4).
-//
-// `uri` is an OPAQUE reference (`https://…` / `s3://…`) and the aggregate validates only that it
-// is non-empty — no scheme allow-list, no extension parsing. **Nothing in the system uploads
-// anything.** There is no upload pipeline, no signed-URL issuer and no CDN rewriter, here or
-// elsewhere; a `uri` is whatever string the caller sent, stored verbatim and handed back verbatim.
-//
-// The `number | null` id mirrors `Product` / `Category`: null before persistence
-// assigns one, concrete after `reconstitute`.
-//
-// Records NO domain events. Like `Category`, media edits are not in the must-emit
-// set, so this aggregate never calls `addDomainEvent`; `pullDomainEvents()` always
-// drains empty (ADR-029 §6).
 export class MediaAsset extends AggregateRoot<number | null> {
   private readonly _ownerType: MediaOwnerTypeEnum;
   private readonly _ownerId: number;
@@ -103,9 +81,6 @@ export class MediaAsset extends AggregateRoot<number | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // Creates a new `active` media asset at the given slot. The owner reference is
-  // taken as-is (the use case has already verified the owner exists — the model
-  // cannot see other aggregates). Records no event.
   public static create(input: ICreateMediaAssetInput): MediaAsset {
     return new MediaAsset({
       id: null,
@@ -119,8 +94,6 @@ export class MediaAsset extends AggregateRoot<number | null> {
     });
   }
 
-  // Rebuilds a persisted media asset from storage — no status guard (any status
-  // reconstitutes, including `archived`).
   public static reconstitute(props: IMediaAssetProps): MediaAsset {
     return new MediaAsset(props);
   }
@@ -161,11 +134,6 @@ export class MediaAsset extends AggregateRoot<number | null> {
     return this._status === MediaAssetStatusEnum.ARCHIVED;
   }
 
-  // active → archived status flip (soft-delete via `status`; no `deletedAt`).
-  // This is the DETACH operation. It is STATE-GUARDED, NOT idempotent: archiving
-  // an already-archived asset is an illegal transition — the row is preserved for
-  // anything that captured the id historically, so a second detach is a 409 rather
-  // than a silent success (ADR-029 §4).
   public archive(): void {
     if (!this.isActive()) {
       throw new CatalogDomainException(

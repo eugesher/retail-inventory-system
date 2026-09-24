@@ -65,11 +65,9 @@ describe('ListProductsUseCase', () => {
 
     const result = await useCase.execute(query());
 
-    // Only the active product surfaces — draft and archived are hidden.
     expect(result.items).toHaveLength(1);
     expect(result.items[0].id).toBe(100);
     expect(result.items[0].status).toBe(ProductStatusEnum.ACTIVE);
-    // Its archived variant is filtered out of the read view.
     expect(result.items[0].variants).toHaveLength(1);
     expect(result.items[0].variants[0].id).toBe(5001);
     expect(result.items[0].variants[0].status).toBe(ProductVariantStatusEnum.ACTIVE);
@@ -84,10 +82,10 @@ describe('ListProductsUseCase', () => {
 
     const result = await useCase.execute(query({ page: 1, pageSize: 2 }));
 
-    expect(result.total).toBe(3); // total matching, not the page slice
+    expect(result.total).toBe(3);
     expect(result.page).toBe(1);
     expect(result.size).toBe(2);
-    expect(result.items).toHaveLength(2); // page slice honours pageSize
+    expect(result.items).toHaveLength(2);
   });
 
   it('applies the default page/size when the query omits them', async () => {

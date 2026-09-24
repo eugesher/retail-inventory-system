@@ -39,8 +39,6 @@ describe('pricing mappers', () => {
     });
 
     it('coerces BIGINT variant_id / amount_minor strings back to numbers', () => {
-      // The mysql2 driver returns non-PK BIGINT columns as strings; toDomain
-      // must hand the domain real numbers.
       const entity = {
         id: 7,
         variantId: '42' as unknown as number,
@@ -235,11 +233,6 @@ describe('PricingTypeormRepository', () => {
     });
   });
 
-  // The variant-tax FK lives on the catalog-owned `product_variant` table; pricing
-  // reaches it with a PARAMETERIZED query through the injected manager rather than
-  // importing the catalog entity (ADR-026 §5). These specs assert the SQL is
-  // parameterized (placeholders + a bound args array, never string interpolation)
-  // and that the numeric coercion / null-guard hold.
   describe('attachTaxCategoryToVariant', () => {
     it('writes the FK with a parameterized UPDATE bound to [taxCategoryId, variantId]', async () => {
       const query = priceRepo.manager.query as unknown as jest.Mock;
@@ -247,9 +240,6 @@ describe('PricingTypeormRepository', () => {
 
       await repository.attachTaxCategoryToVariant(42, 3);
 
-      // The `?` placeholders + the bound args array are the parameterization: the
-      // ids are never string-interpolated into the SQL. Order is
-      // [taxCategoryId, variantId].
       expect(query).toHaveBeenCalledTimes(1);
       expect(query).toHaveBeenCalledWith(
         expect.stringContaining('UPDATE product_variant SET tax_category_id = ? WHERE id = ?'),

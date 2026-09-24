@@ -13,10 +13,6 @@ import { makePinoLoggerMock } from '@retail-inventory-system/observability/testi
 
 import { CatalogRabbitmqPublisher } from '../catalog-rabbitmq.publisher';
 
-// Proves the catalog publisher dual-publishes (ADR-035): every event keeps its
-// primary default-exchange emit AND mirrors the same routing key + wire onto
-// `ris.events`. `catalog.variant.created` rides `inventory_queue`; the two
-// `catalog.product.*` events ride `catalog_queue`.
 describe('CatalogRabbitmqPublisher dual-publish', () => {
   let catalogEmit: jest.Mock;
   let inventoryEmit: jest.Mock;

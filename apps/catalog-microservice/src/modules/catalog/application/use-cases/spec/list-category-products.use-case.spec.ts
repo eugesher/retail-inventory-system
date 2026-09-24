@@ -55,7 +55,6 @@ describe('ListCategoryProductsUseCase', () => {
       logger as unknown as PinoLogger,
     );
 
-    // electronics (id 1) → phones (id 2, child).
     categoryRepository.seed(
       seedCategory({ id: 1, slug: 'electronics', parentId: null, path: '/electronics' }),
     );
@@ -63,7 +62,6 @@ describe('ListCategoryProductsUseCase', () => {
       seedCategory({ id: 2, slug: 'phones', parentId: 1, path: '/electronics/phones' }),
     );
 
-    // p100, p101 directly in electronics; p102 in phones (the descendant).
     catalogRepository.seed(seedProduct(100, 'p100'));
     catalogRepository.seed(seedProduct(101, 'p101'));
     catalogRepository.seed(seedProduct(102, 'p102'));
@@ -75,10 +73,8 @@ describe('ListCategoryProductsUseCase', () => {
   it('lists only the named category by default (includeDescendants off)', async () => {
     const page = await useCase.execute({ slug: 'electronics', correlationId: 'corr-1' });
 
-    // Only electronics members — newest-first by id.
     expect(page.items.map((item) => item.slug)).toEqual(['p101', 'p100']);
     expect(page.total).toBe(2);
-    // The browse asked for the single category id only.
     expect(catalogRepository.listByCategoryCalls.at(-1)).toEqual([1]);
   });
 
@@ -89,10 +85,8 @@ describe('ListCategoryProductsUseCase', () => {
       correlationId: 'corr-2',
     });
 
-    // electronics members + the phones (descendant) member.
     expect(page.items.map((item) => item.slug)).toEqual(['p102', 'p101', 'p100']);
     expect(page.total).toBe(3);
-    // The resolved id set covers self + the descendant.
     expect([...(catalogRepository.listByCategoryCalls.at(-1) ?? [])].sort()).toEqual([1, 2]);
   });
 
@@ -105,7 +99,6 @@ describe('ListCategoryProductsUseCase', () => {
       correlationId: 'corr-3',
     });
 
-    // 3 matches, page 2 of size 2 → the trailing 1 item; metadata echoes the input.
     expect(page.page).toBe(2);
     expect(page.size).toBe(2);
     expect(page.total).toBe(3);

@@ -15,8 +15,6 @@ export class MediaAssetMapper {
       status: domain.status,
     };
 
-    // Omit a null id so TypeORM treats the row as an insert; pass the concrete id
-    // so an existing asset is updated in place.
     if (domain.id !== null) {
       entity.id = domain.id;
     }
@@ -28,8 +26,6 @@ export class MediaAssetMapper {
     return MediaAsset.reconstitute({
       id: entity.id,
       ownerType: entity.ownerType,
-      // `owner_id` is a non-PK BIGINT, which mysql2 may surface as a string.
-      // Coerce to a number (always non-null — `owner_id` is NOT NULL).
       ownerId: Number(entity.ownerId),
       uri: entity.uri,
       type: entity.type,

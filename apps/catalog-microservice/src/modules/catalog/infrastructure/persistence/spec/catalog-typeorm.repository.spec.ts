@@ -220,8 +220,6 @@ describe('CatalogTypeormRepository', () => {
       expect(builder.where).toHaveBeenCalledWith('Product.status = :status', {
         status: ProductStatusEnum.ACTIVE,
       });
-      // The membership filter is an id-subselect — ids BOUND via `:...categoryIds`,
-      // never string-interpolated.
       expect(builder.andWhere).toHaveBeenCalledWith(
         'Product.id IN (SELECT pc.product_id FROM product_categories pc WHERE pc.category_id IN (:...categoryIds))',
         { categoryIds: [1, 2] },

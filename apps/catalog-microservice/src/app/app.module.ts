@@ -16,10 +16,6 @@ import { HealthController } from './health.controller';
   imports: [
     ConfigModule.forRoot(configModuleConfig),
     LoggerModule.forRoot(new LoggerModuleConfig(AppNameEnum.CATALOG_MICROSERVICE)),
-    // The service owns one MySQL connection shared by both colocated modules, so the
-    // two entity lists are merged into the single `forRoot`. Both are plain inferred
-    // arrays of entity classes and spread directly — no cast (see the note on
-    // `catalogEntities`).
     DatabaseModule.forRoot([...catalogEntities, ...pricingEntities]),
     CatalogModule,
     PricingModule,

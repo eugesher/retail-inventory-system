@@ -6,11 +6,6 @@ import { Price } from '../../../domain';
 import { SelectApplicablePriceUseCase } from '../select-applicable-price.use-case';
 import { InMemoryPricingRepository } from './test-doubles';
 
-// The resolution policy (priority DESC, then validFrom DESC) lives in the use
-// case, not in SQL — these specs prove it against an in-memory repository whose
-// `findInEffect` returns candidates **unsorted** (insertion order). If the
-// resolution had leaked into the query, an unsorted candidate set would surface
-// the bug here.
 describe('SelectApplicablePriceUseCase', () => {
   const VARIANT_ID = 42;
   const CURRENCY = 'USD';
@@ -46,8 +41,8 @@ describe('SelectApplicablePriceUseCase', () => {
   };
 
   it('resolves the highest-priority row when several are in effect', async () => {
-    seedPrice(1, 1000, '2020-01-01T00:00:00.000Z', null, 0); // base, open
-    seedPrice(2, 800, '2026-01-01T00:00:00.000Z', '2027-01-01T00:00:00.000Z', 10); // promo
+    seedPrice(1, 1000, '2020-01-01T00:00:00.000Z', null, 0);
+    seedPrice(2, 800, '2026-01-01T00:00:00.000Z', '2027-01-01T00:00:00.000Z', 10);
 
     const view = await useCase.execute({
       variantId: VARIANT_ID,
@@ -71,16 +66,13 @@ describe('SelectApplicablePriceUseCase', () => {
       correlationId: 'corr-1',
     });
 
-    // Same priority → the more recently started interval wins.
     expect(view?.amountMinor).toBe(650);
   });
 
   it('respects asOf interval containment (half-open: validTo is exclusive)', async () => {
-    seedPrice(5, 1000, '2020-01-01T00:00:00.000Z', null, 0); // base, open
-    seedPrice(6, 800, '2026-01-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 10); // promo ends
+    seedPrice(5, 1000, '2020-01-01T00:00:00.000Z', null, 0);
+    seedPrice(6, 800, '2026-01-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 10);
 
-    // At exactly the promo's validTo the promo is already out (exclusive end), so
-    // the base resolves despite the promo's higher priority.
     const atBoundary = await useCase.execute({
       variantId: VARIANT_ID,
       currency: CURRENCY,
@@ -89,7 +81,6 @@ describe('SelectApplicablePriceUseCase', () => {
     });
     expect(atBoundary?.amountMinor).toBe(1000);
 
-    // Well after the promo: still the base.
     const after = await useCase.execute({
       variantId: VARIANT_ID,
       currency: CURRENCY,
@@ -105,7 +96,7 @@ describe('SelectApplicablePriceUseCase', () => {
     const view = await useCase.execute({
       variantId: VARIANT_ID,
       currency: CURRENCY,
-      asOf: '2025-01-01T00:00:00.000Z', // before any interval
+      asOf: '2025-01-01T00:00:00.000Z',
       correlationId: 'corr-1',
     });
 

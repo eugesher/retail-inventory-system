@@ -22,13 +22,6 @@ import {
   SetPriceUseCase,
 } from '../application/use-cases';
 
-// Thin RMQ entry points for the six pricing RPCs on `catalog_queue` (three price,
-// three tax-category). The handlers translate the wire payload into the use-case
-// call; `correlationId` is logged inline inside each use case
-// (`PinoLogger.assign()` throws outside request scope — ADR-001 / ADR-011), so the
-// controller carries no logging of its own. Set and Schedule share
-// `catalog.price.set` — they are one write with two outcomes, distinguished by
-// `validFrom`, not two endpoints.
 @Controller()
 export class PricingController {
   constructor(

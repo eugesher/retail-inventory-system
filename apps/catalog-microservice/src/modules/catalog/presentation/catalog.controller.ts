@@ -27,10 +27,6 @@ import {
   RegisterProductUseCase,
 } from '../application/use-cases';
 
-// Thin RMQ entry points for the catalog write and read paths. The handlers
-// translate the wire payload into the use-case call; `correlationId` is logged
-// inline inside each use case (`PinoLogger.assign()` throws outside request
-// scope — ADR-001 / ADR-011), so the controller carries no logging of its own.
 @Controller()
 export class CatalogController {
   constructor(
