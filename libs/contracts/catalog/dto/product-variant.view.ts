@@ -11,10 +11,6 @@ export class VariantDimensionsView {
   public h: number;
 }
 
-// RPC response shape for `catalog.variant.create` — the persisted variant after
-// it is appended to its product. `gtin`, `weightG`, and `dimensionsMm` are
-// nullable (absent on a variant that omits them). `optionValues` is the raw
-// option map. `status` is the variant lifecycle string (`active`/`archived`).
 export class ProductVariantView {
   @ApiResponseProperty()
   public id: number;

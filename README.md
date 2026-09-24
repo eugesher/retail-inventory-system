@@ -550,11 +550,16 @@ The **immutable** side. Five sibling aggregates live here.
 **An `Order` carries three orthogonal status axes**, not one combined enum, because a
 `captured` payment legitimately coexists with `unfulfilled` fulfillment:
 
-| Axis                | Values                                                          |
-| ------------------- | --------------------------------------------------------------- |
-| `status`            | `pending` → `confirmed` / `cancelled` / `shipped` / `delivered` |
-| `paymentStatus`     | `none` → `authorized` → `captured` → `refunded` (or `failed`)   |
-| `fulfillmentStatus` | `unfulfilled` → `partially-shipped` → `shipped` → `delivered`   |
+| Axis                | Values                                                        |
+| ------------------- | ------------------------------------------------------------- |
+| `status`            | `pending` → `cancelled` / `delivered`                         |
+| `paymentStatus`     | `none` → `authorized` → `captured`, or `none` → `failed`      |
+| `fulfillmentStatus` | `unfulfilled` → `partially-shipped` → `shipped` → `delivered` |
+
+The enums also carry `confirmed` and `shipped` (`status`) and `refunded` (`paymentStatus`), and
+nothing sets them: shipment progress lives on `fulfillmentStatus`, and a refund changes the
+`Payment` row, not the order. `failed` is a declined authorize at place. Which enum values are
+produced, and by what: [`docs/reference/wire-contracts.md`](docs/reference/wire-contracts.md#status-values-nothing-produces).
 
 `Fulfillment.status` (`pending → shipped → delivered`, or `cancelled`) is a **fourth axis**,
 evolving per shipment; the order's `fulfillmentStatus` is the roll-up. Partial and split
@@ -660,7 +665,7 @@ requested ──► authorized ──► received ──► inspected ──► 
 | Authorize / Reject / Close | staff `order:return-authorize`          | status walk; Reject appends its reason to `notes`                                                                                                                                                                                              |
 | Receive                    | warehouse `inventory:receive-return`    | status walk                                                                                                                                                                                                                                    |
 | Inspect                    | warehouse `inventory:receive-return`    | the inspection set must cover **every** line; after commit, each `restock`-disposition line calls `inventory.stock.restock-from-return` (retry-then-log, idempotent on `returnRequestId`). Records refund amounts but **issues no refund**.    |
-| Get / List                 | owner-or-staff `order:read`             | non-staff filtered to own                                                                                                                                                                                                                      |
+| Get / List                 | owner-or-staff `order:read`             | a non-staff caller who is not the buyer gets `403 RETURN_ACCESS_FORBIDDEN`, never an empty list; List checks the order's buyer, Get the RMA's                                                                                                  |
 
 ### Notifications (`notification-microservice`)
 
