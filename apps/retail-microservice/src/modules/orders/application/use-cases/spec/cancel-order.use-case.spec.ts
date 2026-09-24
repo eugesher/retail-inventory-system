@@ -54,7 +54,6 @@ const makeHarness = async (
   const customerContactReader = new FakeCustomerContactReader();
 
   await orderRepository.save(order);
-  // `null` opts.payment means "no payment row" (a bare placed order before authorize).
   const payment =
     opts.payment === undefined
       ? buildPaymentFixture(900, ORDER_ID, PaymentStatusEnum.AUTHORIZED, order.grandTotalMinor)
@@ -71,7 +70,6 @@ const makeHarness = async (
     inventoryGateway,
     publisher,
     customerContactReader,
-    // OCC_RETRY_ATTEMPTS budget (ADR-036).
     5,
     logger,
   );
@@ -106,12 +104,10 @@ describe('CancelOrderUseCase', () => {
 
       expect(view.status).toBe(OrderStatusEnum.CANCELLED);
 
-      // Authorized → voided (no money taken), not flagged.
       const payment = await h.paymentRepository.findByOrderId(ORDER_ID);
       expect(payment?.status).toBe(PaymentStatusEnum.VOIDED);
       expect(payment?.flaggedForRefund).toBe(false);
 
-      // Allocation released for the order's lines (variantId === orderLineId in the fixture).
       expect(h.inventoryGateway.cancelCalls).toHaveLength(1);
       expect(h.inventoryGateway.cancelCalls[0]).toMatchObject({
         orderId: ORDER_ID,
@@ -124,8 +120,6 @@ describe('CancelOrderUseCase', () => {
         orderId: ORDER_ID,
         reason: 'changed-my-mind',
         paymentFlaggedForRefund: false,
-        // The buyer's email was resolved from the order's customerId and stamped on the
-        // dual-emitted cancellation event (ADR-033); locale ships null.
         customerEmail: FAKE_CUSTOMER_EMAIL,
         customerLocale: null,
       });
@@ -160,12 +154,10 @@ describe('CancelOrderUseCase', () => {
       expect(view.status).toBe(OrderStatusEnum.CANCELLED);
 
       const payment = await h.paymentRepository.findByOrderId(ORDER_ID);
-      // The money is gone — the row stays captured but is flagged for the later refund.
       expect(payment?.status).toBe(PaymentStatusEnum.CAPTURED);
       expect(payment?.flaggedForRefund).toBe(true);
 
       expect(h.publisher.orderCancelled[0]).toMatchObject({ paymentFlaggedForRefund: true });
-      // The allocation is still released regardless of the payment outcome.
       expect(h.inventoryGateway.cancelCalls).toHaveLength(1);
     });
   });
@@ -185,7 +177,6 @@ describe('CancelOrderUseCase', () => {
         code: OrderErrorCodeEnum.ORDER_NOT_CANCELLABLE,
       });
 
-      // Nothing was settled or released.
       const order = await h.orderRepository.findById(ORDER_ID);
       expect(order?.status).toBe(OrderStatusEnum.PENDING);
       const payment = await h.paymentRepository.findByOrderId(ORDER_ID);
@@ -224,8 +215,6 @@ describe('CancelOrderUseCase', () => {
     });
   });
 
-  // Defensive: a placed order always carries a payment, but the cancel must not blow up
-  // if one is somehow absent — it simply skips the payment settlement.
   describe('no payment row', () => {
     it('cancels and releases the allocation with flagged=false', async () => {
       const h = await makeHarness({ payment: null });
@@ -239,10 +228,6 @@ describe('CancelOrderUseCase', () => {
     });
   });
 
-  // Cancel Line already released the units it cancelled, so Cancel Order must release only
-  // what the order still HOLDS — its lines' active quantity (ADR-040). Releasing the
-  // place-time ordered quantity would free those units twice against the shared
-  // per-`(variant, location)` `quantity_allocated`, eating other orders' allocations.
   describe('a prior Cancel Line shrinks what remains to release', () => {
     it('releases only the active quantity of a partially-cancelled line', async () => {
       const h = await makeHarness({
@@ -254,7 +239,6 @@ describe('CancelOrderUseCase', () => {
       await h.useCase.execute(cancelPayload());
 
       expect(h.inventoryGateway.cancelCalls).toHaveLength(1);
-      // 3, not the ordered 5.
       expect(h.inventoryGateway.cancelCalls[0].lines).toEqual([
         { variantId: 10, stockLocationId: 'default-warehouse', quantity: 3 },
       ]);
@@ -275,8 +259,6 @@ describe('CancelOrderUseCase', () => {
       ]);
     });
 
-    // Inventory rejects an empty `lines` array, so the RPC must not be made at all — and
-    // the cancel itself must still succeed.
     it('skips the release RPC entirely when every line is already cancelled', async () => {
       const h = await makeHarness({
         order: buildOrderWithLinesFixture(ORDER_ID, OWNER_ID, [

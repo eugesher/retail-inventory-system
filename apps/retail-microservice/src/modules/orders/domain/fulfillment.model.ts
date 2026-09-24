@@ -19,52 +19,18 @@ export interface IFulfillmentProps {
   updatedAt?: Date | null;
 }
 
-// Input to the `create` factory — the shipment-planning path. `lines` carries the
-// per-`OrderLine` quantities the shipment includes; the factory builds the
-// `FulfillmentLine` children from them. Status / tracking / timestamps are set by
-// the factory (always `PENDING` / all null), never supplied.
 export interface ICreateFulfillmentInput {
   orderId: number;
   stockLocationId: string;
   lines: { orderLineId: number; quantity: number }[];
 }
 
-// Input to the `ship` mutator. `trackingNumber` is required (the tracking-on-ship
-// policy); `carrier` is optional metadata that may stay null.
 export interface IShipFulfillmentInput {
   trackingNumber: string | null;
   carrier: string | null;
   shippedAt: Date;
 }
 
-// `Fulfillment` is the per-shipment, per-`stockLocationId` record that drives an
-// order from `pending`/`authorized` toward `delivered` (ADR-031). It is a **sibling
-// aggregate root** inside the `orders/` module — its operations act on `Order` and
-// `Payment` (ship advances the order's fulfillment axis and captures payment), so it
-// shares the bounded context and reuses `OrderDomainException` (the `Payment` /
-// `Address` precedent, ADR-028 §4), rather than being a new module.
-//
-// Its `status` is a **fourth status axis** alongside the order's three orthogonal
-// axes (ADR-028 §2): a `pending`/`shipped`/`delivered`/`cancelled` value that is
-// *per shipment*. An order with split shipments owns several `Fulfillment`s, each
-// with its own status; the order's own `fulfillment_status` is the roll-up across
-// them (computed by the operations, not here).
-//
-// `version` is the per-shipment OCC token, and it advances on every mutation. **The
-// ship-vs-cancel status transitions are not settled by it, though** — those are serialised by a
-// pessimistic `SELECT … FOR UPDATE` on the row, because two transitions on one fulfillment must
-// not both be allowed to try. Read that scope literally: the lock decides which *transition*
-// wins and nothing else. Ship captures the payment **before** it takes the lock, so a ship that
-// loses the race can still have moved the customer's money (`ShipFulfillmentUseCase`).
-//
-// **The aggregate enforces only its own shape** — ≥ 1 line, each line's quantity > 0,
-// the legal status transitions, and tracking-on-ship. The cross-fulfillment invariant is **NOT**
-// here: the aggregate cannot see sibling fulfillments or the order's line quantities, so the
-// **Create Fulfillment use case** enforces it (ADR-031) — bounding the per-`OrderLine` sum across
-// an order's shipments by the line's **active** quantity (`ordered − cancelled`, ADR-040), not by
-// the place-time ordered quantity. Records no domain events — the `retail.fulfillment.created`
-// event is built and emitted by the Create use case after persistence assigns ids (the
-// `Order.place` / ADR-011 precedent).
 export class Fulfillment extends AggregateRoot<number | null> {
   private readonly _orderId: number;
   private readonly _stockLocationId: string;
@@ -100,12 +66,6 @@ export class Fulfillment extends AggregateRoot<number | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // The shipment-planning factory: validates ≥ 1 line, builds the `FulfillmentLine`
-  // children (each enforcing its own positive-quantity invariant), and opens the
-  // fulfillment `PENDING` at `version 0` with null tracking / carrier / timestamps.
-  // `id` / each line's id are null until persistence assigns the BIGINTs. Records no
-  // domain event here — the Create use case emits `retail.fulfillment.created` after
-  // the save concretizes the ids (ADR-011 / ADR-031).
   public static create(input: ICreateFulfillmentInput): Fulfillment {
     const lines = input.lines.map(
       (line) =>
@@ -130,8 +90,6 @@ export class Fulfillment extends AggregateRoot<number | null> {
     });
   }
 
-  // Rebuilds a persisted fulfillment from storage (any status / version). Records no
-  // events.
   public static reconstitute(props: IFulfillmentProps): Fulfillment {
     return new Fulfillment(props);
   }
@@ -172,12 +130,6 @@ export class Fulfillment extends AggregateRoot<number | null> {
     return this._version;
   }
 
-  // `PENDING → SHIPPED`. Requires a non-empty `trackingNumber` (the tracking-on-ship
-  // policy — a shipment without a tracking number cannot be marked shipped); a
-  // null/blank one raises `FULFILLMENT_TRACKING_REQUIRED` (400). Stamps `shippedAt`
-  // and records the (optional) carrier. The state guard is primary — shipping a
-  // non-`pending` fulfillment is an illegal transition (409) regardless of input.
-  // Bumps the OCC token.
   public ship(input: IShipFulfillmentInput): void {
     if (this._status !== FulfillmentStatusEnum.PENDING) {
       throw new OrderDomainException(
@@ -198,9 +150,6 @@ export class Fulfillment extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // `SHIPPED → DELIVERED`. Stamps `deliveredAt`. Rejects any non-`shipped` start
-  // (a `pending` shipment has not left, a `delivered`/`cancelled` one is terminal).
-  // Bumps the OCC token.
   public markDelivered(at: Date): void {
     if (this._status !== FulfillmentStatusEnum.SHIPPED) {
       throw new OrderDomainException(
@@ -213,10 +162,6 @@ export class Fulfillment extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // `PENDING → CANCELLED`. A `shipped`/`delivered` fulfillment is **not** cancellable
-  // — that is what protects Cancel Order's precondition (physically-shipped stock can
-  // never be stranded by a cancellation). Cancellation is a status transition, never
-  // a row delete — `fulfillment` is append-only. Bumps the OCC token.
   public cancel(): void {
     if (this._status !== FulfillmentStatusEnum.PENDING) {
       throw new OrderDomainException(
@@ -228,9 +173,6 @@ export class Fulfillment extends AggregateRoot<number | null> {
     this.bumpVersion();
   }
 
-  // Every mutation advances the OCC token so "version bumps on each mutation" is
-  // observable. Persistence delegates the stored value to TypeORM's `@VersionColumn`;
-  // this in-memory bump keeps the domain self-describing (the `Order` precedent).
   private bumpVersion(): void {
     this._version += 1;
   }

@@ -17,9 +17,6 @@ export interface IRefundProps {
   updatedAt?: Date | null;
 }
 
-// Input to the `open` factory — the construction path from Issue Refund. `status` /
-// `gatewayReference` / `issuedAt` are set by the factory (PENDING / null / null), not
-// supplied by the caller.
 export interface IOpenRefundInput {
   orderId: number;
   paymentId: number;
@@ -28,36 +25,6 @@ export interface IOpenRefundInput {
   reason: string;
 }
 
-// `Refund` is the record of a single gateway refund interaction against a captured
-// `payment` — its own aggregate root, **not** a child of `Order` or `Payment`. It
-// lives inside the `orders/` module (a sibling of `Payment` / `Address` /
-// `Fulfillment`) because every refund operation **mutates `Payment`** — it walks the
-// payment status and increments `refunded_amount_minor` — and `Payment` lives here
-// (docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md). Placing it
-// elsewhere would re-import the orders context across a module boundary, the very
-// coupling ADR-028 §4 avoids.
-//
-// A `Refund` is **distinct from a `ReturnRequest`**: a refund must be able to exist
-// with no return behind it — a chargeback, a goodwill credit, a partial price
-// adjustment, or a refund Cancel Order issues on an order that never shipped. A return
-// that closes with money owed *triggers* a refund rather than *being* one.
-//
-// `gatewayReference` is the **opaque token** the gateway returns when the refund
-// issues (a real adapter echoes a processor's refund id; the in-process fake returns a
-// deterministic stand-in) — retail stores it but never parses it, and it stays null
-// while `pending`. `amountMinor` is an integer count of minor units (cents), never a
-// float, and is **strictly positive** (a zero/negative refund is meaningless — unlike
-// `Payment.amountMinor`, which allows 0 for a free order). The id is the auto-increment
-// BIGINT assigned by persistence (`null` until then). The aggregate records **no** domain events —
-// Issue Refund emits `retail.refund.issued` / `.failed` after the row is persisted.
-//
-// **The over-refund ceiling is NOT enforced here.** `amount ≤ Payment.amountMinor −
-// Payment.refundedAmountMinor` is invisible to this model — it cannot see `Payment` — so a `Refund`
-// on its own will happily open for more than is left. **Issue Refund is the only thing standing
-// between a caller and a double refund** (`REFUND_EXCEEDS_REFUNDABLE`). Do not construct a `Refund`
-// outside it and assume the amount was checked.
-//
-// The model enforces only its own shape: a positive amount, a non-empty reason, legal transitions.
 export class Refund extends AggregateRoot<number | null> {
   private readonly _orderId: number;
   private readonly _paymentId: number;
@@ -71,10 +38,6 @@ export class Refund extends AggregateRoot<number | null> {
   public readonly updatedAt: Date | null;
 
   private constructor(props: IRefundProps) {
-    // `orderId` / `paymentId` are positive-integer references the orders module already
-    // validates on `Payment`; reuse the module's shared id-invalid code (the
-    // one-throwable-per-module convention — these are not refund-specific business
-    // rules, unlike the amount/reason guards below).
     if (!Number.isInteger(props.orderId) || props.orderId <= 0) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.PAYMENT_ORDER_ID_INVALID,
@@ -87,8 +50,6 @@ export class Refund extends AggregateRoot<number | null> {
         `Refund.paymentId must be a positive integer, got ${props.paymentId}`,
       );
     }
-    // A refund must move a **strictly positive** amount — distinct from
-    // `Payment.amountMinor` (which allows 0), so it gets its own code.
     if (!Number.isInteger(props.amountMinor) || props.amountMinor <= 0) {
       throw new OrderDomainException(
         OrderErrorCodeEnum.REFUND_AMOUNT_INVALID,
@@ -121,9 +82,6 @@ export class Refund extends AggregateRoot<number | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // The construction path from Issue Refund: opens the refund `PENDING` with no
-  // gateway reference and no issue stamp (both set once the gateway answers). `id` is
-  // null until persistence assigns the BIGINT.
   public static open(input: IOpenRefundInput): Refund {
     return new Refund({
       id: null,
@@ -138,7 +96,6 @@ export class Refund extends AggregateRoot<number | null> {
     });
   }
 
-  // Rebuilds a persisted refund from storage (any status). Records no events.
   public static reconstitute(props: IRefundProps): Refund {
     return new Refund(props);
   }
@@ -175,10 +132,6 @@ export class Refund extends AggregateRoot<number | null> {
     return this._issuedAt;
   }
 
-  // `PENDING → ISSUED`: the gateway refund succeeded, so stamp the opaque
-  // `gatewayReference` it returned and the `issuedAt` moment. Rejects any non-`pending`
-  // start (a double-issue, or issuing a failed refund) with
-  // `REFUND_INVALID_STATUS_TRANSITION` (409).
   public markIssued(input: { gatewayReference: string; issuedAt: Date }): void {
     if (this._status !== RefundStatusEnum.PENDING) {
       throw new OrderDomainException(
@@ -191,10 +144,6 @@ export class Refund extends AggregateRoot<number | null> {
     this._issuedAt = input.issuedAt;
   }
 
-  // `PENDING → FAILED` (terminal): the gateway declined the refund. Unreachable with
-  // the always-succeed fake gateway, but modeled so a real decline has a home (the
-  // `ORDER_PAYMENT_NOT_APPROVED` precedent). Rejects any non-`pending` start with
-  // `REFUND_INVALID_STATUS_TRANSITION` (409).
   public markFailed(): void {
     if (this._status !== RefundStatusEnum.PENDING) {
       throw new OrderDomainException(

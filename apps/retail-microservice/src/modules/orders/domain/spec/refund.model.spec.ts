@@ -51,11 +51,6 @@ describe('Refund', () => {
     it('rejects an empty currency', () => {
       expect(() => Refund.open({ ...openInput(), currency: '' })).toThrow(OrderDomainException);
     });
-
-    // The amount ≤ Payment.amountMinor − Payment.refundedAmountMinor ceiling (the
-    // over-refund guard) is NOT a model concern — the model cannot see Payment. It is
-    // enforced by the Issue Refund use case (a later capability), so it is not asserted
-    // here.
   });
 
   describe('markIssued', () => {
@@ -96,7 +91,6 @@ describe('Refund', () => {
       refund.markFailed();
 
       expect(refund.status).toBe(RefundStatusEnum.FAILED);
-      // A failed refund never stamped a gateway reference or issue moment.
       expect(refund.gatewayReference).toBeNull();
       expect(refund.issuedAt).toBeNull();
     });

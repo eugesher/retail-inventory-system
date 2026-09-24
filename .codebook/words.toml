@@ -4,6 +4,7 @@ words = [
     "RIS",
     "Typeorm",
     "dto",
+    "fulfillments",
     "nestjs",
     "occ",
     "pino",

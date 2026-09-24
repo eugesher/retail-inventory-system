@@ -28,7 +28,6 @@ describe('resolveCustomerEmail (orders)', () => {
     expect(reader.calls).toEqual([CUSTOMER_ID]);
   });
 
-  // A tombstoned order carries a null `customerId` (ADR-037) — short-circuit, never read.
   it('returns null for a null customerId without consulting the reader', async () => {
     const reader = new FakeCustomerContactReader();
 
@@ -65,8 +64,6 @@ describe('resolveCustomerEmail (orders)', () => {
     expect(email).toBeNull();
   });
 
-  // An erased customer keeps its row but with `email` nulled in place (ADR-037), a
-  // different path from "no row at all".
   it('returns null when the resolved row has a nulled email', async () => {
     const reader = new FakeCustomerContactReader(null);
 
@@ -80,9 +77,6 @@ describe('resolveCustomerEmail (orders)', () => {
     expect(email).toBeNull();
   });
 
-  // The contract the doc comment states in bold: **never throws**. This runs on the
-  // post-commit emit path, so a reader hiccup must degrade to `customerEmail: null`
-  // rather than fail an operation that already committed.
   it('swallows a reader failure, warn-logs it, and degrades to null', async () => {
     const reader = new FakeCustomerContactReader();
     const failure = new Error('connection reset');

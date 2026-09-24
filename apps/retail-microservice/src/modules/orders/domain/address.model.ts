@@ -21,9 +21,6 @@ export interface IAddressProps {
   updatedAt?: Date | null;
 }
 
-// Input to the order-snapshot factory — the address fields the buyer supplied at
-// place-time, plus the owning order's id. `ownerType` / `id` are set by the
-// factory.
 export interface IAddressForOrderInput {
   orderId: string;
   recipientName: string;
@@ -36,23 +33,8 @@ export interface IAddressForOrderInput {
   phone?: string | null;
 }
 
-// 2-letter ISO-3166 country code, upper-cased and validated so a malformed code
-// never reaches the CHAR(2) column.
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
 
-// `Address` is a **polymorphic** aggregate root over `ownerType ∈ {customer,
-// order}` (ADR-028 §5). Its id is a CHAR(36) UUID generated in-app at `forOrder`
-// (caller-assigned, like the cart id), or reloaded on `reconstitute`.
-//
-// At place-time an order's billing and shipping addresses are **snapshot copies**
-// written as immutable `ownerType = order` rows — copies of whatever the buyer supplied,
-// never references into an address book.
-//
-// **`AddressOwnerTypeEnum.CUSTOMER` has no producer.** `forOrder` is the only factory and it
-// hardcodes `ORDER`; nothing in the tree writes a `customer` row. The enum member and the
-// polymorphic column exist — the address book does not. Do not read a `customer` address as
-// reachable state, and do not write a query that expects one. An address is immutable once
-// written (no setters); the inherited `deletedAt` stays inert.
 export class Address extends AggregateRoot<string | null> {
   public readonly ownerType: AddressOwnerTypeEnum;
   public readonly ownerId: string;
@@ -89,8 +71,6 @@ export class Address extends AggregateRoot<string | null> {
       'postalCode',
     );
 
-    // Normalise to upper-case, then validate the 2-letter ISO shape — `us` becomes
-    // `US`; `USA` / `u` are rejected (wrong length).
     const country =
       typeof props.country === 'string' ? props.country.trim().toUpperCase() : props.country;
     if (typeof country !== 'string' || !COUNTRY_PATTERN.test(country)) {
@@ -115,9 +95,6 @@ export class Address extends AggregateRoot<string | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // The place-time snapshot factory: writes an immutable `ownerType = order` row
-  // owned by `orderId`, generating the CHAR(36) UUID in-app. **The only factory** — there is
-  // none for the `customer` owner type (see the class comment).
   public static forOrder(input: IAddressForOrderInput): Address {
     return new Address({
       id: randomUUID(),
@@ -134,7 +111,6 @@ export class Address extends AggregateRoot<string | null> {
     });
   }
 
-  // Rebuilds a persisted address from storage. Records no events.
   public static reconstitute(props: IAddressProps): Address {
     return new Address(props);
   }

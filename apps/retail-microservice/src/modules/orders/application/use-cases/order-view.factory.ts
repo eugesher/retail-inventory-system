@@ -2,14 +2,6 @@ import { OrderLineView, OrderView, PaymentView } from '@retail-inventory-system/
 
 import { Order, OrderLine, Payment } from '../../domain';
 
-// Pure mapping from the order domain onto its wire view, shared by the order use
-// cases so the projection lives in exactly one place (the cart `cart-view.factory`
-// / catalog `catalog-view.factory` pattern). Framework-free — no Nest decorators.
-//
-// A persisted order (placed or reconstituted) carries a concrete id, and a line
-// re-read from the repository carries its generated BIGINT id, so the `!`
-// assertions are safe here (the same non-null assertion the cart factory makes).
-
 export const toOrderLineView = (line: OrderLine): OrderLineView => ({
   id: line.id!,
   variantId: line.variantId,
@@ -36,9 +28,6 @@ export const toPaymentView = (payment: Payment): PaymentView => ({
   capturedAt: payment.capturedAt ? payment.capturedAt.toISOString() : null,
 });
 
-// `payment` is folded onto the view only when an order has one (placed-and-authorized
-// orders do; a bare placed order before authorize would not). `undefined` omits the
-// optional field rather than serializing a null `payment`.
 export const toOrderView = (order: Order, payment?: Payment | null): OrderView => ({
   id: order.id!,
   orderNumber: order.orderNumber,

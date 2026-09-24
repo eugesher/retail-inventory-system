@@ -12,10 +12,6 @@ import {
 import { loadAuthorizedOrder } from './order-access';
 import { toOrderView } from './order-view.factory';
 
-// Resolves one order — header, lines and payment — by id.
-//
-// Authorization goes through `loadAuthorizedOrder` (the rule is stated there, once); the override is
-// `order:read`.
 @Injectable()
 export class GetOrderUseCase {
   constructor(

@@ -145,10 +145,6 @@ const makeHarness = (
   };
 };
 
-// The canonical body the use case fingerprints — the client-controlled place command
-// minus `correlationId` / `idempotencyKey` / the owner-injected `customerId` (ADR-036).
-// Recomputed here with the same helper so a seeded record's fingerprint matches (a
-// replay) or deliberately diverges (a 422).
 const fingerprintOf = (payload: IPlaceOrderPayload): string =>
   bodyFingerprint({
     cartId: payload.cartId,
@@ -175,22 +171,18 @@ describe('PlaceOrderUseCase', () => {
 
       const { view } = await h.useCase.execute(placePayload());
 
-      // Order header: pending lifecycle, authorized payment, unfulfilled fulfillment
-      // — the three orthogonal axes (ADR-028 §2).
       expect(view.id).toEqual(expect.any(Number));
       expect(view.orderNumber).toMatch(/^ORD-\d{4}-\d{8}$/);
       expect(view.status).toBe(OrderStatusEnum.PENDING);
       expect(view.paymentStatus).toBe(OrderPaymentStatusEnum.AUTHORIZED);
       expect(view.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.UNFULFILLED);
 
-      // Totals: grandTotal = subtotal = Σ unitPrice×qty; tax/discount/shipping 0.
       expect(view.subtotalMinor).toBe(4999 * 2 + 19999);
       expect(view.grandTotalMinor).toBe(29997);
       expect(view.taxTotalMinor).toBe(0);
       expect(view.discountTotalMinor).toBe(0);
       expect(view.shippingTotalMinor).toBe(0);
 
-      // Line snapshots: sku + composed nameSnapshot + unitPriceMinor from the catalog.
       expect(view.lines).toHaveLength(2);
       expect(view.lines[0]).toMatchObject({
         variantId: 1,
@@ -209,19 +201,16 @@ describe('PlaceOrderUseCase', () => {
         lineTotalMinor: 19999,
       });
 
-      // Two snapshot addresses written; the order points at them.
       expect(h.addressRepository.saved).toHaveLength(2);
       expect(view.billingAddressId).toEqual(expect.any(String));
       expect(view.shippingAddressId).toEqual(expect.any(String));
       expect(view.billingAddressId).not.toBe(view.shippingAddressId);
 
-      // Cart marked converted; payment present.
       expect(h.cartReader.convertedCount).toBe(1);
       expect(view.payment).toBeDefined();
       expect(view.payment?.amountMinor).toBe(29997);
       expect(view.payment?.status).toBe('authorized');
 
-      // Both wire events emitted.
       expect(h.publisher.placed).toHaveLength(1);
       expect(h.publisher.authorized).toHaveLength(1);
       expect(h.publisher.placed[0]).toMatchObject({
@@ -229,8 +218,6 @@ describe('PlaceOrderUseCase', () => {
         grandTotalMinor: 29997,
         lineCount: 2,
         eventVersion: 'v1',
-        // The buyer's email was resolved from the order's customerId and stamped on the
-        // event (ADR-033); locale ships null.
         customerEmail: FAKE_CUSTOMER_EMAIL,
         customerLocale: null,
       });
@@ -241,9 +228,6 @@ describe('PlaceOrderUseCase', () => {
         eventVersion: 'v1',
       });
 
-      // The cart's holds were allocated to the order, carrying the orderId + the
-      // snapshotted lines (the lines ride the payload so inventory's fallback needs
-      // no cross-service read).
       expect(h.inventory.allocateCalls).toHaveLength(1);
       expect(h.inventory.allocateCalls[0]).toEqual({
         cartId: 'cart-1',
@@ -254,7 +238,6 @@ describe('PlaceOrderUseCase', () => {
         ],
         correlationId: 'corr-1',
       });
-      // The happy path never compensates.
       expect(h.inventory.cancelCalls).toHaveLength(0);
     });
 
@@ -266,8 +249,6 @@ describe('PlaceOrderUseCase', () => {
 
       await h.useCase.execute(placePayload());
 
-      // markConverted (the CAS) precedes allocate, which precedes payment authorize
-      // — so money is never authorized for stock that could not be allocated.
       expect(convertSpy.mock.invocationCallOrder[0]).toBeLessThan(
         allocateSpy.mock.invocationCallOrder[0],
       );
@@ -279,8 +260,6 @@ describe('PlaceOrderUseCase', () => {
 
   describe('customer email enrichment (ADR-033)', () => {
     it('stamps customerEmail null when the customer resolves no row (tombstoned/unknown)', async () => {
-      // The reader finds no row for the buyer's id — the placed event carries a null email
-      // (the consumer falls back to its own recipient resolution) but the order still places.
       const h = makeHarness(
         activeCart(),
         catalogMaps(),
@@ -297,7 +276,6 @@ describe('PlaceOrderUseCase', () => {
         customerEmail: null,
         customerLocale: null,
       });
-      // The reader was still consulted (the order's customerId is non-null).
       expect(h.customerContactReader.calls).toEqual([CUSTOMER_ID]);
     });
   });
@@ -314,8 +292,6 @@ describe('PlaceOrderUseCase', () => {
         details: { available: 0 },
       });
 
-      // No payment authorized, no events emitted, and no compensation (the allocate
-      // never committed inventory-side, so there is nothing to unwind).
       expect(h.paymentGateway.authorizeCount).toBe(0);
       expect(h.publisher.placed).toHaveLength(0);
       expect(h.publisher.authorized).toHaveLength(0);
@@ -324,15 +300,12 @@ describe('PlaceOrderUseCase', () => {
 
     it('does not allocate when the cart-conversion CAS loses (concurrent place)', async () => {
       const h = makeHarness(activeCart());
-      // The cart passes the up-front guard (active at findCart) but the CAS flips no
-      // row — a concurrent place converted it first.
       jest.spyOn(h.cartReader, 'markConverted').mockResolvedValue(false);
 
       await expect(h.useCase.execute(placePayload())).rejects.toMatchObject({
         code: OrderErrorCodeEnum.ORDER_CART_NOT_PLACEABLE,
       });
 
-      // Allocate-after-CAS means the loser never allocates — no double allocation.
       expect(h.inventory.allocateCalls).toHaveLength(0);
       expect(h.paymentGateway.authorizeCount).toBe(0);
     });
@@ -348,8 +321,6 @@ describe('PlaceOrderUseCase', () => {
 
       await expect(h.useCase.execute(placePayload())).rejects.toBe(commitError);
 
-      // The allocation committed inventory-side, then the place tx failed at commit
-      // → the orphaned allocation is cancelled best-effort with reason place-rollback.
       expect(h.inventory.allocateCalls).toHaveLength(1);
       expect(h.inventory.cancelCalls).toHaveLength(1);
       expect(h.inventory.cancelCalls[0]).toMatchObject({
@@ -361,7 +332,6 @@ describe('PlaceOrderUseCase', () => {
         correlationId: 'corr-1',
       });
       expect(h.inventory.cancelCalls[0].orderId).toEqual(expect.any(Number));
-      // The original commit error still surfaced; no payment, no events.
       expect(h.paymentGateway.authorizeCount).toBe(0);
       expect(h.publisher.placed).toHaveLength(0);
     });
@@ -379,7 +349,6 @@ describe('PlaceOrderUseCase', () => {
       await expect(h.useCase.execute(placePayload())).rejects.toBe(commitError);
 
       expect(h.inventory.cancelCalls).toHaveLength(1);
-      // The failed compensation was warn-logged, not raised over the commit error.
       expect(h.logger.warn).toHaveBeenCalled();
     });
 
@@ -389,8 +358,6 @@ describe('PlaceOrderUseCase', () => {
       await h.useCase.execute(placePayload());
       expect(h.inventory.allocateCalls).toHaveLength(1);
 
-      // The cart is now converted; a repeat place resolves the existing order and
-      // never allocates again.
       await h.useCase.execute(placePayload({ idempotencyKey: 'idem-2' }));
       expect(h.inventory.allocateCalls).toHaveLength(1);
     });
@@ -427,12 +394,11 @@ describe('PlaceOrderUseCase', () => {
 
     it('rejects a line with no applicable price with ORDER_LINE_NO_PRICE (409)', async () => {
       const catalog = catalogMaps();
-      catalog.prices.set(3, null); // variant 3 has no applicable price
+      catalog.prices.set(3, null);
       const h = makeHarness(activeCart(), catalog);
       await expect(h.useCase.execute(placePayload())).rejects.toMatchObject({
         code: OrderErrorCodeEnum.ORDER_LINE_NO_PRICE,
       });
-      // No order is created when a line cannot be priced (the reject precedes persist).
       expect(h.orderRepository.saveCount).toBe(0);
     });
   });
@@ -444,15 +410,11 @@ describe('PlaceOrderUseCase', () => {
       const { view: first } = await h.useCase.execute(placePayload());
       const saveCountAfterFirst = h.orderRepository.saveCount;
 
-      // The cart is now converted; a repeat place (a NEW key → a store miss) resolves the
-      // existing order via the durable cart-state backstop.
       const { view: second } = await h.useCase.execute(placePayload({ idempotencyKey: 'idem-2' }));
 
       expect(second.id).toBe(first.id);
       expect(second.orderNumber).toBe(first.orderNumber);
-      // No further order writes happened on the repeat (no duplicate order).
       expect(h.orderRepository.saveCount).toBe(saveCountAfterFirst);
-      // The repeat path does not re-authorize or re-convert.
       expect(h.cartReader.convertedCount).toBe(1);
       expect(h.paymentGateway.authorizeCount).toBe(1);
       expect(second.payment).toBeDefined();
@@ -472,8 +434,6 @@ describe('PlaceOrderUseCase', () => {
 
     it('replays the stored response on a matching key + fingerprint, with no side effects', async () => {
       const store = new FakeIdempotencyStore();
-      // A prior place under the same key + the same canonical body — its stored OrderView
-      // is what the replay must return verbatim.
       const priorView = { id: 4242, orderNumber: 'ORD-2026-00004242', status: 'pending' };
       store.seed(
         buildIdempotencyRecord({
@@ -488,8 +448,6 @@ describe('PlaceOrderUseCase', () => {
 
       expect(replayed).toBe(true);
       expect(view).toEqual(priorView);
-      // A replay is side-effect-free beyond returning the stored response: no inventory,
-      // no payment, no events, no cart conversion, no order write, no second store write.
       expect(h.inventory.allocateCalls).toHaveLength(0);
       expect(h.paymentGateway.authorizeCount).toBe(0);
       expect(h.publisher.placed).toHaveLength(0);
@@ -512,7 +470,6 @@ describe('PlaceOrderUseCase', () => {
       await expect(h.useCase.execute(placePayload())).rejects.toMatchObject({
         code: OrderErrorCodeEnum.ORDER_IDEMPOTENCY_KEY_REUSED,
       });
-      // The reuse is rejected before any place work runs.
       expect(h.orderRepository.saveCount).toBe(0);
       expect(h.inventory.allocateCalls).toHaveLength(0);
       expect(h.paymentGateway.authorizeCount).toBe(0);
@@ -533,11 +490,8 @@ describe('PlaceOrderUseCase', () => {
       const { view, replayed } = await h.useCase.execute(placePayload());
 
       expect(replayed).toBe(false);
-      // The place ran fully (a fresh execution).
       expect(h.orderRepository.saveCount).toBeGreaterThan(0);
       expect(h.publisher.placed).toHaveLength(1);
-      // The record was stored under (place-order, key) with the fingerprint + the OrderView
-      // as the response body + the 201 success status.
       expect(h.store.saved).toHaveLength(1);
       expect(h.store.saved[0]).toMatchObject({
         scope: 'place-order',
@@ -550,8 +504,6 @@ describe('PlaceOrderUseCase', () => {
 
     it('converges on the concurrent winner: a duplicate save falls back to the stored winner as a replay', async () => {
       const store = new FakeIdempotencyStore();
-      // A simultaneous identical place committed + stored first (a DIFFERENT order id). It
-      // is hidden from our first lookup (the miss) and revealed on the post-save re-read.
       const winnerView = { id: 999, orderNumber: 'ORD-2026-00000999' };
       store.armConcurrentWinner(
         buildIdempotencyRecord({
@@ -564,26 +516,11 @@ describe('PlaceOrderUseCase', () => {
 
       const { view, replayed } = await h.useCase.execute(placePayload());
 
-      // Our save lost the composite-PK race, so the winner's stored order is returned as a
-      // replay — the two racers converge on one response.
       expect(replayed).toBe(true);
       expect(view).toEqual(winnerView);
-      // Exactly one save was attempted (swallowed as the duplicate).
       expect(h.store.saved).toHaveLength(1);
-      // In production the cart-conversion CAS is what guarantees exactly one order per cart
-      // (the loser's CAS fails and rolls back — see 'does not allocate when the
-      // cart-conversion CAS loses'); this test isolates the store's convergence step.
     });
   });
-  // ════════════════════════════════════════════════════════════════════════════════════════
-  // A DECLINED AUTHORIZATION (ISSUE-06 / ADR-052).
-  //
-  // **This branch had never been executed by a test.** `FakePaymentGateway` has taken an `approve`
-  // flag all along and `makeHarness` has forwarded it — and **not one spec ever passed `false`.** The
-  // decline was modelled (a typed `ORDER_PAYMENT_NOT_APPROVED` code exists; someone expected declines)
-  // and then never exercised, which is exactly how the orphan survived eleven epics: the bound gateway
-  // always approves, so the path was unreachable in production *and* in CI.
-  // ════════════════════════════════════════════════════════════════════════════════════════
   describe('a declined authorization', () => {
     it('surfaces the decline rather than returning a successful order', async () => {
       const h = makeHarness(activeCart(), catalogMaps(), false);
@@ -598,13 +535,9 @@ describe('PlaceOrderUseCase', () => {
 
       await expect(h.useCase.execute(placePayload())).rejects.toThrow();
 
-      // The compensation ran, against the SAME lines the allocate used.
       expect(h.inventory.cancelCalls).toHaveLength(1);
       expect(h.inventory.cancelCalls[0]).toMatchObject({
         lines: h.inventory.allocateCalls[0].lines,
-        // The ledger records WHY: not an operator cancelling, but a place that never got off the
-        // ground. Distinguishing it from `place-rollback` (the pre-commit window) and from
-        // `order-cancelled` matters to anyone reading the movement ledger.
         reason: 'authorization-declined',
       });
     });
@@ -615,13 +548,8 @@ describe('PlaceOrderUseCase', () => {
       await expect(h.useCase.execute(placePayload())).rejects.toThrow();
 
       const order = (await h.orderRepository.findById(1))!;
-      // The lifecycle axis says the order is dead...
       expect(order.status).toBe(OrderStatusEnum.CANCELLED);
-      // ...and the payment axis says why. Two orthogonal axes (ADR-028 §2), no new enum member:
-      // `OrderPaymentStatusEnum.FAILED` was in the contract and in the column all along, with nothing
-      // producing it.
       expect(order.paymentStatus).toBe(OrderPaymentStatusEnum.FAILED);
-      // It used to read `pending` / `none` — indistinguishable from a healthy order.
       expect(order.status).not.toBe(OrderStatusEnum.PENDING);
     });
 
@@ -630,26 +558,15 @@ describe('PlaceOrderUseCase', () => {
 
       await expect(h.useCase.execute(placePayload())).rejects.toThrow();
 
-      // `emitEvents` runs after the authorize, so `retail.order.placed` never fired. Announcing a
-      // cancellation would announce the death of something nobody heard was born — and would drive
-      // `OrderCancelledConsumer` into an auto-refund of a payment that does not exist.
       expect(h.publisher.placed).toHaveLength(0);
       expect(h.publisher.orderCancelled).toHaveLength(0);
       expect(h.publisher.authorized).toHaveLength(0);
     });
 
-    // **The assertion that makes this `high` rather than `medium`.**
     it('REFUSES the retry instead of reporting the dead order as a success', async () => {
       const h = makeHarness(activeCart(), catalogMaps(), false);
       await expect(h.useCase.execute(placePayload())).rejects.toThrow();
 
-      // The customer, having seen an error, tries again. The cart is `converted` (the CAS is the
-      // double-place guard and cannot be reversed), so the repeat-place path fires — and it used to
-      // return `toOrderView(existing, null)`: **a 200/201 with `payment: undefined`.** The customer
-      // whose card was declined was told their order went through.
-      //
-      // A fresh idempotency key, so the request-level replay guard does not fire and we reach the
-      // converted-cart branch for real.
       await expect(
         h.useCase.execute(placePayload({ idempotencyKey: 'idem-retry' })),
       ).rejects.toMatchObject({

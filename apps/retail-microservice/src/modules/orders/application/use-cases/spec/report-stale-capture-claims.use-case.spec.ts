@@ -10,8 +10,6 @@ import { FakePaymentRepository } from './test-doubles';
 const NOW = new Date('2026-07-13T12:00:00Z');
 const STALE_MINUTES = 15;
 
-// A payment reconstituted straight into a state, with an explicit `updatedAt` — the horizon is
-// measured from it, so the spec must be able to set it.
 const paymentAt = (status: PaymentStatusEnum, updatedAt: Date, id: number): Payment =>
   Payment.reconstitute({
     id,
@@ -51,7 +49,6 @@ describe('ReportStaleCaptureClaimsUseCase', () => {
   });
 
   it('ignores a claim that is younger than the horizon — a capture in flight is not a fault', async () => {
-    // Claimed one minute ago: a gateway round-trip is still plausibly in progress.
     await repository.save(
       paymentAt(PaymentStatusEnum.CAPTURING, new Date('2026-07-13T11:59:00Z'), 2),
     );
@@ -71,8 +68,6 @@ describe('ReportStaleCaptureClaimsUseCase', () => {
       expect.objectContaining({
         paymentId: 3,
         orderId: 103,
-        // Without this, an operator cannot ask the processor what actually happened — which is the
-        // only thing that can resolve the row.
         gatewayReference: 'fake_ref_3',
         claimedSince: new Date('2026-07-13T11:00:00Z'),
       }),
@@ -80,15 +75,6 @@ describe('ReportStaleCaptureClaimsUseCase', () => {
     );
   });
 
-  // **The assertion that matters most, and it is an assertion of INACTION.**
-  //
-  // A sweeper that "resolves" a stranded claim is a sweeper that guesses whether the customer's money
-  // moved — and the gateway offers no way to ask. Releasing the claim back to `AUTHORIZED` invites the
-  // next caller to charge a second time; completing it to `CAPTURED` records a charge that may never
-  // have happened. There is no safe automatic answer, so this use case must not write ANYTHING.
-  //
-  // Pinning that is the only way it stays true: the next author to read `SweepExpiredReservations…`
-  // and reason by analogy will add a fix-it branch, and nothing else in the codebase would stop them.
   it('does NOT resolve the claim — it writes nothing at all', async () => {
     await repository.save(
       paymentAt(PaymentStatusEnum.CAPTURING, new Date('2026-07-13T10:30:00Z'), 4),
