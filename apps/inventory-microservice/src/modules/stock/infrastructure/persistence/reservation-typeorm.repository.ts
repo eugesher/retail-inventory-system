@@ -12,11 +12,6 @@ import { StockWriteConflictError } from '../../application/use-cases/stock-write
 import { ReservationEntity } from './reservation.entity';
 import { ReservationMapper } from './reservation.mapper';
 
-// The single `@InjectRepository(ReservationEntity)` site. Extends
-// `BaseTypeormRepository` for the `toDomain`/`toEntity` seam; `save` is overridden
-// to be transaction-scope-aware, re-read the row, and translate a lost INSERT race
-// into the shared `StockWriteConflictError`. Returns domain types only — no
-// TypeORM leak past this file (ADR-017 / ADR-030).
 @Injectable()
 export class ReservationTypeormRepository
   extends BaseTypeormRepository<ReservationEntity, Reservation>
@@ -50,7 +45,6 @@ export class ReservationTypeormRepository
     stockLocationId: string,
     scope?: ITransactionScope,
   ): Promise<Reservation | null> {
-    // The all-statuses UNIQUE triple — any one row at most, regardless of status.
     const entity = await this.repo(scope).findOne({
       where: { cartId, variantId, stockLocationId },
     });
@@ -77,12 +71,6 @@ export class ReservationTypeormRepository
     return entities.map((entity) => ReservationMapper.toDomain(entity));
   }
 
-  // `WHERE status = 'active' AND expires_at < :now ORDER BY expires_at ASC, id ASC
-  // LIMIT :limit` — served by `IDX_RESERVATION_STATUS_EXPIRES_AT (status, expires_at)`.
-  // The strict `<` matches `Reservation.isExpired(now)`, so a hold whose `expiresAt`
-  // equals `now` is not a candidate. Oldest-first makes a capped scan reclaim the
-  // longest-stranded holds first; the `id` tiebreaker totalises the order, so a repeated
-  // scan over an unchanged table returns the same page.
   public async listExpiredActive(
     now: Date,
     limit: number,
@@ -105,16 +93,6 @@ export class ReservationTypeormRepository
     const repo = this.repo(scope);
     const partial = ReservationMapper.toEntity(reservation);
 
-    // The app-assigned UUID PK lets `save` preload by id → INSERT when absent,
-    // UPDATE when present (the `Cart` idiom). A first-touch INSERT that loses the
-    // `UC_RESERVATION_CART_VARIANT_LOCATION` race to a concurrent writer (who
-    // created the row for the same triple under a DIFFERENT id) surfaces
-    // `ER_DUP_ENTRY`. Translate it to `StockWriteConflictError` so the shared
-    // bounded-retry write protocol (the Reserve / Allocate use cases) re-reads the
-    // now-present row via `findByKey` and reactivates it rather than duplicating —
-    // the all-statuses UNIQUE triple converges. An UPDATE never trips
-    // this: a reservation never changes its triple, only its quantity / TTL /
-    // status / version.
     try {
       await repo.save(partial);
     } catch (error) {
@@ -132,9 +110,6 @@ export class ReservationTypeormRepository
     return this.reload(repo, id);
   }
 
-  // Resolves the repository bound to the caller's transaction when a `scope` is
-  // supplied (un-opaqued with `entityManagerOf`, ADR-054), else the default-manager
-  // repository.
   private repo(scope?: ITransactionScope): Repository<ReservationEntity> {
     if (!scope) {
       return this.reservationRepository;
@@ -143,9 +118,6 @@ export class ReservationTypeormRepository
     return manager.getRepository(ReservationEntity);
   }
 
-  // Re-read so the returned aggregate carries the committed version + the DB
-  // timestamps. The row was just written in this unit of work, so a miss here is an
-  // invariant breach rather than a not-found.
   private async reload(repo: Repository<ReservationEntity>, id: string): Promise<Reservation> {
     const reloaded = await repo.findOne({ where: { id } });
     if (!reloaded) {

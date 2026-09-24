@@ -54,7 +54,7 @@ describe('ReceiveStockUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
   });
@@ -93,8 +93,6 @@ describe('ReceiveStockUseCase', () => {
   });
 
   it('lazy-initializes a missing stock level then applies the receive', async () => {
-    // No seeded level for this variant — the use case find-or-initialAt's a zeroed
-    // level and applies the delta on top of it.
     const view = await useCase.execute({ variantId: 999, quantity: 7 });
 
     expect(view.quantityOnHand).toBe(7);
@@ -159,7 +157,6 @@ describe('ReceiveStockUseCase', () => {
     expect(emitted.event.actorId).toBe('staff-1');
     expect(emitted.correlationId).toBe(CORRELATION_ID);
 
-    // Receive never lowers on-hand, so it never fires the low-stock alert.
     expect(publisher.low).toHaveLength(0);
   });
 
@@ -182,7 +179,6 @@ describe('ReceiveStockUseCase', () => {
       correlationId: CORRELATION_ID,
     });
 
-    // Exactly one `receipt` ledger row with the positive received quantity.
     expect(movements.appended).toHaveLength(1);
     const [movement] = movements.appended;
     expect(movement.type).toBe(StockMovementTypeEnum.RECEIPT);
@@ -194,10 +190,8 @@ describe('ReceiveStockUseCase', () => {
     expect(movement.referenceType).toBeNull();
     expect(movement.referenceId).toBeNull();
 
-    // It was appended on the same transaction scope as the counter persist.
     expect(movements.appendScopes[0]).toBe(transaction.lastScope);
 
-    // The recorded event fires post-commit alongside `inventory.stock.received`.
     expect(publisher.movementsRecorded).toHaveLength(1);
     expect(publisher.movementsRecorded[0].movement).toBe(movement);
     expect(publisher.movementsRecorded[0].correlationId).toBe(CORRELATION_ID);
@@ -226,7 +220,6 @@ describe('ReceiveStockUseCase', () => {
 
     const view = await useCase.execute({ variantId: VARIANT_ID, quantity: 5 });
 
-    // The receive still succeeds and the ledger row still landed in the tx.
     expect(view.quantityOnHand).toBe(5);
     expect(movements.appended).toHaveLength(1);
   });

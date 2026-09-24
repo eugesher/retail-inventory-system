@@ -34,22 +34,6 @@ import {
 } from '../../domain';
 import { IStockEventsPublisherPort } from '../../application/ports';
 
-// The only place in the inventory service allowed to hold a `ClientProxy`
-// (ADR-009 / ADR-020). It holds two clients because the inventory service emits
-// onto two different consumer queues: `inventory.stock.low` lands on
-// `notification_events` (the notification service's queue), while the
-// `inventory.stock.{received,adjusted}` + `inventory.stock-level.initialized`
-// events land on `inventory_queue` (the service's own queue, reserved surfaces
-// with no cross-service consumer yet). Each is the producer-targets-consumer-queue
-// pattern — the destination queue is fixed by which client token the emit goes
-// through (ADR-008 / ADR-020).
-//
-// Every event is **dual-published** (ADR-035): after the primary default-exchange
-// `emit` above, the same routing key + wire is mirrored onto the `ris.events`
-// topic exchange via the shared `RisEventsMirrorPublisher`, so the event store's
-// firehose captures the whole inventory stream (the highest-volume producer)
-// without re-binding any existing consumer. The mirror is best-effort and
-// non-throwing, ordered after the primary emit.
 @Injectable()
 export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
   constructor(
@@ -71,9 +55,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // `firstValueFrom` materializes the cold Observable from `emit()` and
-    // waits for the broker ack so application code awaits a plain Promise.
-    // Emitted via the notification client → lands on `notification_events`.
     await firstValueFrom(
       this.notificationClient.emit<void, IInventoryStockLowEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_LOW,
@@ -98,8 +79,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Emitted via the inventory client → lands on `inventory_queue` (reserved
-    // surface, no handler bound yet).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockReceivedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_RECEIVED,
@@ -125,8 +104,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Emitted via the inventory client → lands on `inventory_queue` (reserved
-    // surface, no handler bound yet).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockAdjustedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_ADJUSTED,
@@ -148,9 +125,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Emitted via the inventory client → lands on `inventory_queue`. No handler
-    // is bound to this pattern yet (reserved surface); the broker holds it for a
-    // future consumer (e.g. an audit capability).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockLevelInitializedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_LEVEL_INITIALIZED,
@@ -176,7 +150,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Reserved surface on `inventory_queue` (no handler bound yet).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockReservedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_RESERVED,
@@ -201,7 +174,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Reserved surface on `inventory_queue` (no handler bound yet).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockAllocatedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_ALLOCATED,
@@ -227,7 +199,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Reserved surface on `inventory_queue` (no handler bound yet).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockReleasedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_RELEASED,
@@ -252,7 +223,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Reserved surface on `inventory_queue` (no handler bound yet).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockCommittedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_COMMITTED,
@@ -277,7 +247,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Reserved surface on `inventory_queue` (no handler bound yet).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockReturnedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_RETURNED,
@@ -287,11 +256,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
     await this.risEvents.mirror(ROUTING_KEYS.INVENTORY_STOCK_RETURNED, wire);
   }
 
-  // Maps the domain `StockMovement` record straight to the wire event (no wrapper
-  // event class — see the port comment). The record is always the just-appended
-  // one, so its DB-assigned `id` is concrete; a null id here is an internal bug
-  // (calling publish before append), surfaced as a plain `Error` the best-effort
-  // caller warn-swallows.
   public async publishStockMovementRecorded(
     movement: StockMovement,
     correlationId?: string,
@@ -315,7 +279,6 @@ export class StockRabbitmqPublisher implements IStockEventsPublisherPort {
       correlationId: correlationId ?? '',
     };
 
-    // Reserved surface on `inventory_queue` (no handler bound yet).
     await firstValueFrom(
       this.inventoryClient.emit<void, IInventoryStockMovementRecordedEvent>(
         ROUTING_KEYS.INVENTORY_STOCK_MOVEMENT_RECORDED,

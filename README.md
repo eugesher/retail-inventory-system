@@ -475,8 +475,8 @@ Three aggregates plus one append-only ledger record, all keyed on the opaque cat
 | `Reservation`   | TTL-bounded, cart-scoped hold. App-generated `CHAR(36)` UUID. `active → committed / released / expired`, plus a `reactivate` row-reuse path so the all-statuses UNIQUE `(cartId, variantId, stockLocationId)` triple survives a remove-then-re-add. |
 | `StockMovement` | Immutable, `Object.freeze`d ledger record — no mutators, no events. Six types with a **fixed sign**: `+` receipt/return, `−` sale/allocation/release, `±` non-zero adjustment. Polymorphic FK-less `referenceType`/`referenceId`.                   |
 
-Every counter-changing operation appends a `StockMovement` **in the same transaction** and
-routes through `stockCache.withInvalidation(...)` (post-commit invalidation,
+Every counter-changing operation except Reserve appends a `StockMovement` **in the same transaction**
+(a hold is not a movement), and every one routes through `stockCache.withInvalidation(...)` (post-commit invalidation,
 [ADR-023](docs/adr/023-cache-invalidate-post-commit-by-type.md)) and the shared bounded-OCC
 `runWithStockWriteRetry`.
 
@@ -869,7 +869,9 @@ after serialization gets its terminal domain `409` (`ORDER_NOT_CANCELLABLE`,
 
 ### Inventory invariants
 
-**No-oversell.** `available` never goes negative. Reserve and the direct-allocate fallback
+**No-oversell.** Reserve and allocation never drive `available` below zero. (An on-hand decrease can:
+Adjust and Transfer guard on-hand, not `available` —
+[`docs/reference/inventory.md`](docs/reference/inventory.md#stocklevel).) Reserve and the direct-allocate fallback
 check `quantity ≤ available` _before_ moving a counter and reject the overflow with
 `409 INVENTORY_OUT_OF_STOCK` carrying `details.available`; Adjust and Transfer reject an
 on-hand result below zero with `409 INVENTORY_STOCK_RESULT_NEGATIVE`. Check and write run in
@@ -1721,7 +1723,8 @@ Two read paths use Redis today, both **cache-aside**:
 3. loader → STOCK_REPOSITORY.findStockLevelsByVariant(variantId, locationIds?)
      → point lookup of the variant's stock_level rows (no SUM/GROUP BY)
      → project to StockLevelView, sort by stockLocationId, sum totals
-4. STOCK_CACHE.set(key, view, jittered TTL)
+4. the single-flight leader writes the view back with a jittered TTL
+   (skipped when the cache read failed; StockCache's own set is private)
 ```
 
 A variant with no rows in scope is a valid, cached **zero-availability** answer, not a 404.

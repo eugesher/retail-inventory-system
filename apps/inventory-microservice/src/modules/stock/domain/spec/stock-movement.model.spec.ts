@@ -14,9 +14,6 @@ const makeRecordProps = (
 
 describe('StockMovement', () => {
   describe('sign-per-type invariant', () => {
-    // The fixed-sign reading of ADR-030 §2: positive rows record stock ENTERING
-    // on-hand, negative rows record stock LEAVING or a hold being torn down, and
-    // `adjustment` carries the operator's signed delta (either sign).
     const positiveTypes = [StockMovementTypeEnum.RECEIPT, StockMovementTypeEnum.RETURN] as const;
     const negativeTypes = [
       StockMovementTypeEnum.SALE,
@@ -66,8 +63,6 @@ describe('StockMovement', () => {
     });
 
     it.each(allTypes)('a %s rejects a non-integer quantity', (type) => {
-      // A non-integer of the legal sign for the type still fails on the
-      // integer check.
       expect(() => StockMovement.record(makeRecordProps({ type, quantity: 1.5 }))).toThrow(Error);
     });
   });
@@ -81,20 +76,14 @@ describe('StockMovement', () => {
     it('an attempted field write does not change the value (frozen at runtime)', () => {
       const movement = StockMovement.record(makeRecordProps({ quantity: 5 }));
       try {
-        // The cast defeats the compile-time `readonly`; the runtime freeze is what
-        // actually holds the line.
         (movement as unknown as { quantity: number }).quantity = 999;
-      } catch {
-        // A strict-mode write to a frozen property throws; either way the value
-        // must be unchanged.
+      } catch (error) {
+        void error;
       }
       expect(movement.quantity).toBe(5);
     });
 
     it('exposes no instance methods at all — no mutators, no getters', () => {
-      // Every field is a public readonly data property, so the prototype carries
-      // ONLY the constructor: there is no method that could change a recorded
-      // movement.
       expect(Object.getOwnPropertyNames(StockMovement.prototype)).toEqual(['constructor']);
     });
   });
@@ -150,8 +139,6 @@ describe('StockMovement', () => {
         referenceType: 'cart',
         referenceId: 'cart-abc',
         actorId: null,
-        // A cart-driven release carries no operation key — only Cancel-Allocation mints one
-        // (ADR-057), which is what keeps every other release out of the dedupe UNIQUE.
         operationKey: null,
         occurredAt,
       });
@@ -175,7 +162,7 @@ describe('StockMovement', () => {
           variantId: 1,
           stockLocationId: 'default-warehouse',
           type: StockMovementTypeEnum.RECEIPT,
-          quantity: -1, // illegal: a receipt is strictly positive
+          quantity: -1,
           reasonCode: null,
           referenceType: null,
           referenceId: null,

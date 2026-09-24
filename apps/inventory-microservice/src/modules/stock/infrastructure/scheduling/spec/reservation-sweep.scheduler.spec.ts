@@ -20,9 +20,6 @@ const EMPTY_SWEEP: IReservationSweepResult = {
   durationMs: 0,
 };
 
-// A stand-in for the use case: the scheduler only ever calls `execute()` with no arguments,
-// so the double needs nothing else. The real `SchedulerRegistry` is used as-is — it is a
-// plain class with a no-arg constructor and a `Map` behind it.
 class FakeSweepUseCase {
   public readonly execute = jest.fn<Promise<IReservationSweepResult>, []>(() =>
     Promise.resolve(EMPTY_SWEEP),
@@ -52,8 +49,6 @@ describe('ReservationSweepScheduler', () => {
   });
 
   afterEach(() => {
-    // Guards the suite against the very leak this scheduler exists to avoid: a surviving
-    // interval would keep firing into the next test's fake clock.
     if (registry.doesExist('interval', RESERVATION_SWEEP_INTERVAL_NAME)) {
       registry.deleteInterval(RESERVATION_SWEEP_INTERVAL_NAME);
     }
@@ -131,7 +126,6 @@ describe('ReservationSweepScheduler', () => {
         'Reservation sweep failed',
       );
 
-      // The scheduler survives the fault: the next tick still reaches the use case.
       await jest.advanceTimersByTimeAsync(INTERVAL_MS);
       expect(sweeper.execute).toHaveBeenCalledTimes(2);
       expect(logger.warn).toHaveBeenCalledTimes(1);

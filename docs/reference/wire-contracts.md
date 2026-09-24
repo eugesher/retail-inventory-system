@@ -212,7 +212,8 @@ for a transfer. Reserve writes no movement.
   (`normalizeReservationLines`, `reservation-mutation.ts`).
 - **Commit Sale and Restock From Return reject two lines on the same `(variantId, stockLocationId)`**
   (`requireDistinctLevels`): their replay guard is a UNIQUE on that pair per reference, so a
-  duplicate would read as a replay. Allocate and Cancel Allocation accept such lines and sum them.
+  duplicate would read as a replay. Allocate and Cancel Allocation accept such lines,
+  but sum them correctly only in some cases ([`inventory.md`](inventory.md#two-lines-on-one-variant-location)).
 - Commit Sale and Restock From Return are all-lines-atomic and idempotent on `fulfillmentId` /
   `returnRequestId` (`README.md` §4). On a replay the result **echoes the request's lines** without
   touching a counter; it is not read back from the ledger (`CommitSaleUseCase.execute`,

@@ -64,17 +64,14 @@ describe('QueryAvailabilityUseCase', () => {
 
     const result = await useCase.execute({ variantId: 42, correlationId });
 
-    // Repository projection surfaced.
     expect(result.variantId).toBe(42);
     expect(result.locations).toHaveLength(1);
     expect(result.locations[0].stockLocationId).toBe('default-warehouse');
-    // Write-back happened through getOrLoad.
     expect(cache.setCalls).toHaveLength(1);
     expect(cache.setCalls[0].data).toBe(result);
   });
 
   it('computes per-location available and aggregates the totals, sorted by stockLocationId', async () => {
-    // west sorts after default by localeCompare; seed out of order to prove the sort.
     repository.seedLevel(
       level({
         variantId: 42,
@@ -98,10 +95,8 @@ describe('QueryAvailabilityUseCase', () => {
       'default-warehouse',
       'west-warehouse',
     ]);
-    // default: 10 − 2 − 1 = 7; west: 5 − 0 − 0 = 5.
     expect(result.locations[0].available).toBe(7);
     expect(result.locations[1].available).toBe(5);
-    // Totals are the cross-location sums.
     expect(result.totalOnHand).toBe(15);
     expect(result.totalAvailable).toBe(12);
   });
@@ -115,8 +110,6 @@ describe('QueryAvailabilityUseCase', () => {
       totalAvailable: 0,
       locations: [],
     });
-    // The empty projection is written back — it is a valid cached value, not a
-    // "skip the cache" signal.
     expect(cache.setCalls).toHaveLength(1);
     expect(cache.setCalls[0].data).toEqual(result);
   });
@@ -141,10 +134,6 @@ describe('QueryAvailabilityUseCase', () => {
   });
 
   it('falls back to the repository on a Redis-down read without a write-back', async () => {
-    // CACHE-005: a read that returns `available: false` short-circuits the
-    // write-back so the request is served from the DB without re-attempting a
-    // dead cache (the duplicate-warn suppression itself is covered at the
-    // StockCache adapter level).
     cache.available = false;
     repository.seedLevel(
       level({ variantId: 42, stockLocationId: 'default-warehouse', quantityOnHand: 7 }),

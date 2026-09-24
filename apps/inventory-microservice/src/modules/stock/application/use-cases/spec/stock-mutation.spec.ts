@@ -59,9 +59,6 @@ describe('applyOnHandChange (shared stock mutator)', () => {
       movementRepository: movements,
       stockCache: cache,
       logger: makePinoLoggerMock() as unknown as PinoLogger,
-      // The bounded OCC retry budget is now injected (OCC_RETRY_ATTEMPTS, ADR-036), not a
-      // hardcoded constant. The default tests use 5; the budget-specific block below
-      // overrides it to prove the loop honors the injected value.
       maxAttempts: 5,
     };
   });
@@ -99,7 +96,6 @@ describe('applyOnHandChange (shared stock mutator)', () => {
 
   it('retries on an optimistic conflict and applies the delta exactly once (no double-apply)', async () => {
     seedLevel(repository, 10);
-    // The first two persists lose the compare-and-swap; the third succeeds.
     repository.conflictsBeforeSuccess = 2;
 
     const { level } = await applyOnHandChange(deps, {
@@ -108,8 +104,6 @@ describe('applyOnHandChange (shared stock mutator)', () => {
       delta: 5,
     });
 
-    // 10 + 5 — applied once despite three attempts (each retry re-reads the
-    // unchanged stored row; a corrupted double-apply would read 20 or 25).
     expect(level.quantityOnHand).toBe(15);
     expect(transaction.calls).toBe(3);
     expect(cache.invalidations).toHaveLength(1);
@@ -124,17 +118,14 @@ describe('applyOnHandChange (shared stock mutator)', () => {
 
     expect(transaction.calls).toBe(1);
     expect(cache.invalidations).toHaveLength(0);
-    // The stored level is untouched.
     const persisted = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(persisted?.quantityOnHand).toBe(3);
   });
 
   it('exhausts the injected retry budget and surfaces a STOCK_WRITE_CONFLICT (409)', async () => {
     seedLevel(repository, 10);
-    repository.conflictsBeforeSuccess = 99; // always conflict
+    repository.conflictsBeforeSuccess = 99;
 
-    // A non-default budget (4, not the env default 5) proves the loop counts down the
-    // INJECTED value, not a hardcoded constant.
     const error = await applyOnHandChange(
       { ...deps, maxAttempts: 4 },
       { variantId: VARIANT_ID, stockLocationId: LOCATION, delta: 5 },
@@ -144,7 +135,6 @@ describe('applyOnHandChange (shared stock mutator)', () => {
     expect((error as InventoryDomainException).code).toBe(
       InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
     );
-    // Bounded by the injected budget — tried exactly 4 times, never more.
     expect(transaction.calls).toBe(4);
     expect(cache.invalidations).toHaveLength(0);
   });
@@ -152,7 +142,7 @@ describe('applyOnHandChange (shared stock mutator)', () => {
   describe('honors the injected OCC retry budget (OCC_RETRY_ATTEMPTS, ADR-036)', () => {
     it('succeeds when conflicts stay within budget (budget 2, one conflict then success)', async () => {
       seedLevel(repository, 10);
-      repository.conflictsBeforeSuccess = 1; // one lost CAS, the second attempt wins
+      repository.conflictsBeforeSuccess = 1;
 
       const { level } = await applyOnHandChange(
         { ...deps, maxAttempts: 2 },
@@ -160,14 +150,13 @@ describe('applyOnHandChange (shared stock mutator)', () => {
       );
 
       expect(level.quantityOnHand).toBe(15);
-      // Exactly two attempts: the conflict plus the success — the budget was enough.
       expect(transaction.calls).toBe(2);
       expect(cache.invalidations).toHaveLength(1);
     });
 
     it('exhausts at exactly the budget (budget 2, two conflicts) → STOCK_WRITE_CONFLICT', async () => {
       seedLevel(repository, 10);
-      repository.conflictsBeforeSuccess = 2; // both attempts lose the CAS
+      repository.conflictsBeforeSuccess = 2;
 
       const error = await applyOnHandChange(
         { ...deps, maxAttempts: 2 },
@@ -178,7 +167,6 @@ describe('applyOnHandChange (shared stock mutator)', () => {
       expect((error as InventoryDomainException).code).toBe(
         InventoryErrorCodeEnum.STOCK_WRITE_CONFLICT,
       );
-      // Stopped at the budget, not the default 5.
       expect(transaction.calls).toBe(2);
       expect(cache.invalidations).toHaveLength(0);
     });
@@ -202,17 +190,13 @@ describe('applyOnHandChange (shared stock mutator)', () => {
           }),
       });
 
-      // The movement is appended and returned with its DB-assigned id.
       expect(movements.appended).toHaveLength(1);
       expect(movement).not.toBeNull();
       expect(movement?.id).toBe(1);
       expect(movement?.type).toBe(StockMovementTypeEnum.RECEIPT);
       expect(movement?.quantity).toBe(5);
       expect(movement?.actorId).toBe('staff-1');
-      // It was appended on the SAME scope the transaction port opened (it joined
-      // the counter's transaction, not a separate unit of work).
       expect(movements.appendScopes[0]).toBe(transaction.lastScope);
-      // The factory saw the persisted level.
       expect(level.quantityOnHand).toBe(15);
     });
 
@@ -231,8 +215,6 @@ describe('applyOnHandChange (shared stock mutator)', () => {
 
     it('appends the movement exactly once across an optimistic retry (after persist, not per attempt)', async () => {
       seedLevel(repository, 10);
-      // Two persists lose the CAS; the append sits AFTER the persist, so a losing
-      // attempt never reaches it — the third (winning) attempt appends once.
       repository.conflictsBeforeSuccess = 2;
 
       await applyOnHandChange(deps, {

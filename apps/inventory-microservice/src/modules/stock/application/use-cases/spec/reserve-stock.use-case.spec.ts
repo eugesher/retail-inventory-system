@@ -79,7 +79,7 @@ describe('ReserveStockUseCase', () => {
       reservations,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       TTL_MINUTES,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
@@ -110,14 +110,11 @@ describe('ReserveStockUseCase', () => {
     expect(typeof view.reservationId).toBe('string');
     expect(view.reservationId.length).toBeGreaterThan(0);
 
-    // Counter moved on the persisted level.
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(level?.quantityReserved).toBe(4);
 
-    // Exactly one reservation row for the triple.
     expect(reservations.rows.size).toBe(1);
 
-    // stock.reserved emitted post-commit with the absolute quantity; NO movement.
     expect(publisher.reserved).toHaveLength(1);
     expect(publisher.reserved[0].event.aggregateId).toBe(VARIANT_ID);
     expect(publisher.reserved[0].event.quantity).toBe(4);
@@ -126,7 +123,6 @@ describe('ReserveStockUseCase', () => {
     expect(movements.appended).toHaveLength(0);
     expect(publisher.movementsRecorded).toHaveLength(0);
 
-    // Invalidation fired post-commit with the mutated (variantId, stockLocationId).
     expect(cache.invalidations).toHaveLength(1);
     expect(cache.invalidations[0].items).toEqual([
       { variantId: VARIANT_ID, stockLocationId: LOCATION },
@@ -155,7 +151,7 @@ describe('ReserveStockUseCase', () => {
 
     await reserve(3);
     const firstId = [...reservations.rows.keys()][0];
-    const view = await reserve(5); // delta +2
+    const view = await reserve(5);
 
     expect(reservations.rows.size).toBe(1);
     expect(view.reservationId).toBe(firstId);
@@ -169,7 +165,7 @@ describe('ReserveStockUseCase', () => {
     seedLevel(repository, { onHand: 10 });
 
     await reserve(5);
-    const view = await reserve(2); // delta −3
+    const view = await reserve(2);
 
     expect(reservations.rows.size).toBe(1);
     expect(view.quantity).toBe(2);
@@ -182,13 +178,12 @@ describe('ReserveStockUseCase', () => {
 
     const first = await reserve(3);
     await new Promise((resolve) => setTimeout(resolve, 5));
-    const second = await reserve(3); // delta 0 — counters untouched, TTL refreshed
+    const second = await reserve(3);
 
     expect(reservations.rows.size).toBe(1);
     expect(new Date(second.expiresAt).getTime()).toBeGreaterThan(
       new Date(first.expiresAt).getTime(),
     );
-    // delta-zero leaves the counter untouched.
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(level?.quantityReserved).toBe(3);
   });

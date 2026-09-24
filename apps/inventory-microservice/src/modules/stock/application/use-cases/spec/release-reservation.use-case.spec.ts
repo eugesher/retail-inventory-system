@@ -46,12 +46,11 @@ describe('ReleaseReservationUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
   });
 
-  // Seeds an active hold + a level whose reserved counter holds exactly it.
   const seedHold = (variantId: number, quantity: number, cartId = CART_ID): Reservation => {
     repository.seedLevel(
       new StockLevel({
@@ -86,26 +85,22 @@ describe('ReleaseReservationUseCase', () => {
     expect(result.released[0].status).toBe('released');
     expect(result.released[0].reservationId).toBe(hold.id);
 
-    // Counter returned to available.
     const level = await repository.findStockLevel(42, LOCATION);
     expect(level?.quantityReserved).toBe(0);
 
-    // Exactly one negative `release` movement referencing the cart.
     expect(movements.appended).toHaveLength(1);
     const movement = movements.appended[0];
     expect(movement.type).toBe(StockMovementTypeEnum.RELEASE);
     expect(movement.quantity).toBe(-3);
     expect(movement.referenceType).toBe('cart');
     expect(movement.referenceId).toBe(CART_ID);
-    expect(movement.reasonCode).toBe('cart-removed'); // default
+    expect(movement.reasonCode).toBe('cart-removed');
 
-    // Both post-commit events fired.
     expect(publisher.released).toHaveLength(1);
     expect(publisher.released[0].event.quantity).toBe(3);
     expect(publisher.released[0].event.reason).toBe('cart-removed');
     expect(publisher.movementsRecorded).toHaveLength(1);
 
-    // Invalidation item correct.
     expect(cache.invalidations).toHaveLength(1);
     expect(cache.invalidations[0].items).toEqual([{ variantId: 42, stockLocationId: LOCATION }]);
   });
@@ -124,7 +119,6 @@ describe('ReleaseReservationUseCase', () => {
     expect((await repository.findStockLevel(42, LOCATION))?.quantityReserved).toBe(0);
     expect((await repository.findStockLevel(99, LOCATION))?.quantityReserved).toBe(0);
 
-    // Two distinct invalidation items.
     expect(cache.invalidations).toHaveLength(1);
     expect(cache.invalidations[0].items).toEqual(
       expect.arrayContaining([
@@ -148,7 +142,6 @@ describe('ReleaseReservationUseCase', () => {
     expect(result.released).toHaveLength(1);
     expect(result.released[0].variantId).toBe(42);
     expect((await repository.findStockLevel(42, LOCATION))?.quantityReserved).toBe(0);
-    // Variant 99's hold is untouched.
     expect((await repository.findStockLevel(99, LOCATION))?.quantityReserved).toBe(2);
   });
 
