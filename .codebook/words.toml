@@ -5,4 +5,5 @@ words = [
     "Typeorm",
     "dto",
     "nestjs",
+    "reparent",
 ]
