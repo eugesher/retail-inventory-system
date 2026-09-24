@@ -11,10 +11,12 @@ import {
   IReturnCustomerContactReaderPort,
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  IReturnsUnitOfWorkRunner,
   OCC_RETRY_ATTEMPTS,
   RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
+  RETURNS_UNIT_OF_WORK,
 } from '../ports';
 import { loadReturnById } from './return-access';
 import { resolveCustomerEmail } from './resolve-customer-email';
@@ -29,11 +31,18 @@ import { toReturnRequestView } from './return-view.factory';
 // repeated here — the substantive eligibility gate was Open; Authorize is the staff's
 // approval of an already-validated request. Emits `retail.return.authorized` best-effort
 // post-commit (ADR-020).
+//
+// **The read and the write are not in the same unit of work** (ADR-063): `loadReturnById`
+// reads off the plain read port, unscoped; the write is a self-contained version-checked
+// CAS on `returnsUow`. Sound because the write does not depend on the read having been
+// current — a stale read just loses the CAS and the retry loop re-reads.
 @Injectable()
 export class AuthorizeReturnUseCase {
   constructor(
     @Inject(RETURN_REQUEST_REPOSITORY)
     private readonly repository: IReturnRequestRepositoryPort,
+    @Inject(RETURNS_UNIT_OF_WORK)
+    private readonly returnsUow: IReturnsUnitOfWorkRunner,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
     @Inject(RETURN_CUSTOMER_CONTACT_READER)
@@ -59,7 +68,7 @@ export class AuthorizeReturnUseCase {
         const request = await loadReturnById(this.repository, rmaId);
         const versionAtLoad = request.version;
         request.authorize(new Date());
-        return this.repository.save(request, undefined, versionAtLoad);
+        return this.returnsUow.run((uow) => uow.returnRequests.save(request, versionAtLoad));
       },
       { rmaId, correlationId },
     );

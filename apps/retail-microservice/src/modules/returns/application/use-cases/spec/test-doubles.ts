@@ -22,8 +22,9 @@ import {
   IReturnOrderReaderPort,
   IReturnOrderSnapshot,
   IReturnRequestRepositoryPort,
-  ITransactionPort,
-  ITransactionScope,
+  IReturnRequestWriteRepositoryPort,
+  IReturnsUnitOfWork,
+  IReturnsUnitOfWorkRunner,
 } from '../../ports';
 import { ReturnWriteConflictError } from '../return-write-conflict.error';
 
@@ -64,10 +65,15 @@ const reconstituteWithId = (request: ReturnRequest, id: number): ReturnRequest =
   });
 };
 
-// In-memory `IReturnRequestRepositoryPort` double. `save` assigns the BIGINT id + finalizes
-// the RMA number on a new request (mirroring the real repo's re-read-then-finalize), and
-// re-persists an existing one; every read returns an independent reconstituted copy.
-export class FakeReturnRequestRepository implements IReturnRequestRepositoryPort {
+// In-memory double satisfying BOTH `IReturnRequestRepositoryPort` (the plain read port)
+// and `IReturnRequestWriteRepositoryPort` (the UoW-only write port, ADR-063) — one shared
+// Map-backed store, since a fake needs no real transaction isolation between the two roles.
+// `save` assigns the BIGINT id + finalizes the RMA number on a new request (mirroring the
+// real repo's re-read-then-finalize), and re-persists an existing one; every read returns
+// an independent reconstituted copy.
+export class FakeReturnRequestRepository
+  implements IReturnRequestRepositoryPort, IReturnRequestWriteRepositoryPort
+{
   private readonly store = new Map<number, ReturnRequest>();
   private sequence = 0;
   public readonly saved: ReturnRequest[] = [];
@@ -79,11 +85,7 @@ export class FakeReturnRequestRepository implements IReturnRequestRepositoryPort
 
   // Jest-free, non-`async` (returns `Promise.resolve(...)`) so the require-await /
   // no-floating lint rules stay satisfied — the orders `test-doubles` convention.
-  public save(
-    request: ReturnRequest,
-    _scope?: ITransactionScope,
-    expectedVersion?: number,
-  ): Promise<ReturnRequest> {
+  public save(request: ReturnRequest, expectedVersion?: number): Promise<ReturnRequest> {
     // A version-checked CAS that loses the race — mirrors the real repo throwing
     // `ReturnWriteConflictError`, which the retry helper catches. It rejects WITHOUT
     // storing, so the retry re-reads the pristine (pre-transition) request.
@@ -203,16 +205,15 @@ export class FakeReturnCustomerContactReader implements IReturnCustomerContactRe
   }
 }
 
-// A throwaway brand value — the fakes ignore the scope (they share no real transaction),
-// so any object satisfies the opaque `ITransactionScope` here (the orders test-doubles
-// precedent).
-export const FAKE_SCOPE = {} as unknown as ITransactionScope;
+// Runs the work immediately against the SAME `FakeReturnRequestRepository` instance the
+// spec injected as the plain read port — no real transaction, good enough for the use-case
+// unit tests, which assert orchestration, not atomicity (ADR-063; the `FakeTransactionPort`
+// precedent it replaces).
+export class FakeReturnsUnitOfWorkRunner implements IReturnsUnitOfWorkRunner {
+  constructor(private readonly returnRequests: IReturnRequestWriteRepositoryPort) {}
 
-// Runs the work immediately with the throwaway scope — no real transaction. Good enough
-// for the use-case unit tests, which assert orchestration, not atomicity.
-export class FakeTransactionPort implements ITransactionPort {
-  public runInTransaction<T>(work: (scope: ITransactionScope) => Promise<T>): Promise<T> {
-    return work(FAKE_SCOPE);
+  public run<T>(work: (uow: IReturnsUnitOfWork) => Promise<T>): Promise<T> {
+    return work({ returnRequests: this.returnRequests });
   }
 }
 

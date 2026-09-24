@@ -7,9 +7,11 @@ import { ReturnRequest } from '../../domain';
 import {
   IReturnEventsPublisherPort,
   IReturnRequestRepositoryPort,
+  IReturnsUnitOfWorkRunner,
   OCC_RETRY_ATTEMPTS,
   RETURN_EVENTS_PUBLISHER,
   RETURN_REQUEST_REPOSITORY,
+  RETURNS_UNIT_OF_WORK,
 } from '../ports';
 import { loadReturnById } from './return-access';
 import { runWithReturnWriteRetry } from './return-write';
@@ -23,11 +25,16 @@ import { toReturnRequestView } from './return-view.factory';
 // transition (`RETURN_INVALID_STATUS_TRANSITION` from any non-`requested` start). Emits
 // `retail.return.rejected` onto `retail_queue` (reserved) best-effort post-commit
 // (ADR-020).
+//
+// **The read and the write are not in the same unit of work** (ADR-063) — see
+// `AuthorizeReturnUseCase`'s note; the shape is identical for every simple transition.
 @Injectable()
 export class RejectReturnUseCase {
   constructor(
     @Inject(RETURN_REQUEST_REPOSITORY)
     private readonly repository: IReturnRequestRepositoryPort,
+    @Inject(RETURNS_UNIT_OF_WORK)
+    private readonly returnsUow: IReturnsUnitOfWorkRunner,
     @Inject(RETURN_EVENTS_PUBLISHER)
     private readonly publisher: IReturnEventsPublisherPort,
     @Inject(OCC_RETRY_ATTEMPTS)
@@ -51,7 +58,7 @@ export class RejectReturnUseCase {
         const request = await loadReturnById(this.repository, rmaId);
         const versionAtLoad = request.version;
         request.reject(new Date(), reason ?? null);
-        return this.repository.save(request, undefined, versionAtLoad);
+        return this.returnsUow.run((uow) => uow.returnRequests.save(request, versionAtLoad));
       },
       { rmaId, correlationId },
     );

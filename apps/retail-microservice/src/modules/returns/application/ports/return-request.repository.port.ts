@@ -1,46 +1,19 @@
 import { ReturnRequest } from '../../domain';
-import { ITransactionScope } from '@retail-inventory-system/ddd';
 
 export const RETURN_REQUEST_REPOSITORY = Symbol('RETURN_REQUEST_REPOSITORY');
 
-// The repository seam for the `ReturnRequest` aggregate. Returns domain types only —
-// no TypeORM entity, `Repository`, or `EntityManager` leaks here (ADR-017 forbids
-// `typeorm` in `application/ports`). The TypeORM details live entirely in
-// `ReturnRequestTypeormRepository`.
+// The NON-transactional read seam for the `ReturnRequest` aggregate (ADR-063) — every
+// method here runs off the default connection and never joins a caller's transaction.
+// The write-capable half (`save`, and the in-transaction re-read Inspect & Disposition
+// needs) lives on `IReturnRequestWriteRepositoryPort`, reachable only through
+// `IReturnsUnitOfWork` — there is no `scope` parameter left to forget here or there.
 //
-// `save` / `findById` are **scope-aware** (ADR-017 §6 / ADR-032) so Inspect can re-read the RMA
-// and write it back **inside one attempt's transaction**, which is what makes the OCC retry
-// sound: a lost compare-and-swap re-runs against fresh, committed state. The scope carries the
-// RMA root and its lines — **nothing else.** Returns cannot reach the orders module's `Refund` or
-// `Payment` (the boundaries lint forbids the import), so no returns transaction has ever spanned
-// them. Without a `scope` the method opens its own transaction. `listByOrderId` is a plain
-// read (no scope) — it backs both the list endpoint and the Open use case's
-// already-returned-quantity sum.
-//
-// The contract the open / authorize / reject / receive / inspect / close operations
-// depend on:
-// - `save` upserts the root together with its lines and re-reads the saved graph so
-//   the generated BIGINT id + `return_line.id`s come back concrete and the
-//   `rma_number` is finalized to `RMA-<year>-<pad8(id)>` (the "re-read the saved
-//   graph, then finalize a derived field" idiom the order repo follows). It accepts an
-//   optional `expectedVersion`: when supplied (a status transition on an existing RMA)
-//   the root write is an optimistic compare-and-swap on `version`
-//   (`UPDATE … WHERE id = ? AND version = ?`, ADR-036) — a zero-rows result throws the
-//   internal `ReturnWriteConflictError` the retry helper catches; absent (the Open
-//   insert) the root persists via the plain managed save.
-// - `findById` is the by-id load path (the lifecycle preconditions resolve an RMA by
-//   id).
-// - `listByOrderId` lists an order's return requests newest-first (by `requested_at`
-//   then `id` — the `(order_id, requested_at)` index supports it).
-//
-// `nextRmaSequence()` is intentionally absent — the RMA number derives from the
-// generated id (the order-number precedent), so there is no sequence table.
+// - `findById` backs the owner-checked read (`loadOwnedReturn`) and the staff-gated
+//   existence check (`loadReturnById`) — both resolve the RMA before any write use case
+//   opens a unit of work.
+// - `listByOrderId` lists an order's return requests newest-first (by `requested_at` then
+//   `id`); it backs both the list endpoint and Open's already-returned-quantity sum.
 export interface IReturnRequestRepositoryPort {
-  save(
-    returnRequest: ReturnRequest,
-    scope?: ITransactionScope,
-    expectedVersion?: number,
-  ): Promise<ReturnRequest>;
-  findById(id: number, scope?: ITransactionScope): Promise<ReturnRequest | null>;
+  findById(id: number): Promise<ReturnRequest | null>;
   listByOrderId(orderId: number): Promise<ReturnRequest[]>;
 }

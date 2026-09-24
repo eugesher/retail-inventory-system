@@ -15,11 +15,13 @@ import {
   IReturnOrderReaderPort,
   IReturnOrderSnapshot,
   IReturnRequestRepositoryPort,
+  IReturnsUnitOfWorkRunner,
   RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_ORDER_READER,
   RETURN_REQUEST_REPOSITORY,
   RETURN_WINDOW_DAYS,
+  RETURNS_UNIT_OF_WORK,
 } from '../ports';
 import { resolveCustomerEmail } from './resolve-customer-email';
 import { toReturnRequestView } from './return-view.factory';
@@ -56,6 +58,8 @@ export class OpenReturnRequestUseCase {
   constructor(
     @Inject(RETURN_REQUEST_REPOSITORY)
     private readonly repository: IReturnRequestRepositoryPort,
+    @Inject(RETURNS_UNIT_OF_WORK)
+    private readonly returnsUow: IReturnsUnitOfWorkRunner,
     @Inject(RETURN_ORDER_READER)
     private readonly orderReader: IReturnOrderReaderPort,
     @Inject(RETURN_EVENTS_PUBLISHER)
@@ -134,7 +138,7 @@ export class OpenReturnRequestUseCase {
       },
       now,
     );
-    const saved = await this.repository.save(request);
+    const saved = await this.returnsUow.run((uow) => uow.returnRequests.save(request));
 
     await this.emitRequested(saved, correlationId);
 

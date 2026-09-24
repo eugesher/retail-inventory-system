@@ -13,6 +13,7 @@ import {
   FAKE_CUSTOMER_EMAIL,
   FakeReturnCustomerContactReader,
   FakeReturnRequestRepository,
+  FakeReturnsUnitOfWorkRunner,
   SpyReturnEventsPublisher,
 } from './test-doubles';
 
@@ -26,10 +27,12 @@ const makeHarness = (): {
 } => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const repository = new FakeReturnRequestRepository();
+  const returnsUow = new FakeReturnsUnitOfWorkRunner(repository);
   const publisher = new SpyReturnEventsPublisher();
   const customerContactReader = new FakeReturnCustomerContactReader();
   const useCase = new AuthorizeReturnUseCase(
     repository,
+    returnsUow,
     publisher,
     customerContactReader,
     // OCC_RETRY_ATTEMPTS budget (ADR-036).

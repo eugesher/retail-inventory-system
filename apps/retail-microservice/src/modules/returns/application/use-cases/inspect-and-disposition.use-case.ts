@@ -23,14 +23,14 @@ import {
   IReturnEventsPublisherPort,
   IReturnOrderReaderPort,
   IReturnRequestRepositoryPort,
-  ITransactionPort,
+  IReturnsUnitOfWorkRunner,
   INVENTORY_RESTOCK_GATEWAY,
   OCC_RETRY_ATTEMPTS,
   RETURN_CUSTOMER_CONTACT_READER,
   RETURN_EVENTS_PUBLISHER,
   RETURN_ORDER_READER,
   RETURN_REQUEST_REPOSITORY,
-  TRANSACTION_PORT,
+  RETURNS_UNIT_OF_WORK,
 } from '../ports';
 import { loadReturnById } from './return-access';
 import { resolveCustomerEmail } from './resolve-customer-email';
@@ -79,7 +79,7 @@ const RESTOCK_MAX_ATTEMPTS = 3;
 //
 // **Ordering** (the cross-cutting consistency rule, the Ship→Commit-Sale parallel,
 // ADR-031): the inspection (per-line outcome + the `received → inspected` walk) commits
-// **locally first**, in one `TRANSACTION_PORT` scope; the restock runs **after** that
+// **locally first**, in one `RETURNS_UNIT_OF_WORK` unit of work; the restock runs **after** that
 // commit, bounded-retried-then-logged — a remote inventory failure does **not** roll back a
 // completed physical inspection, and the restock RPC's `returnRequestId` idempotency makes
 // the replay safe. Recording the inspection inside the restock transaction was rejected: it
@@ -89,11 +89,17 @@ const RESTOCK_MAX_ATTEMPTS = 3;
 // **Inspect records `lineRefundAmountMinor` but does NOT issue a refund** — the refund is a
 // distinct, explicit operation (Issue Refund) that sums these per-line amounts; see the
 // `Refund` aggregate in the orders module (ADR-032).
+//
+// **The one return use case whose read and write share a unit of work** (ADR-063): unlike
+// its four siblings (Authorize/Reject/Receive/Close), which read unscoped and then run a
+// self-contained CAS, Inspect mutates every line plus the root in one attempt and re-reads
+// inside `returnsUow.run(...)` to do it — a retried attempt must start from a fresh,
+// un-inspected copy of the whole graph, not the stale one a failed attempt mutated.
 @Injectable()
 export class InspectAndDispositionUseCase {
   constructor(
-    @Inject(TRANSACTION_PORT)
-    private readonly transactionPort: ITransactionPort,
+    @Inject(RETURNS_UNIT_OF_WORK)
+    private readonly returnsUow: IReturnsUnitOfWorkRunner,
     @Inject(RETURN_REQUEST_REPOSITORY)
     private readonly repository: IReturnRequestRepositoryPort,
     @Inject(RETURN_ORDER_READER)
@@ -137,14 +143,14 @@ export class InspectAndDispositionUseCase {
     // version captured, and the root saved with the version-checked CAS — a concurrent
     // transition that advanced the version makes the CAS lose and the whole unit of work
     // retry. `markInspected` enforces the `received → inspected` transition (a terminal
-    // 409 otherwise, never retried) and is reached inside the scope, so a wrong status
-    // rolls everything back. `save(scope, versionAtLoad)` re-persists the root + the
-    // lines' newly-set inspection columns and re-reads the graph with concrete ids.
+    // 409 otherwise, never retried) and is reached inside the unit of work, so a wrong
+    // status rolls everything back. `save(fresh, versionAtLoad)` re-persists the root +
+    // the lines' newly-set inspection columns and re-reads the graph with concrete ids.
     const saved = await runWithReturnWriteRetry(
       { logger: this.logger, maxAttempts: this.maxAttempts },
       () =>
-        this.transactionPort.runInTransaction<ReturnRequest>(async (scope) => {
-          const fresh = await this.repository.findById(rmaId, scope);
+        this.returnsUow.run<ReturnRequest>(async (uow) => {
+          const fresh = await uow.returnRequests.findById(rmaId);
           if (!fresh) {
             throw new ReturnDomainException(
               ReturnErrorCodeEnum.RETURN_NOT_FOUND,
@@ -163,7 +169,7 @@ export class InspectAndDispositionUseCase {
             });
           }
           fresh.markInspected();
-          return this.repository.save(fresh, scope, versionAtLoad);
+          return uow.returnRequests.save(fresh, versionAtLoad);
         }),
       { rmaId, correlationId },
     );
