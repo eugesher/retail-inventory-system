@@ -3,9 +3,6 @@ import KeyvRedis from '@keyv/redis';
 
 import { RedisCacheAdapter } from '../redis-cache.adapter';
 
-// Port-adapter contract test: the `RedisCacheAdapter` must honour the
-// `ICachePort` semantics — `wrap` is read-through (calls fn on miss, skips
-// fn on hit). Uses a hand-rolled cache stub so the test runs without Redis.
 describe('RedisCacheAdapter', () => {
   const stubCache = (initial: Record<string, unknown> = {}): Cache => {
     const store = new Map(Object.entries(initial));
@@ -88,11 +85,7 @@ describe('RedisCacheAdapter', () => {
 
   describe('delByPrefix', () => {
     it('returns 0 when no Redis-backed store is present (in-memory fallback is a no-op)', async () => {
-      const adapter = new RedisCacheAdapter(
-        stubCacheWithStore({
-          /* not KeyvRedis */
-        }),
-      );
+      const adapter = new RedisCacheAdapter(stubCacheWithStore({}));
       expect(await adapter.delByPrefix('ris:inventory:stock:1:')).toBe(0);
     });
 
@@ -174,11 +167,6 @@ describe('RedisCacheAdapter', () => {
   });
 
   describe('singleFlight', () => {
-    // ADR-021: concurrent calls with the same key share one invocation of
-    // `fn`; followers observe the leader's outcome (value or rejection);
-    // the in-flight slot is cleared in `finally` so a rejection does not
-    // poison the key. These tests pin those guarantees.
-
     it('invokes fn exactly once when N callers hit the same key concurrently', async () => {
       const adapter = new RedisCacheAdapter(stubCache());
       let resolveLeader!: (value: number) => void;
@@ -190,9 +178,6 @@ describe('RedisCacheAdapter', () => {
       );
 
       const callers = Array.from({ length: 20 }, () => adapter.singleFlight('k', fn));
-      // Let the leader start before resolving — otherwise the loader could
-      // resolve in the same microtask and clear the in-flight slot before
-      // the rest of the callers attach.
       await Promise.resolve();
       resolveLeader(7);
 
@@ -232,8 +217,6 @@ describe('RedisCacheAdapter', () => {
       await adapter.singleFlight('k', fn);
       await adapter.singleFlight('k', fn);
 
-      // A fresh call after the first settles must invoke fn again — the
-      // primitive is dedupe-while-in-flight, not a memoizer.
       expect(fn).toHaveBeenCalledTimes(2);
     });
 
@@ -263,7 +246,6 @@ describe('RedisCacheAdapter', () => {
       const pendingA = adapter.singleFlight('a', fnA);
       const finishedB = await adapter.singleFlight('b', fnB);
 
-      // B completed without waiting on A.
       expect(finishedB).toBe('b');
       expect(fnA).toHaveBeenCalledTimes(1);
       expect(fnB).toHaveBeenCalledTimes(1);

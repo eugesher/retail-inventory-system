@@ -7,31 +7,10 @@ import { SnakeNamingStrategy } from './snake-naming.strategy';
 
 @Module({})
 export class DatabaseModule {
-  // The default connection, opened from `DATABASE_URL` — the shared operational
-  // `retail_db` every stateful service joins. Behaviour is delegated to
-  // `forRootWithUrl` so the connection options (UTC pin, `synchronize` off, the
-  // naming strategy) are defined once.
-  //
-  // NOTE on the parameter type, for whoever declares the `<x>Entities` const a caller
-  // passes here. `TypeOrmModuleOptions['entities']` is deliberately the LOOSEST thing
-  // TypeORM accepts — `MixedList<Function | string | EntitySchema> | undefined`, i.e. an
-  // array *or an object map* or nothing. That is right for a parameter and wrong for a
-  // value: annotate a const with it and the concrete entity-class array widens into a
-  // union that is not iterable (no spread — catalog's `app.module.ts` merges two lists)
-  // and is not assignable to `forFeature`'s `EntityClassOrSchema[]` (so the module file
-  // would have to re-list every entity by hand). Every `<x>Entities` const in `apps/` is
-  // therefore left UNANNOTATED: the inferred array satisfies this signature, `forFeature`,
-  // and the spread. `EntityClassOrSchema` is not re-exported from the package root, so an
-  // explicit annotation would also cost a deep import into `@nestjs/typeorm/dist/`.
   public static forRoot(entities: TypeOrmModuleOptions['entities']): DynamicModule {
     return DatabaseModule.forRootWithUrl(entities, 'DATABASE_URL');
   }
 
-  // A second root connection opened from a configurable env var. The event-store
-  // microservice calls this with `EVENTSTORE_DATABASE_URL` to reach its isolated
-  // `ris_eventstore` schema (ADR-034) — a separate logical database whose
-  // write-heavy event firehose must not pressure the operational `retail_db`. The
-  // connection options are identical to `forRoot`; only the URL source differs.
   public static forRootWithUrl(
     entities: TypeOrmModuleOptions['entities'],
     urlEnvVar: string,
@@ -47,13 +26,6 @@ export class DatabaseModule {
             url: configService.get<string>(urlEnvVar),
             logging: configService.get<boolean>('DATABASE_LOGGING'),
             synchronize: false,
-            // Pin the mysql2 driver to UTC so JS `Date`s are written and read as
-            // UTC wall-clock — matching the MySQL server clock and SQL functions
-            // like `UTC_TIMESTAMP()`. Without this the driver defaults to the
-            // Node host's local timezone, storing local wall-clock and misreading
-            // DB-generated (`CURRENT_TIMESTAMP`) values on a non-UTC host. The
-            // pricing publish precondition probe compares stored `valid_from`
-            // against `UTC_TIMESTAMP()`, so the two clocks must agree.
             timezone: 'Z',
             entities,
             namingStrategy: new SnakeNamingStrategy(),

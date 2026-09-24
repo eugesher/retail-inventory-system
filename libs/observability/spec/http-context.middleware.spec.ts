@@ -3,9 +3,6 @@ import { NextFunction, Request, Response } from 'express';
 import { CORRELATION_ID_HEADER } from '../correlation/correlation.constants';
 import { CorrelationMiddleware } from '../correlation/http-context.middleware';
 
-// Behaviour test: middleware must reuse an inbound correlation ID when
-// present, and generate a stable random one otherwise. The output is mirrored
-// onto the response header so downstream services see the same ID.
 describe('CorrelationMiddleware', () => {
   const middleware = new CorrelationMiddleware();
 

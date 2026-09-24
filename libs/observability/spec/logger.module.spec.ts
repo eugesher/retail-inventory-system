@@ -6,10 +6,6 @@ import { AppNameEnum } from '@retail-inventory-system/contracts';
 
 import { LoggerModuleConfig } from '../logger.module';
 
-// The Pino `logMethod` hook is the seam where trace-correlation lives.
-// Behavior we care about: when a span is active, every log record carries
-// matching `traceId` / `spanId`; when no span is active, the hook is a
-// passthrough (no enrichment fields are added).
 describe('LoggerModuleConfig — trace-correlation hook', () => {
   const contextManager = new AsyncLocalStorageContextManager().enable();
   context.setGlobalContextManager(contextManager);
@@ -23,9 +19,6 @@ describe('LoggerModuleConfig — trace-correlation hook', () => {
   } => {
     const config = new LoggerModuleConfig(AppNameEnum.API_GATEWAY);
     const captured: { args: unknown[] | null } = { args: null };
-    // `pinoHttp` is `Options | [Options, DestinationStream]`. In test mode
-    // (no E2E destination installed) the constructor produces the plain
-    // `Options` branch, so the cast below is safe in this fixture.
     const options = config.pinoHttp as { hooks?: { logMethod?: unknown } };
     return {
       hook: options.hooks!.logMethod! as unknown as (

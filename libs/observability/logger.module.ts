@@ -16,23 +16,8 @@ const NOISY_CONTEXTS = new Set<string>([
   'RoutesResolver',
 ]);
 
-// E2E test hook: when a writable destination has been installed on this
-// `globalThis` key (via libs/observability/testing/pino-memory-stream.ts),
-// pino writes JSON records straight to it and the pino-pretty transport
-// is suppressed. Production never sets the key, so the branch is inert
-// outside of test bootstraps. Documented in TEST-002 of
-// audit-2026-05-20-followup.
-//
-// The stream is plumbed via the nestjs-pino tuple form
-// `pinoHttp: [Options, DestinationStream]` — pino-http forwards the
-// second positional arg into `pino()`'s destination slot. Nesting
-// `stream` inside `Options` is silently ignored by pino-http and was
-// the source of an empty-capture bug during initial implementation.
 const E2E_PINO_DESTINATION_KEY = '__RIS_E2E_PINO_DESTINATION__';
 
-// Pino logger configuration. The `logMethod` hook decorates every log
-// record with `traceId`/`spanId` from the currently active OTel span so
-// log lines and traces can be cross-filtered (ADR-015).
 export class LoggerModuleConfig implements Params {
   public readonly pinoHttp: Options | [Options, DestinationStream];
   public readonly forRoutes: Parameters<MiddlewareConfigProxy['forRoutes']>;
@@ -48,11 +33,6 @@ export class LoggerModuleConfig implements Params {
 
     const baseOptions: Options = {
       msgPrefix: `[${appName}] `,
-      // When the e2e capture is active, force `debug` regardless of `LOG_LEVEL`. CI sets
-      // `LOG_LEVEL=warn` to keep pipeline logs lean, and a suite that ASSERTS on log records
-      // cannot run at a level that drops them: `test/concurrent-sweep-release.e2e-spec.ts`
-      // matches the OCC retry trace, an `info` line (ADR-036). Honoring the env var here fails
-      // its positive assertions and passes its negative ones vacuously.
       level: e2eDestination
         ? 'debug'
         : (process.env.LOG_LEVEL ?? (isProduction ? 'info' : 'debug')),
@@ -89,8 +69,6 @@ export class LoggerModuleConfig implements Params {
     };
 
     if (e2eDestination) {
-      // Tuple form: `pinoHttp(options, destination)` — see comment on
-      // E2E_PINO_DESTINATION_KEY above for why this is required.
       this.pinoHttp = [baseOptions, e2eDestination];
     } else if (isProduction) {
       this.pinoHttp = baseOptions;
