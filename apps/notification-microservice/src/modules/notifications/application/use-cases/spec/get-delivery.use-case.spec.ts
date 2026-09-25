@@ -10,8 +10,6 @@ import {
 import { GetDeliveryUseCase } from '../get-delivery.use-case';
 import { FakeLogger, InMemoryDeliveryRepo } from './test-doubles';
 
-// `GetDeliveryUseCase` loads one full delivery row by id (incl. the materialized
-// `renderedBody`). An unknown id is a typed `DELIVERY_NOT_FOUND`.
 describe('GetDeliveryUseCase', () => {
   let repo: InMemoryDeliveryRepo;
   let useCase: GetDeliveryUseCase;

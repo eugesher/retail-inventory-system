@@ -49,7 +49,6 @@ describe('RefundEventsConsumer', () => {
     expect(renderAndDispatch.inputs[0]).toEqual({
       eventType: ROUTING_KEYS.RETAIL_REFUND_ISSUED,
       channel: NotificationChannelEnum.EMAIL,
-      // The refund event carries no `customerId`, so the row is not deduped.
       recipientCustomerId: null,
       recipientAddress: 'buyer@example.com',
       eventReferenceType: 'refund',

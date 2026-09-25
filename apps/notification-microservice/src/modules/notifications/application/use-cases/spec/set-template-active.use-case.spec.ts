@@ -10,9 +10,6 @@ import {
 import { SetTemplateActiveUseCase } from '../set-template-active.use-case';
 import { FakeLogger, InMemoryTemplateRepo } from './test-doubles';
 
-// `SetTemplateActiveUseCase` activates/deactivates one template version by id — the
-// soft-delete (and rollback) lever. A deactivated row stays on disk and out of the
-// "find latest active" resolution; an unknown id is a typed `TEMPLATE_NOT_FOUND`.
 describe('SetTemplateActiveUseCase', () => {
   let repo: InMemoryTemplateRepo;
   let useCase: SetTemplateActiveUseCase;
@@ -53,7 +50,6 @@ describe('SetTemplateActiveUseCase', () => {
 
     expect(view.active).toBe(false);
     expect(view.id).toBe(seeded.id);
-    // The row is retained (soft-delete via `active`, never removed).
     expect(repo.rows).toHaveLength(1);
   });
 

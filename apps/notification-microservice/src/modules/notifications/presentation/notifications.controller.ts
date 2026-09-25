@@ -27,23 +27,6 @@ import {
   SetTemplateActiveUseCase,
 } from '../application/use-cases';
 
-// The notification microservice's non-health `@MessagePattern` surface (ADR-033) — the
-// template authoring/read RPCs + the delivery audit reads + the record-outcome RPC the
-// gateway calls, on `notification_events`. Until ADR-033 the service had only
-// `@EventPattern` consumers + the health ping; this opens the template registry to staff
-// authoring and the delivery trail to staff querying.
-//
-// The handlers translate the wire payload into the use-case call; `correlationId` is
-// logged inline inside each use case (`PinoLogger.assign()` throws outside request
-// scope — ADR-001 / ADR-011 §7), so the controller carries no logging of its own. A
-// thrown `NotificationDomainException` is mapped to the wire `{ statusCode, message,
-// code }` shape by the `APP_FILTER`-registered `NotificationRpcExceptionFilter`.
-//
-// **`record-outcome` is the one RPC here with no gateway HTTP route.** It is the ESP-webhook
-// seam: the internal RPC a provider-webhook bridge (HTTP endpoint + signature verification +
-// payload mapping) would call — and **no such bridge exists anywhere in the system**, so nothing
-// outside this service can reach it. Every other pattern on this controller is fronted by a route
-// under `/api/notifications`.
 @Controller()
 export class NotificationsController {
   constructor(
@@ -99,9 +82,6 @@ export class NotificationsController {
     return this.recordDeliveryOutcomeUseCase.execute(payload);
   }
 
-  // The operator manual-retry of one `failed` delivery — re-dispatches the
-  // already-rendered content, forcing past the scheduled sweeper's backoff gate (ADR-033).
-  // Fronted by `POST /api/notifications/deliveries/:id/retry`.
   @MessagePattern(ROUTING_KEYS.NOTIFICATION_DELIVERY_RETRY)
   public async retryDelivery(
     @Payload() payload: INotificationDeliveryRetryPayload,
@@ -109,14 +89,6 @@ export class NotificationsController {
     return this.retryDeliveryUseCase.execute(payload);
   }
 
-  // The staff-triggered marketing dispatch (ADR-037). It routes through the shared
-  // Render & Dispatch pipeline, where the consent-gate decides send vs `skipped-no-consent`.
-  // Resolves the resulting `NotificationDeliveryView`, or `null` when no active marketing
-  // template resolves — a success that sent nothing, not an error.
-  //
-  // **A `null` here almost always means the seed did not run.** The marketing template ships in
-  // `scripts/seeds/notification-template.sql` (`yarn test:seed`), not in a migration, so
-  // `yarn migration:run` alone leaves the registry empty. See `SendMarketingUseCase`.
   @MessagePattern(ROUTING_KEYS.NOTIFICATION_MARKETING_SEND)
   public async sendMarketing(
     @Payload() payload: INotificationMarketingSendPayload,

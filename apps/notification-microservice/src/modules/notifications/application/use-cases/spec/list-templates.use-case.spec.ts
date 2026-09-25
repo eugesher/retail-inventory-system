@@ -6,9 +6,6 @@ import { NotificationTemplate } from '../../../domain';
 import { ListTemplatesUseCase } from '../list-templates.use-case';
 import { FakeLogger, InMemoryTemplateRepo } from './test-doubles';
 
-// `ListTemplatesUseCase` is the filtered registry browse: every filter field is
-// optional and narrows the scan, an empty filter lists every template across versions
-// (active or not).
 describe('ListTemplatesUseCase', () => {
   let repo: InMemoryTemplateRepo;
   let useCase: ListTemplatesUseCase;
@@ -63,7 +60,6 @@ describe('ListTemplatesUseCase', () => {
       correlationId: 'corr-list-narrow',
     });
 
-    // Both retained versions of the order-placed email template.
     expect(views).toHaveLength(2);
     expect(views.map((v) => v.version).sort()).toEqual([1, 2]);
   });

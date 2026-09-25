@@ -691,16 +691,20 @@ RMQ-only, no HTTP surface of its own. Two aggregates in the shared `retail_db`
 **`RenderAndDispatchUseCase` is the single persist-then-send pipeline every consumer calls.**
 Given a channel-agnostic input it resolves the latest active template, renders it, runs the
 consent gate, **persists a `queued` row _before_ the `NOTIFIER` call**, then flips it to
-`sent` or `failed`. A failure is recorded on the row and **never rethrown** — rethrowing
-inside an `@EventPattern` would make the broker blind-redeliver. A missing template
-warn-logs and persists nothing.
+`sent` or `failed`. A failure is recorded on the row and **never rethrown**. A missing template
+warn-logs and persists nothing. What `notification_events` does with a handled message — it
+never acknowledges one — is in
+[`docs/reference/notifications.md`](docs/reference/notifications.md#what-the-queue-does-with-a-message).
 
-Double-dispatch is deduped twice: an explicit `findByDedupeKey` pre-check (customer-facing
-rows only) plus a STORED generated-column UNIQUE (`delivery_dedupe_key`) that collapses a
-concurrent race.
+Double-dispatch is deduped twice: an explicit `findByDedupeKey` pre-check (rows with a
+`recipientCustomerId` only) plus a STORED generated-column UNIQUE (`delivery_dedupe_key`) that
+collapses a concurrent race.
 
 **The consent gate** ([ADR-037](docs/adr/037-consent-record-and-tombstone-erasure.md)) runs
-before the transport call, for customer-facing rows only (a null-recipient ops row skips it):
+before the transport call, only for rows with a `recipientCustomerId`. The ops alert and the four
+customer-facing events whose contracts carry no `customerId` — `retail.order.cancelled`,
+`retail.fulfillment.shipped` / `.delivered`, `retail.refund.issued` — skip it
+([`docs/reference/notifications.md`](docs/reference/notifications.md#renderanddispatchusecase)):
 
 | Channel + event type                           | Gated on                                                                                             |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -714,7 +718,7 @@ An unconsented channel persists a terminal `skipped-no-consent` row — an audit
 cache-aside at `ris:notifications:consent:v1:<customerId>`, kept fresh by the
 `customer.consent.updated` / `customer.erased` events rather than by TTL. The cache
 **fails safe**: a Redis or reader error resolves to defaults (transactional allowed,
-marketing suppressed), so a dispatch never blind-redelivers.
+marketing suppressed), so a consent read never fails a dispatch.
 
 **Seven consumers.** Six route their wire event through `RenderAndDispatchUseCase`
 (`inventory-events`, `order-events`, `order-cancelled-events`, `fulfillment-events`,
@@ -725,11 +729,12 @@ customer-contact reader; `customerLocale` currently ships `null`). A row whose
 `customerEmail` is null — a tombstoned or guest buyer — is warn-logged and skipped.
 
 **Retry.** `RetryFailedDeliveriesUseCase` sweeps `failed` deliveries under
-`MAX_DELIVERY_ATTEMPTS` on exponential backoff (`baseMs · 2^(attemptCount-1)`), driven by
+`MAX_DELIVERY_ATTEMPTS`, plus `queued` rows orphaned for more than 5 minutes, on exponential backoff (`baseMs · 2^(attemptCount-1)`), driven by
 `DeliveryRetryScheduler` (`@Interval`). An operator can force one now via
 `POST /api/notifications/deliveries/:id/retry` — it re-dispatches the row's **already-rendered**
 subject/body (no template re-lookup; the row is a self-contained snapshot) and ignores the
-backoff gate. At the cap the service emits `notifications.delivery.failed` exactly once.
+backoff gate. The sweeper emits `notifications.delivery.failed` once, when a row reaches the cap;
+each failed manual retry of a capped row emits it again.
 
 Rendering is Handlebars (`HandlebarsTemplateRendererAdapter`, the only `handlebars` import).
 `{{ }}` HTML-escapes the render context by default — the right posture for trusted,

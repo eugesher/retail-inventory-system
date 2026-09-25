@@ -9,9 +9,6 @@ import { NotificationDelivery } from '../../../domain';
 import { ListDeliveriesUseCase } from '../list-deliveries.use-case';
 import { FakeLogger, InMemoryDeliveryRepo } from './test-doubles';
 
-// `ListDeliveriesUseCase` is the paginated, filterable audit read of the delivery trail.
-// Every filter field narrows the page; an absent field widens it. The result is the
-// canonical `IPage<NotificationDeliveryView>` envelope.
 describe('ListDeliveriesUseCase', () => {
   let repo: InMemoryDeliveryRepo;
   let useCase: ListDeliveriesUseCase;
@@ -21,8 +18,6 @@ describe('ListDeliveriesUseCase', () => {
     useCase = new ListDeliveriesUseCase(repo, new FakeLogger() as unknown as PinoLogger);
   });
 
-  // Opens + persists a delivery, optionally walking it to `sent` so a status filter has
-  // something to discriminate on.
   const seed = async (overrides: {
     recipientCustomerId?: string | null;
     eventReferenceType?: string;
@@ -57,9 +52,7 @@ describe('ListDeliveriesUseCase', () => {
 
     expect(page.total).toBe(3);
     expect(page.items).toHaveLength(3);
-    // Newest-first: the last-seeded (highest id) row leads.
     expect(page.items[0].eventReferenceId).toBe('3');
-    // Defaults applied (page 1, size 20).
     expect(page.page).toBe(1);
     expect(page.size).toBe(20);
   });
@@ -77,7 +70,7 @@ describe('ListDeliveriesUseCase', () => {
 
   it('narrows the page by status', async () => {
     await seed({ eventReferenceId: '10', sent: true });
-    await seed({ eventReferenceId: '11' }); // stays queued
+    await seed({ eventReferenceId: '11' });
 
     const page = await useCase.execute({
       status: NotificationDeliveryStatusEnum.SENT,
@@ -111,7 +104,6 @@ describe('ListDeliveriesUseCase', () => {
 
     const page = await useCase.execute({ page: 2, pageSize: 2, correlationId: 'corr-paged' });
 
-    // 3 rows, page size 2 → page 2 carries the single remaining (oldest) row.
     expect(page.total).toBe(3);
     expect(page.items).toHaveLength(1);
     expect(page.page).toBe(2);
