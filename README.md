@@ -1265,6 +1265,7 @@ Two subject kinds share the pipeline:
 
 3. POST /api/auth/logout (bearer)
    ↳ clear the refresh hash; subsequent /auth/refresh fails 401
+   ↳ the access JWT is not revoked: it keeps working until it expires
 ```
 
 Refresh tokens **rotate on every refresh**; reuse of a stale token trips a circuit-breaker
@@ -1501,7 +1502,9 @@ direct SQL even though `GET /api/audit/*` could answer the same questions: a sui
 Every endpoint is authored in **both** libraries, in lockstep: Kulala `*.http` files under
 [`http/kulala/`](http/kulala/) and the [posting.sh](https://posting.sh) collection under
 [`http/posting/`](http/posting/). How to run the Posting collection:
-[`http/posting/README.md`](http/posting/README.md).
+[`http/posting/README.md`](http/posting/README.md). What a run needs, which files can run twice, and
+what `kulala-core` 0.37 does with them:
+[`docs/reference/http-api.md`](docs/reference/http-api.md).
 
 ---
 
