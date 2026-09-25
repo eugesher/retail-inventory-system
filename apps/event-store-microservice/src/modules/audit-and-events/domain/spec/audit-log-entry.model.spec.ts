@@ -57,7 +57,6 @@ describe('AuditLogEntry', () => {
 
     it('rejects an unknown actor type', () => {
       expect(() =>
-        // The cast simulates a malformed wire value reaching the model.
         AuditLogEntry.create(makeCreateProps({ actorType: 'customer' as AuditActorType })),
       ).toThrow(Error);
     });
@@ -115,8 +114,8 @@ describe('AuditLogEntry', () => {
       const entry = AuditLogEntry.create(makeCreateProps({ action: 'UserLoggedIn' }));
       try {
         (entry as unknown as { action: string }).action = 'tampered';
-      } catch {
-        // A strict-mode write to a frozen property throws; either way the value is unchanged.
+      } catch (error) {
+        void error;
       }
       expect(entry.action).toBe('UserLoggedIn');
     });

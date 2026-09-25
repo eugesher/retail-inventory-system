@@ -75,17 +75,14 @@ describe('DomainEvent', () => {
     it('an attempted field write does not change the value (frozen at runtime)', () => {
       const event = DomainEvent.create(makeCreateProps({ eventType: 'retail.order.placed' }));
       try {
-        // The cast defeats the compile-time `readonly`; the runtime freeze holds the line.
         (event as unknown as { eventType: string }).eventType = 'tampered';
-      } catch {
-        // A strict-mode write to a frozen property throws; either way the value is unchanged.
+      } catch (error) {
+        void error;
       }
       expect(event.eventType).toBe('retail.order.placed');
     });
 
     it('exposes no instance methods at all — no mutators, no getters', () => {
-      // Every field is a public readonly data property, so the prototype carries ONLY
-      // the constructor: nothing can change a recorded event.
       expect(Object.getOwnPropertyNames(DomainEvent.prototype)).toEqual(['constructor']);
     });
   });

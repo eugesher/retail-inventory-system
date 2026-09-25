@@ -15,11 +15,6 @@ import {
 } from '../../ports';
 import { QueryDomainEventsUseCase } from '../query-domain-events.use-case';
 
-// A fake firehose repository that RECORDS the arguments `query` was called with — the
-// filters (asserted to arrive verbatim) and the clamped page window — and returns whatever
-// page the test programmed. The default ordering is asserted at this seam: the fake records
-// nothing about SQL, but the port's contract says `occurred_at DESC, id DESC` and the rows it
-// hands back are in that order, so the use case must not reorder them.
 class RecordingDomainEventRepository implements IDomainEventRepositoryPort {
   public lastFilters: IDomainEventQueryFilters | null = null;
   public lastPage: IDomainEventPageRequest | null = null;
@@ -154,8 +149,6 @@ describe('QueryDomainEventsUseCase', () => {
     });
 
     it('returns an empty page for an inverted from/to range without throwing', async () => {
-      // The repository turns `from > to` into `BETWEEN hi AND lo`, which selects nothing.
-      // The use case does not pre-validate the ordering and raises no domain exception.
       repository.program({ items: [], total: 0, page: 1, size: 20 });
 
       const result = await useCase.execute(
@@ -191,8 +184,6 @@ describe('QueryDomainEventsUseCase', () => {
     });
 
     it('surfaces the empty-string correlationId of an event ingested without one', async () => {
-      // `domain_event.correlation_id` is NOT NULL DEFAULT '' so the ingest dedupe UNIQUE
-      // collides. The view reports the storage fact rather than rewriting it to null.
       repository.program({
         items: [makeEvent({ correlationId: '' })],
         total: 1,
@@ -216,8 +207,6 @@ describe('QueryDomainEventsUseCase', () => {
     });
 
     it('preserves the newest-first order the repository returned (it never re-sorts)', async () => {
-      // The port's contract is `occurred_at DESC, id DESC`. The fake hands the rows back in
-      // exactly that order; the use case must project them in place.
       const newer = makeEvent({ id: 9, occurredAt: new Date('2026-06-27T12:00:00.000Z') });
       const olderSameInstant = makeEvent({ id: 8 });
       const oldest = makeEvent({ id: 7 });

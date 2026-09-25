@@ -224,7 +224,9 @@ exchange and is not bound to this exchange at all.
 **Delivery guarantee.** The bus is at-least-once and dual-publish has no transactional
 outbox, so the firehose may see an event twice. `domain_event` absorbs the redelivery on a
 composite UNIQUE (the idempotent-consumer pattern); `audit_log_entry` intentionally keeps
-every occurrence.
+every occurrence. The firehose queue never acknowledges a message, so every stop, restart or
+`consumer_timeout` delivers its whole history again, and that UNIQUE can also merge two distinct
+events ([`docs/reference/event-store.md`](docs/reference/event-store.md#what-the-queues-do-with-a-message)).
 
 ### RPC surface
 
@@ -766,19 +768,21 @@ it can only be an internal caller bug, because the ingest validates first.
 One `FirehoseConsumer` reads the concrete routing key off
 `context.getMessage().fields.routingKey` and dispatches: `audit.staff.action` →
 `IngestAuditLogUseCase`, everything else → `IngestDomainEventUseCase`. It **warn-swallows**
-and never rethrows. It sits beside the aggregator module rather than inside either sibling
-module because it injects use cases from **both**, and `eslint-plugin-boundaries` only lets a
-module's `infrastructure/` inject its own.
+and never rethrows. It is an ordinary `presentation/` member of the one `audit-and-events`
+module, which owns both ingest use cases
+([ADR-042](docs/adr/042-one-bounded-context-one-module.md)).
 
 `producer` / `aggregateType` / `aggregateId` are heuristically resolved by
 `firehose-extractors.ts` (producer ← first routing-key token; aggregateType ← second;
-aggregateId ← first present of a documented payload-key precedence). A missing or `NaN`
-`occurredAt` is warn-and-dropped.
+aggregateId ← first present of a fixed payload-key precedence, in which `orderId` wins over the
+payment, fulfillment, refund and return ids). A missing or `NaN` `occurredAt` is warn-and-dropped
+([`docs/reference/event-store.md`](docs/reference/event-store.md#ingest-into-domain_event)).
 
 **The logs can be read back over RPC** ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)).
 `QueryDomainEventsUseCase` and `QueryAuditLogEntriesUseCase` are filtered, paginated and
-newest-first, over **indexed columns only** (the JSON `payload` / `before` / `after` are
-returned but never searched); `TraceByCorrelationUseCase` is an unpaginated ascending timeline
+newest-first, over plain column predicates (the JSON `payload` / `before` / `after` are
+returned but never searched; not every filter leads an index —
+[`docs/reference/event-store.md`](docs/reference/event-store.md#reads)); `TraceByCorrelationUseCase` is an unpaginated ascending timeline
 of everything one correlation id touched, across both logs. Page size is capped at 100 in the
 use case, so every caller inherits the cap. An unknown id or an inverted `from`/`to` range
 yields an empty result, never an error: the event store has no domain-exception type, and
@@ -1143,8 +1147,10 @@ input, not a cross-module lookup.
 
 Three questions: _what did the system do_ (`domain_event`), _what did a person do_
 (`audit_log_entry`), _what did this one request cause_ (both, joined by correlation id). Every
-filter is optional and names an **indexed** column — the JSON bodies (`payload`, `before`,
-`after`) are returned but never searched.
+filter is optional and is a plain column predicate — the JSON bodies (`payload`, `before`,
+`after`) are returned but never searched. `aggregateId` without `aggregateType`, `entityId` without
+`entityType`, and a bare `from`/`to` window use no index
+([`docs/reference/event-store.md`](docs/reference/event-store.md#reads)).
 
 `pageSize` defaults to 20 and is **capped at 100 by the event store's use case**, not by the
 gateway DTO, so a direct RPC caller inherits the same ceiling. The DTO owns shape instead: an
@@ -1166,9 +1172,12 @@ GET /api/audit/trace/9f1c0e2a-7b4d-4c8e-9a11-6d3f5b2c0e77
 
 `aggregateType` and `aggregateId` are the routing key's **second token** and the payload id it
 names, resolved per event — so `?aggregateType=order` matches `retail.order.placed` and
-`retail.order.cancelled`, and _not_ that order's payment, fulfillment or refund events, which are
-extracted under their own type and their own id. Reassembling one order's whole story is what
-`?correlationId=` and the trace route are for.
+`retail.order.cancelled`, and _not_ that order's payment, fulfillment, refund or return events,
+which are extracted under their own type — but keyed by the **order id**, because the extractor
+prefers `orderId` over the per-aggregate id. `?aggregateType=payment&aggregateId=<orderId>` finds an
+order's payment events; a `paymentId` finds nothing
+([`docs/reference/event-store.md`](docs/reference/event-store.md#ingest-into-domain_event)).
+Reassembling one order's whole story is what `?correlationId=` and the trace route are for.
 
 ### Admin
 

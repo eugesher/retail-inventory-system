@@ -6,8 +6,6 @@ import { DomainEventEntity } from './domain-event.entity';
 export class DomainEventMapper {
   public static toDomain(entity: DomainEventEntity): DomainEvent {
     return DomainEvent.reconstitute({
-      // The BIGINT PK comes back from the mysql2 driver as a string; coerce to a
-      // number (the `StockMovementMapper` precedent, ADR-019).
       id: Number(entity.id),
       eventType: entity.eventType,
       aggregateType: entity.aggregateType,
@@ -21,9 +19,6 @@ export class DomainEventMapper {
   }
 
   public static toEntity(domain: DomainEvent): DeepPartial<DomainEventEntity> {
-    // `id` (DB-assigned) and `received_at` (DB-defaulted to the ingest instant) are
-    // deliberately omitted — they are written by the database, never by the mapper.
-    // There is no update path: a captured event is immutable once appended.
     return {
       eventType: domain.eventType,
       aggregateType: domain.aggregateType,
@@ -31,9 +26,6 @@ export class DomainEventMapper {
       payload: domain.payload,
       eventVersion: domain.eventVersion,
       producer: domain.producer,
-      // The `correlation_id` column is `NOT NULL DEFAULT ''`; coalesce a null domain value
-      // to `''` so the idempotency UNIQUE dedupes (and an explicit NULL never reaches the
-      // non-null column). The ingest already coalesces, so this is the second guard.
       correlationId: domain.correlationId ?? '',
       occurredAt: domain.occurredAt,
     };
