@@ -1,3 +1,2 @@
-# Posting scripts are plain Python; keep their bytecode cache out of the repo.
 __pycache__/
 *.pyc

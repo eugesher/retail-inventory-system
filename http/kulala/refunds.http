@@ -1,59 +1,8 @@
-# Refund endpoints — the manual (goodwill) refund + the auto-refund-from-cancel trace
-#
-# These routes are order-scoped, so they live on apps/api-gateway/src/modules/orders/
-# presentation/refunds.controller.ts (@Controller('orders') — a second controller on the
-# orders prefix, next to capture/cancel) and front the retail microservice's refund RPCs
-# over RabbitMQ (ADR-009 / ADR-032):
-#   - POST /api/orders/:orderId/refunds   (Bearer — order:refund, staff-only)
-#       Issue a refund against the order's CAPTURED payment. Body { paymentId, amountMinor,
-#       reason } + a REQUIRED, DEDUPLICATED `Idempotency-Key` header (ADR-036): the same key +
-#       same body replays the stored refund (200 + `Idempotent-Replay: true`, before the
-#       gateway call AND before the audit — no second audit row), a different body is 422, a
-#       missing key is 400. The retail service validates the captured precondition + the
-#       refundable ceiling (payment.amountMinor - payment.refundedAmountMinor) and reverses the
-#       payment via the (fake) gateway. Returns the issued RefundView (201 fresh, 200 replay; a
-#       partial refund leaves the payment `captured`, a full one flips it `refunded`).
-#   - GET  /api/orders/:orderId/refunds   (Bearer — owner OR order:read)
-#       List the order's refunds newest-first. Returns RefundView[] (200).
-#
-# AUTHORIZATION (two shapes, ADR-024 / ADR-028 §7). Issue Refund is STAFF-ONLY — gated
-# @RequiresPermission(order:refund); a customer cannot refund itself. List Refunds is
-# owner-or-staff (the owning customer, OR staff with order:read) and carries NO permission
-# gate (that would block the owner) — the owner-check is retail-side, the staff override
-# resolved at the gateway. A non-owner non-staff caller gets 403 (REFUND_ACCESS_FORBIDDEN).
-#
-# Typed upstream codes (REFUND_* / ORDER_*) surface as 400/403/404/409 via throwRpcError.
-# All routes sit behind the global "api" prefix. With the default dev environment that
-# resolves to http://localhost:3000/api.
-#
-# Prereqs:
-#   1. Start the backing services and the gateway, then migrate + seed:
-#        docker compose up -d
-#        yarn migration:run
-#        yarn test:seed
-#        yarn start:dev
-#   2. Run `loginStaff` FIRST -> @accessToken (admin@example.com / admin1234; holds
-#      order:capture + order:cancel + order:refund + order:read). In production order-support
-#      (support@example.com / support1234) holds the same order:* set.
-#   3. Run `loginCustomer` -> @customerToken (customer@example.com / customer1234; the owner).
-#   4. CASE 1 (manual goodwill refund, no return): `createCart` -> `addLine` -> `placeOrder`
-#      -> `capturePayment` (captures @paymentId) -> `issueRefund` (partial) ->
-#      `issueRefundReplay` (200 + `Idempotent-Replay: true`, SAME @refundKey + body — no
-#      second refund AND no second audit row) -> `issueRefundDifferentBody` (422, SAME
-#      @refundKey + a changed amount) -> `listRefunds`.
-#   5. CASE 2 (auto-refund-from-cancel): `createCartB` -> `addLineB` -> `placeOrderB` ->
-#      `capturePaymentB` (capture WITHOUT shipping) -> `cancelOrderB`. Cancel flags the
-#      captured payment for refund and emits retail.order.cancelled; the retail
-#      OrderCancelledConsumer reacts INLINE and issues the full refund (no HTTP call). Then
-#      `listRefundsB` shows the auto-issued refund.
-
 @baseUrl = {{ENV_BASE_URL}}
 
 ###
 
 # @name loginStaff
-# POST /api/auth/staff/login
-# Seeded admin login (order:capture + order:cancel + order:refund + order:read).
 POST {{baseUrl}}/auth/staff/login
 Content-Type: application/json
 
@@ -68,8 +17,6 @@ Content-Type: application/json
 ###
 
 # @name loginCustomer
-# POST /api/auth/customer/login
-# Seeded customer login — the order owner.
 POST {{baseUrl}}/auth/customer/login
 Content-Type: application/json
 
@@ -82,12 +29,8 @@ Content-Type: application/json
 @customerToken = {{loginCustomer.response.body.$.accessToken}}
 
 ###
-# ===========================================================================
-# CASE 1 — manual goodwill refund against a captured payment (no return)
-# ===========================================================================
 
 # @name createCart
-# POST /api/cart  (Bearer + owner-check)
 POST {{baseUrl}}/cart
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
@@ -102,8 +45,6 @@ Content-Type: application/json
 ###
 
 # @name addLine
-# POST /api/cart/:cartId/lines  (Bearer + owner-check)
-# Adds seeded variant 1 (USD 4999), quantity 1 — order grand total 4999.
 POST {{baseUrl}}/cart/{{cartId}}/lines
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
@@ -116,8 +57,6 @@ Content-Type: application/json
 ###
 
 # @name placeOrder
-# POST /api/cart/:cartId/place  (Bearer + owner-check)
-# Places the order (authorize-only). Response (201) is OrderView; capture @orderId.
 POST {{baseUrl}}/cart/{{cartId}}/place
 Authorization: Bearer {{customerToken}}
 Idempotency-Key: {{$guid}}
@@ -149,10 +88,6 @@ Content-Type: application/json
 ###
 
 # @name capturePayment
-# POST /api/orders/:orderId/payments/capture  (Bearer — owner OR order:capture)
-# Captures the authorized payment (authorized -> captured) so it becomes refundable.
-# Response (200) is OrderView with paymentStatus='captured'; capture the payment id from
-# the embedded payment row.
 POST {{baseUrl}}/orders/{{orderId}}/payments/capture
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{$guid}}
@@ -165,19 +100,9 @@ Content-Type: application/json
 
 ###
 
-# Capture the refund key ONCE so `issueRefund` and `issueRefundReplay` share it.
 @refundKey = {{$guid}}
 
 # @name issueRefund
-# POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
-# Issues a PARTIAL goodwill refund (1000 of the 4999 captured) — no return involved. The
-# retail service checks the captured precondition + the refundable ceiling, reverses the
-# amount via the (fake) gateway, accumulates payment.refunded_amount_minor, and (since this
-# is partial) leaves the payment `captured`. The `Idempotency-Key` is REQUIRED and
-# DEDUPLICATED (ADR-036) — the same key + body replays the stored refund (200 +
-# `Idempotent-Replay: true`, before the gateway AND before the audit); the refundable-amount
-# ceiling + the already-issued match remain the backstop against an over-refund on a new-key
-# replay. Response (201) is RefundView with status='issued' and a gatewayReference.
 POST {{baseUrl}}/orders/{{orderId}}/refunds
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{refundKey}}
@@ -192,12 +117,6 @@ Content-Type: application/json
 ###
 
 # @name issueRefundReplay
-# POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
-# The REPLAY: the SAME @refundKey + the SAME body. The store short-circuits BEFORE the
-# gateway call AND BEFORE the audit emit, so there is NO second gateway reversal and — the
-# refund-specific guarantee — NO second `audit_log_entry` row (one logical refund = exactly
-# one audit record). Response is the stored RefundView with 200 (not 201) + the header
-# `Idempotent-Replay: true`; confirm the refund id + gatewayReference match `issueRefund`.
 POST {{baseUrl}}/orders/{{orderId}}/refunds
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{refundKey}}
@@ -212,12 +131,6 @@ Content-Type: application/json
 ###
 
 # @name issueRefundDifferentBody
-# POST /api/orders/:orderId/refunds  (Bearer — staff order:refund)
-# The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @refundKey but a CHANGED amountMinor
-# (2000 instead of 1000). The stored fingerprint no longer matches, so the request is
-# rejected WITHOUT executing:
-#   422 { statusCode: 422, code: "ORDER_IDEMPOTENCY_KEY_REUSED" }
-# The 422 fires before any gateway call, so no over-refund can slip through this reuse.
 POST {{baseUrl}}/orders/{{orderId}}/refunds
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{refundKey}}
@@ -232,20 +145,12 @@ Content-Type: application/json
 ###
 
 # @name listRefunds
-# GET /api/orders/:orderId/refunds  (Bearer — owner OR order:read)
-# Lists the order's refunds newest-first. The owning customer could list its own with
-# @customerToken; staff use the order:read override. Response (200) is RefundView[] — the
-# one goodwill refund.
 GET {{baseUrl}}/orders/{{orderId}}/refunds
 Authorization: Bearer {{accessToken}}
 
 ###
-# ===========================================================================
-# CASE 2 — auto-refund-from-cancel (place -> capture -> cancel; the consumer refunds)
-# ===========================================================================
 
 # @name createCartB
-# POST /api/cart  (Bearer + owner-check)
 POST {{baseUrl}}/cart
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
@@ -260,8 +165,6 @@ Content-Type: application/json
 ###
 
 # @name addLineB
-# POST /api/cart/:cartId/lines  (Bearer + owner-check)
-# Adds seeded variant 1 (USD 4999), quantity 1.
 POST {{baseUrl}}/cart/{{cartIdB}}/lines
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
@@ -274,8 +177,6 @@ Content-Type: application/json
 ###
 
 # @name placeOrderB
-# POST /api/cart/:cartId/place  (Bearer + owner-check)
-# Places the order (authorize-only). Capture @orderIdB.
 POST {{baseUrl}}/cart/{{cartIdB}}/place
 Authorization: Bearer {{customerToken}}
 Idempotency-Key: {{$guid}}
@@ -307,11 +208,6 @@ Content-Type: application/json
 ###
 
 # @name capturePaymentB
-# POST /api/orders/:orderId/payments/capture  (Bearer — owner OR order:capture)
-# Captures the payment WITHOUT shipping. A captured-but-unshipped order is the only state
-# where Cancel Order flags the payment for refund (cancel-after-ship is blocked; a
-# never-captured cancel just voids the authorization). Response (200) is OrderView with
-# paymentStatus='captured'.
 POST {{baseUrl}}/orders/{{orderIdB}}/payments/capture
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{$guid}}
@@ -322,13 +218,6 @@ Content-Type: application/json
 ###
 
 # @name cancelOrderB
-# POST /api/orders/:orderId/cancel  (Bearer — owner OR order:cancel)
-# Cancels the captured-but-unshipped order. Cancel flags the captured payment for refund
-# (payment.flagged_for_refund = true), releases the stock allocation, and emits
-# retail.order.cancelled with paymentFlaggedForRefund=true. The retail OrderCancelledConsumer
-# consumes that event and issues the FULL refund INLINE (no HTTP call here) — the payment
-# goes `refunded`, the flag clears, and a refund row is written. Response (200) is the
-# cancelled OrderView.
 POST {{baseUrl}}/orders/{{orderIdB}}/cancel
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -340,10 +229,5 @@ Content-Type: application/json
 ###
 
 # @name listRefundsB
-# GET /api/orders/:orderId/refunds  (Bearer — owner OR order:read)
-# Lists the order's refunds. Run a moment after `cancelOrderB` so the asynchronous
-# auto-refund consumer has processed retail.order.cancelled. Response (200) is RefundView[]
-# with the one auto-issued full refund (status='issued', reason='order-cancelled'). Re-running
-# the cancel event is idempotent — the refundable remainder is 0, so no second refund issues.
 GET {{baseUrl}}/orders/{{orderIdB}}/refunds
 Authorization: Bearer {{accessToken}}

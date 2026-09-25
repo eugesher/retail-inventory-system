@@ -63,7 +63,7 @@ placeholders.
 | [`architecture-lint.md`](architecture-lint.md)     | the rules in `eslint.config.mjs`                                               |
 | [`persistence.md`](persistence.md)                 | the schema from `migrations/`, the two migration pipelines, the test seed      |
 | [`build-and-ci.md`](build-and-ci.md)               | Node/Yarn, the webpack configs, Dockerfile, CI, pre-commit hook, compose files |
-| `http-api.md`                                      | the request collections under `http/`                                          |
+| [`http-api.md`](http-api.md)                       | the request collections under `http/`, what a run needs and what it does       |
 
 ## Shape of an area file
 
