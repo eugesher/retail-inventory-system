@@ -11,38 +11,12 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// The stock-movement audit ledger end-to-end (ADR-030 §2). One variant is driven
-// through every counter-changing operation over HTTP and the
-// `GET /api/inventory/variants/:variantId/movements` read is asserted to hold the
-// exact newest-first timeline, with the right types, signs, reason codes,
-// reference pairs, and actor ids — plus the filter / paging / permission contract.
-//
-// The full flow (each step a real gateway request):
-//   receive 10  → adjust −2 (cycle-count) → transfer 3 to backup-store
-//   (warehouse staff, inventory:adjust / :transfer)
-//   then, as the seeded customer: add 2 to a cart → remove the line (release) →
-//   place a fresh 1-line cart (allocation).
-//
-// The audit read is per-variant and spans locations, so BOTH transfer legs appear
-// on the same variant timeline (−3 debited at the source, +3 credited at the
-// destination — there is no by-location ledger filter). A reservation writes NO
-// ledger row, so the cart ADD is invisible here; only the release and the
-// allocation surface. Staff-driven rows carry the staff `actorId`; the cart-driven
-// release + the place-driven allocation are system rows (`actorId: null`).
-//
-// Note on the by-reservation-id manual release: that endpoint is exercised in the
-// `http/kulala/inventory.http` flow and the inventory unit specs. There is no HTTP source
-// for a reservation id in-suite (no reservation read API), so the same `release`
-// ledger row is produced here via the cart Remove route, which travels the
-// identical release codepath (reason `cart-removed`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const WAREHOUSE_EMAIL = 'warehouse@example.com';
 const WAREHOUSE_PASSWORD = 'warehouse1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
 const CUSTOMER_PASSWORD = 'customer1234';
-// The seeded warehouse-staff user id (scripts/test-db-seed.ts) — the `actorId`
-// the gateway folds from `@CurrentUser().id` onto every staff-driven movement.
 const WAREHOUSE_STAFF_ID = '00000000-0000-4000-a000-000000000004';
 const DEFAULT_WAREHOUSE = 'default-warehouse';
 const BACKUP_STORE = 'backup-store';
@@ -132,9 +106,6 @@ describe('Inventory stock-movement audit ledger (e2e)', () => {
     }
   };
 
-  // Register product + variant + price + publish (NO receive — the receipt is the
-  // first explicit ledger row this suite asserts). Waits for auto-init so the
-  // subsequent receive does not race a duplicate INSERT.
   const provisionPricedVariant = async (): Promise<number> => {
     const productRes = await server()
       .post('/api/catalog/products')
@@ -254,29 +225,24 @@ describe('Inventory stock-movement audit ledger (e2e)', () => {
   });
 
   it('drives the full receive → adjust → transfer → cart-add → cart-remove → place flow', async () => {
-    // receive 10 (warehouse staff) → on-hand 10
     const receive = await server()
       .post(`/api/inventory/variants/${variantId}/stock/receive`)
       .set('Authorization', warehouseAuth)
       .send({ quantity: 10 });
     expect(receive.status).toBe(HttpStatus.OK);
 
-    // adjust −2 with a reason → on-hand 8
     const adjust = await server()
       .post(`/api/inventory/variants/${variantId}/stock/adjust`)
       .set('Authorization', warehouseAuth)
       .send({ quantityDelta: -2, reasonCode: 'cycle-count' });
     expect(adjust.status).toBe(HttpStatus.OK);
 
-    // transfer 3 to backup-store → source on-hand 5, destination on-hand 3
     const transfer = await server()
       .post(`/api/inventory/variants/${variantId}/stock/transfer`)
       .set('Authorization', warehouseAuth)
       .send({ fromLocationId: DEFAULT_WAREHOUSE, toLocationId: BACKUP_STORE, quantity: 3 });
     expect(transfer.status).toBe(HttpStatus.OK);
 
-    // customer adds 2 to a cart (reserve — NO ledger row), then removes the line
-    // (release — a `cart-removed` ledger row).
     const cart = await server()
       .post('/api/cart')
       .set('Authorization', `Bearer ${customerToken}`)
@@ -295,7 +261,6 @@ describe('Inventory stock-movement audit ledger (e2e)', () => {
       .set('Authorization', `Bearer ${customerToken}`);
     expect(remove.status).toBe(HttpStatus.OK);
 
-    // place a fresh 1-line cart (reserve 1 → allocate 1 — an `allocation` row).
     const placeCart = await server()
       .post('/api/cart')
       .set('Authorization', `Bearer ${customerToken}`)
@@ -324,24 +289,18 @@ describe('Inventory stock-movement audit ledger (e2e)', () => {
 
     const items = page.items;
 
-    // [0] allocation (−1), order reference, system actor.
     expect(items[0].type).toBe('allocation');
     expect(items[0].quantity).toBe(-1);
     expect(items[0].referenceType).toBe('order');
     expect(items[0].referenceId).toBe(String(orderId));
     expect(items[0].actorId).toBeNull();
 
-    // [1] release (−2), cart reference, reason cart-removed, system actor.
     expect(items[1].type).toBe('release');
     expect(items[1].quantity).toBe(-2);
     expect(items[1].referenceType).toBe('cart');
     expect(items[1].reasonCode).toBe('cart-removed');
     expect(items[1].actorId).toBeNull();
 
-    // [2] + [3] the two transfer legs (one +3 transfer-in, one −3 transfer-out),
-    // both `adjustment` type, both `transfer` reference sharing one referenceId,
-    // both attributed to the warehouse staff. Order between the two is not
-    // asserted (same transaction, same occurredAt) — match them by reason.
     const transferLegs = [items[2], items[3]];
     transferLegs.forEach((leg) => {
       expect(leg.type).toBe('adjustment');
@@ -356,18 +315,15 @@ describe('Inventory stock-movement audit ledger (e2e)', () => {
     expect(transferIn.stockLocationId).toBe(BACKUP_STORE);
     expect(transferOut.quantity).toBe(-3);
     expect(transferOut.stockLocationId).toBe(DEFAULT_WAREHOUSE);
-    // The two legs are one transfer — same referenceId.
     expect(transferIn.referenceId).toBe(transferOut.referenceId);
     transferReferenceId = transferIn.referenceId!;
 
-    // [4] adjustment (−2), operator reason cycle-count, warehouse actor.
     expect(items[4].type).toBe('adjustment');
     expect(items[4].quantity).toBe(-2);
     expect(items[4].reasonCode).toBe('cycle-count');
     expect(items[4].referenceType).toBeNull();
     expect(items[4].actorId).toBe(WAREHOUSE_STAFF_ID);
 
-    // [5] receipt (+10), no reference, warehouse actor.
     expect(items[5].type).toBe('receipt');
     expect(items[5].quantity).toBe(10);
     expect(items[5].referenceType).toBeNull();
@@ -380,7 +336,6 @@ describe('Inventory stock-movement audit ledger (e2e)', () => {
     expect(page.total).toBe(3);
     expect(page.items).toHaveLength(3);
     page.items.forEach((m) => expect(m.type).toBe('adjustment'));
-    // The two transfer legs are in this set (same shared referenceId).
     const transferRows = page.items.filter((m) => m.referenceId === transferReferenceId);
     expect(transferRows).toHaveLength(2);
   });
@@ -389,16 +344,13 @@ describe('Inventory stock-movement audit ledger (e2e)', () => {
     const farPast = '2000-01-01T00:00:00.000Z';
     const farFuture = '2999-01-01T00:00:00.000Z';
 
-    // A window that brackets the whole flow returns every row.
     const within = await listMovements({ from: farPast, to: farFuture });
     expect(within.total).toBe(6);
 
-    // An upper bound before any movement → empty.
     const beforeAll = await listMovements({ to: farPast });
     expect(beforeAll.total).toBe(0);
     expect(beforeAll.items).toEqual([]);
 
-    // A lower bound after every movement → empty.
     const afterAll = await listMovements({ from: farFuture });
     expect(afterAll.total).toBe(0);
     expect(afterAll.items).toEqual([]);
@@ -418,7 +370,6 @@ describe('Inventory stock-movement audit ledger (e2e)', () => {
     expect(pageTwo.items).toHaveLength(2);
     expect(pageThree.items).toHaveLength(2);
 
-    // The three pages are disjoint and together cover all six rows.
     const ids = new Set([
       ...pageOne.items.map((m) => m.id),
       ...pageTwo.items.map((m) => m.id),

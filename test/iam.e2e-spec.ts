@@ -11,12 +11,6 @@ import { MicroserviceQueueEnum, PermissionCodeEnum } from '@retail-inventory-sys
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 
-// The seeded `warehouse-staff` StaffUser (scripts/test-db-seed.ts) is the
-// round-trip's assign/revoke target. `warehouse-staff` bundles only
-// `inventory:*` codes — no `audit:read` — which gives the same "lacks the
-// admin permission then gains it" arc the round-trip needs without an
-// inline fixture. The id matches the seed's stable UUID so URL paths
-// don't need a lookup step.
 const FIXTURE_EMAIL = 'warehouse@example.com';
 const FIXTURE_PASSWORD = 'warehouse1234';
 const FIXTURE_STAFF_USER_ID = '00000000-0000-4000-a000-000000000004';
@@ -264,22 +258,11 @@ describe('IAM admin endpoints (e2e)', () => {
     });
   });
 
-  // POST /api/iam/staff — the route ADR-047 added. `RegisterStaffUserUseCase` had been written,
-  // unit-tested and registered as a provider since the identity baseline, but no controller ever
-  // injected it: the only way to mint a staff principal was the seed script. The DI-graph sweep
-  // is what found it.
-  //
-  // The test that matters is not the 201 — it is that the created user can then LOG IN. A 201
-  // only proves a row was written; the login proves the argon2 hash and the role bundle are real
-  // and that the new principal is a first-class one.
   describe('POST /api/iam/staff', () => {
     const NEW_STAFF_EMAIL = `staff-${Date.now()}@example.com`;
     const NEW_STAFF_PASSWORD = 'newstaff1234';
 
     it('rejects a caller without iam:staff-create with 403', async () => {
-      // The warehouse fixture holds iam:assign-adjacent codes but not this one. Minting a
-      // principal is a higher privilege than granting an existing one a role bundle — sharing a
-      // code would make role assignment a silent user-creation escalation.
       const fixture = await login(FIXTURE_EMAIL, FIXTURE_PASSWORD);
       await supertest(apiGatewayApp.getHttpServer())
         .post('/api/iam/staff')
@@ -310,8 +293,6 @@ describe('IAM admin endpoints (e2e)', () => {
       const tokens = await login(NEW_STAFF_EMAIL, NEW_STAFF_PASSWORD);
       expect(tokens.accessToken).toEqual(expect.any(String));
 
-      // ...and it carries the role's permissions, not an empty bundle: warehouse-staff has no
-      // audit:read, so the guard chain must reject it exactly as it rejects the seeded fixture.
       await supertest(apiGatewayApp.getHttpServer())
         .get('/api/auth/admin/ping')
         .set('Authorization', `Bearer ${tokens.accessToken}`)

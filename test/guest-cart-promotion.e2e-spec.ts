@@ -38,8 +38,6 @@ describe('Guest cart promotion (e2e)', () => {
   let apiGatewayApp: INestApplication;
   let retailMicroservice: INestMicroservice;
   let catalogMicroservice: INestMicroservice;
-  // Add-to-Cart reserves stock, so the inventory microservice must be up to serve
-  // `inventory.reservation.*` on inventory_queue.
   let inventoryMicroservice: INestMicroservice;
 
   beforeAll(async () => {
@@ -103,7 +101,6 @@ describe('Guest cart promotion (e2e)', () => {
   });
 
   it('promotes a guest cart to a registered customer via claim', async () => {
-    // 1. Mint a guest session — a real, logged-in-able guest customer + token.
     const guestSession = await supertest(apiGatewayApp.getHttpServer()).post(
       '/api/auth/customer/guest-session',
     );
@@ -114,7 +111,6 @@ describe('Guest cart promotion (e2e)', () => {
     const guestToken = guest.accessToken;
     const guestId = guest.customerId;
 
-    // 2. Build a cart AS THE GUEST through the normal bearer-protected routes.
     const create = await supertest(apiGatewayApp.getHttpServer())
       .post('/api/cart')
       .set('Authorization', `Bearer ${guestToken}`)
@@ -131,7 +127,6 @@ describe('Guest cart promotion (e2e)', () => {
     expect(add.status).toBe(HttpStatus.OK);
     expect((add.body as ICartBody).lines).toHaveLength(1);
 
-    // 3. Register a real customer and log in → the registered token.
     const email = registeredEmail();
     await supertest(apiGatewayApp.getHttpServer())
       .post('/api/auth/customer/register')
@@ -141,22 +136,18 @@ describe('Guest cart promotion (e2e)', () => {
       .send({ email, password: CUSTOMER_PASSWORD });
     const registeredToken = (loginRes.body as ITokenResponse).accessToken;
 
-    // 4. Claim the guest cart with the registered token + the fromCustomerId proof.
     const claim = await supertest(apiGatewayApp.getHttpServer())
       .post(`/api/cart/${cartId}/claim`)
       .set('Authorization', `Bearer ${registeredToken}`)
       .send({ fromCustomerId: guestId });
     expect(claim.status).toBe(HttpStatus.OK);
-    // The cart now belongs to the registered customer, lines preserved.
     expect((claim.body as ICartBody).lines).toHaveLength(1);
 
-    // 5. The registered customer now resolves the cart (it is the new owner).
     const ownerGet = await supertest(apiGatewayApp.getHttpServer())
       .get(`/api/cart/${cartId}`)
       .set('Authorization', `Bearer ${registeredToken}`);
     expect(ownerGet.status).toBe(HttpStatus.OK);
 
-    // 6. The guest token can no longer read the cart (ownership moved) → 403.
     const guestGet = await supertest(apiGatewayApp.getHttpServer())
       .get(`/api/cart/${cartId}`)
       .set('Authorization', `Bearer ${guestToken}`);
@@ -175,7 +166,6 @@ describe('Guest cart promotion (e2e)', () => {
       .send({});
     const cartId = (create.body as ICartBody).id;
 
-    // A registered customer attempts to claim with a wrong (non-owning) proof.
     const email = registeredEmail();
     await supertest(apiGatewayApp.getHttpServer())
       .post('/api/auth/customer/register')

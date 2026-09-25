@@ -20,12 +20,6 @@ import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// The cross-service auto-init flow end-to-end: a catalog variant is created over
-// HTTP → the catalog microservice persists it and emits `catalog.variant.created`
-// onto `inventory_queue` (producer-targets-consumer-queue) → the inventory
-// microservice's `CatalogEventsConsumer` auto-initializes a zeroed `stock_level`
-// row at `default-warehouse` → the figure is observable via the public inventory
-// GET. A repeat event is a no-op (idempotent — no duplicate row).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const DEFAULT_WAREHOUSE = 'default-warehouse';
@@ -75,8 +69,6 @@ describe('Inventory auto-init on catalog.variant.created (e2e)', () => {
   let dataSource: InventoryAutoInitE2ESpecDataSource;
   let inventoryPublisher: ClientProxy;
 
-  // A fresh slug/sku each run so the flow stays idempotent under
-  // `yarn test:e2e:run` against an already-seeded DB.
   const stamp = Date.now();
   const productSlug = `e2e-auto-init-${stamp}`;
   const sku = `E2E-AUTOINIT-${stamp}`;
@@ -90,9 +82,6 @@ describe('Inventory auto-init on catalog.variant.created (e2e)', () => {
     return `Bearer ${(body as ITokenResponse).accessToken}`;
   };
 
-  // Polls the database directly until the consumer has created the row. Reading
-  // over HTTP first would cache a `locations: []` answer (the read path does not
-  // invalidate), so the DB poll is the gate before any HTTP assertion.
   const waitForRows = async (deadlineMs = 20_000): Promise<IStockLevelRow[]> => {
     const start = Date.now();
     let rows = (await dataSource.getStockLevelRows(variantId)) as IStockLevelRow[];
@@ -150,8 +139,6 @@ describe('Inventory auto-init on catalog.variant.created (e2e)', () => {
     });
     await dataSource.initialize();
 
-    // A direct publisher onto `inventory_queue` to re-emit a synthetic duplicate
-    // event for the idempotency assertion (the notification e2e pattern).
     inventoryPublisher = ClientProxyFactory.create({
       transport: Transport.RMQ,
       options: {
@@ -162,8 +149,6 @@ describe('Inventory auto-init on catalog.variant.created (e2e)', () => {
     });
     await inventoryPublisher.connect();
 
-    // Create the product + variant over HTTP; adding the variant is what emits
-    // `catalog.variant.created` and triggers the inventory auto-init consumer.
     const auth = await bearer(ADMIN_EMAIL, ADMIN_PASSWORD);
 
     const productResponse = await supertest(apiGatewayApp.getHttpServer())
@@ -194,10 +179,6 @@ describe('Inventory auto-init on catalog.variant.created (e2e)', () => {
   it('auto-initializes a zeroed default-warehouse stock level, observable via the inventory GET', async () => {
     const rows = await waitForRows();
 
-    // Exactly one row, zeroed, at the default warehouse. `version` is a
-    // TypeORM `@VersionColumn()` — it starts at 1 on the INSERT path (not the
-    // domain's in-memory 0), so the meaningful zeroed invariant is the three
-    // quantity columns, not the optimistic-lock token's starting value.
     expect(rows).toHaveLength(1);
     const [row] = rows;
     expect(row.stock_location_id).toBe(DEFAULT_WAREHOUSE);
@@ -206,8 +187,6 @@ describe('Inventory auto-init on catalog.variant.created (e2e)', () => {
     expect(row.quantity_reserved).toBe(0);
     expect(typeof row.version).toBe('number');
 
-    // The same figure is observable through the public read path. This GET is the
-    // first read of this variant, so it is a clean cache miss that loads the row.
     const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(
       `/api/inventory/variants/${variantId}/stock`,
     );
@@ -226,8 +205,6 @@ describe('Inventory auto-init on catalog.variant.created (e2e)', () => {
   });
 
   it('is idempotent — a repeat catalog.variant.created does not duplicate the row', async () => {
-    // The row already exists from the first variant-create. Re-emit a synthetic
-    // duplicate directly onto `inventory_queue`; the consumer must no-op.
     const duplicate: ICatalogVariantCreatedEvent = {
       productId: 0,
       variantId,
@@ -238,8 +215,6 @@ describe('Inventory auto-init on catalog.variant.created (e2e)', () => {
     };
     await firstValueFrom(inventoryPublisher.emit(ROUTING_KEYS.CATALOG_VARIANT_CREATED, duplicate));
 
-    // Give the consumer time to process the no-op, then assert the row count is
-    // still exactly one and the figure is unchanged.
     await new Promise((resolve) => setTimeout(resolve, 2_000));
 
     const rows = (await dataSource.getStockLevelRows(variantId)) as IStockLevelRow[];

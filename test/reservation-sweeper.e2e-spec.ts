@@ -14,34 +14,6 @@ import { MicroserviceQueueEnum, ReservationView } from '@retail-inventory-system
 import { EventStoreE2ESpecDataSource } from './data-source/event-store.e2e-spec.data-source';
 import { ReservationSweepE2ESpecDataSource } from './data-source/reservation-sweep.e2e-spec.data-source';
 
-// The operator-triggered reservation sweep, end to end (ADR-038). A cart line holds
-// stock; the hold is aged past its TTL; `POST /api/inventory/reservations/sweep`
-// reclaims it. The suite follows the reclaim through every surface it touches: the
-// `reservation` row's terminal status, the `stock_level` counters, the append-only
-// `stock_movement` ledger, the cache-aside HTTP stock read, and — one bus hop later —
-// the `ris_eventstore.domain_event` row the emitted `inventory.stock.released` lands in.
-//
-// TWO ENVIRONMENT FACTS make this suite deterministic, and both are load-bearing:
-//
-//   1. `RESERVATION_SWEEP_INTERVAL_SECONDS` is pushed far out of the way BEFORE the
-//      inventory app module is loaded. The service's own timer runs the exact same use
-//      case; left at its 60-second default it would race the manual trigger and reclaim
-//      the hold first, turning `expired: 1` into `expired: 0`. The override must precede
-//      the module's `ConfigModule.forRoot(...)`, which validates and SNAPSHOTS the
-//      environment the moment `app.module.ts` is imported — a snapshot `ConfigService`
-//      then reads ahead of `process.env`. Hence the dynamic `import()` below: a static
-//      import is hoisted above every statement in this file and would take the snapshot
-//      with the default still in place. The cron suite makes the mirror-image override
-//      for the same reason.
-//
-//   2. A drain sweep runs once during setup. The reclaim is global — it acts on every
-//      `active` hold whose `expires_at` has passed, not just this suite's — so a hold
-//      left stale by an earlier run (or a long-lived local database) would inflate
-//      `expired`. Draining first makes the counted sweep below see exactly one candidate.
-//
-// The suite ages `reservation.expires_at` by direct SQL. That is the only way to make a
-// hold stale without waiting out `RESERVATION_TTL_MINUTES`, and it is deliberate that no
-// production API can do it — see `ReservationSweepE2ESpecDataSource.ageReservation`.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const ADMIN_STAFF_USER_ID = '00000000-0000-4000-a000-000000000001';
@@ -143,8 +115,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
     return level;
   };
 
-  // Ingestion is asynchronous (publish → broker → consume → insert), so poll rather than
-  // read once — the `event-store-firehose.e2e-spec.ts` recipe.
   const waitForReleasedEvent = async (deadlineMs = 30_000): Promise<Record<string, unknown>> => {
     const start = Date.now();
     for (;;) {
@@ -180,7 +150,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
     });
 
   beforeAll(async () => {
-    // See the header, fact 1. Set BEFORE the dynamic import, never after.
     process.env.RESERVATION_SWEEP_INTERVAL_SECONDS = '3600';
     const inventoryModule = await import('@retail-inventory-system/apps/inventory-microservice');
 
@@ -197,8 +166,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
       MicroserviceQueueEnum.INVENTORY_QUEUE,
     );
 
-    // The firehose shape of the event store's `main.ts`: `#` on the `ris.events` topic
-    // exchange, so the `inventory.stock.released` the sweep emits is ingested.
     eventStoreMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
       EventStoreMicroserviceAppModule,
       {
@@ -230,8 +197,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
     );
     await apiGatewayApp.init();
 
-    // `timezone: 'Z'` matches the app's `DatabaseModule` — the ageing write below and the
-    // sweep's `now` must agree on the wall clock.
     retailDb = new ReservationSweepE2ESpecDataSource({
       type: 'mysql',
       url: process.env.DATABASE_URL!,
@@ -256,12 +221,8 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
       .send({ email: CUSTOMER_EMAIL, password: CUSTOMER_PASSWORD });
     customerToken = (customerLogin.body as ITokenResponse).accessToken;
 
-    // See the header, fact 2: clear any hold an earlier run left stale, so the counted
-    // sweep sees exactly the one candidate this suite creates.
     await sweep();
 
-    // Self-provisioned, disjoint fixture — its own product/variant/price/stock, so the
-    // shared seeded variants are untouched.
     const productRes = await server()
       .post('/api/catalog/products')
       .set('Authorization', adminAuth)
@@ -348,7 +309,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
   });
 
   it('the manual sweep expires exactly the aged hold and reports scanned = expired + skipped', async () => {
-    // The escape hatch: one minute into the past, so `expires_at < now` inside the scan.
     await retailDb.ageReservation(reservationId, new Date(Date.now() - 60_000));
 
     const aged = await retailDb.getReservationById(reservationId);
@@ -365,13 +325,9 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
   it('the hold is expired with an advanced version; reserved is returned, on-hand untouched', async () => {
     const hold = await retailDb.getReservationById(reservationId);
     expect(hold!.status).toBe('expired');
-    // `expire()` bumps the optimistic token — proof the aggregate was mutated and
-    // version-checked-persisted, not merely re-read.
     expect(hold!.version).toBeGreaterThan(reservationVersionBeforeSweep);
 
     const level = await retailDb.getStockLevel(variantId, DEFAULT_WAREHOUSE);
-    // A release moves the reserved counter and NOTHING else: `available` rises because
-    // the hold stopped subtracting from it, never because units appeared.
     expect(level!.quantityReserved).toBe(reservedBeforeHold);
     expect(level!.quantityOnHand).toBe(ON_HAND);
     expect(level!.quantityAllocated).toBe(0);
@@ -386,14 +342,11 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
     expect(releases[0].reasonCode).toBe('expired');
     expect(releases[0].referenceType).toBe('cart');
     expect(releases[0].referenceId).toBe(cartId);
-    // The one behavioural difference between an operator sweep and a timer tick.
     expect(releases[0].actorId).toBe(ADMIN_STAFF_USER_ID);
     expect(releases[0].stockLocationId).toBe(DEFAULT_WAREHOUSE);
   });
 
   it('the public stock read reports the restored availability (the cache was invalidated)', async () => {
-    // A cache-aside read: had `withInvalidation` not wiped the variant's prefix after the
-    // commit, this would still serve the pre-sweep `available`.
     const level = await warehouseLevel();
     expect(level.quantityReserved).toBe(reservedBeforeHold);
     expect(level.available).toBe(ON_HAND - reservedBeforeHold);
@@ -412,8 +365,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
   it('a second sweep is a no-op: nothing expires and no second release row is written', async () => {
     const result = await sweep();
 
-    // The set the sweep acts on is `status = 'active' AND expires_at < now`; acting on a
-    // row removes it from that set. Idempotence is structural, not guarded.
     expect(result.expired).toBe(0);
 
     const releases = (await retailDb.getMovementsByCartAndVariant(cartId, variantId)).filter(
@@ -425,11 +376,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
     expect(level!.quantityReserved).toBe(reservedBeforeHold);
   });
 
-  // `POST /api/inventory/reservations/:reservationId/release` (staff `inventory:adjust`) —
-  // the by-id manual lever beside the TTL sweep. Same release codepath, different reason
-  // code: an operator release is stamped `manual`, a swept one `expired`. Exercised here
-  // because the suite already owns a disjoint variant and a stock baseline to measure
-  // against; the aged hold above doubles as the invalid-state fixture.
   describe('POST /api/inventory/reservations/:reservationId/release — manual by-id release', () => {
     const releaseById = (id: string): supertest.Test =>
       server().post(`/api/inventory/reservations/${id}/release`).set('Authorization', adminAuth);
@@ -457,8 +403,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
 
       const res = await releaseById(manualReservationId).send({});
       expect(res.status).toBe(HttpStatus.OK);
-      // Exactly one element for a by-id release. The view keys the hold as
-      // `reservationId`, not `id`.
       const released = (res.body as { released: ReservationView[] }).released;
       expect(released).toHaveLength(1);
       expect(released[0]).toMatchObject({
@@ -472,7 +416,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
       const after = await retailDb.getReservationById(manualReservationId);
       expect(after!.status).toBe('released');
 
-      // A release moves the reserved counter and nothing else.
       const level = await retailDb.getStockLevel(variantId, DEFAULT_WAREHOUSE);
       expect(level!.quantityReserved).toBe(reservedBeforeHold);
       expect(level!.quantityOnHand).toBe(ON_HAND);
@@ -482,7 +425,6 @@ describe('Reservation sweeper — the manual trigger reclaims a stale hold (e2e)
       ).filter((m) => m.type === 'release');
       expect(releases).toHaveLength(1);
       expect(releases[0].quantity).toBe(-HELD_QUANTITY);
-      // The one field that distinguishes an operator release from a swept one.
       expect(releases[0].reasonCode).toBe('manual');
       expect(releases[0].actorId).toBe(ADMIN_STAFF_USER_ID);
     });

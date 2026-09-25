@@ -9,11 +9,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { PricingE2ESpecDataSource } from './data-source/pricing.e2e-spec.data-source';
 
-// Seeded staff users (scripts/test-db-seed.ts). `admin` carries every permission
-// (incl. `pricing:write`); `warehouse` carries only `inventory:*` — no pricing
-// code — so it is the staff negative fixture for the write gate. A freshly
-// registered customer carries no `permissions` claim at all, so any code-gated
-// route is staff-only by construction (ADR-024).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_PASSWORD = 'customer1234';
@@ -67,8 +62,6 @@ describe('Pricing gateway endpoints (e2e)', () => {
   let catalogMicroservice: INestMicroservice;
   let dataSource: PricingE2ESpecDataSource;
 
-  // Stamped so the flow stays idempotent under `yarn test:e2e:run` against an
-  // already-seeded DB: a fresh slug/sku/tax-code set every run.
   const stamp = Date.now();
   const productSlug = `e2e-pricing-chair-${stamp}`;
   const skuA = `E2E-PRICE-A-${stamp}`;
@@ -77,8 +70,6 @@ describe('Pricing gateway endpoints (e2e)', () => {
 
   let productId: number;
   const variantIds: number[] = [];
-  // The persisted USD prices captured from the Set responses — their server-side
-  // `validFrom` instants anchor the as-of / historic assertions below.
   let priceA0: IPriceBody;
   let priceB0: IPriceBody;
 
@@ -89,13 +80,6 @@ describe('Pricing gateway endpoints (e2e)', () => {
 
   const server = () => supertest(apiGatewayApp.getHttpServer());
 
-  // The `price.valid_from` column is second-granular (`TIMESTAMP(0)`), so MySQL
-  // rounds the domain's sub-second `validFrom` to the nearest whole second — a
-  // freshly-set immediate price can round *up* and momentarily sit one second in
-  // the future, which the publish precondition probe (`valid_from <=
-  // UTC_TIMESTAMP()`) would read as "no active price". Waiting just over a second
-  // lets that rounded second elapse — the realistic "price first, publish later"
-  // gap — so the precondition is deterministically met.
   const settleTimestampRounding = (): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, 1_500));
 
@@ -104,8 +88,6 @@ describe('Pricing gateway endpoints (e2e)', () => {
     return `Bearer ${(body as ITokenResponse).accessToken}`;
   };
 
-  // Register a fresh customer and log in for a customer-tier access token (it
-  // carries an empty `permissions` claim — the write-gate negative fixture).
   const customerBearer = async (): Promise<string> => {
     const email = `buyer-${stamp}-${Math.random().toString(36).slice(2, 8)}@example.com`;
     await server().post('/api/auth/customer/register').send({ email, password: CUSTOMER_PASSWORD });
@@ -187,8 +169,6 @@ describe('Pricing gateway endpoints (e2e)', () => {
 
       expect(publish.status).toBe(HttpStatus.CONFLICT);
 
-      // The product must not have transitioned — get-by-slug resolves it
-      // regardless of status (ADR-025), so we can read its lifecycle back.
       const { status, body } = await server().get(`/api/catalog/products/${productSlug}`);
       expect(status).toBe(HttpStatus.OK);
       expect((body as IProductBody).status).toBe('draft');
@@ -256,10 +236,6 @@ describe('Pricing gateway endpoints (e2e)', () => {
 
       expect(status).toBe(HttpStatus.CREATED);
       const scheduled = body as IPriceBody;
-      // The scheduled row is the new open row (the immediate predecessor was
-      // closed at its start). `validFrom` is asserted via behavior below, not by
-      // exact-string equality — the second-granular column rounds the sub-second
-      // instant we sent.
       expect(scheduled.amountMinor).toBe(AMOUNT_A_FUTURE);
       expect(scheduled.priority).toBe(10);
       expect(scheduled.validTo).toBeNull();
@@ -304,9 +280,6 @@ describe('Pricing gateway endpoints (e2e)', () => {
       expect(newPrice.amountMinor).toBe(AMOUNT_B1);
       expect(newPrice.validTo).toBeNull();
 
-      // Read the ledger as-of the original `validFrom`: only the predecessor is
-      // in effect then, and it is now closed exactly at the new row's start
-      // (half-open tiling, ADR-026).
       const list = await server()
         .get(`/api/catalog/variants/${variantIds[1]}/prices`)
         .query({ currency: 'USD', asOf: priceB0.validFrom });
@@ -395,13 +368,9 @@ describe('Pricing gateway endpoints (e2e)', () => {
       const responses = await Promise.all([fire(5000), fire(6000)]);
       const statuses = responses.map((r) => r.status as HttpStatus);
 
-      // The invariant the `open_scope_key` UNIQUE backstop + the
-      // close-in-transaction guarantee: never two open rows for one scope.
       const openRows = await dataSource.countOpenPrices(raceVariantId, 'USD');
       expect(openRows).toBe(1);
 
-      // At least one Set wins cleanly; any loser is a clear error (never a
-      // silent second open row), so every response is a success or a >= 400.
       expect(statuses.filter((s) => s === HttpStatus.CREATED).length).toBeGreaterThanOrEqual(1);
       expect(statuses.every((s) => s === HttpStatus.CREATED || Number(s) >= 400)).toBe(true);
     });

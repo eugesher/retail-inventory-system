@@ -59,7 +59,7 @@ placeholders.
 | [`notifications.md`](notifications.md)             | notification `modules/notifications/`                                   |
 | [`event-store.md`](event-store.md)                 | event store `modules/audit-and-events/`                                 |
 | [`api-gateway.md`](api-gateway.md)                 | `apps/api-gateway`                                                      |
-| `testing.md`                                       | the e2e harness under `test/` and the repository self-checks in `spec/` |
+| [`testing.md`](testing.md)                         | the e2e harness under `test/` and the repository self-checks in `spec/` |
 | `architecture-lint.md`                             | the rules in `eslint.config.mjs`                                        |
 | `persistence.md`                                   | schema facts from `migrations/` and the seeds under `scripts/`          |
 | `build-and-ci.md`                                  | Dockerfile, CI workflow, compose files, `.env.example`                  |

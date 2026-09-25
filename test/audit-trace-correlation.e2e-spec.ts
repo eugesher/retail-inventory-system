@@ -12,26 +12,6 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
-// `GET /api/audit/trace/:correlationId` — the third operator question: "what did THIS
-// request cause?" (ADR-039). It reassembles both event-store logs for one correlation id:
-// `events` from `domain_event` and `auditEntries` from `audit_log_entry`.
-//
-// TWO TIMELINES, NEVER MERGED. They answer different questions and their ids live in
-// different spaces, so the route returns two arrays rather than one interleaved stream.
-// Both read FORWARD (`occurredAt` ascending, `id` ascending for ties) — the opposite of
-// the two list routes, which read newest-first. A trace is a story; a list is an inbox.
-//
-// EMPTY IS NOT MISSING. An unknown correlation id is `200 { events: [], auditEntries: [] }`,
-// never a `404`: the absence of a trace is not the absence of a resource. That is the one
-// assertion an operator's tooling depends on and the one a well-meaning refactor breaks.
-//
-// NO ASSERTION ON `auditEntries.length`. `audit_log_entry` has no dedupe key, so an
-// at-least-once redelivery of an `audit.staff.action` message appends another identical
-// row. `domain_event` carries a composite UNIQUE and swallows its duplicate at ingest;
-// the audit log does not. The suite asserts the CONTENT of every returned row, never a count.
-//
-// The suite drives one Place Order and one staff action under the SAME `x-correlation-id`,
-// so both logs have something to say about the same request.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const ADMIN_STAFF_USER_ID = '00000000-0000-4000-a000-000000000001';
@@ -47,8 +27,6 @@ const KEY_CART_CREATED = 'retail.cart.created';
 const KEY_ORDER_PLACED = 'retail.order.placed';
 const KEY_PAYMENT_AUTHORIZED = 'retail.payment.authorized';
 const ASSIGN_ROLE_ACTION = 'StaffUserRolesAssigned';
-// `audit.staff.action` is the one routing key the firehose diverts away from the
-// domain-event ingest; it must never appear among the traced `events`.
 const KEY_AUDIT_STAFF_ACTION = 'audit.staff.action';
 
 const ADDRESS = {
@@ -87,7 +65,6 @@ interface ITraceBody {
   auditEntries: IAuditLogEntryItem[];
 }
 
-// Assert a timeline reads forward: `occurredAt` ascending, ties broken on ascending `id`.
 const assertAscending = (rows: ITimelineRow[]): void => {
   for (let i = 1; i < rows.length; i++) {
     const previousAt = new Date(rows[i - 1].occurredAt).getTime();
@@ -129,7 +106,6 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
   ): Promise<supertest.Response> =>
     server().get(`/api/audit/trace/${targetCorrelationId}`).set('Authorization', auth);
 
-  // Both logs are written asynchronously off the bus, so poll until each has a row.
   const waitForBothLogs = async (deadlineMs = 30_000): Promise<ITraceBody> => {
     const start = Date.now();
     for (;;) {
@@ -193,8 +169,6 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
       MicroserviceQueueEnum.INVENTORY_QUEUE,
     );
 
-    // The hybrid boot of the event store's `main.ts`: firehose (ingest) + query queue (RPC),
-    // `init()` first, `listen()` never.
     eventStoreApp = await NestFactory.create(EventStoreMicroserviceAppModule, { logger: false });
     eventStoreApp.connectMicroservice<MicroserviceOptions>(
       {
@@ -253,7 +227,6 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
       .send({ email: CUSTOMER_EMAIL, password: CUSTOMER_PASSWORD });
     customerToken = (customerLogin.body as ITokenResponse).accessToken;
 
-    // Self-provisioned, disjoint fixture.
     const productRes = await server()
       .post('/api/catalog/products')
       .set('Authorization', adminAuth)
@@ -291,7 +264,6 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
       .send({ quantity: 10 });
     expect(receiveRes.status).toBe(HttpStatus.OK);
 
-    // The domain-event half of the trace: a full Place Order under the traced id.
     const create = await server()
       .post('/api/cart')
       .set('Authorization', `Bearer ${customerToken}`)
@@ -316,8 +288,6 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
     expect(place.status).toBe(HttpStatus.CREATED);
     orderId = (place.body as { id: number }).id;
 
-    // The audit-log half: one staff action under the SAME id. Re-assigning the seeded role
-    // is a valid, non-mutating call whose audit publish is unconditional.
     const assign = await server()
       .post(`/api/iam/staff/${TARGET_STAFF_USER_ID}/roles`)
       .set('Authorization', adminAuth)
@@ -340,8 +310,6 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
     expect(body.events.some((event) => event.eventType === KEY_ORDER_PLACED)).toBe(true);
     expect(body.auditEntries.some((entry) => entry.action === ASSIGN_ROLE_ACTION)).toBe(true);
 
-    // The two logs stay distinct: `audit.staff.action` rides the firehose into
-    // `audit_log_entry` alone and never lands among the domain events.
     expect(body.events.some((event) => event.eventType === KEY_AUDIT_STAFF_ACTION)).toBe(false);
   });
 
@@ -351,16 +319,12 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
     assertAscending(body.events);
     assertAscending(body.auditEntries);
 
-    // Read forward, the chain is a story with the causality intact: the cart is opened
-    // before the order is placed, and the order is placed before its payment is authorized.
     const at = (eventType: string): number =>
       body.events.findIndex((event) => event.eventType === eventType);
     expect(at(KEY_CART_CREATED)).toBeGreaterThanOrEqual(0);
     expect(at(KEY_CART_CREATED)).toBeLessThan(at(KEY_ORDER_PLACED));
     expect(at(KEY_ORDER_PLACED)).toBeLessThan(at(KEY_PAYMENT_AUTHORIZED));
 
-    // The placed order is this suite's order, not a neighbour's — the correlation id is
-    // the join key, and it scopes exactly one request.
     const placed = body.events[at(KEY_ORDER_PLACED)];
     expect(placed.producer).toBe('retail-microservice');
     expect(placed.aggregateId).toBe(String(orderId));
@@ -374,7 +338,6 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
     }
     for (const entry of body.auditEntries) {
       expect(entry.correlationId).toBe(correlationId);
-      // The staff action was the admin's; nothing else was performed under this id.
       expect(entry.actorId).toBe(ADMIN_STAFF_USER_ID);
       expect(entry.actorType).toBe('staff-user');
     }
@@ -388,10 +351,6 @@ describe('GET /api/audit/trace/:correlationId — both logs, one request (e2e)',
   });
 
   it('a missing id 404s from routing; a whitespace-only id 400s from the handler', async () => {
-    // A bare `/audit/trace/` matches no route at all. A whitespace segment DOES reach the
-    // handler, and must be rejected: `domain_event.correlation_id` is `NOT NULL DEFAULT ''`,
-    // so an empty target would ask for the bucket of every event ingested WITHOUT a
-    // correlation id rather than for nothing.
     const missing = await server().get('/api/audit/trace/').set('Authorization', adminAuth);
     expect(missing.status).toBe(HttpStatus.NOT_FOUND);
 

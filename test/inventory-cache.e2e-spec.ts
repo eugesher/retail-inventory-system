@@ -10,13 +10,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Proves the stock-availability cache is invalidated **post-commit** (ADR-023):
-// a Receive routes its write through `stockCache.withInvalidation(...)`, which
-// awaits the commit and only then wipes the cached `VariantStockView`. The spec
-// primes the cache (a read that writes the pre-receive figure back to Redis),
-// receives stock, and asserts the very next read reflects the new figure — if the
-// invalidation ran before the commit (or not at all), the read would serve the
-// stale primed value.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 
@@ -138,23 +131,18 @@ describe('Inventory cache post-commit invalidation (e2e)', () => {
   });
 
   it('serves the post-commit figure on the read after a Receive (invalidation runs post-commit)', async () => {
-    // Prime: this read loads the pre-receive figure (0) from MySQL and writes the
-    // `VariantStockView` back to Redis under ris:inventory:stock:v3:<variantId>:__all__.
     const primed = await supertest(apiGatewayApp.getHttpServer()).get(
       `/api/inventory/variants/${variantId}/stock`,
     );
     expect(primed.status).toBe(HttpStatus.OK);
     expect((primed.body as IVariantStockBody).totalAvailable).toBe(0);
 
-    // Receive 30. The write commits, then `withInvalidation` wipes the primed key.
     const received = await supertest(apiGatewayApp.getHttpServer())
       .post(`/api/inventory/variants/${variantId}/stock/receive`)
       .set('Authorization', adminAuth)
       .send({ quantity: 30 });
     expect(received.status).toBe(HttpStatus.OK);
 
-    // The next read is a clean miss (the primed value was invalidated) and loads
-    // the post-commit 30 — not the stale primed 0.
     const afterReceive = await supertest(apiGatewayApp.getHttpServer()).get(
       `/api/inventory/variants/${variantId}/stock`,
     );
@@ -162,7 +150,6 @@ describe('Inventory cache post-commit invalidation (e2e)', () => {
     expect((afterReceive.body as IVariantStockBody).totalOnHand).toBe(30);
     expect((afterReceive.body as IVariantStockBody).totalAvailable).toBe(30);
 
-    // A repeat read is a cache hit and returns the same body (re-primed at 30).
     const cachedRead = await supertest(apiGatewayApp.getHttpServer()).get(
       `/api/inventory/variants/${variantId}/stock`,
     );

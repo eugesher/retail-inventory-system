@@ -11,29 +11,9 @@ import {
   NotificationDeliveryView,
 } from '@retail-inventory-system/contracts';
 
-// The customer consent round trip (ADR-037): a customer reads their defaults, opts INTO
-// marketing, sees the change reflected on their own read AND on the admin staff-override
-// read, then a marketing send to them is DISPATCHED (the consent cache refreshed from the
-// `customer.consent.updated` event) — and finally, opting back OUT flips a later marketing
-// send to `skipped-no-consent` (the reversal is proven end to end).
-//
-// Everything is asserted through PUBLIC STATE — the consent read endpoints and the gateway
-// delivery audit query (`GET /api/notifications/deliveries`, staff `notifications:read`,
-// ADR-033) — never an event spy. The marketing-send RPC is request-response, so the POST
-// also returns the resulting delivery row synchronously; the suite cross-checks that
-// against the audit query filtered to the send's marketing `campaignId` reference.
-//
-// The consent cache is kept fresh by the async `customer.consent.updated` consumer, so the
-// reversal is polled (a fresh `campaignId` per attempt — distinct delivery rows) until a
-// `skipped-no-consent` row appears, rather than assuming the cache has caught up.
-//
-// Self-provisioned throwaway customer (`e2e-consent-roundtrip-*`): the shared seeded
-// `customer@example.com` other suites depend on is never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 
-// Rendered against the seeded `marketing.email.promo` template. Plain ASCII so Handlebars'
-// default HTML-escaping leaves them verbatim in the body/subject to assert on.
 const MARKETING_CONTEXT = { customerName: 'Ada Lovelace', promoCode: 'SAVE20' };
 
 interface ITokenResponse {
@@ -95,9 +75,6 @@ describe('Consent round trip: read defaults, opt in, marketing sends, opt out (e
     return body as ConsentRecordView;
   };
 
-  // The marketing-send RPC is request-response — the POST body is the resulting delivery
-  // row (sent / skipped-no-consent / a pre-existing duplicate), or empty when no template
-  // resolves. A fresh `campaignId` per call makes each send a DISTINCT delivery row.
   const sendMarketing = async (campaignId: string): Promise<NotificationDeliveryView> => {
     const { body } = await server()
       .post('/api/notifications/marketing/send')
@@ -111,10 +88,6 @@ describe('Consent round trip: read defaults, opt in, marketing sends, opt out (e
     return body as NotificationDeliveryView;
   };
 
-  // Poll: send with a fresh `campaignId` each attempt until the returned delivery reaches
-  // the target status. Absorbs the async consent-cache refresh — a just-changed preference
-  // may not have propagated from the `customer.consent.updated` consumer to the cache yet,
-  // so an early send can still reflect the prior state; a later one settles.
   const sendMarketingUntil = async (
     targetStatus: string,
     deadlineMs = 20_000,
@@ -123,9 +96,6 @@ describe('Consent round trip: read defaults, opt in, marketing sends, opt out (e
     for (let attempt = 0; ; attempt++) {
       const campaignId = `e2e-roundtrip-${stamp}-${targetStatus}-${attempt}`;
       const delivery = await sendMarketing(campaignId);
-      // `status` is a NotificationDeliveryStatusEnum; coerce to string so the compare
-      // is string-vs-string (the target is a plain string), and optional-chain the
-      // empty-body ('' when no template resolves) case.
       const currentStatus = String(delivery?.status ?? 'empty');
       if (currentStatus === targetStatus) {
         return { delivery, campaignId };
@@ -207,7 +177,6 @@ describe('Consent round trip: read defaults, opt in, marketing sends, opt out (e
 
     const readBack = await getMyConsent();
     expect(readBack.marketingEmail).toBe(true);
-    // The opt-in did not disturb the transactional default.
     expect(readBack.transactionalEmail).toBe(true);
   });
 
@@ -225,13 +194,10 @@ describe('Consent round trip: read defaults, opt in, marketing sends, opt out (e
     expect(delivery.eventReferenceType).toBe('marketing');
     expect(delivery.recipientCustomerId).toBe(customerId);
     expect(delivery.recipientAddress).toBe(customerEmail);
-    // Rendered from the seeded `marketing.email.promo` template against the send context.
     expect(delivery.renderedBody).toContain(MARKETING_CONTEXT.customerName);
     expect(delivery.renderedBody).toContain(MARKETING_CONTEXT.promoCode);
     expect(delivery.renderedSubject).toContain(MARKETING_CONTEXT.customerName);
 
-    // Cross-check through the gateway audit query, filtered to this send's reference:
-    // exactly one row, and it is the `sent` one.
     const rows = await listMarketingDeliveries(campaignId);
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe('sent');

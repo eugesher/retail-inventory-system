@@ -6,19 +6,6 @@ import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/
 
 import { ConsentErasureE2ESpecDataSource } from './data-source/consent-erasure.e2e-spec.data-source';
 
-// The confirm-email guard on the irreversible tombstone-erase (ADR-037 §2). The admin
-// must retype the customer's CURRENT email; a mismatch is a `400` and NOTHING is written
-// — the guard is the third gate in the erase sequence (after not-found + the
-// idempotent-on-deleted short-circuit), placed BEFORE any PII nulling.
-//
-// This suite boots ONLY the gateway: the erase runs entirely gateway-side (the auth
-// module's raw-SQL `CUSTOMER_ERASURE_WRITER` on the gateway's own retail_db connection —
-// no retail/catalog/inventory RPC), and a wrong `confirmEmail` never even reaches the
-// writer. The proof that "nothing changed" is read straight from the `customer` row via a
-// read-only data-source (there is no admin "read customer" endpoint).
-//
-// Self-provisioned throwaway customer (`e2e-confirm-guard-*`): the shared seeded
-// `customer@example.com` other suites depend on is never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 
@@ -94,7 +81,6 @@ describe('Erase customer — confirm-email guard rejects a mismatch and writes n
     const row = await dataSource.getCustomerById(customerId);
 
     expect(row).toBeDefined();
-    // The account is still live: status intact, email intact, no tombstone marker.
     expect(row!.status).toBe('active');
     expect(row!.email).toBe(customerEmail);
     expect(row!.deletedAt).toBeNull();

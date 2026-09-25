@@ -11,24 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Cancel Order before any shipment — the pre-fulfillment unhappy terminal (ADR-031).
-// A customer places a one-line order (authorize-only — nothing has shipped), then the
-// OWNER cancels it (owner-or-staff `order:cancel`, no permission gate). The cancel:
-//   - flips the order's lifecycle axis to `cancelled`;
-//   - VOIDS the authorized payment (no money was ever taken — `authorized → voided`);
-//   - releases the order's stock allocation back to `available` — so
-//     `quantity_allocated` drops to 0, `available` returns to the received quantity,
-//     and the audit ledger gains a negative `release` row referencing the order
-//     (`reason_code = order-cancelled`).
-//
-// Asserted through PUBLIC state (the order GET + the public stock read + the uncached
-// movements ledger) — never an event spy. The allocation release is awaited inside the
-// cancel use case before the HTTP response returns (best-effort with retry, but
-// synchronous to the caller), and the movements read is uncached, so the `release` row
-// is observable immediately with no sleep.
-//
-// Self-provisioned, disjoint fixture (`e2e-cancel-pre-*`): its own variant, so the
-// shared seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -315,7 +297,6 @@ describe('Cancel Order pre-fulfillment: void payment + release allocation (e2e)'
     const level = await warehouseLevel(variantId);
     expect(level.quantityAllocated).toBe(ORDERED_QTY);
     expect(level.available).toBe(RECEIVED_QTY - ORDERED_QTY);
-    // No release row exists yet — nothing has been cancelled.
     expect(await listReleases(variantId)).toHaveLength(0);
   });
 
@@ -328,12 +309,8 @@ describe('Cancel Order pre-fulfillment: void payment + release allocation (e2e)'
 
     const cancelled = cancel.body as IOrderBody;
     expect(cancelled.status).toBe('cancelled');
-    // The authorized payment is voided (no money was ever taken). The order's payment
-    // AXIS keeps its value (there is no `voided` member on it); the payment ROW carries
-    // `voided` — the deliberate orthogonality of the two payment enums.
     expect(cancelled.payment?.status).toBe('voided');
 
-    // Re-read confirms the persisted cancelled state.
     const fresh = await getOrder(order.id);
     expect(fresh.status).toBe('cancelled');
     expect(fresh.payment?.status).toBe('voided');
@@ -346,10 +323,6 @@ describe('Cancel Order pre-fulfillment: void payment + release allocation (e2e)'
     expect(level.available).toBe(RECEIVED_QTY);
     expect(level.quantityOnHand).toBe(RECEIVED_QTY);
 
-    // The cancel released the order's allocation back to available, leaving exactly one
-    // negative `release` ledger row referencing the order, with the `order-cancelled`
-    // reason. The ledger is an audit trail (a release is a fixed-negative type), not the
-    // balance authority.
     const releases = await listReleases(variantId);
     expect(releases).toHaveLength(1);
     expect(releases[0].type).toBe('release');
@@ -367,17 +340,9 @@ describe('Cancel Order pre-fulfillment: void payment + release allocation (e2e)'
     expect(recancel.status).toBe(HttpStatus.CONFLICT);
     expect((recancel.body as { code: string }).code).toBe('ORDER_NOT_CANCELLABLE');
 
-    // No second release row — the idempotency guard stops a double release.
     expect(await listReleases(variantId)).toHaveLength(1);
   });
 
-  // `POST /api/orders/:orderId/lines/:lineId/cancel` (staff `order:cancel`) — the narrower
-  // sibling of the whole-order cancel: it cancels the **unshipped quantity of one line**,
-  // releases exactly that slice's allocation, and mutates no money. The cancellable
-  // remainder is `ordered − alreadyFulfilled`; an omitted `quantity` cancels all of it.
-  //
-  // Runs on its own variant + order so the whole-order assertions above (which count this
-  // suite's `release` rows for `variantId`) keep measuring exactly one row.
   describe('POST /api/orders/:orderId/lines/:lineId/cancel — staff partial line cancel', () => {
     let lineVariantId: number;
     let lineOrder: IOrderBody;
@@ -419,7 +384,6 @@ describe('Cancel Order pre-fulfillment: void payment + release allocation (e2e)'
       const res = await cancelLine(1);
       expect(res.status).toBe(HttpStatus.OK);
 
-      // The cancelled count is recorded on the line (ADR-040) — the money snapshot stands.
       const line = (res.body as IOrderBody).lines[0];
       expect(line.cancelledQuantity).toBe(1);
       expect(line.quantity).toBe(ORDERED_QTY);
@@ -427,10 +391,8 @@ describe('Cancel Order pre-fulfillment: void payment + release allocation (e2e)'
       const after = await warehouseLevel(lineVariantId);
       expect(after.quantityAllocated).toBe(ORDERED_QTY - 1);
       expect(after.available).toBe(before.available + 1);
-      // No money moves on a line cancel — on-hand is untouched too.
       expect(after.quantityOnHand).toBe(before.quantityOnHand);
 
-      // `line-cancelled` is what distinguishes the ledger row from a whole-order cancel.
       const releases = await listReleases(lineVariantId);
       expect(releases).toHaveLength(1);
       expect(releases[0].type).toBe('release');
@@ -457,34 +419,24 @@ describe('Cancel Order pre-fulfillment: void payment + release allocation (e2e)'
       expect((res.body as { code: string }).code).toBe('ORDER_LINE_NOT_FOUND');
     });
 
-    // The regression ADR-040 closes, asserted through the PUBLIC stock read: before the
-    // cancelled count was persisted, each repeat call released the same units again and
-    // drove `quantity_allocated` below zero.
     it('cancels the second unit, then refuses a third — releasing the allocation exactly twice', async () => {
-      // One unit is already cancelled by the first test; cancel the remaining one.
       const second = await cancelLine(1);
       expect(second.status).toBe(HttpStatus.OK);
 
       const line = (second.body as IOrderBody).lines[0];
       expect(line.cancelledQuantity).toBe(ORDERED_QTY);
-      // Cancelling the last active unit is terminal for the line.
       expect(line.status).toBe('cancelled');
 
       const drained = await warehouseLevel(lineVariantId);
       expect(drained.quantityAllocated).toBe(0);
 
-      // Nothing active remains, so a third cancel has nothing to cancel.
       const third = await cancelLine(1);
       expect(third.status).toBe(HttpStatus.CONFLICT);
       expect((third.body as { code: string }).code).toBe('FULFILLMENT_QUANTITY_EXCEEDS_REMAINING');
 
-      // An omitted quantity ("cancel whatever remains") is refused for the same reason —
-      // it must not silently resolve to the already-cancelled units.
       const fourth = await cancelLine();
       expect(fourth.status).toBe(HttpStatus.CONFLICT);
 
-      // The decisive assertions: exactly two release rows, and the allocation never went
-      // negative. Before the fix both of these blew past their bound.
       const releases = await listReleases(lineVariantId);
       expect(releases).toHaveLength(2);
       expect(releases.every((r) => r.quantity === -1)).toBe(true);

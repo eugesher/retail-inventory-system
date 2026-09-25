@@ -1443,7 +1443,12 @@ the driver would default to the Node host's local timezone.
 
 **E2E suites drive gateway HTTP and assert through public state** — order/refund reads, the
 public stock read, the uncached movements ledger, the delivery audit reads, and (as the
-"exactly one event" oracle) direct SQL against `ris_eventstore`. Never an event spy.
+"exactly one event" oracle) direct SQL against `ris_eventstore`. One suite spies on an event
+publisher (`cart-to-order-walking-skeleton`). Three spy on a port instead, to count or fail calls
+that no state records: the payment gateway in `concurrent-capture-double-charge` and
+`declined-authorization`, and the notifier in `notification`. How a suite boots the services,
+where it reads configuration and how it waits for asynchronous work:
+[`docs/reference/testing.md`](docs/reference/testing.md).
 
 | Capability                  | Suites                                                                                                                                                                         |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

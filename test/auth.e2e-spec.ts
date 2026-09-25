@@ -8,8 +8,6 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum, PermissionCodeEnum } from '@retail-inventory-system/contracts';
 
-// Decode the JWT body without verifying the signature — the assertions only
-// care about the claim shape, and the unit suite already covers verification.
 const decodeJwtBody = (token: string): Record<string, unknown> => {
   const [, body] = token.split('.');
   if (!body) throw new Error('malformed JWT');
@@ -19,18 +17,9 @@ const decodeJwtBody = (token: string): Record<string, unknown> => {
 
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
-// Seeded by `yarn test:seed` (scripts/test-db-seed.ts) — the canonical
-// `warehouse-staff` StaffUser. That role bundles only `inventory:*` codes,
-// so the caller does NOT carry `audit:read` and the PermissionsGuard 403
-// path on `/api/auth/admin/ping` is exercised without inline fixturing.
 const WAREHOUSE_EMAIL = 'warehouse@example.com';
 const WAREHOUSE_PASSWORD = 'warehouse1234';
-// Stable id matches the seed script so future tests can reference the
-// fixture by id without first looking it up by email.
 const WAREHOUSE_STAFF_USER_ID = '00000000-0000-4000-a000-000000000004';
-// Customer-side coverage lives in `test/auth-customer.e2e-spec.ts` — that
-// spec drives the buyer aggregate through HTTP (register → login → me) and
-// asserts the customer JWT is rejected by /api/auth/admin/ping.
 
 interface ITokenResponse {
   accessToken: string;
@@ -139,11 +128,9 @@ describe('Auth flow (e2e)', () => {
       const payload = decodeJwtBody(tokens.accessToken);
       expect(Array.isArray(payload.permissions)).toBe(true);
       const codes = payload.permissions as string[];
-      // Admin is seeded with every code in the registry (see scripts/test-db-seed.ts).
       for (const code of Object.values(PermissionCodeEnum)) {
         expect(codes).toContain(code);
       }
-      // Determinism: sorted ASC and free of duplicates.
       expect(codes).toEqual([...codes].sort());
       expect(new Set(codes).size).toBe(codes.length);
     });
@@ -179,14 +166,12 @@ describe('Auth flow (e2e)', () => {
     it('rejects the original refresh token after a rotation', async () => {
       const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
-      // First refresh — succeeds and returns new tokens.
       const rotated = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refreshToken: tokens.refreshToken });
       expect(rotated.status).toBe(HttpStatus.OK);
       expect(rotated.body.refreshToken).not.toBe(tokens.refreshToken);
 
-      // Replay the original refresh token — must be rejected (rotation reuse).
       const replay = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refreshToken: tokens.refreshToken });
@@ -194,9 +179,6 @@ describe('Auth flow (e2e)', () => {
     });
   });
 
-  // The "customer JWT gets 403 here" assertion lives in
-  // `test/auth-customer.e2e-spec.ts` so it can ride alongside the customer
-  // register/login fixtures that produce that JWT.
   describe('Permissions guard (/api/auth/admin/ping)', () => {
     it('admits an admin (audit:read present in bundled permissions) with 200', async () => {
       const tokens = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
@@ -212,9 +194,6 @@ describe('Auth flow (e2e)', () => {
     it('rejects a non-admin StaffUser (no audit:read) with 403 and "Insufficient permissions"', async () => {
       const tokens = await login(WAREHOUSE_EMAIL, WAREHOUSE_PASSWORD);
 
-      // Sanity-check: the access JWT resolves to the seeded warehouse staff
-      // user id — guards against an accidental email collision masking the
-      // 403 assertion below.
       const payload = decodeJwtBody(tokens.accessToken);
       expect(payload.sub).toBe(WAREHOUSE_STAFF_USER_ID);
 

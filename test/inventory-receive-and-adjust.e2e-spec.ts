@@ -10,17 +10,8 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// The inventory write path end-to-end: a variant is created via the catalog flow,
-// auto-init (the catalog.variant.created consumer) zeroes its stock level, then the
-// two Stage-1 write operations run over HTTP through the gateway →
-// `inventory.stock-level.receive` / `inventory.stock-level.adjust` → the inventory
-// microservice → MySQL, with post-commit cache invalidation (ADR-023). It proves
-// the receive/adjust arithmetic, the below-zero 409, and the `inventory:adjust`
-// gate (403 for an unprivileged staff token).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
-// catalog-manager: a seeded staff user that holds catalog/pricing permissions but
-// NOT inventory:adjust — the negative fixture for the permission gate.
 const CATALOG_EMAIL = 'catalog@example.com';
 const CATALOG_PASSWORD = 'catalog1234';
 const DEFAULT_WAREHOUSE = 'default-warehouse';
@@ -74,9 +65,6 @@ describe('Inventory receive + adjust write path (e2e)', () => {
     return `Bearer ${(body as ITokenResponse).accessToken}`;
   };
 
-  // Poll the DB until the auto-init consumer has created the row — reading over
-  // HTTP first would cache a `locations: []` answer the read path does not
-  // invalidate (auto-init does not go through `withInvalidation`).
   const waitForRows = async (deadlineMs = 20_000): Promise<IStockLevelRow[]> => {
     const start = Date.now();
     let rows = (await dataSource.getStockLevelRows(variantId)) as IStockLevelRow[];
@@ -162,7 +150,6 @@ describe('Inventory receive + adjust write path (e2e)', () => {
   });
 
   it('runs the full auto-init → receive 50 → adjust −3 → read 47 → adjust −100 (409) → 403 flow', async () => {
-    // 1. Auto-init zeroes the stock level (assert after the consumer has run).
     await waitForRows();
     const initial = await supertest(apiGatewayApp.getHttpServer()).get(
       `/api/inventory/variants/${variantId}/stock`,
@@ -170,7 +157,6 @@ describe('Inventory receive + adjust write path (e2e)', () => {
     expect(initial.status).toBe(HttpStatus.OK);
     expect((initial.body as IVariantStockBody).totalOnHand).toBe(0);
 
-    // 2. Receive 50 → on-hand 50, available 50 (single-location StockLevelView).
     const received = await supertest(apiGatewayApp.getHttpServer())
       .post(`/api/inventory/variants/${variantId}/stock/receive`)
       .set('Authorization', adminAuth)
@@ -181,7 +167,6 @@ describe('Inventory receive + adjust write path (e2e)', () => {
     expect(receivedLevel.quantityOnHand).toBe(50);
     expect(receivedLevel.available).toBe(50);
 
-    // 3. Adjust −3 (reason damaged) → on-hand 47.
     const adjusted = await supertest(apiGatewayApp.getHttpServer())
       .post(`/api/inventory/variants/${variantId}/stock/adjust`)
       .set('Authorization', adminAuth)
@@ -191,7 +176,6 @@ describe('Inventory receive + adjust write path (e2e)', () => {
     expect(adjustedLevel.quantityOnHand).toBe(47);
     expect(adjustedLevel.available).toBe(47);
 
-    // 4. Public read returns 47 (cache miss then hit — both bodies byte-equal).
     const firstRead = await supertest(apiGatewayApp.getHttpServer()).get(
       `/api/inventory/variants/${variantId}/stock`,
     );
@@ -202,7 +186,6 @@ describe('Inventory receive + adjust write path (e2e)', () => {
     expect((firstRead.body as IVariantStockBody).totalAvailable).toBe(47);
     expect(secondRead.body).toEqual(firstRead.body);
 
-    // 5. Adjust −100 would drive on-hand below zero → 409 (no state change).
     const belowZero = await supertest(apiGatewayApp.getHttpServer())
       .post(`/api/inventory/variants/${variantId}/stock/adjust`)
       .set('Authorization', adminAuth)

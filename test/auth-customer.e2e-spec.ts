@@ -4,8 +4,6 @@ import * as supertest from 'supertest';
 
 import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/api-gateway';
 
-// Decode the JWT body without verifying the signature — the assertions only
-// care about the claim shape, and the unit suite already covers verification.
 const decodeJwtBody = (token: string): Record<string, unknown> => {
   const [, body] = token.split('.');
   if (!body) throw new Error('malformed JWT');
@@ -19,9 +17,6 @@ interface ITokenResponse {
   expiresIn: number;
 }
 
-// Each run creates a fresh customer to avoid colliding with prior runs that
-// may have left rows in the table. The seed script does not produce customer
-// rows yet — a later seed-extension step will.
 const customerEmail = (): string =>
   `buyer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
 const CUSTOMER_PASSWORD = 'customer1234';
@@ -77,10 +72,6 @@ describe('Customer auth flow (e2e)', () => {
 
     it('never returns 500 under a concurrent same-email race (DuplicateKeyExceptionFilter)', async () => {
       const email = customerEmail();
-      // Fire identical registrations at once so two can clear the
-      // application-level findByEmail guard before either commits; the DB
-      // unique constraint then rejects the losers and the filter maps those
-      // raw QueryFailedErrors to 409 instead of a bare 500.
       const responses = await Promise.all(
         Array.from({ length: 4 }, () =>
           supertest(apiGatewayApp.getHttpServer())
@@ -90,7 +81,6 @@ describe('Customer auth flow (e2e)', () => {
       );
 
       const statuses = responses.map((r) => r.status as HttpStatus);
-      // Exactly one insert wins; every loser is a clean 409 — never a 500.
       expect(statuses.filter((s) => s === HttpStatus.CREATED)).toHaveLength(1);
       expect(statuses.every((s) => s === HttpStatus.CREATED || s === HttpStatus.CONFLICT)).toBe(
         true,
@@ -189,21 +179,17 @@ describe('Customer auth flow (e2e)', () => {
         .send({ email, password: CUSTOMER_PASSWORD });
       const tokens = login.body as ITokenResponse;
 
-      // The refresh route is staff+customer shared; a customer subject must
-      // resolve here (regression: it previously hit the staff repo only → 401).
       const rotated = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refreshToken: tokens.refreshToken });
       expect(rotated.status).toBe(HttpStatus.OK);
       expect(rotated.body.refreshToken).not.toBe(tokens.refreshToken);
 
-      // The rotated customer access token still carries empty claims.
       const payload = decodeJwtBody((rotated.body as ITokenResponse).accessToken);
       expect(payload.roles).toEqual([]);
       expect(payload.permissions).toEqual([]);
       expect(payload.email).toBe(email);
 
-      // Replaying the original (now-stale) refresh token is rejected.
       const replay = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refreshToken: tokens.refreshToken });
@@ -222,8 +208,6 @@ describe('Customer auth flow (e2e)', () => {
         .send({ email, password: CUSTOMER_PASSWORD });
       const tokens = login.body as ITokenResponse;
 
-      // Logout is a bearer route; a customer subject must resolve here
-      // (regression: it previously hit the staff repo only → 404).
       const logout = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/logout')
         .set('Authorization', `Bearer ${tokens.accessToken}`);
@@ -237,10 +221,6 @@ describe('Customer auth flow (e2e)', () => {
   });
 
   describe('Staff login path', () => {
-    // The inverse of the test that stood here until ADR-050: it asserted the
-    // `/auth/login` alias "still returns 200". Removing the route without pinning its
-    // absence would leave the deletion unguarded — a stray `@Controller(['auth', ...])`
-    // would silently resurrect it.
     it('POST /api/auth/login (the removed alias) is gone', async () => {
       const { status } = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/auth/login')

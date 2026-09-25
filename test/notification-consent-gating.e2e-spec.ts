@@ -15,27 +15,6 @@ import {
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// The notification consent-gate (ADR-037), proven both ways against ONE fresh customer who
-// carries the capability defaults (transactionalEmail=true, marketingEmail=false):
-//
-//   - NEGATIVE (marketing gated): a marketing send is classified against `marketingEmail`.
-//     With marketing off, the gate persists a TERMINAL `skipped-no-consent` row BEFORE and
-//     INSTEAD OF the NOTIFIER call — `attemptCount=0`, never `sent`. The NOTIFIER is never
-//     invoked (an unconsented marketing email is not merely un-attempted — it is recorded
-//     as skipped and dispatched nowhere).
-//
-//   - POSITIVE control (transactional bypass): a real placed order emits
-//     `retail.order.placed` — a TRANSACTIONAL event — which the gate classifies against
-//     `transactionalEmail` (the bypass), NOT marketing. Even with marketing OFF, the same
-//     customer still gets a `sent` order-confirmation delivery. This is what makes the
-//     gate a marketing filter, not a blanket mute.
-//
-// Both consent reads hit the SAME cached snapshot for the customer, so the two outcomes
-// (skip vs send) turn purely on the event classification, not on differing consent.
-//
-// Asserted through PUBLIC STATE — the marketing-send RPC response + the gateway delivery
-// audit query (`GET /api/notifications/deliveries`, ADR-033) — never an event spy.
-// Self-provisioned, disjoint fixtures (`e2e-consent-gate-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 
@@ -287,9 +266,6 @@ describe('Notification consent-gate: marketing skipped, transactional bypassed (
   });
 
   it('skips a marketing send for a customer who has not opted into marketing', async () => {
-    // The fresh customer carries the defaults — marketingEmail is false — so the marketing
-    // classification gates the send off. The RPC is request-response, so the row comes back
-    // on the POST directly.
     const campaignId = `e2e-consent-gate-skip-${stamp}`;
     const { body } = await server()
       .post('/api/notifications/marketing/send')
@@ -298,12 +274,9 @@ describe('Notification consent-gate: marketing skipped, transactional bypassed (
 
     const delivery = body as NotificationDeliveryView;
     expect(delivery.status).toBe('skipped-no-consent');
-    // Terminal at creation — the NOTIFIER was never called (a sent row would have
-    // attemptCount >= 1).
     expect(delivery.attemptCount).toBe(0);
     expect(delivery.recipientCustomerId).toBe(customerId);
 
-    // Public audit query confirms exactly one row for the reference, and it never went sent.
     const rows = await server()
       .get('/api/notifications/deliveries')
       .query({ eventReferenceType: 'marketing', eventReferenceId: campaignId })
@@ -334,8 +307,6 @@ describe('Notification consent-gate: marketing skipped, transactional bypassed (
     expect(place.status).toBe(HttpStatus.CREATED);
     order = place.body as IOrderBody;
 
-    // The transactional `retail.order.placed` bypasses the marketing gate: even with
-    // marketingEmail off, the order confirmation is dispatched.
     const delivery = await waitForSentOrderDelivery(order.id);
     expect(delivery.status).toBe('sent');
     expect(delivery.channel).toBe('email');

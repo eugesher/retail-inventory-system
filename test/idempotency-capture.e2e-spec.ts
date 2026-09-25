@@ -11,14 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Idempotent Capture Payment (ADR-036). A capture with an `Idempotency-Key`, replayed with
-// the same key + body, returns the stored `OrderView` (HTTP 200 + `Idempotent-Replay: true`)
-// BEFORE any gateway call — no second charge. The observable proof is the payment's
-// `capturedAt`: the replay leaves it byte-for-byte unchanged (a re-capture would re-stamp
-// it). Capture is also naturally idempotent by payment state, so this suite proves the
-// request-level store layers cleanly on top of that backstop.
-//
-// Self-provisioned, disjoint fixture (`e2e-idem-capture-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -226,7 +218,6 @@ describe('Idempotent Capture Payment: replay does not re-charge (e2e)', () => {
       .send({ shippingAddress: ADDRESS, billingAddress: ADDRESS, paymentMethod: 'tok_visa' });
     expect(place.status).toBe(HttpStatus.CREATED);
     order = place.body as IOrderBody;
-    // Place authorizes but does not capture.
     expect(order.paymentStatus).toBe('authorized');
   }, timeout);
 
@@ -257,8 +248,6 @@ describe('Idempotent Capture Payment: replay does not re-charge (e2e)', () => {
 
     const replayed = res.body as IOrderBody;
     expect(replayed.payment?.status).toBe('captured');
-    // The capture timestamp is unchanged — the replay short-circuited before the gateway,
-    // so the money was not taken a second time.
     expect(replayed.payment?.capturedAt).toBe(capturedAtAfterFirst);
   });
 

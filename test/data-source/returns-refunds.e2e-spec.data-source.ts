@@ -1,10 +1,5 @@
 import { InventoryAutoInitE2ESpecDataSource } from './inventory-auto-init.e2e-spec.data-source';
 
-// One captured `payment` row, projected to the fields the returns/refunds suites
-// assert on. `PaymentView` (the HTTP response shape) deliberately omits the internal
-// accounting columns `refunded_amount_minor` and `flagged_for_refund`, so the suites
-// read them straight from the row — the cumulative refund total and the
-// cancel-flag are the only authoritative proof that a refund (manual or auto) landed.
 export interface IPaymentRowProjection {
   id: number;
   status: string;
@@ -13,7 +8,6 @@ export interface IPaymentRowProjection {
   flaggedForRefund: number;
 }
 
-// One `refund` row, projected to the fields the suites assert on.
 export interface IRefundRowProjection {
   id: number;
   paymentId: number;
@@ -22,14 +16,6 @@ export interface IRefundRowProjection {
   reason: string;
 }
 
-// E2E helper for the returns/refunds suites. Inherits `getStockLevelRows` (used to poll
-// for the async catalog-variant-created auto-init before the cache-aside HTTP stock read,
-// exactly as the fulfillment suites do) and adds two readers over the retail `payment` /
-// `refund` tables.
-//
-// mysql2 returns BIGINT columns (the ids + the two minor-unit totals) as strings, so every
-// numeric field is coerced with `Number(...)` here — keeping the suite assertions plain
-// `=== <number>` comparisons rather than string/number guesswork.
 export class ReturnsRefundsE2ESpecDataSource extends InventoryAutoInitE2ESpecDataSource {
   public async getPaymentByOrderId(orderId: number): Promise<IPaymentRowProjection | undefined> {
     const rows: Record<string, unknown>[] = await this.query(

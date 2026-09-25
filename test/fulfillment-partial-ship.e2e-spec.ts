@@ -11,20 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Partial shipment across two fulfillments (ADR-031). A two-line order (one variant
-// per line) is split into TWO fulfillments, each covering one line in full. Shipping
-// them one at a time proves the order's `fulfillmentStatus` roll-up: it is
-// `partially-shipped` while only one line has shipped, and flips to `shipped` only
-// once the SECOND fulfillment ships — the roll-up is derived from the order's shipped
-// fulfillments' line quantities, not from a single fulfillment. Per-line status tracks
-// alongside (`shipped` for a shipped line, `allocated` for one still pending).
-//
-// Asserted through PUBLIC state (the order GET + the public stock read) — never an
-// event spy. Each shipped line leaves its own `sale` movement on its own variant, so
-// the per-line decrement is observable per-variant.
-//
-// Self-provisioned, disjoint fixtures (`e2e-ful-partial-*`): two own variants, so the
-// shared seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -331,7 +317,6 @@ describe('Fulfillment partial ship: two fulfillments, one line each (e2e)', () =
     expect(fulfillments).toHaveLength(2);
     expect(fulfillments.every((f) => f.status === 'pending')).toBe(true);
 
-    // Planning two shipments does not advance the order: still unfulfilled.
     expect((await getOrder(order.id)).fulfillmentStatus).toBe('unfulfilled');
   });
 
@@ -339,15 +324,12 @@ describe('Fulfillment partial ship: two fulfillments, one line each (e2e)', () =
     await shipFulfillment(fulfillmentAId, '1Z999AA10123456001');
 
     const fresh = await getOrder(order.id);
-    // The roll-up reflects ONE shipped line out of two.
     expect(fresh.fulfillmentStatus).toBe('partially-shipped');
     expect(lineStatus(fresh, lineAId)).toBe('shipped');
     expect(lineStatus(fresh, lineBId)).toBe('allocated');
-    // The order lifecycle stays `pending`; payment captured on the first ship.
     expect(fresh.status).toBe('pending');
     expect(fresh.paymentStatus).toBe('captured');
 
-    // Only variant A's stock decremented; variant B still allocated, not shipped.
     const levelA = await warehouseLevel(variantA);
     expect(levelA.quantityOnHand).toBe(4);
     expect(levelA.quantityAllocated).toBe(0);
@@ -360,14 +342,12 @@ describe('Fulfillment partial ship: two fulfillments, one line each (e2e)', () =
     await shipFulfillment(fulfillmentBId, '1Z999AA10123456002');
 
     const fresh = await getOrder(order.id);
-    // Now every line has shipped, so the roll-up flips from partially-shipped → shipped.
     expect(fresh.fulfillmentStatus).toBe('shipped');
     expect(lineStatus(fresh, lineAId)).toBe('shipped');
     expect(lineStatus(fresh, lineBId)).toBe('shipped');
     expect(fresh.status).toBe('pending');
     expect(fresh.paymentStatus).toBe('captured');
 
-    // Variant B's stock now decremented too.
     const levelB = await warehouseLevel(variantB);
     expect(levelB.quantityOnHand).toBe(4);
     expect(levelB.quantityAllocated).toBe(0);

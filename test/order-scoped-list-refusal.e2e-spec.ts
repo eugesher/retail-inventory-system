@@ -11,20 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// THE assertion ADR-051 exists for, and the one that did not exist before it: **the three
-// order-scoped, owner-or-staff lists give a non-owner the SAME answer.**
-//
-// They did not. `/returns` filtered its rows and handed a stranger `[]` with a `200`, while
-// `/refunds` and `/fulfillments` refused with a `403`. A client could not write one error handler
-// for one shape of request, and the next list endpoint's author would have copied whichever sibling
-// they happened to open. Nothing recorded which was intended — so this spec records it, in the only
-// place a rule survives: a test that fails if the codebase drifts back.
-//
-// **It is deliberately fixture-light.** No returns and no refunds are created: the question is what
-// a NON-OWNER gets, and the answer must not depend on whether the order has anything to show. That
-// independence is the subtle half of ADR-051 — the old `.filter()` refused nothing, so an order with
-// no RMAs and an order with RMAs both answered `[]`, and the endpoint still told a stranger *whether
-// the order had returns*. An order and a second customer are the whole fixture.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const OWNER_EMAIL = 'customer@example.com';
@@ -58,8 +44,6 @@ describe('Order-scoped lists refuse a non-owner identically (e2e)', () => {
   let strangerToken: string;
   let orderId: number;
 
-  // The three order-scoped, owner-or-staff lists. `/returns` is served by the returns module,
-  // `/refunds` and `/fulfillments` by orders — three files, one rule (ADR-051).
   const listRoutes = (id: number): string[] => [
     `/api/orders/${id}/returns`,
     `/api/orders/${id}/refunds`,
@@ -84,12 +68,9 @@ describe('Order-scoped lists refuse a non-owner identically (e2e)', () => {
     return customerLogin(email, CUSTOMER_PASSWORD);
   };
 
-  // The pricing publish probe compares `price.valid_from` against a second-granular
-  // `UTC_TIMESTAMP()`; publishing immediately after the price lands can miss it.
   const settleTimestampRounding = (): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, 1_500));
 
-  // `stock_level` is created asynchronously by the catalog-variant-created consumer.
   const waitForStockRow = async (variantId: number, deadlineMs = 20_000): Promise<void> => {
     const start = Date.now();
     while ((await dataSource.getStockLevelRows(variantId)).length === 0) {
@@ -199,9 +180,6 @@ describe('Order-scoped lists refuse a non-owner identically (e2e)', () => {
     ownerToken = await customerLogin(OWNER_EMAIL, CUSTOMER_PASSWORD);
     strangerToken = await registerCustomer();
 
-    // One order, owned by `customer@example.com`. It is never shipped and never refunded — the
-    // lists are all legitimately EMPTY for its owner, which is exactly what makes the non-owner's
-    // answer meaningful.
     const variantId = await provisionVariant(5);
 
     const cartRes = await server()
@@ -232,9 +210,6 @@ describe('Order-scoped lists refuse a non-owner identically (e2e)', () => {
     await dataSource?.destroy();
   });
 
-  // **The assertion the whole ADR is for.** Before ADR-051 this failed on `/returns`, which answered
-  // `200` with `[]` while its two siblings answered `403` — the same request, three routes, two
-  // answers.
   it('gives a non-owner the SAME refusal on all three lists — 403, never an empty list', async () => {
     const responses = await Promise.all(
       listRoutes(orderId).map((route) =>
@@ -247,11 +222,9 @@ describe('Order-scoped lists refuse a non-owner identically (e2e)', () => {
 
     for (const { route, status, body } of responses) {
       expect({ route, status }).toEqual({ route, status: HttpStatus.FORBIDDEN as number });
-      // And emphatically NOT an empty list dressed up as success.
       expect(body).not.toEqual([]);
     }
 
-    // Stated as the invariant rather than three separate facts: one answer, three routes.
     expect(new Set(responses.map((r) => r.status)).size).toBe(1);
   });
 
@@ -273,9 +246,6 @@ describe('Order-scoped lists refuse a non-owner identically (e2e)', () => {
     }
   });
 
-  // A missing order is a 404 on all three — the other half of ADR-051's rule: `403` = not yours,
-  // `404` = not there. The two are distinct answers to distinct questions, and the ADR accepts that
-  // they are distinguishable.
   it('404s on all three lists for an order that does not exist', async () => {
     for (const route of listRoutes(999_999_999)) {
       const res = await server().get(route).set('Authorization', adminAuth);

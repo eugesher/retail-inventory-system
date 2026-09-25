@@ -15,32 +15,12 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 import { EventStoreE2ESpecDataSource } from './data-source/event-store.e2e-spec.data-source';
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Proves the `ris.events` firehose end-to-end (ADR-035): a real Place Order driven
-// through the gateway dual-publishes its whole event chain onto the topic exchange,
-// the event store's `event_store_firehose_queue` (bound `#`) consumes it, and the
-// `FirehoseConsumer` ingests each event into the isolated `ris_eventstore.domain_event`
-// log. The suite asserts the persisted rows directly by SQL: it is proving INGESTION, and
-// reading through `GET /api/audit/events` would make that assertion depend on the read
-// path — a broken filter there would mask a broken ingest here. `audit-event-query.e2e-spec.ts`
-// proves the read path over the same chain.
-//
-// The whole flow (cart create → add line → place) is driven under ONE fixed
-// `x-correlation-id` header. The gateway's `CorrelationMiddleware` honors an inbound
-// header, and every producer threads the correlation id into the wire event (and
-// across the retail→inventory RPC), so the entire chain lands in `domain_event` under
-// that single correlation id — making "the order chain shares one correlation_id" a
-// deterministic assertion rather than a race.
-//
-// Ingestion is asynchronous (publish → broker → consume → insert), so the suite polls
-// `domain_event` until the expected routing keys appear, up to a bounded timeout.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
 const CUSTOMER_PASSWORD = 'customer1234';
 const CORRELATION_HEADER = 'x-correlation-id';
 
-// The routing keys the Place Order chain dual-publishes onto `ris.events`. Each becomes
-// a `domain_event.event_type` verbatim (the ingest stores the routing key as the type).
 const KEY_CART_CREATED = 'retail.cart.created';
 const KEY_CART_LINE_ADDED = 'retail.cart.line-added';
 const KEY_ORDER_PLACED = 'retail.order.placed';
@@ -115,9 +95,6 @@ describe('Event store firehose captures a Place Order chain (e2e)', () => {
     }
   };
 
-  // Poll `domain_event` (by the chain's shared correlation id) until every expected
-  // routing key has been ingested, or fail the suite on timeout. Ingestion is off the
-  // bus and asynchronous, so an immediate read after `place` would flake.
   const waitForChainKeys = async (deadlineMs = 30_000): Promise<void> => {
     const start = Date.now();
     for (;;) {
@@ -165,9 +142,6 @@ describe('Event store firehose captures a Place Order chain (e2e)', () => {
       MicroserviceQueueEnum.INVENTORY_QUEUE,
     );
 
-    // The event store binds the firehose queue to the `ris.events` TOPIC exchange with
-    // the `#` catch-all + `wildcards: true` — the same shape as its `main.ts`, so the
-    // in-process `FirehoseConsumer` receives the entire firehose.
     eventStoreMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
       EventStoreMicroserviceAppModule,
       {
@@ -222,8 +196,6 @@ describe('Event store firehose captures a Place Order chain (e2e)', () => {
       .send({ email: CUSTOMER_EMAIL, password: CUSTOMER_PASSWORD });
     customerToken = (customerLogin.body as ITokenResponse).accessToken;
 
-    // Self-provisioned, disjoint fixture — its own product/price/published/received
-    // stock, so the shared seeded variants are untouched.
     const productRes = await server()
       .post('/api/catalog/products')
       .set('Authorization', adminAuth)
@@ -309,7 +281,6 @@ describe('Event store firehose captures a Place Order chain (e2e)', () => {
       expect(eventTypes).toContain(key);
     }
 
-    // The correlation id is the firehose chain's join key: every captured row carries it.
     expect(rows.every((r) => r.correlationId === correlationId)).toBe(true);
   });
 
@@ -323,8 +294,6 @@ describe('Event store firehose captures a Place Order chain (e2e)', () => {
       return row;
     };
 
-    // producer ← first routing-key token mapped to the service name; aggregate_type ←
-    // the second token; aggregate_id ← the documented payload-key precedence.
     const orderPlaced = byType(KEY_ORDER_PLACED);
     expect(orderPlaced.producer).toBe('retail-microservice');
     expect(orderPlaced.aggregateType).toBe('order');
@@ -362,9 +331,6 @@ describe('Event store firehose captures a Place Order chain (e2e)', () => {
   });
 
   it('never writes audit.staff.action into domain_event (it routes only to audit_log_entry)', async () => {
-    // The admin login earlier in the suite emitted `audit.staff.action`, so this is a
-    // live negative: the audit stream exists on the bus but the domain-event log must
-    // stay clean of it (ADR-035 keeps the two logs distinct).
     const audited = await eventStore.countDomainEventsByEventType(KEY_AUDIT_STAFF_ACTION);
     expect(audited).toBe(0);
   });
