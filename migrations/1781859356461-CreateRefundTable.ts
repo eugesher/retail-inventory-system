@@ -1,31 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-// Creates the `refund` table — the record of one gateway refund interaction against a
-// captured `payment` (docs/adr/032-returns-and-refunds-rma-lifecycle-and-restock.md).
-// `Refund` is its own aggregate root inside the retail `orders/` module (a sibling of
-// `Payment` — its operations mutate `Payment`, walking its status and incrementing
-// `refunded_amount_minor`), so `order_id` and `payment_id` are plain BIGINT columns
-// under the `FK_REFUND_ORDER` / `FK_REFUND_PAYMENT` foreign keys rather than
-// owned-child relations — the same shape `payment.order_id` uses for its opaque FK.
-//
-// A `Refund` is **distinct from a `ReturnRequest`**: a refund must be able to exist
-// with no return behind it (a chargeback, a goodwill credit, a partial price
-// adjustment, or a refund Cancel Order issues on an order that never shipped), so it
-// is modeled as its own entity that a return *triggers* rather than a field a return
-// *contains*.
-//
-// `status` is the refund-row lifecycle ENUM — a row only ever exists because Issue
-// Refund opened it `pending`, then it walks to `issued` (the gateway succeeded) or
-// `failed` (the gateway declined — terminal). `gateway_reference` / `issued_at` are
-// nullable (both null while `pending`, stamped on issue). `amount_minor` is BIGINT
-// minor units (mysql2 returns it as a string — the mapper coerces with `Number(...)`).
-// Both FKs are `ON DELETE RESTRICT` — a refund is an append-only audit record of money
-// returned, so neither its order nor its payment can be hard-deleted out from under it.
-// `deleted_at` exists because `RefundEntity` extends `BaseEntity` (TypeORM appends
-// `deleted_at IS NULL` to every `find`) — it stays INERT, a refund is never
-// soft-deleted (a decline is a `status` flip). `utf8mb4_unicode_ci` so the implicit
-// collation matches the rest of the schema. The `(order_id)` and `(payment_id)` indexes
-// back the `findByOrderId` / `findByPaymentId` history reads.
 export class CreateRefundTable1781859356461 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`

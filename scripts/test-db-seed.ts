@@ -28,17 +28,6 @@ interface ITestCustomerSeed {
   status: 'active' | 'suspended' | 'guest' | 'deleted';
 }
 
-// Stable UUIDs so test fixtures and assertions can rely on them. UUID
-// prefixes namespace the seed type:
-//   ...-a000-... → users
-//   ...-b000-... → permissions
-//   ...-c000-... → roles
-//
-// **Every `PermissionCodeEnum` member must have a row here.** The `admin` role takes
-// `Object.values(PermissionCodeEnum)` wholesale (see `ROLE_SEEDS`), and `seedRoles` resolves each
-// code to an id from this list — so a member added to the enum and forgotten here has no id and
-// **`seedRoles` throws, naming the code**. The seed fails loudly rather than quietly handing admin
-// a role that is missing a permission, which would surface as a baffling `403` in an unrelated e2e.
 const PERMISSION_SEEDS: { id: string; code: PermissionCodeEnum; description: string }[] = [
   {
     id: '00000000-0000-4000-b000-000000000001',
@@ -183,10 +172,7 @@ const ROLE_SEEDS: {
       PermissionCodeEnum.INVENTORY_READ,
       PermissionCodeEnum.INVENTORY_ADJUST,
       PermissionCodeEnum.INVENTORY_TRANSFER,
-      // Warehouse staff receive and inspect returned goods at the warehouse.
       PermissionCodeEnum.INVENTORY_RECEIVE_RETURN,
-      // Warehouse staff create and ship fulfillments, and may cancel an order
-      // that has not yet shipped.
       PermissionCodeEnum.ORDER_FULFILL,
       PermissionCodeEnum.ORDER_CANCEL,
     ],
@@ -198,21 +184,14 @@ const ROLE_SEEDS: {
     permissions: [
       PermissionCodeEnum.ORDER_READ,
       PermissionCodeEnum.ORDER_CAPTURE,
-      // Support already cancels/refunds; fulfillment authoring rounds out the
-      // order operations they may run.
       PermissionCodeEnum.ORDER_FULFILL,
       PermissionCodeEnum.ORDER_CANCEL,
       PermissionCodeEnum.ORDER_REFUND,
-      // Support authorizes, rejects, and closes customer return requests.
       PermissionCodeEnum.ORDER_RETURN_AUTHORIZE,
     ],
   },
 ];
 
-// The baseline identity acceptance set: one StaffUser per canonical role and one
-// Customer. UUIDs follow the `...-a000-...` user-namespace convention so
-// e2e tests can reference these fixtures by id without first looking them
-// up by email.
 const TEST_STAFF_USERS: ITestStaffUserSeed[] = [
   {
     id: '00000000-0000-4000-a000-000000000001',
@@ -348,10 +327,6 @@ async function seed(): Promise<void> {
   const connection = await mysql.createConnection(url);
 
   try {
-    // Identity first: the SQL fixtures below include the example cart, whose
-    // `customer_id` FK references the customer this pass seeds. None of the
-    // catalog/pricing/stock SQL files depend on identity rows, so seeding
-    // identity ahead of them is safe and satisfies the cart FK.
     await seedPermissions(connection);
     await seedRoles(connection);
     await seedStaffUsers(connection);

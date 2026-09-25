@@ -1,42 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-// Creates the rebuilt retail checkout's immutable side: the polymorphic `address`
-// aggregate, the `order` aggregate root, and its `order_line` children. An order is
-// the placed record of what was bought and at what price — distinct from the
-// mutable `cart` it converts from, so a placed order can never be corrupted by a
-// later cart edit (docs/adr/028-cart-order-payment-and-address-chain.md §1).
-//
-// Tables are created in FK-dependency order — `address` first (the order references
-// it), then `order`, then `order_line`. `order` is a reserved word, backticked
-// throughout.
-//
-// The order carries **three orthogonal status ENUM columns** (`status`,
-// `payment_status`, `fulfillment_status`) that evolve independently (ADR-028 §2),
-// five BIGINT money totals in minor units, a `version` optimistic-concurrency token
-// (ADR-028 §6, the same forward-provisioning ADR-027 used for
-// `stock_level.version`), and a UNIQUE `order_number` that backs the human-facing
-// id derived in the repository. `customer_id` FKs the gateway `customer(id)` auth
-// aggregate (ADR-024) and is **nullable** (`ON DELETE SET NULL`) so deleting a
-// customer leaves an order tombstone; `source_cart_id` FKs `cart(id)` (the
-// repeat-place idempotency link, `ON DELETE SET NULL`); `order_line.variant_id` is a
-// real cross-service FK onto the catalog `product_variant(id)`, the opaque
-// downstream backbone key (ADR-025/027). `deleted_at` exists on all three tables
-// because the entities extend `BaseEntity` (TypeORM appends `deleted_at IS NULL` to
-// every `find`) — it stays INERT, an order/address is append-only/immutable, never
-// soft-deleted.
-//
-// The CHAR(36)/VARCHAR FK columns + tables are `utf8mb4_unicode_ci` so the
-// `order.customer_id → customer.id`, `order.billing/shipping_address_id →
-// address.id`, and `order.source_cart_id → cart.id` FK collations match the
-// referenced columns.
 export class CreateOrderLineAddressTables1781101255857 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Polymorphic over (owner_type, owner_id): an address belongs to a `customer` or an `order`
-    // (a place-time snapshot). `owner_id` is VARCHAR(36) so it holds either a customer's CHAR(36)
-    // UUID or an order's (short, stringified) numeric id.
-    //
-    // The `customer` half was shaped for an address book that **was never built** — nothing has
-    // ever written a `customer` row, here or since. Only `order` rows exist.
     await queryRunner.query(`
       CREATE TABLE address (
         id             CHAR(36)     NOT NULL PRIMARY KEY,
@@ -91,10 +56,6 @@ export class CreateOrderLineAddressTables1781101255857 implements MigrationInter
       'CREATE INDEX IDX_ORDER_CUSTOMER_PLACED ON `order` (customer_id, placed_at);',
     );
 
-    // `order_line.order_id → order.id` is `ON DELETE RESTRICT` (orders are
-    // append-only — a line is never orphaned). `variant_id` is the opaque catalog
-    // backbone FK (`ON DELETE RESTRICT`). Every other column is a place-time
-    // snapshot; `line_total_minor = unit_price_minor × quantity + tax − discount`.
     await queryRunner.query(`
       CREATE TABLE order_line (
         id                    BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -121,8 +82,6 @@ export class CreateOrderLineAddressTables1781101255857 implements MigrationInter
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    // Drop in reverse FK order: `order_line` (FKs `order`), then `order` (FKs
-    // `address` / `cart` / `customer`), then `address`.
     await queryRunner.query('DROP TABLE IF EXISTS order_line;');
     await queryRunner.query('DROP TABLE IF EXISTS `order`;');
     await queryRunner.query('DROP TABLE IF EXISTS address;');
