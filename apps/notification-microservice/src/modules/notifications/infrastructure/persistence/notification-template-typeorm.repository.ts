@@ -17,17 +17,6 @@ import { isDuplicateEntryError } from './mysql-error.util';
 import { NotificationTemplateEntity } from './notification-template.entity';
 import { NotificationTemplateMapper } from './notification-template.mapper';
 
-// The single `@InjectRepository(NotificationTemplateEntity)` site for the
-// `NotificationTemplate` aggregate. A single-row upsert (no owned children, no
-// `@VersionColumn`), re-reading by id so the returned aggregate carries the generated
-// BIGINT id + committed timestamps (the "re-read the saved graph" idiom the
-// payment/refund repos follow). Returns domain types only — no TypeORM leak (ADR-017).
-//
-// **It implements the port DIRECTLY, without `BaseTypeormRepository`**, for the same reason its
-// delivery sibling does: this class overrides `save` and reaches for `this.templateRepository.*`
-// everywhere else, so the base's only contribution was two `protected` hooks nothing called.
-// A registry whose rows are never deleted at all — retirement is the `active` flag — has no use
-// for an inherited `softDelete` either.
 @Injectable()
 export class NotificationTemplateTypeormRepository implements INotificationTemplateRepositoryPort {
   constructor(
@@ -40,12 +29,6 @@ export class NotificationTemplateTypeormRepository implements INotificationTempl
     try {
       saved = await this.templateRepository.save(NotificationTemplateMapper.toEntity(template));
     } catch (error) {
-      // A concurrent author that raced past the use case's `maxVersion` pre-check writes
-      // the same `(event_type, channel, locale, version)` and collides on the natural-key
-      // UNIQUE. The pre-check cannot close that TOCTOU race — the UNIQUE is the real
-      // backstop — so translate the `ER_DUP_ENTRY` into the typed duplicate-version code
-      // (→ 409) here rather than leaking a raw driver error as a 500 (the delivery-repo
-      // ER_DUP translation precedent).
       if (isDuplicateEntryError(error)) {
         throw new NotificationDomainException(
           NotificationErrorCodeEnum.TEMPLATE_DUPLICATE_VERSION,
@@ -54,8 +37,6 @@ export class NotificationTemplateTypeormRepository implements INotificationTempl
       }
       throw error;
     }
-    // Re-read so the returned aggregate carries the concrete generated id + committed DB
-    // timestamps. The row was just written, so a miss is an invariant breach.
     const reloaded = await this.templateRepository.findOne({ where: { id: Number(saved.id) } });
     if (!reloaded) {
       throw new Error(
@@ -70,9 +51,6 @@ export class NotificationTemplateTypeormRepository implements INotificationTempl
     return entity ? NotificationTemplateMapper.toDomain(entity) : null;
   }
 
-  // The hot path: the highest-`version` `active` row for the registry key. `version
-  // DESC` + `LIMIT 1` returns the live template; a null means no active template (the
-  // caller falls back). Served by the `(event_type, channel, locale, active)` index.
   public async findLatestActive(
     eventType: string,
     channel: NotificationChannelEnum,
@@ -85,8 +63,6 @@ export class NotificationTemplateTypeormRepository implements INotificationTempl
     return entity ? NotificationTemplateMapper.toDomain(entity) : null;
   }
 
-  // The exact `(eventType, channel, locale, version)` row — the duplicate-version
-  // pre-check / a version-specific rollback. Backed by the UNIQUE index.
   public async findByNaturalKey(
     eventType: string,
     channel: NotificationChannelEnum,
@@ -99,9 +75,6 @@ export class NotificationTemplateTypeormRepository implements INotificationTempl
     return entity ? NotificationTemplateMapper.toDomain(entity) : null;
   }
 
-  // The highest `version` across ALL rows for the key (active or not), or null when the
-  // key has no rows. The Author use case derives the next version from it
-  // (`(maxVersion ?? 0) + 1`). `maximum` compiles to `SELECT MAX(version) … WHERE …`.
   public async maxVersion(
     eventType: string,
     channel: NotificationChannelEnum,
@@ -115,9 +88,6 @@ export class NotificationTemplateTypeormRepository implements INotificationTempl
     return max ?? null;
   }
 
-  // The registry browse — filtered, unpaginated (the registry is small), newest-first
-  // by `(event_type, channel, locale, version DESC)` so each key's versions group with
-  // the live one on top.
   public async list(filter: INotificationTemplateListFilter): Promise<NotificationTemplate[]> {
     const where: FindOptionsWhere<NotificationTemplateEntity> = {};
     if (filter.eventType !== undefined) {

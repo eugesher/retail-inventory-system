@@ -10,13 +10,6 @@ import { NotificationDomainException, NotificationErrorCodeEnum } from '../../do
 import { INotificationTemplateRepositoryPort, NOTIFICATION_TEMPLATE_REPOSITORY } from '../ports';
 import { toNotificationTemplateView } from './notification-template-view.factory';
 
-// Set-Active activates or deactivates one template **version** by id. Deactivating
-// flips the row out of the "find latest active" resolution while keeping it on disk
-// (soft-delete via the `active` flag, never `deletedAt`), and activating is the
-// inverse — both are idempotent on the aggregate. This is the rollback lever: to
-// revert to an earlier wording, deactivate the live version and activate the desired
-// earlier one (or author a fresh version matching the old body). An unknown id is a
-// 404 (`TEMPLATE_NOT_FOUND`).
 @Injectable()
 export class SetTemplateActiveUseCase {
   constructor(

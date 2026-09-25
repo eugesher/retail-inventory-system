@@ -19,7 +19,6 @@ const createInput = (
   ...overrides,
 });
 
-// Asserts a `NotificationTemplate.create` call throws the expected typed code.
 const expectCreateCode = (
   input: ICreateNotificationTemplateInput,
   code: NotificationErrorCodeEnum,
@@ -134,7 +133,6 @@ describe('NotificationTemplate', () => {
       expect(v2.version).toBe(2);
       expect(v2.active).toBe(true);
       expect(v2.id).toBeNull();
-      // Same registry key — only subject/body and the version changed.
       expect(v2.eventType).toBe(v1.eventType);
       expect(v2.channel).toBe(v1.channel);
       expect(v2.locale).toBe(v1.locale);

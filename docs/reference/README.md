@@ -56,7 +56,7 @@ placeholders.
 | [`retail-returns.md`](retail-returns.md)           | retail `modules/returns/`                                               |
 | [`inventory.md`](inventory.md)                     | inventory `modules/stock/`                                              |
 | [`catalog-and-pricing.md`](catalog-and-pricing.md) | catalog `modules/catalog/`, `modules/pricing/`                          |
-| `notifications.md`                                 | notification `modules/notifications/`                                   |
+| [`notifications.md`](notifications.md)             | notification `modules/notifications/`                                   |
 | `event-store.md`                                   | event store `modules/audit-and-events/`                                 |
 | `api-gateway.md`                                   | `apps/api-gateway`                                                      |
 | `testing.md`                                       | the e2e harness under `test/` and the repository self-checks in `spec/` |

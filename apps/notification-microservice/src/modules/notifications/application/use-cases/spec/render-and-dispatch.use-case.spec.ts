@@ -18,10 +18,6 @@ import {
 import { IRenderAndDispatchInput, RenderAndDispatchUseCase } from '../render-and-dispatch.use-case';
 import { FakeLogger } from './test-doubles';
 
-// A consent cache double. `snapshot` is what `get` returns; it defaults to a
-// FULLY-consenting customer so the non-consent specs (which exercise the dispatch path)
-// are never gated. The consent specs below flip individual flags. `getCalls` records the
-// customer ids `get` was called with, so a spec can prove the gate was (or was not) run.
 class FakeConsentCache implements IConsentCachePort {
   public snapshot: IConsentSnapshot = {
     transactionalEmail: true,
@@ -43,9 +39,6 @@ class FakeConsentCache implements IConsentCachePort {
   }
 }
 
-// A template repo whose only live method is `findLatestActive` — the render hot path. The
-// other port methods are unreachable in this pipeline and throw if touched (a regression
-// guard: the use case must not reach for them).
 class FakeTemplateRepo implements INotificationTemplateRepositoryPort {
   public latest: NotificationTemplate | null = null;
   public readonly findLatestActiveCalls: {
@@ -80,11 +73,6 @@ class FakeTemplateRepo implements INotificationTemplateRepositoryPort {
   }
 }
 
-// A delivery repo that simulates persistence: `save` of an id-less row assigns a fresh
-// BIGINT (via `reconstitute`) and snapshots the status at save time, so a spec can prove
-// the FIRST save persisted a `queued` row. `findByDedupeKey` returns whatever `existing`
-// is set to (the idempotency pre-check). All calls are appended to the shared `events`
-// log so a spec can assert the persist-before-dispatch ordering.
 class RecordingDeliveryRepo implements INotificationDeliveryRepositoryPort {
   public existing: NotificationDelivery | null = null;
   public readonly saved: NotificationDelivery[] = [];
@@ -138,8 +126,6 @@ class RecordingDeliveryRepo implements INotificationDeliveryRepositoryPort {
   }
 }
 
-// A renderer double that does naive `{{key}}` substitution from the context, so a spec can
-// assert deterministic rendered output without coupling to the real Handlebars engine.
 class FakeRenderer implements ITemplateRendererPort {
   public readonly calls: { source: string; context: Record<string, unknown> }[] = [];
 
@@ -155,8 +141,6 @@ class FakeRenderer implements ITemplateRendererPort {
   }
 }
 
-// A notifier that records what it was handed and can be told to throw (a transport
-// failure). Appends to the shared `events` log for the ordering assertion.
 class RecordingNotifier implements INotifierPort {
   public readonly sent: Notification[] = [];
   public shouldThrow = false;
@@ -184,7 +168,6 @@ describe('RenderAndDispatchUseCase', () => {
   let logger: FakeLogger;
   let useCase: RenderAndDispatchUseCase;
 
-  // An email template (subject-bearing) at version 1, persisted (id non-null).
   const emailTemplate = (): NotificationTemplate =>
     NotificationTemplate.reconstitute({
       id: 7,
@@ -244,7 +227,6 @@ describe('RenderAndDispatchUseCase', () => {
     expect(notifier.sent[0].recipient).toBe('ada@example.com');
     expect(notifier.sent[0].channel).toBe(NotificationChannelEnum.EMAIL);
 
-    // The template was resolved on the requested key, defaulting the locale.
     expect(templateRepo.findLatestActiveCalls[0]).toEqual({
       eventType: 'retail.order.placed',
       channel: NotificationChannelEnum.EMAIL,
@@ -257,9 +239,7 @@ describe('RenderAndDispatchUseCase', () => {
 
     await useCase.execute(buildInput());
 
-    // The FIRST save persisted a `queued` row...
     expect(deliveryRepo.savedStatuses[0]).toBe(NotificationDeliveryStatusEnum.QUEUED);
-    // ...and it happened strictly before the notifier was called.
     expect(events.indexOf('delivery.save')).toBeGreaterThanOrEqual(0);
     expect(events.indexOf('notifier.send')).toBeGreaterThan(events.indexOf('delivery.save'));
   });
@@ -279,14 +259,12 @@ describe('RenderAndDispatchUseCase', () => {
     templateRepo.latest = emailTemplate();
     notifier.shouldThrow = true;
 
-    // The use case must NOT rethrow — the failure is recorded on the row.
     const result = await useCase.execute(buildInput());
 
     expect(result?.status).toBe(NotificationDeliveryStatusEnum.FAILED);
     expect(result?.attemptCount).toBe(1);
     expect(result?.lastAttemptAt).toBeInstanceOf(Date);
     expect(result?.failureReason).toBe('smtp down');
-    // Still persisted before the (failed) send — the audit row exists regardless.
     expect(deliveryRepo.savedStatuses[0]).toBe(NotificationDeliveryStatusEnum.QUEUED);
     expect(
       logger.warns.some((w) => w.message === 'Notification dispatch failed; recorded for retry'),
@@ -310,11 +288,6 @@ describe('RenderAndDispatchUseCase', () => {
   });
 
   it('persists no row and does not throw when the template renders an empty body', async () => {
-    // A body that references a context key the event never carries renders to '' (the
-    // FakeRenderer substitutes a missing key with empty). The use case runs inside an
-    // `@EventPattern` consumer, so an empty render must warn-and-skip (like a missing
-    // template) rather than let `NotificationDelivery.open`'s non-empty-body guard throw
-    // out of the handler and blind-redeliver the event.
     templateRepo.latest = NotificationTemplate.reconstitute({
       id: 7,
       eventType: 'retail.order.placed',
@@ -359,7 +332,6 @@ describe('RenderAndDispatchUseCase', () => {
     const result = await useCase.execute(buildInput());
 
     expect(result).toBe(alreadySent);
-    // No new row saved, no second NOTIFIER call.
     expect(deliveryRepo.saved).toHaveLength(0);
     expect(notifier.sent).toHaveLength(0);
     expect(events).not.toContain('notifier.send');
@@ -370,8 +342,6 @@ describe('RenderAndDispatchUseCase', () => {
 
   it('does not run the dedupe pre-check for a system/ops (null-recipient) notification', async () => {
     templateRepo.latest = emailTemplate();
-    // Even if a stale row were present, a null-recipient delivery is never deduped — the
-    // pre-check is skipped, so this row must not short-circuit the dispatch.
     deliveryRepo.existing = NotificationDelivery.reconstitute({
       id: 1,
       templateId: 7,
@@ -411,15 +381,12 @@ describe('RenderAndDispatchUseCase', () => {
 
     const result = await useCase.execute(buildInput({ channel: NotificationChannelEnum.SMS }));
 
-    // The persisted row keeps a null rendered subject (sms carries no subject line)...
     expect(result?.renderedSubject).toBeNull();
-    // ...but the transport (which requires a non-empty subject) gets the eventType fallback.
     expect(notifier.sent[0].subject).toBe('retail.order.placed');
     expect(notifier.sent[0].body).toBe('Order 99 confirmed');
   });
 
   describe('consent-gate (ADR-037)', () => {
-    // `marketing.email.promo` is NOT in TRANSACTIONAL_EVENT_TYPES → a marketing email.
     const MARKETING_EVENT = 'marketing.email.promo';
 
     it('records ONE skipped-no-consent row and never dispatches a marketing email when marketingEmail is false', async () => {
@@ -435,7 +402,6 @@ describe('RenderAndDispatchUseCase', () => {
 
       expect(result?.status).toBe(NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
       expect(result?.attemptCount).toBe(0);
-      // Exactly one row persisted (the skipped row), and the transport was never touched.
       expect(deliveryRepo.saved).toHaveLength(1);
       expect(deliveryRepo.savedStatuses).toEqual([
         NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT,
@@ -476,7 +442,6 @@ describe('RenderAndDispatchUseCase', () => {
         dataRetentionPolicy: 'default-7-years',
       };
 
-      // `retail.order.placed` (buildInput's default eventType) IS in the transactional set.
       const result = await useCase.execute(buildInput());
 
       expect(result?.status).toBe(NotificationDeliveryStatusEnum.SENT);
@@ -500,7 +465,6 @@ describe('RenderAndDispatchUseCase', () => {
 
     it('skips the gate entirely for a system/ops (null-recipient) dispatch and sends as today', async () => {
       templateRepo.latest = emailTemplate();
-      // Even a fully-denied snapshot is irrelevant: the gate never runs for a null recipient.
       consentCache.snapshot = {
         transactionalEmail: false,
         marketingEmail: false,
@@ -518,13 +482,10 @@ describe('RenderAndDispatchUseCase', () => {
 
       expect(result?.status).toBe(NotificationDeliveryStatusEnum.SENT);
       expect(notifier.sent).toHaveLength(1);
-      // The consent cache was never consulted for a null-recipient dispatch.
       expect(consentCache.getCalls).toHaveLength(0);
     });
 
     it('with the absent-row defaults (transactional true, marketing false): transactional sends, marketing skips', async () => {
-      // The cache-aside layer resolves an absent consent_record row to DEFAULT_CONSENT;
-      // here the fake returns those defaults directly.
       consentCache.snapshot = {
         transactionalEmail: true,
         marketingEmail: false,
@@ -536,7 +497,6 @@ describe('RenderAndDispatchUseCase', () => {
       const transactional = await useCase.execute(buildInput());
       expect(transactional?.status).toBe(NotificationDeliveryStatusEnum.SENT);
 
-      // Fresh state for the marketing leg.
       events.length = 0;
       const marketing = await useCase.execute(
         buildInput({ eventType: MARKETING_EVENT, eventReferenceId: '100' }),

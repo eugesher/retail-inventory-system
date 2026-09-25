@@ -13,11 +13,6 @@ import {
 import { AuthorTemplateUseCase } from '../author-template.use-case';
 import { FakeLogger, InMemoryTemplateRepo } from './test-doubles';
 
-// `AuthorTemplateUseCase` is the registry's create-or-edit write: a first author for a
-// `(eventType, channel, locale)` key writes `version = 1`; every later author appends a
-// new row at `(maxVersion ?? 0) + 1`, retaining the prior versions. The channel-specific
-// subject rule (from `NotificationTemplate.create`) rejects an `email` author with no
-// subject, and a derived-version collision is a typed `TEMPLATE_DUPLICATE_VERSION`.
 describe('AuthorTemplateUseCase', () => {
   let repo: InMemoryTemplateRepo;
   let useCase: AuthorTemplateUseCase;
@@ -55,7 +50,6 @@ describe('AuthorTemplateUseCase', () => {
 
     expect(first.version).toBe(1);
     expect(second.version).toBe(2);
-    // Both versions are retained — the edit appended rather than overwrote.
     expect(repo.rows).toHaveLength(2);
     const versions = repo.rows.map((r) => r.version).sort();
     expect(versions).toEqual([1, 2]);
@@ -71,8 +65,6 @@ describe('AuthorTemplateUseCase', () => {
   });
 
   it('rejects a derived-version collision with TEMPLATE_DUPLICATE_VERSION', async () => {
-    // Simulate a concurrent author having inserted version 1 between our maxVersion read
-    // (empty ⇒ next = 1) and the natural-key safety-net check.
     const racer = NotificationTemplate.reconstitute({
       id: 99,
       eventType: 'retail.order.placed',
@@ -99,7 +91,6 @@ describe('AuthorTemplateUseCase', () => {
     await expect(useCase.execute(basePayload({ subject: undefined }))).rejects.toMatchObject({
       code: NotificationErrorCodeEnum.TEMPLATE_SUBJECT_REQUIRED,
     });
-    // Nothing was persisted — the invariant fired before save.
     expect(repo.rows).toHaveLength(0);
   });
 

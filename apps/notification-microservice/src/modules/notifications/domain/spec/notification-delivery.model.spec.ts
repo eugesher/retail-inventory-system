@@ -114,7 +114,6 @@ describe('NotificationDelivery', () => {
         NotificationDomainException,
       );
       expect(() => delivery.markDelivered()).toThrow(NotificationDomainException);
-      // The rejected transitions leave the row in its terminal status untouched.
       expect(delivery.status).toBe(NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
     });
   });
@@ -188,7 +187,6 @@ describe('NotificationDelivery', () => {
           NotificationErrorCodeEnum.DELIVERY_INVALID_STATUS_TRANSITION,
         );
       }
-      // A rejected transition leaves the delivery untouched.
       expect(delivery.status).toBe(NotificationDeliveryStatusEnum.QUEUED);
     });
 
@@ -231,7 +229,6 @@ describe('NotificationDelivery', () => {
       delivery.markFailed(at('2026-06-21T10:00:00Z'), 'smtp timeout');
       expect(delivery.attemptCount).toBe(1);
 
-      // failed → sent is the retry-succeeds path; the count keeps climbing.
       delivery.markSent(at('2026-06-21T10:05:00Z'));
       expect(delivery.attemptCount).toBe(2);
     });

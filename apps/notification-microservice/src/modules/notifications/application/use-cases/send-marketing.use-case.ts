@@ -10,25 +10,6 @@ import {
 import { RenderAndDispatchUseCase } from './render-and-dispatch.use-case';
 import { toNotificationDeliveryView } from './notification-delivery-view.factory';
 
-// The staff-triggered marketing dispatch (ADR-037) — a thin mapper in front of the
-// shared `RenderAndDispatchUseCase`. It exists so the marketing path is demonstrable
-// end to end: the operator names a customer + a marketing `eventType`, and the consent
-// gate inside Render & Dispatch decides send vs `skipped-no-consent`.
-//
-// The mapping is deliberately minimal: channel is `email`, the recipient is the
-// customer (so the consent-gate can look up their consent and dedupe on their id), the
-// reference type is the literal `marketing`, and the reference id is the per-send
-// `campaignId` (minted at the gateway edge). Because `eventType` is a marketing key
-// (NOT in `TRANSACTIONAL_EVENT_TYPES`), the gate weighs it against `marketingEmail`.
-//
-// Returns the resulting `NotificationDeliveryView` (sent, or the `skipped-no-consent`
-// row, or a pre-existing duplicate), or `null` when no active marketing template resolves.
-//
-// **A `null` almost always means the seed did not run.** The marketing template is seeded — by
-// `scripts/seeds/notification-template.sql`, authored under `marketing.email.promo`
-// (`ROUTING_KEYS.MARKETING_EMAIL_PROMO`), which is the `eventType` the gateway defaults to. But
-// migrations do not seed it: `yarn migration:run` alone leaves the registry empty, and only
-// `yarn test:seed` authors the row. So a `null` here is a **missing seed**, not a missing feature.
 @Injectable()
 export class SendMarketingUseCase {
   constructor(

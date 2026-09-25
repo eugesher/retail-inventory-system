@@ -8,9 +8,6 @@ import { makePinoLoggerMock } from '@retail-inventory-system/observability/testi
 
 import { NotificationRabbitmqPublisher } from '../notification-rabbitmq.publisher';
 
-// Proves the notification publisher dual-publishes (ADR-035): the reserved
-// `notifications.delivery.failed` event keeps its primary `notification_events`
-// emit AND mirrors the same routing key + wire onto `ris.events`.
 describe('NotificationRabbitmqPublisher dual-publish', () => {
   let notificationEmit: jest.Mock;
   let mirrorEmit: jest.Mock;

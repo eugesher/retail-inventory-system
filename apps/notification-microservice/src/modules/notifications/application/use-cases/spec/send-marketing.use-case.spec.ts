@@ -11,8 +11,6 @@ import { IRenderAndDispatchInput, RenderAndDispatchUseCase } from '../render-and
 import { SendMarketingUseCase } from '../send-marketing.use-case';
 import { FakeLogger } from './test-doubles';
 
-// Records the input handed to the pipeline and returns a canned persisted delivery so the
-// spec can assert both the mapping AND the view projection.
 class RecordingRenderAndDispatch {
   public readonly inputs: IRenderAndDispatchInput[] = [];
   public result: NotificationDelivery | null = null;

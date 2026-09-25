@@ -47,7 +47,6 @@ describe('OrderCancelledNotificationConsumer', () => {
     expect(renderAndDispatch.inputs[0]).toEqual({
       eventType: ROUTING_KEYS.RETAIL_ORDER_CANCELLED,
       channel: NotificationChannelEnum.EMAIL,
-      // The cancelled wire contract carries no `customerId`, so the row is not deduped.
       recipientCustomerId: null,
       recipientAddress: 'buyer@example.com',
       eventReferenceType: 'order',

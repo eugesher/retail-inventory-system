@@ -13,27 +13,12 @@ import {
   INotificationTemplateRepositoryPort,
 } from '../../ports';
 
-// Rejects with a value that is NOT an `Error`.
-//
-// Production code must never do this, and `@typescript-eslint/prefer-promise-reject-errors`
-// enforces that — correctly. But a third-party driver is not production code we control:
-// `mysql2` and `amqplib` can both reject with a bare string or a response object, which is why
-// every `catch` in this module reads `err instanceof Error ? err.message : String(err)`. Those
-// defensive arms are unreachable from any double that obeys the rule, so a fault injector that
-// simulates a hostile driver has to step outside it.
-//
-// The exception is confined HERE, stated once, and routed to by every fault-injection site —
-// rather than a disable comment at each of them. It is the second `eslint-disable` in the
-// repository, and it should stay that rare.
 // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
 export const rejectWithNonError = (value: unknown): Promise<never> => Promise.reject(value);
 
 export class FakeLogger {
   public readonly assignments: Record<string, unknown>[] = [];
   public readonly logs: { context: unknown; message?: string }[] = [];
-  // `warn` lines land in their own array so a spec can assert the missing-template /
-  // dispatch-failed warn branches without disturbing the `logs` (info) ordering the
-  // sibling specs assert on.
   public readonly warns: { context: unknown; message?: string }[] = [];
   public readonly debugs: { context: unknown; message?: string }[] = [];
 
@@ -49,21 +34,11 @@ export class FakeLogger {
     this.warns.push({ context, message });
   }
 
-  // `PinoLogger` has one and this double did not — so a use case that debug-logs its quiet path (the
-  // retention sweep's "nothing aged out") crashed the spec with `logger.debug is not a function`. A
-  // double that is missing a method the real thing has does not fail honestly; it fails somewhere
-  // unrelated, at the first caller that reaches for it.
   public debug(context: unknown, message?: string): void {
     this.debugs.push({ context, message });
   }
 }
 
-// A persistence-simulating template repo for the authoring use-case specs: `save`
-// assigns a fresh BIGINT to an id-less row (and re-`reconstitute`s it with concrete
-// timestamps, the real repo's re-read idiom) or replaces the row in place by id;
-// `maxVersion` / `findByNaturalKey` / `findById` / `list` / `findLatestActive` read
-// the in-memory `rows`. It lets a spec author a real version chain and observe the
-// retained history, rather than stubbing each method per call.
 export class InMemoryTemplateRepo implements INotificationTemplateRepositoryPort {
   public readonly rows: NotificationTemplate[] = [];
   private seq = 0;
@@ -152,24 +127,10 @@ export class InMemoryTemplateRepo implements INotificationTemplateRepositoryPort
   }
 }
 
-// A persistence-simulating delivery repo for the delivery read/outcome use-case specs:
-// `save` assigns a fresh BIGINT to an id-less row (re-`reconstitute`d with concrete
-// timestamps, the real repo's re-read idiom) or replaces the row in place by id;
-// `findById` / `list` / `findByDedupeKey` / `listRetryable` read the in-memory `rows`.
-// `list` applies the same optional-field filter narrowing the real repo does and pages
-// over an id-DESC (newest-first) sort, so a spec can prove a filter narrows the page.
 export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort {
   public readonly rows: NotificationDelivery[] = [];
-  // Makes `save` reject, standing in for a database fault at the moment a use case persists.
-  // The retry sweeper isolates each row precisely so one of these cannot abort the whole sweep.
   public failSave = false;
-  // As `failSave`, but rejecting with a value that is not an `Error` — the other arm of the
-  // sweep loop's defensive stringify.
   public failSaveWith: unknown = undefined;
-  // Drops `failureReason` on the way back out, standing in for a `failed` row whose
-  // `failure_reason` column is NULL. Unreachable through the domain (`markFailed` always sets
-  // one), which is exactly why the `?? 'unknown'` default on the emitted event needs a double to
-  // reach it — a defensive branch with no way in is a branch nobody has checked.
   public stripFailureReasonOnSave = false;
   private seq = 0;
 
@@ -248,7 +209,6 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
           (filter.recipientCustomerId === undefined ||
             r.recipientCustomerId === filter.recipientCustomerId),
       )
-      // Newest-first, id DESC as the in-memory stand-in for `created_at DESC, id DESC`.
       .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
 
     const start = (page.page - 1) * page.size;
@@ -260,17 +220,6 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
     });
   }
 
-  // Both arms of the real scan, and the status predicates matter: this double used to filter on
-  // `attemptCount` ALONE, which quietly made every `sent` row look retryable to a sweeper spec. A
-  // double that is laxer than the query it stands in for does not fail — it just stops asserting.
-  //
-  //  1. `failed` under the attempt budget — the ordinary recorded failure;
-  //  2. `queued` older than `queuedStaleBefore` — the row orphaned between the persist and the
-  //     dispatch. A null `createdAt` (a domain object that never round-tripped a mapper) is treated
-  //     as NOT stale, the same conservative direction `deleteOlderThan` takes below.
-  //
-  // Ordered oldest-attempt-first with NULLs leading, mirroring MySQL's ASC ordering — so an orphan
-  // (which has no `lastAttemptAt` at all) leads the batch, exactly as it does in production.
   public listRetryable(
     maxAttempts: number,
     limit: number,
@@ -291,13 +240,6 @@ export class InMemoryDeliveryRepo implements INotificationDeliveryRepositoryPort
     return Promise.resolve(ordered.slice(0, limit));
   }
 
-  // The retention sweep's HARD delete (ISSUE-08). It really removes the rows — a double that merely
-  // flagged them would model a *soft* delete, which is the one thing this must not be: the row is the
-  // dedupe anchor, and a hidden-but-present row means the same notification sends twice.
-  //
-  // `createdAt` is null on a domain object that never round-tripped through the mapper; such a row is
-  // treated as **not yet aged**, the conservative direction (a purge that deletes what it cannot date
-  // is worse than one that skips it).
   public deleteOlderThan(horizon: Date, limit: number): Promise<number> {
     const doomed = this.rows
       .filter((r) => r.createdAt !== null && r.createdAt < horizon)
