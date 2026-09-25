@@ -99,7 +99,6 @@ describe('RefreshTokenUseCase', () => {
     const user = await seed();
     const first = await login.execute({ email: user.email, password: 'password123' });
 
-    // Rotate once successfully — `first.refreshToken` is now stale.
     await refresh.execute({ refreshToken: first.refreshToken });
 
     await expect(refresh.execute({ refreshToken: first.refreshToken })).rejects.toBeInstanceOf(
@@ -148,7 +147,6 @@ describe('RefreshTokenUseCase', () => {
     expect(rotated.refreshToken).not.toBe(seededRefresh);
     const reloaded = await customers.findById(customer.id);
     expect(reloaded?.refreshTokenHash).toBe(`hash:${rotated.refreshToken}`);
-    // Customer access tokens carry no roles/permissions.
     expect(tokens.issuedAccess[issuedBefore]).toMatchObject({ roles: [], permissions: [] });
   });
 

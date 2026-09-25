@@ -6,15 +6,6 @@ import { ICurrentUser, OrderView, PermissionCodeEnum } from '@retail-inventory-s
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Cancels a not-yet-shipped order. The route carries **no `@RequiresPermission`** —
-// Cancel Order is owner-reachable (a customer may cancel its own pending order), so a
-// permission gate would block the owning customer (ADR-024). This use case resolves
-// the staff override `isStaffCancel` from `@CurrentUser().permissions` (true iff the
-// caller holds `order:cancel`) and folds `@CurrentUser().id` into `actorId`. The
-// retail use case is the single enforcement point: it allows the cancel if
-// `isStaffCancel` OR the caller owns the order, then rejects a `shipped`/`delivered`
-// order (409 `ORDER_NOT_CANCELLABLE`), voids/flags the payment, and releases the
-// allocation. Returns the cancelled `OrderView`.
 @Injectable()
 export class CancelOrderUseCase {
   constructor(

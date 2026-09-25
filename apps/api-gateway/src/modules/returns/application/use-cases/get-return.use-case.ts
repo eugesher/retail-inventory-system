@@ -10,12 +10,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IReturnsGatewayPort, RETURNS_GATEWAY_PORT } from '../ports';
 
-// Reads one RMA by id. The route carries **no `@RequiresPermission`** (that would block
-// the owning customer — ADR-024); this use case resolves the staff override `isStaff`
-// from `@CurrentUser().permissions` (true iff the caller holds `order:read`) and folds
-// `@CurrentUser().id` into `actorId`. The retail use case is the single enforcement
-// point: it allows the read if `isStaff` OR the caller owns the RMA's order, else 403
-// (`RETURN_ACCESS_FORBIDDEN`); a missing RMA is a 404 (`RETURN_NOT_FOUND`).
 @Injectable()
 export class GetReturnUseCase {
   constructor(

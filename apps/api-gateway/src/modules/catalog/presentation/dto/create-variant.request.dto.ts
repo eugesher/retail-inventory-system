@@ -12,8 +12,6 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-// Millimetre bounding box. Non-negative integers; the catalog `Dimensions` VO
-// re-validates downstream, this is the gateway's edge guard.
 export class VariantDimensionsRequestDto {
   @ApiProperty({ example: 680, minimum: 0 })
   @IsInt()
@@ -34,10 +32,6 @@ export class VariantDimensionsRequestDto {
   public h: number;
 }
 
-// Request body for `POST /api/catalog/products/:productId/variants`. The owning
-// product is taken from the route param, not the body. `optionValues` is a
-// free-form option map (e.g. `{ color: 'black', size: 'M' }`) — the catalog
-// `OptionValues` VO enforces the non-empty-key/value invariant downstream.
 export class CreateVariantRequestDto {
   @ApiProperty({ example: 'AERON-CHAIR-BLK-M', minLength: 1, maxLength: 255 })
   @IsString()

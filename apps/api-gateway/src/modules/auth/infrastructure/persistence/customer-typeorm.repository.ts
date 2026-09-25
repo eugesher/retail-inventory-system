@@ -27,8 +27,6 @@ export class CustomerTypeormRepository implements ICustomerRepositoryPort {
   }
 
   public existsAuthenticatableById(id: string): Promise<boolean> {
-    // A guest is authenticatable alongside an active customer; suspended/deleted
-    // are barred (Q1/Q7).
     return this.repository.existsBy({ id, status: In(['active', 'guest']) });
   }
 

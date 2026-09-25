@@ -22,11 +22,6 @@ interface IRepositoryDouble {
   delete: (criteria: unknown) => Promise<unknown>;
 }
 
-// A hand-rolled EntityManager double: `transaction(cb)` runs the callback with a
-// transactional manager that records `getRepository().save()` / `.delete()` calls
-// and `query()` calls, so the spec can assert the exact SQL + bound params the
-// adapter issues — in particular that the address UPDATE targets
-// `owner_type='customer'` only, and that the consent record is deleted.
 const buildManagerDouble = (): {
   entityManager: EntityManager;
   saved: unknown[];
@@ -104,11 +99,9 @@ describe('CustomerErasureWriterAdapter', () => {
 
     const addressUpdate = queries.find((q) => /UPDATE\s+address/i.test(q.sql));
     expect(addressUpdate).toBeDefined();
-    // The discriminator is bound to 'customer' — order-snapshot rows are never touched.
     expect(addressUpdate!.params).toEqual(['customer', CUSTOMER_ID]);
     expect(addressUpdate!.sql).toMatch(/owner_type\s*=\s*\?/i);
     expect(addressUpdate!.sql).toMatch(/recipient_name\s*=\s*NULL/i);
-    // country is NOT nulled (a non-identifying region code).
     expect(addressUpdate!.sql).not.toMatch(/country\s*=\s*NULL/i);
   });
 
@@ -131,10 +124,6 @@ describe('CustomerErasureWriterAdapter', () => {
 
     await adapter.persistErasure(makeErasedCustomer());
 
-    // The consent record is deleted in the same transaction, so it does not survive
-    // the tombstone (its FK CASCADE never fires on a non-hard-delete). A later consent
-    // read then falls through to the absent-row defaults (marketing denied), which is
-    // what the `customer.erased` cache-eviction consumer relies on.
     const consentDelete = deletes.find((d) => d.target === ConsentRecordEntity);
     expect(consentDelete).toBeDefined();
     expect(consentDelete!.criteria).toEqual({ customerId: CUSTOMER_ID });

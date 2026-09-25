@@ -37,15 +37,6 @@ import {
   IRefundListQuery,
 } from '../../application/ports';
 
-// The single `ClientProxy` holder for the gateway orders module (ADR-009 /
-// ADR-020). Each method materializes the RPC with `firstValueFrom` and stitches the
-// transport-level `correlationId` onto the wire payload; everything else in the
-// module depends on `IOrdersGatewayPort`, never on `@nestjs/microservices`. All the
-// RPCs target `retail_queue` via the `RETAIL_MICROSERVICE` client (the orders
-// controller serves them, since they act on `Order` / its `Fulfillment` siblings). A
-// rejected RPC flows back as the retail filter's `{ statusCode, message, code, details }`,
-// which the calling use case re-throws through `throwRpcError` (typed `code` + `details`
-// preserved).
 @Injectable()
 export class OrdersRabbitmqAdapter implements IOrdersGatewayPort {
   constructor(

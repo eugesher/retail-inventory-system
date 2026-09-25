@@ -52,7 +52,6 @@ describe('ConsentRecord', () => {
       record.apply({ marketingEmail: true });
 
       expect(record.marketingEmail).toBe(true);
-      // The other three defaults are untouched.
       expect(record.transactionalEmail).toBe(true);
       expect(record.marketingSms).toBe(false);
       expect(record.dataRetentionPolicy).toBe('default-7-years');

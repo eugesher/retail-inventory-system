@@ -6,9 +6,6 @@ import { CartView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CART_GATEWAY_PORT, ICartChangeLineQuantityCommand, ICartGatewayPort } from '../ports';
 
-// Sets a cart line's quantity to a new positive value (a `0` is rejected
-// retail-side — removal is the explicit op). The owner-check is enforced
-// retail-side from the folded `customerId`.
 @Injectable()
 export class ChangeCartLineQuantityUseCase {
   constructor(

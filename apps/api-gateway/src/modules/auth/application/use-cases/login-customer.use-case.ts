@@ -72,8 +72,6 @@ export class LoginCustomerUseCase {
 
     const accessToken = await this.tokens.issueAccessToken({
       sub: customer.id,
-      // A customer that cleared password validation is non-`deleted`, so its
-      // email is a real string (tombstone nullability never reaches a session).
       email: customer.email!,
       roles: [],
       permissions: [],

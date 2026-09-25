@@ -6,12 +6,6 @@ import { IStockTransferResult } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { IInventoryGatewayPort, INVENTORY_GATEWAY_PORT, ITransferStockCommand } from '../ports';
 
-// Thin gateway-side orchestrator over the `inventory.stock-level.transfer` RPC. The
-// two-location move, the paired ledger writes, cache invalidation, and the
-// low-stock re-check are the inventory microservice's responsibility — the gateway
-// threads the correlation id and maps a downstream error onto the right HTTP status
-// (a bad quantity / same-location is a 400, an over-transfer a 409, via
-// `throwRpcError`).
 @Injectable()
 export class TransferStockUseCase {
   constructor(

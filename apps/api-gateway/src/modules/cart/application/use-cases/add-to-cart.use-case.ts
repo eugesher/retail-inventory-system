@@ -6,9 +6,6 @@ import { CartView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CART_GATEWAY_PORT, ICartAddLineCommand, ICartGatewayPort } from '../ports';
 
-// Adds a variant line to the cart. The unit price is snapshotted retail-side from
-// `catalog.price.select`; an unknown/unpriced variant comes back as a 409. The
-// owner-check is enforced retail-side from the folded `customerId`.
 @Injectable()
 export class AddToCartUseCase {
   constructor(

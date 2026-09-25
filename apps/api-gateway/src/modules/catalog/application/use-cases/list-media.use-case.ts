@@ -6,9 +6,6 @@ import { MediaAssetView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CATALOG_GATEWAY_PORT, ICatalogGatewayPort, IListMediaCommand } from '../ports';
 
-// Backs BOTH media GET routes — `GET /products/:productId/media` and
-// `GET /variants/:variantId/media` — the controller folds the matching
-// `ownerType` so one use case serves both owner kinds (ADR-029 §4).
 @Injectable()
 export class ListMediaUseCase {
   constructor(

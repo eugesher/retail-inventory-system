@@ -9,15 +9,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IInventoryGatewayPort, INVENTORY_GATEWAY_PORT } from '../ports';
 
-// Thin gateway-side orchestrator over the `inventory.reservation.release` RPC,
-// used here as the **manual** ops release: the controller targets one hold by
-// `reservationId` and folds `reason: 'manual'` + the staff `actorId` into the
-// payload. The counter return, the row flip to `released`, and the `release`
-// ledger append are the inventory microservice's responsibility; the gateway
-// forwards the payload (it already carries the correlation id) and maps a
-// downstream rejection onto the right HTTP status via `throwRpcError` — an unknown
-// id is a 404 (`INVENTORY_RESERVATION_NOT_FOUND`), an already-released/committed
-// row a 409 (`INVENTORY_RESERVATION_INVALID_STATE`).
 @Injectable()
 export class ReleaseReservationUseCase {
   constructor(

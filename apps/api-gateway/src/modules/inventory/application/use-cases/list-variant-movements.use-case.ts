@@ -10,12 +10,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IInventoryGatewayPort, INVENTORY_GATEWAY_PORT } from '../ports';
 
-// Thin gateway-side orchestrator over the `inventory.stock-movement.list` RPC —
-// the operator audit read of one variant's append-only ledger. The paging,
-// filtering, and newest-first ordering are the inventory microservice's
-// responsibility; the gateway forwards the assembled payload (it already carries
-// the correlation id) and maps any downstream rejection onto the right HTTP status
-// via `throwRpcError`. An unknown variant is an empty page, not an error.
 @Injectable()
 export class ListVariantMovementsUseCase {
   constructor(

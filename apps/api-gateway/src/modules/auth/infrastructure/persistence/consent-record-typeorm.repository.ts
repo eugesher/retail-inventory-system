@@ -7,11 +7,6 @@ import { ConsentRecord } from '../../domain';
 import { ConsentRecordEntity } from './consent-record.entity';
 import { ConsentRecordMapper } from './consent-record.mapper';
 
-// The sole `@InjectRepository(ConsentRecordEntity)` site. It implements
-// `IConsentRecordRepositoryPort` directly (not `BaseTypeormRepository`, whose
-// numeric-id assumptions and soft-delete surface don't fit a CHAR(36)-keyed,
-// no-`BaseEntity` row) and returns domain types only — no TypeORM leak past this
-// file (ADR-017). The `CustomerTypeormRepository` "save-then-reload" precedent.
 @Injectable()
 export class ConsentRecordTypeormRepository implements IConsentRecordRepositoryPort {
   constructor(
@@ -24,10 +19,6 @@ export class ConsentRecordTypeormRepository implements IConsentRecordRepositoryP
     return entity ? ConsentRecordMapper.toDomain(entity) : null;
   }
 
-  // INSERT-or-update upsert on the `customer_id` PK: TypeORM `.save` INSERTs a new
-  // row on first write and UPDATEs the flags/policy on subsequent writes; the
-  // `@UpdateDateColumn` `updated_at` is DB-stamped. Re-read so the returned record
-  // carries the persisted `updatedAt`.
   public async save(record: ConsentRecord): Promise<ConsentRecord> {
     const partial = ConsentRecordMapper.toEntity(record);
     await this.repository.save(partial);

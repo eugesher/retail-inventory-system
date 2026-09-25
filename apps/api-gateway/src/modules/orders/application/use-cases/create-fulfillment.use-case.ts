@@ -10,13 +10,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Plans a shipment of one or more `OrderLine` quantities for an order. The route is
-// `@RequiresPermission('order:fulfill')`-gated (a customer cannot fulfill), so a
-// caller that reaches here always holds `order:fulfill`; this use case still resolves
-// `isStaffFulfill` from `@CurrentUser().permissions` (always `true` here) and folds
-// `@CurrentUser().id` into `actorId`, keeping the retail use case the single
-// enforcement point (ADR-024 / ADR-028 §7). Returns the created `FulfillmentView`
-// (201); the order's roll-up statuses are unchanged until Ship.
 @Injectable()
 export class CreateFulfillmentUseCase {
   constructor(

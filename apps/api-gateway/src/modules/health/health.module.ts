@@ -14,12 +14,6 @@ import { CheckHealthUseCase } from './application/use-cases';
 import { HealthRabbitmqAdapter } from './infrastructure/messaging';
 import { HealthController } from './presentation';
 
-// The liveness fan-out module (ADR-044). It is the only gateway module that imports **every**
-// `MicroserviceClient*Module`, because it is the only one that talks to every service —
-// every other module fronts exactly one.
-//
-// `HEALTH_PROBE_TIMEOUT_MS` bounds a single probe (Joi default 2000). It is a value provider,
-// not a `process.env` read: the use case and the adapter receive a plain `number`.
 @Module({
   imports: [
     MicroserviceClientCatalogModule,

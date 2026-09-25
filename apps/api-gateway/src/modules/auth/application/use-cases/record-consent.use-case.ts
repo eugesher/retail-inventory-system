@@ -11,16 +11,6 @@ import {
   ICustomerEventsPublisherPort,
 } from '../ports';
 
-// Record (upsert) one customer's channel-consent preferences and announce the
-// change. The customer id is the authenticated caller's own — the controller folds
-// `@CurrentUser().id` into the command, so this use case never writes another
-// customer's record (auth + inherent ownership, ADR-024/028; no permission code).
-//
-// Flow: load the existing row (or start from `ConsentRecord.default(customerId)` —
-// absent-row-means-defaults), overlay only the supplied keys (`apply` is an
-// upsert-merge), persist, then emit `customer.consent.updated` carrying the FULL
-// saved snapshot. The emit is best-effort post-commit — the publisher swallows a
-// broker hiccup, so a fan-out failure never fails the committed write.
 @Injectable()
 export class RecordConsentUseCase {
   constructor(

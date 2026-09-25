@@ -6,8 +6,6 @@ import { CartView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CART_GATEWAY_PORT, ICartGatewayPort, ICartRemoveLineCommand } from '../ports';
 
-// Removes a line from the cart. An unknown line id is a 404. The owner-check is
-// enforced retail-side from the folded `customerId`.
 @Injectable()
 export class RemoveFromCartUseCase {
   constructor(

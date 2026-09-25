@@ -52,9 +52,6 @@ export class IamController {
     private readonly updateRole: UpdateRoleUseCase,
     private readonly assignStaffRole: AssignStaffRoleUseCase,
     private readonly revokeStaffRole: RevokeStaffRoleUseCase,
-    // Owned by `modules/auth/` and reached through its barrel — the sanctioned cross-module
-    // seam the admin shells use (ARCH-LINT-EX-02, ADR-024). The staff aggregate stays in the
-    // module that owns it; IAM is the admin surface over it.
     private readonly registerStaffUser: RegisterStaffUserUseCase,
   ) {}
 
@@ -110,13 +107,6 @@ export class IamController {
     return this.toDto(role);
   }
 
-  // Creating a staff user was the one thing this admin surface could not do: until now the
-  // only way to mint a principal was the seed script. `RegisterStaffUserUseCase` had been
-  // written, unit-tested and provided all along — it simply had no route (ADR-047).
-  //
-  // Gated on `iam:staff-create`, NOT `iam:assign`: minting a principal is a higher privilege
-  // than granting an existing one a role bundle, and sharing a code would make role assignment
-  // a silent user-creation escalation.
   @Post('staff')
   @RequiresPermission(PermissionCodeEnum.IAM_STAFF_CREATE)
   @ApiOperation({ summary: 'Create a staff user with one or more roles' })

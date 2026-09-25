@@ -6,9 +6,6 @@ import { StockLocationView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { IInventoryGatewayPort, IListLocationsQuery, INVENTORY_GATEWAY_PORT } from '../ports';
 
-// Thin gateway-side orchestrator over the `inventory.location.list` RPC. The
-// list is not cached on either side (a small, slow-changing set); the gateway is
-// a pass-through that threads the correlation id and maps downstream errors.
 @Injectable()
 export class ListLocationsUseCase {
   constructor(

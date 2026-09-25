@@ -6,11 +6,6 @@ import { ICurrentUser, ReturnRequestView } from '@retail-inventory-system/contra
 import { throwRpcError } from '../../../../common/utils';
 import { IReturnsGatewayPort, RETURNS_GATEWAY_PORT } from '../ports';
 
-// Walks an `authorized` RMA → `received` (the warehouse logs the returned goods in). The
-// route is `@RequiresPermission('inventory:receive-return')`-gated — a **warehouse-staff**
-// operation. This use case folds `@CurrentUser().id` into `actorId`; the retail use case
-// walks the status and emits `retail.return.received`. Returns the received
-// `ReturnRequestView` (200).
 @Injectable()
 export class ReceiveReturnUseCase {
   constructor(

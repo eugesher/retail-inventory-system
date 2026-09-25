@@ -923,11 +923,13 @@ operationally required); `marketingEmail` / `marketingSms` default **false** (op
 `PUT` is an upsert-merge that changes only the fields it carries.
 
 **Erasure is a tombstone, never a hard delete.** `POST /api/admin/customers/:id/erase`
-(body `{ confirmEmail }`) nulls PII across `customer`, `address` (`owner_type='customer'`
-rows only), and `cart` in **one transaction** via a gateway-owned raw-SQL
-`CUSTOMER_ERASURE_WRITER`; flips `status='deleted'` + stamps `deleted_at`; and clears the
-refresh-token hash (a session revoke). It **preserves the customer id**, so every
-`order.customer_id` FK and the immutable `owner_type='order'` address snapshots stay intact.
+(body `{ confirmEmail }`) nulls PII in `customer` and `address` (`owner_type='customer'`
+rows only), abandons the customer's active carts and deletes its `consent_record`, in **one
+transaction** via the gateway-owned `CUSTOMER_ERASURE_WRITER` (raw SQL for the retail tables);
+flips `status='deleted'` + stamps `deleted_at`; and clears the refresh-token hash (a session
+revoke). The carts' stock holds are not released; they expire with their TTL
+([`docs/reference/api-gateway.md`](docs/reference/api-gateway.md#erasure)). It **preserves the
+customer id**, so every `order.customer_id` FK and the immutable `owner_type='order'` address snapshots stay intact.
 A `confirmEmail` mismatch is a `400` with nothing written; an already-erased customer is an
 idempotent no-op.
 
@@ -1021,14 +1023,14 @@ one dead service costs one timeout, not five.
 
 ### Pricing and tax categories
 
-| Method  | Route                                       | Auth                                             |
-| ------- | ------------------------------------------- | ------------------------------------------------ |
-| `POST`  | `/catalog/variants/:variantId/prices`       | `pricing:write` — set or schedule                |
-| `GET`   | `/catalog/variants/:variantId/prices`       | public — `?currency=USD`, `?asOf`                |
-| `GET`   | `/catalog/variants/:variantId/price`        | public — single applicable price, or a null body |
-| `POST`  | `/catalog/tax-categories`                   | `pricing:write`                                  |
-| `GET`   | `/catalog/tax-categories`                   | public                                           |
-| `PATCH` | `/catalog/variants/:variantId/tax-category` | `pricing:write` — attach by code                 |
+| Method  | Route                                       | Auth                                                          |
+| ------- | ------------------------------------------- | ------------------------------------------------------------- |
+| `POST`  | `/catalog/variants/:variantId/prices`       | `pricing:write` — set or schedule                             |
+| `GET`   | `/catalog/variants/:variantId/prices`       | public — `?currency=USD`, `?asOf`                             |
+| `GET`   | `/catalog/variants/:variantId/price`        | public — single applicable price, or `200` with an empty body |
+| `POST`  | `/catalog/tax-categories`                   | `pricing:write`                                               |
+| `GET`   | `/catalog/tax-categories`                   | public                                                        |
+| `PATCH` | `/catalog/variants/:variantId/tax-category` | `pricing:write` — attach by code                              |
 
 ### Categories and media
 
@@ -1215,6 +1217,10 @@ on a stable code rather than a message:
   }
 }
 ```
+
+A rejection the gateway raises itself (`auth`, `iam`, the admin shells, request validation) carries
+no `code`, and an upstream rejection without one keeps its status only for `400`/`403`/`404`/`409`
+([`docs/reference/api-gateway.md`](docs/reference/api-gateway.md#error-forwarding)).
 
 ---
 

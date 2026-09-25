@@ -6,19 +6,6 @@ import { ICorrelationTraceResult } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { AUDIT_GATEWAY_PORT, IAuditGatewayPort, ITraceByCorrelationQuery } from '../ports';
 
-// Thin gateway-side orchestrator over the `audit.trace.by-correlation` RPC — the causal
-// chain of one request across every service that touched it, reassembled from the two
-// event-store logs by a single correlation id (ADR-039).
-//
-// TWO correlation ids meet here and never merge:
-//   - `correlationId`             — the trace id of the request asking the question,
-//                                   threaded by `CorrelationMiddleware`;
-//   - `query.targetCorrelationId` — the id being traced.
-// They occupy different fields on the wire payload, and both are logged, so a support
-// query is itself traceable against the chain it went looking for.
-//
-// An unknown target yields two empty arrays with a `200`. The absence of a trace is not
-// the absence of a resource, so there is no `404` path here.
 @Injectable()
 export class TraceByCorrelationUseCase {
   constructor(

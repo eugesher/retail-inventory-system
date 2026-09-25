@@ -197,8 +197,9 @@ by `presentation/audit-query.controller.ts`.
 - **An unparseable `from` or `to` is dropped, not rejected.** `parseInstant` returns `undefined`
   for it, so the window widens. That includes a well-formed but impossible instant such as
   `2026-13-45T99:99:99`: kept as `Invalid Date`, it would make the page empty instead of
-  unfiltered. The gateway DTOs validate both bounds with `@IsISO8601()`, so such a value arrives
-  only through a direct RPC.
+  unfiltered. The gateway DTOs' `@IsISO8601()` rejects that one, but it accepts forms `Date` cannot
+  read — a week date, an ordinal date, the basic format — so those widen the window over HTTP too
+  ([`api-gateway.md`](api-gateway.md#time-bounds)).
 
 ## `parseInstant`
 

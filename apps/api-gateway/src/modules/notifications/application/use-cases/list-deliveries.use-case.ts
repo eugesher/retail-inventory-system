@@ -10,11 +10,6 @@ import {
   NOTIFICATIONS_GATEWAY_PORT,
 } from '../ports';
 
-// Thin gateway-side orchestrator over the `notification.delivery.list` RPC — the
-// paginated, filterable, newest-first audit read of the delivery trail. The paging,
-// filtering, and ordering are the notification microservice's responsibility; the
-// gateway forwards the query (with the correlation id stitched in the adapter) and
-// maps any downstream rejection onto the right HTTP status via `throwRpcError`.
 @Injectable()
 export class ListDeliveriesUseCase {
   constructor(

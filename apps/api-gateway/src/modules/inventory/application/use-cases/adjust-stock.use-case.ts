@@ -6,11 +6,6 @@ import { StockLevelView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { IAdjustStockCommand, IInventoryGatewayPort, INVENTORY_GATEWAY_PORT } from '../ports';
 
-// Thin gateway-side orchestrator over the `inventory.stock-level.adjust` RPC. The
-// signed-delta mutation, the below-zero rejection, cache invalidation, and the
-// adjusted/low-stock events are the inventory microservice's responsibility — the
-// gateway threads the correlation id and maps a downstream error onto the right
-// HTTP status (a below-zero adjustment surfaces as a 409 via `throwRpcError`).
 @Injectable()
 export class AdjustStockUseCase {
   constructor(

@@ -27,15 +27,6 @@ import {
   IReturnsGatewayPort,
 } from '../../application/ports';
 
-// The single `ClientProxy` holder for the gateway returns module (ADR-009 / ADR-020).
-// Each method materializes the RPC with `firstValueFrom` and stitches the
-// transport-level `correlationId` onto the wire payload; everything else in the module
-// depends on `IReturnsGatewayPort`, never on `@nestjs/microservices`. All eight RPCs
-// target `retail_queue` via the `RETAIL_MICROSERVICE` client (the returns controller
-// serves them — the returns bounded context is its own retail module, ADR-032). A
-// rejected RPC flows back as the returns filter's `{ statusCode, message, code }`, which
-// the calling use case re-throws through `throwRpcError` (typed `RETURN_*` code preserved
-// so a client can branch on it).
 @Injectable()
 export class ReturnsRabbitmqAdapter implements IReturnsGatewayPort {
   constructor(

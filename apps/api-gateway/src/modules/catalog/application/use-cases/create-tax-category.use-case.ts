@@ -6,9 +6,6 @@ import { TaxCategoryView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CATALOG_GATEWAY_PORT, ICatalogGatewayPort, ICreateTaxCategoryCommand } from '../ports';
 
-// Create a tax category (a classification label only — code + name; no
-// rate/jurisdiction, ADR-026). A duplicate `code` is rejected downstream with a
-// 409 (`TAX_CATEGORY_CODE_TAKEN`).
 @Injectable()
 export class CreateTaxCategoryUseCase {
   constructor(

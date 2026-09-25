@@ -10,12 +10,6 @@ import {
   NOTIFICATIONS_GATEWAY_PORT,
 } from '../ports';
 
-// Thin gateway-side orchestrator over the `notification.template.set-active` RPC —
-// the rollback lever (deactivate the newest version so resolution falls through to
-// the prior active one, or re-activate an earlier version). The find-by-id +
-// activate/deactivate are the notification microservice's responsibility; the
-// gateway threads the correlation id and maps a downstream rejection (an unknown id
-// is a 404) onto the right HTTP status via `throwRpcError`.
 @Injectable()
 export class SetTemplateActiveUseCase {
   constructor(

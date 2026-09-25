@@ -36,15 +36,6 @@ import {
 } from '../application/use-cases';
 import { AttachMediaRequestDto, ReorderMediaRequestDto } from './dto';
 
-// HTTP surface over the catalog microservice's polymorphic MediaAsset RPCs
-// (ADR-009/ADR-029 §4). One-aggregate-shaped controller, separate from
-// `CatalogController` / `CategoryController` but sharing the `catalog` prefix
-// (multiple controllers per prefix — the auth-module precedent). Write routes are
-// `catalog:write` per ADR-024 — the SAME code as product/category authoring, no
-// new permission minted. Read routes are `@Public()`: a storefront renders a
-// product's media without a token, and an unknown owner is a `200` empty list
-// (the zero-answer convention), never a 404. The two list routes share one
-// `ListMediaUseCase`, folding the matching `ownerType` discriminator per route.
 @ApiTags('Catalog')
 @Controller('catalog')
 export class MediaController {
@@ -72,8 +63,6 @@ export class MediaController {
   @RequiresPermission(PermissionCodeEnum.CATALOG_WRITE)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
-  // A STATIC `media/reorder` segment, not a `:id` PATCH — there is no
-  // `PATCH media/:id` route to collide with, so Nest matches it unambiguously.
   @ApiOperation({ summary: 'Reorder an owner media strip (exact active-set permutation)' })
   @ApiOkResponse({
     description: 'The refreshed active media strip in its new order',

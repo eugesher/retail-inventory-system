@@ -10,10 +10,6 @@ import {
   ICatalogGatewayPort,
 } from '../ports';
 
-// Point a variant at a tax category by code (writes the
-// `product_variant.tax_category_id` FK downstream). An unknown code → 404
-// (`TAX_CATEGORY_NOT_FOUND`); an unknown variant → 404 (`VARIANT_NOT_FOUND`).
-// Returns the minimal updated variant tax header, not the full variant view.
 @Injectable()
 export class AttachVariantTaxCategoryUseCase {
   constructor(

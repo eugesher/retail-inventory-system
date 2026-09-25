@@ -6,8 +6,6 @@ import { TaxCategoryView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CATALOG_GATEWAY_PORT, ICatalogGatewayPort } from '../ports';
 
-// List the (small, static) set of tax categories. There is nothing to scope by,
-// so the query carries only the transport `correlationId`.
 @Injectable()
 export class ListTaxCategoriesUseCase {
   constructor(

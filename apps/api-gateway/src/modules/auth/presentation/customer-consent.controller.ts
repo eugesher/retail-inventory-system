@@ -14,15 +14,6 @@ import { CorrelationId } from '@retail-inventory-system/observability';
 import { RecordConsentUseCase, ReadConsentUseCase } from '../application/use-cases';
 import { RecordConsentRequestDto } from './dto';
 
-// The customer self-service consent surface at `/api/auth/customer/me/consent`.
-//
-// Both routes are **bearer-protected with NO permission code** (ADR-024/028): the
-// controller folds `@CurrentUser().id` into the query/command, so a customer can
-// only ever read/write their **own** consent — ownership is inherent in the token,
-// never a `@RequiresPermission` gate (a customer JWT carries no `permissions`
-// claim, so a permission code would be unreachable dead code). `isStaff: false` is
-// hard-wired here: the staff/admin consent-read path is a separate admin controller
-// that reuses `ReadConsentUseCase` with `isStaff: true`.
 @ApiTags('Auth — Customer Consent')
 @ApiBearerAuth()
 @Controller('auth/customer/me/consent')

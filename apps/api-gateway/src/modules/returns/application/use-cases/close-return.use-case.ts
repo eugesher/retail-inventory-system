@@ -6,12 +6,6 @@ import { ICurrentUser, ReturnRequestView } from '@retail-inventory-system/contra
 import { throwRpcError } from '../../../../common/utils';
 import { IReturnsGatewayPort, RETURNS_GATEWAY_PORT } from '../ports';
 
-// Walks an `inspected` RMA → `closed` (terminal — the RMA is settled). The route is
-// `@RequiresPermission('order:return-authorize')`-gated — **staff-only**. This use case
-// folds `@CurrentUser().id` into `actorId`; the retail use case walks the status and
-// emits `retail.return.closed`. Closing does not itself issue a refund — Issue Refund is
-// a distinct, explicit operation that consumes the per-line amounts recorded at Inspect.
-// Returns the closed `ReturnRequestView` (200).
 @Injectable()
 export class CloseReturnUseCase {
   constructor(

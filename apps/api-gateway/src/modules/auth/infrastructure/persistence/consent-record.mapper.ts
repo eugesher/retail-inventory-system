@@ -14,8 +14,6 @@ export class ConsentRecordMapper {
     });
   }
 
-  // `updatedAt` is intentionally omitted — it is the DB's `@UpdateDateColumn`,
-  // stamped by MySQL on write, never supplied by the application.
   public static toEntity(record: ConsentRecord): DeepPartial<ConsentRecordEntity> {
     return {
       customerId: record.customerId,

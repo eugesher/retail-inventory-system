@@ -6,10 +6,6 @@ import { CartView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CART_GATEWAY_PORT, ICartGatewayPort, ICartGetQuery } from '../ports';
 
-// Reads a cart by id. The owner-check is enforced retail-side from the
-// `customerId` the controller folded in (`@CurrentUser().id`): a non-owner gets a
-// 403, surfaced here as `ForbiddenException` via `throwRpcError`; a missing cart
-// is a 404.
 @Injectable()
 export class GetCartUseCase {
   constructor(

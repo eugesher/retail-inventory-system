@@ -9,17 +9,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IInventoryGatewayPort, INVENTORY_GATEWAY_PORT } from '../ports';
 
-// Thin gateway-side orchestrator over the `inventory.reservation.sweep` RPC — the
-// on-demand twin of the inventory service's sweep timer. The controller folds the
-// staff `actorId` into the payload (ADR-028); every `release` ledger row the sweep
-// writes then names the human who pressed the button, which is the only behavioural
-// difference from an unattended tick.
-//
-// The scan, the expiry, the counter return, the ledger appends, and the per-hold
-// `inventory.stock.released` emissions are the inventory microservice's business
-// (ADR-038); the gateway forwards the payload (it already carries the correlation id)
-// and maps a downstream rejection onto the right HTTP status via `throwRpcError` — an
-// exhausted optimistic-retry budget is a 409 (`INVENTORY_STOCK_WRITE_CONFLICT`).
 @Injectable()
 export class SweepReservationsUseCase {
   constructor(

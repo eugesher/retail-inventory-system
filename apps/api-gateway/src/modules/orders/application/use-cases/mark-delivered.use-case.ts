@@ -10,13 +10,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Marks a `shipped` fulfillment `delivered`. The route is
-// `@RequiresPermission('order:fulfill')`-gated (staff-only), so `isStaffFulfill`
-// resolved from `@CurrentUser().permissions` is always `true` here; the retail use
-// case is the single enforcement point (ADR-024 / ADR-028 §7). Once every
-// non-`cancelled` fulfillment of the order is delivered the retail side advances the
-// order's lifecycle + fulfillment axes to `delivered`. Returns the delivered
-// `FulfillmentView`.
 @Injectable()
 export class MarkDeliveredUseCase {
   constructor(

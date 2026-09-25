@@ -60,10 +60,6 @@ import {
   ISetPriceCommand,
 } from '../../application/ports';
 
-// The single `ClientProxy` holder for the catalog gateway module (ADR-009 /
-// ADR-020). Each method materializes the RPC with `firstValueFrom` and stitches
-// the transport-level `correlationId` onto the wire payload; everything else in
-// the module depends on `ICatalogGatewayPort`, never on `@nestjs/microservices`.
 @Injectable()
 export class CatalogRabbitmqAdapter implements ICatalogGatewayPort {
   constructor(

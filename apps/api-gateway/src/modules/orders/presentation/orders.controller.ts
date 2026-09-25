@@ -55,28 +55,6 @@ import {
   ShipFulfillmentRequestDto,
 } from './dto';
 
-// HTTP surface over the retail microservice's order read + capture + fulfillment +
-// cancel RPCs (ADR-009, ADR-031). Every route is bearer-protected by default (the
-// global `JwtAuthGuard`). Two authorization shapes coexist (ADR-024 / ADR-028 §7):
-//
-//   - **Owner-or-staff** (Read, List orders, Capture, List fulfillments, Cancel Order)
-//     carry **no `@RequiresPermission`** — that would block the owning customer, who
-//     carries no permissions. The owner-check (`order.customerId === @CurrentUser().id`)
-//     lives in the retail use case; the staff override (`order:read` / `order:capture` /
-//     `order:cancel`) is computed in the gateway use case from `@CurrentUser().permissions`
-//     and forwarded as a boolean. A customer reaches only its own order; staff with the
-//     override reach any.
-//   - **Staff-only** (Create / Ship / Deliver fulfillment, Cancel Line) ARE gated with
-//     `@RequiresPermission('order:fulfill'|'order:cancel')`: a customer cannot fulfill
-//     a shipment or cancel an individual line, so the permission gate is the right (and
-//     simpler) shape. The gateway use case still resolves the staff flag from the same
-//     `@CurrentUser().permissions` — always true for a caller that passes the gate — so
-//     the retail use case stays the single enforcement point.
-//
-// A non-owner non-staff caller gets a 403; an unauthenticated caller a 401. Typed
-// upstream codes (`FULFILLMENT_*` / `ORDER_*`) surface as 400/404/409 via `throwRpcError`.
-//
-// `orderId` / `fulfillmentId` / `lineId` are BIGINT ids (numeric params via `ParseIntPipe`).
 @ApiTags('Order')
 @ApiBearerAuth()
 @Controller('orders')
@@ -100,8 +78,6 @@ export class OrdersController {
   @ApiExtraModels(OrderView)
   @ApiOkResponse({
     description: 'Own orders for the caller, paginated',
-    // The handler returns the `IPage` envelope ({ items, total, page, size }), not a
-    // bare array — describe the real shape so generated clients read `body.items`.
     schema: {
       type: 'object',
       properties: {
@@ -148,10 +124,6 @@ export class OrdersController {
   })
   @ApiOkResponse({ description: 'The order with the captured payment', type: OrderView })
   @ApiProduces('application/json')
-  // Capture is a `200` route for both a fresh capture and a replay, so it keeps
-  // `@HttpCode(200)` and uses `@Res({ passthrough: true })` only to add the
-  // `Idempotent-Replay: true` marker header on a served replay — the return value is still
-  // the response body and the status stays `200` (ADR-036).
   public async capturePayment(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: CapturePaymentRequestDto,
@@ -227,9 +199,6 @@ export class OrdersController {
   })
   @ApiOkResponse({ description: 'The shipped fulfillment', type: FulfillmentView })
   @ApiProduces('application/json')
-  // Ship is a `200` route for both a fresh ship and a replay (like Capture), so it keeps
-  // `@HttpCode(200)` and uses `@Res({ passthrough: true })` only to add the
-  // `Idempotent-Replay: true` marker header on a served replay (ADR-036).
   public async shipFulfillment(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Param('fulfillmentId', ParseIntPipe) fulfillmentId: number,

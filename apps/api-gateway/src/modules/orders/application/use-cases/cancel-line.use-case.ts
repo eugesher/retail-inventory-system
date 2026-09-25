@@ -6,15 +6,6 @@ import { ICurrentUser, OrderView, PermissionCodeEnum } from '@retail-inventory-s
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Cancels one `OrderLine`'s unshipped quantity. The route is
-// `@RequiresPermission('order:cancel')`-gated — line-level cancel is a **staff-only**
-// operation (not owner-reachable, unlike Cancel Order), so the permission gate is the
-// right shape (ADR-024). This use case still resolves `isStaffCancel` from
-// `@CurrentUser().permissions` (always `true` here) and folds `@CurrentUser().id` into
-// `actorId`; the retail use case enforces staff-only (a non-staff caller is 403) and
-// releases the cancelled quantity's allocation proportionally with no money-total
-// change. Omit `quantity` to cancel all the line's remaining unshipped quantity.
-// Returns the updated `OrderView`.
 @Injectable()
 export class CancelLineUseCase {
   constructor(

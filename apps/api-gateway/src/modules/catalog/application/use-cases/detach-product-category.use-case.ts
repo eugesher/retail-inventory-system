@@ -6,17 +6,11 @@ import { ProductCategoriesView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CATALOG_GATEWAY_PORT, ICatalogGatewayPort } from '../ports';
 
-// Input for the `DELETE /api/catalog/products/:productId/categories/:categorySlug`
-// route — both values come from path params.
 export interface IDetachProductCategoryInput {
   productId: number;
   categorySlug: string;
 }
 
-// Folds the single-slug detach HTTP shape onto the `catalog.product.reclassify`
-// RPC with an EMPTY attach list and a ONE-slug detach list. Detach is idempotent
-// (removing a non-membership is a silent success) and a detach of an archived
-// category is allowed — the microservice owns both rules.
 @Injectable()
 export class DetachProductCategoryUseCase {
   constructor(
