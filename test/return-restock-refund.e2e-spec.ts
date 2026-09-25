@@ -11,28 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { ReturnsRefundsE2ESpecDataSource } from './data-source/returns-refunds.e2e-spec.data-source';
 
-// The Stage-2 acceptance criterion (ADR-032): the full returns + refunds chain end to
-// end. A customer places a two-unit order; an operator ships and delivers it; the
-// customer opens an RMA for one of the two units; the operator authorizes, receives, and
-// inspects it with a `restock` disposition; then a goodwill-free refund is issued for the
-// returned unit's value. The proof spans both service boundaries and is asserted through
-// PUBLIC state only (the order GET, the public stock read, the uncached movements ledger,
-// the refund read) — never an event spy:
-//   - Inspect's `restock` disposition re-enters the unit into sellable inventory: the
-//     cross-service `inventory.stock.restock-from-return` RPC is AWAITED inside the inspect
-//     use case (before its HTTP response returns) and is idempotent on the RMA id, so by
-//     the time inspect answers, `quantity_on_hand` has risen by the restocked quantity and
-//     the audit ledger carries exactly one positive `return` movement referencing the RMA.
-//   - Issue Refund reverses the returned unit's value against the SHIP-captured payment
-//     (ship auto-captures, so the payment is already `captured` — no explicit capture
-//     needed): the refund row goes `issued`, and the payment's `refunded_amount_minor`
-//     accumulates the refunded amount (a partial refund of the two-unit order, so the
-//     payment stays `captured`).
-//
-// Asserted RELATIVELY (deltas from the self-provisioned baseline) so the suite stays green
-// alongside seed data. Self-provisioned, disjoint fixture (`e2e-return-restock-*`): its own
-// product, variant, price, and `receive`d stock, so the shared seeded variants are never
-// touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -381,8 +359,6 @@ describe('Returns + refunds: place → ship → deliver → return → restock �
       .set('Authorization', adminAuth);
     expect(deliver.status).toBe(HttpStatus.OK);
 
-    // Ship auto-captured the payment (ship-triggered capture, ADR-031), so the order is
-    // delivered with a CAPTURED payment ready to be refunded — no explicit capture needed.
     const fresh = await getOrder(order.id);
     expect(fresh.status).toBe('delivered');
     expect(fresh.fulfillmentStatus).toBe('delivered');
@@ -390,12 +366,9 @@ describe('Returns + refunds: place → ship → deliver → return → restock �
     expect(fresh.payment?.status).toBe('captured');
     paymentId = fresh.payment!.id;
 
-    // Ship physically shipped both units: on-hand fell from the received baseline by the
-    // ordered quantity. This is the baseline the restock must raise.
     onHandBeforeRestock = (await warehouseLevel(variantId)).quantityOnHand;
     expect(onHandBeforeRestock).toBe(RECEIVED_QTY - ORDERED_QTY);
 
-    // No `return` movement exists yet — nothing has been restocked.
     expect(await listReturnMovements(variantId)).toHaveLength(0);
   });
 
@@ -417,7 +390,6 @@ describe('Returns + refunds: place → ship → deliver → return → restock �
     expect(rma.lines).toHaveLength(1);
     expect(rma.lines[0].orderLineId).toBe(orderLineId);
     expect(rma.lines[0].quantity).toBe(RETURNED_QTY);
-    // The inspection columns are null until the warehouse inspects.
     expect(rma.lines[0].condition).toBeNull();
     expect(rma.lines[0].disposition).toBeNull();
     expect(rma.lines[0].lineRefundAmountMinor).toBeNull();
@@ -439,7 +411,6 @@ describe('Returns + refunds: place → ship → deliver → return → restock �
     expect(receive.status).toBe(HttpStatus.OK);
     expect((receive.body as IReturnBody).status).toBe('received');
 
-    // Authorize + receive are pure status walks — the goods are not yet back on the shelf.
     expect((await warehouseLevel(variantId)).quantityOnHand).toBe(onHandBeforeRestock);
     expect(await listReturnMovements(variantId)).toHaveLength(0);
   });
@@ -466,18 +437,11 @@ describe('Returns + refunds: place → ship → deliver → return → restock �
     expect(inspected.lines[0].disposition).toBe('restock');
     expect(inspected.lines[0].lineRefundAmountMinor).toBe(UNIT_PRICE_MINOR);
 
-    // Restock-from-Return is AWAITED inside the inspect use case (before this response
-    // returned) and invalidates the stock cache post-commit, so the public read reflects
-    // immediately: on-hand rose by exactly the restocked quantity.
     const level = await warehouseLevel(variantId);
     expect(level.quantityOnHand).toBe(onHandBeforeRestock + RETURNED_QTY);
-    // Reserved/allocated are untouched — a restock only raises on-hand (and thus available).
     expect(level.quantityAllocated).toBe(0);
     expect(level.quantityReserved).toBe(0);
 
-    // The audit ledger gained exactly one positive `return` row referencing the RMA (the
-    // `returnRequestId` idempotency anchor). The ledger is an audit trail, not the balance
-    // authority.
     const movements = await listReturnMovements(variantId);
     expect(movements).toHaveLength(1);
     expect(movements[0].type).toBe('return');
@@ -496,7 +460,6 @@ describe('Returns + refunds: place → ship → deliver → return → restock �
     expect(closed.status).toBe('closed');
     expect(closed.closedAt).not.toBeNull();
 
-    // Closing the RMA does not move money — Issue Refund is a distinct, explicit step.
     expect(await dataSource.getRefundsByOrderId(order.id)).toHaveLength(0);
     const payment = await dataSource.getPaymentByOrderId(order.id);
     expect(payment?.refundedAmountMinor).toBe(0);
@@ -517,17 +480,13 @@ describe('Returns + refunds: place → ship → deliver → return → restock �
     expect(issued.amountMinor).toBe(UNIT_PRICE_MINOR);
     expect(issued.gatewayReference).not.toBeNull();
 
-    // The payment's cumulative refund total reflects the issued amount. Refunding one of
-    // two units is a PARTIAL refund, so the payment row stays `captured`.
     const payment = await dataSource.getPaymentByOrderId(order.id);
     expect(payment?.refundedAmountMinor).toBe(UNIT_PRICE_MINOR);
     expect(payment?.status).toBe('captured');
 
-    // The order's embedded payment view agrees (still captured after a partial refund).
     const fresh = await getOrder(order.id);
     expect(fresh.payment?.status).toBe('captured');
 
-    // The refund is readable back, newest-first, as a single issued row.
     const list = await server()
       .get(`/api/orders/${order.id}/refunds`)
       .set('Authorization', adminAuth);

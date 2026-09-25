@@ -1,31 +1,5 @@
 import { DataSource } from 'typeorm';
 
-// E2E helper for the event-store suites. Unlike the other `*.e2e-spec.data-source.ts`
-// helpers — which open on `DATABASE_URL` (the operational `retail_db`) — this one is
-// opened by its suite on `EVENTSTORE_DATABASE_URL`, the isolated `ris_eventstore`
-// schema (ADR-034) that holds the two append-only firehose logs. It therefore extends
-// `DataSource` directly rather than `InventoryAutoInitE2ESpecDataSource`, whose
-// `stock_level` reader targets a table that does not exist here.
-//
-// It exists so a suite can assert a persisted row WITHOUT going through the query API.
-// `GET /api/audit/*` can answer these questions now, but a suite that proves INGESTION
-// must not depend on the read path to do it: a bug in the query filters would then hide a
-// bug in the ingest, and vice versa. The suites that prove the read path (`audit-*-query`,
-// `audit-trace-correlation`) go through the API on purpose; the ones that prove the write
-// path read the table. Both logs are written asynchronously off the bus, so suites poll
-// these readers (re-query with a short delay up to a bounded timeout) rather than
-// asserting immediately after the HTTP call.
-//
-// mysql2 returns BIGINT `id` columns as strings and already parses `json` columns to
-// objects, so `id` is coerced with `Number(...)` and `payload`/`before`/`after` are
-// passed through as objects. `occurred_at` is returned as a `Date`; the connection is
-// pinned to UTC (`timezone: 'Z'`, matching the writer's `DatabaseModule`) so the
-// wall-clock the producer emitted round-trips unshifted.
-
-// One `domain_event` row, projected to the fields the firehose / idempotency suites
-// assert on. `payload` is the whole captured wire event; the resolver-derived columns
-// (`producer`, `aggregate_type`, `aggregate_id`) and the idempotency anchor
-// (`correlation_id` + `occurred_at`) are surfaced for direct assertion.
 export interface IDomainEventRowProjection {
   id: number;
   eventType: string;
@@ -38,7 +12,6 @@ export interface IDomainEventRowProjection {
   payload: Record<string, unknown>;
 }
 
-// One `audit_log_entry` row, projected to the fields the audit-log suite asserts on.
 export interface IAuditLogEntryRowProjection {
   id: number;
   actorId: string | null;
@@ -73,9 +46,6 @@ export class EventStoreE2ESpecDataSource extends DataSource {
     correlation_id, event_version, occurred_at, payload
   `;
 
-  // Every domain event the firehose captured under one correlation id, oldest first —
-  // the whole Place Order chain when the suite drives the flow under a fixed
-  // `x-correlation-id` header.
   public async getDomainEventsByCorrelationId(
     correlationId: string,
   ): Promise<IDomainEventRowProjection[]> {
@@ -99,8 +69,6 @@ export class EventStoreE2ESpecDataSource extends DataSource {
     return Number(rows[0].n);
   }
 
-  // Used to prove `audit.staff.action` never lands in `domain_event` (it routes only to
-  // `audit_log_entry`).
   public async countDomainEventsByEventType(eventType: string): Promise<number> {
     const rows: Record<string, unknown>[] = await this.query(
       `SELECT COUNT(*) AS n FROM domain_event WHERE event_type = ?;`,
@@ -109,12 +77,6 @@ export class EventStoreE2ESpecDataSource extends DataSource {
     return Number(rows[0].n);
   }
 
-  // The idempotency oracle: exactly how many `domain_event` rows exist for one event type
-  // against one aggregate (e.g. `retail.order.placed` for a given order id). A replay must
-  // short-circuit BEFORE the event publisher (ADR-036), so two identical Place Order calls
-  // that resolve to one order leave this at 1 — the "one logical place = one event" proof.
-  // Keyed on `(event_type, aggregate_id)` rather than the correlation id so it holds even
-  // if the two requests carried different correlation ids.
   public async countDomainEventsByTypeAndAggregateId(
     eventType: string,
     aggregateId: string,
@@ -126,9 +88,6 @@ export class EventStoreE2ESpecDataSource extends DataSource {
     return Number(rows[0].n);
   }
 
-  // Exactly the composite UNIQUE `(producer, event_type, aggregate_id, occurred_at,
-  // correlation_id)` — the idempotency anchor. A double-publish of the same wire event
-  // must leave this at 1.
   public async countDomainEventsByCompositeKey(key: {
     producer: string;
     eventType: string;
@@ -151,7 +110,6 @@ export class EventStoreE2ESpecDataSource extends DataSource {
     return Number(rows[0].n);
   }
 
-  // Every staff audit entry under one correlation id, newest first.
   public async getAuditLogEntriesByCorrelationId(
     correlationId: string,
   ): Promise<IAuditLogEntryRowProjection[]> {

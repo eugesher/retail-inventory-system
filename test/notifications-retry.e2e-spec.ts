@@ -23,20 +23,6 @@ import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 
 import { FLAKY_NOTIFIER_FAIL_MARKER } from '../apps/notification-microservice/src/modules/notifications/infrastructure/delivery/flaky-log.notifier.adapter';
 
-// A failed delivery is recovered by the manual retry route (ADR-033). This suite turns on
-// the test-only flaky NOTIFIER (`NOTIFIER_TEST_FLAKY`, set before the notification
-// microservice boots), authors — over the gateway — a `retail.order.placed` template whose
-// body carries the fail-once marker, then publishes a synthetic `retail.order.placed` event
-// (the disjoint, per-run `orderId`/`customerId` keep it isolated). The first dispatch fails
-// (the flaky adapter rejects a marked body once), so the delivery lands `failed` with
-// `attempt_count = 1`. Driving the manual retry route
-// (`POST /api/notifications/deliveries/:id/retry`, which re-dispatches the already-rendered
-// content and ignores the backoff gate) flips it to `sent` with `attempt_count = 2`.
-//
-// Everything is asserted through PUBLIC STATE — the gateway delivery audit query + the retry
-// route's own response — never an event spy. The synthetic publish mirrors the existing
-// notification flow e2e, keeping the flaky path deterministic without booting retail/catalog/
-// inventory. (The scheduled-sweeper retry is covered by the unit spec.)
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const RECIPIENT_EMAIL = 'retry-e2e@example.com';
@@ -60,8 +46,6 @@ describe('Notifications — manual retry recovers a failed delivery (e2e)', () =
   let publisher: ClientProxy;
 
   const stamp = Date.now();
-  // Disjoint per-run identity so the delivery (and its dedupe key) never collides with
-  // another run's row or another suite's order.
   const orderId = 900_000_000 + (stamp % 90_000_000);
   const orderNumber = `ORD-RETRY-${stamp}`;
   const customerId = randomUUID();
@@ -105,9 +89,6 @@ describe('Notifications — manual retry recovers a failed delivery (e2e)', () =
   };
 
   beforeAll(async () => {
-    // Turn on the flaky NOTIFIER for THIS microservice instance only. Set before boot so the
-    // module's wiring-time selection picks the flaky adapter; restored in afterAll so no later
-    // suite inherits it.
     flakyFlagBefore = process.env.NOTIFIER_TEST_FLAKY;
     process.env.NOTIFIER_TEST_FLAKY = 'true';
 
@@ -146,9 +127,6 @@ describe('Notifications — manual retry recovers a failed delivery (e2e)', () =
 
     adminAuth = await bearer(ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    // Author the marker template as the newest active `retail.order.placed` version. Its body
-    // carries the fail-once marker; it keeps `{{orderNumber}}` so it stays a superset of the
-    // seeded body (other suites that render it succeed under their non-flaky notifier).
     const authorRes = await server()
       .post('/api/notifications/templates')
       .set('Authorization', adminAuth)
@@ -167,7 +145,6 @@ describe('Notifications — manual retry recovers a failed delivery (e2e)', () =
     await publisher?.close();
     await apiGatewayApp?.close();
     await notificationMicroservice?.close();
-    // Restore the flag so a later suite's notification microservice is not flaky.
     if (flakyFlagBefore === undefined) {
       delete process.env.NOTIFIER_TEST_FLAKY;
     } else {
@@ -211,7 +188,6 @@ describe('Notifications — manual retry recovers a failed delivery (e2e)', () =
     expect(retried.status).toBe('sent');
     expect(retried.attemptCount).toBe(2);
 
-    // And the public audit trail agrees — the same row is now sent.
     const sent = await listOrderDeliveries('sent');
     expect(sent).toHaveLength(1);
     expect(sent[0].id).toBe(failed.id);

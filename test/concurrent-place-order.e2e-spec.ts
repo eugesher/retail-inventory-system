@@ -11,20 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// The no-oversell invariant under a full checkout race (ADR-030). TEN customers, each with
-// their own cart, race to buy the last units of ONE variant provisioned to exactly FIVE.
-// Adding a line reserves stock through the bounded optimistic write protocol
-// (version-checked compare-and-swap + retry), and `StockLevel.reserve` throws `OUT_OF_STOCK`
-// the moment the ask exceeds `available`. So EXACTLY FIVE racers reserve-and-place (five
-// orders) and the other five get `409 INVENTORY_OUT_OF_STOCK` — total successful allocations
-// can never exceed available stock, even when writers retry. Each placed order commits its
-// hold as exactly one negative `allocation` `StockMovement`, so there are exactly FIVE
-// allocation rows (one per order) with NO duplicates — the retry never double-allocates.
-//
-// Winner-AGNOSTIC: the suite never assumes WHICH five win — it sums the outcomes and asserts
-// exact counts. It reads DB-backed public state (the stock read + the uncached movements
-// ledger), never a broker side effect. Self-provisioned, disjoint fixture
-// (`e2e-conc-place-*`) with on-hand exactly SUPPLY.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_PASSWORD = 'customer1234';
@@ -135,9 +121,6 @@ describe('Concurrent place order: 10 racers, 5 supply → exactly 5 succeed (e2e
     }
   };
 
-  // Fire one request, retrying only on a transient in-process socket reset (the concurrent
-  // burst occasionally drops a connection — a real client retries these). A 4xx (the loser's
-  // OUT_OF_STOCK) is a real outcome and is returned, never retried.
   const sendWithNetRetry = async (
     build: () => supertest.Test,
     maxTries = 8,
@@ -230,13 +213,6 @@ describe('Concurrent place order: 10 racers, 5 supply → exactly 5 succeed (e2e
     return (body as IPageBody<IMovementBody>).items;
   };
 
-  // Fire a request, retrying a transient stock write-conflict — the 409 a writer gets when it
-  // loses the version compare-and-swap and exhausts the server-side OCC budget under heavy
-  // contention (`INVENTORY_STOCK_WRITE_CONFLICT`, distinct from the terminal
-  // `INVENTORY_OUT_OF_STOCK`). A real client refetches-and-retries a write-conflict, so doing
-  // so keeps the race deterministic: every reserve attempt terminates in either a 200 (got a
-  // unit) or OUT_OF_STOCK (stock genuinely gone), never a spurious conflict. OUT_OF_STOCK and
-  // every 2xx are returned as-is.
   const sendRetryingConflicts = async (
     build: () => supertest.Test,
     maxTries = 50,
@@ -256,9 +232,6 @@ describe('Concurrent place order: 10 racers, 5 supply → exactly 5 succeed (e2e
     return last;
   };
 
-  // The whole checkout for one racer: reserve (add line), then — only if the reserve won —
-  // place. A reserve 409 (after conflicts are retried away) is the OUT_OF_STOCK outcome; a
-  // place commits the held reservation (allocate), retried past any transient conflict.
   const checkout = async (racer: IRacer, index: number): Promise<ICheckoutOutcome> => {
     const add = await sendRetryingConflicts(() =>
       server()
@@ -268,8 +241,6 @@ describe('Concurrent place order: 10 racers, 5 supply → exactly 5 succeed (e2e
     );
 
     if (add.status === (HttpStatus.CONFLICT as number)) {
-      // A loser — never got the unit. Both codes are legitimate "no unit" 409s: OUT_OF_STOCK
-      // (stock gone) or a write-conflict that outlasted even the client retry.
       expect(['INVENTORY_OUT_OF_STOCK', 'INVENTORY_STOCK_WRITE_CONFLICT']).toContain(add.body.code);
       return { outcome: 'out-of-stock' };
     }
@@ -359,7 +330,6 @@ describe('Concurrent place order: 10 racers, 5 supply → exactly 5 succeed (e2e
   it(
     `exactly ${SUPPLY} of ${NUM_RACERS} checkouts succeed; the rest get OUT_OF_STOCK; no duplicate allocations`,
     async () => {
-      // Distinct customers + carts, all built before the race so the burst is truly concurrent.
       const racers: IRacer[] = [];
       for (let index = 0; index < NUM_RACERS; index++) {
         const token = await registerCustomer(index);
@@ -373,8 +343,6 @@ describe('Concurrent place order: 10 racers, 5 supply → exactly 5 succeed (e2e
       expect(placed).toHaveLength(SUPPLY);
       expect(outOfStock).toHaveLength(NUM_RACERS - SUPPLY);
 
-      // Final stock is fully consumed and consistent: every unit allocated, none reserved,
-      // nothing negative.
       const level = await warehouseLevel(variantId);
       expect(level.quantityOnHand).toBe(SUPPLY);
       expect(level.quantityAllocated).toBe(SUPPLY);
@@ -383,15 +351,12 @@ describe('Concurrent place order: 10 racers, 5 supply → exactly 5 succeed (e2e
       expect(level.quantityAllocated).toBeGreaterThanOrEqual(0);
       expect(level.available).toBeGreaterThanOrEqual(0);
 
-      // Exactly SUPPLY allocation movements — one per placed order, NO duplicates. Each row
-      // is −1 and references a distinct order id (the set of placed order ids).
       const allocations = (await listMovements(variantId)).filter((m) => m.type === 'allocation');
       expect(allocations).toHaveLength(SUPPLY);
       expect(allocations.every((m) => m.quantity === -1)).toBe(true);
 
       const placedOrderIds = new Set(placed.map((o) => String(o.orderId)));
       const allocationOrderIds = allocations.map((m) => m.referenceId);
-      // No duplicate allocation order references, and each maps to a real placed order.
       expect(new Set(allocationOrderIds).size).toBe(SUPPLY);
       expect(allocationOrderIds.every((id) => id !== null && placedOrderIds.has(id))).toBe(true);
     },

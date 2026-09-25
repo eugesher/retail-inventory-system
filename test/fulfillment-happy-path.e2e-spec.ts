@@ -11,27 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// The fulfillment happy path end-to-end (ADR-031). A customer places a one-line
-// order (qty 2, authorize-on-place), then an operator drives the shipment all the
-// way: create one fulfillment covering the line in full → ship it → deliver it. The
-// proof spans all four status axes and crosses the service boundary into inventory:
-//   - the order's three axes (lifecycle / payment / fulfillment) and the
-//     fulfillment's own (fourth) axis advance exactly as the lifecycle prescribes;
-//   - Ship CAPTURES the authorized payment automatically (paymentStatus → captured)
-//     and, only AFTER its local commit, Commit-Sale physically decrements stock — so
-//     BOTH `quantity_on_hand` AND `quantity_allocated` drop (an allocation is reclassed
-//     to a shipment, not a within-warehouse move);
-//   - the audit ledger gains exactly one negative `sale` row per shipped line,
-//     referencing the fulfillment (the `fulfillmentId` idempotency anchor).
-//
-// Asserted through PUBLIC state only (the order GET, the public stock read, the
-// uncached movements ledger) — never an event spy or a broker side effect (the
-// project convention). Commit-Sale is awaited inside the ship use case before the
-// HTTP response returns, and the movements read is uncached, so the `sale` row is
-// observable immediately with no sleep.
-//
-// Self-provisioned, disjoint fixture (`e2e-ful-happy-*`): its own product, variant,
-// price, and `receive`d stock, so the shared seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -337,8 +316,6 @@ describe('Fulfillment happy path: place → fulfill → ship → deliver (e2e)',
     expect(order.payment?.status).toBe('authorized');
     expect(order.payment?.capturedAt).toBeNull();
 
-    // Place moved the cart hold (reserved) to an order allocation: on-hand intact,
-    // allocated up, reserved back to 0.
     const level = await warehouseLevel(variantId);
     expect(level.quantityOnHand).toBe(RECEIVED_QTY);
     expect(level.quantityAllocated).toBe(ORDERED_QTY);
@@ -367,8 +344,6 @@ describe('Fulfillment happy path: place → fulfill → ship → deliver (e2e)',
     expect(fulfillment.lines[0].quantity).toBe(ORDERED_QTY);
     fulfillmentId = fulfillment.id;
 
-    // Creating a fulfillment is a plan, not a physical move: the order axes and the
-    // stock counters are untouched (the flip is Ship's job).
     const fresh = await getOrder(order.id);
     expect(fresh.status).toBe('pending');
     expect(fresh.paymentStatus).toBe('authorized');
@@ -394,9 +369,6 @@ describe('Fulfillment happy path: place → fulfill → ship → deliver (e2e)',
     expect(shipped.carrier).toBe('UPS');
     expect(shipped.shippedAt).not.toBeNull();
 
-    // The order's lifecycle axis stays `pending` (Ship advances only fulfillment); the
-    // payment axis flips to `captured` (ship-triggered capture) and the fulfillment axis
-    // rolls up to `shipped` because the single line is fully shipped.
     const fresh = await getOrder(order.id);
     expect(fresh.status).toBe('pending');
     expect(fresh.paymentStatus).toBe('captured');
@@ -405,8 +377,6 @@ describe('Fulfillment happy path: place → fulfill → ship → deliver (e2e)',
     expect(fresh.payment?.status).toBe('captured');
     expect(fresh.payment?.capturedAt).not.toBeNull();
 
-    // Commit-Sale physically decremented BOTH counters: on-hand 5→3 and allocated
-    // 2→0. `available` is unchanged (both counters already subtracted from it).
     const level = await warehouseLevel(variantId);
     expect(level.quantityOnHand).toBe(RECEIVED_QTY - ORDERED_QTY);
     expect(level.quantityAllocated).toBe(0);
@@ -433,14 +403,11 @@ describe('Fulfillment happy path: place → fulfill → ship → deliver (e2e)',
     expect(delivered.status).toBe('delivered');
     expect(delivered.deliveredAt).not.toBeNull();
 
-    // The order's only fulfillment is delivered, so the lifecycle AND fulfillment axes
-    // both roll up to `delivered`; payment stays `captured`.
     const fresh = await getOrder(order.id);
     expect(fresh.status).toBe('delivered');
     expect(fresh.paymentStatus).toBe('captured');
     expect(fresh.fulfillmentStatus).toBe('delivered');
 
-    // Delivery moves no stock: the post-ship counters and the single `sale` row stand.
     const level = await warehouseLevel(variantId);
     expect(level.quantityOnHand).toBe(RECEIVED_QTY - ORDERED_QTY);
     expect(level.quantityAllocated).toBe(0);

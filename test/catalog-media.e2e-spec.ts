@@ -7,35 +7,11 @@ import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/
 import { AppModule as CatalogMicroserviceAppModule } from '@retail-inventory-system/apps/catalog-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
-// Gateway-only HTTP walk of the polymorphic MediaAsset surface (ADR-029 §4):
-// attach-appends-in-order, the all-or-nothing reorder (a non-permutation set is a
-// 409 `CATALOG_MEDIA_REORDER_SET_MISMATCH`), detach as a state-guarded archive
-// flip (a second detach is a 409), variant-scoped media, and the 401/403/404/400
-// gates. The catalog microservice maps each typed `CatalogDomainException` onto an
-// HTTP status via `CatalogRpcExceptionFilter`; the gateway's `throwRpcError`
-// forwards the typed `code` into the error body.
-//
-// COLLISION-PROOFING (read before editing). A later session seeds two media rows
-// on product 1. To keep this suite green both before and after that seed lands —
-// and to survive a second `yarn test:e2e:run` against living infra where prior
-// runs leave archived/active media behind — every assertion here is RELATIVE: it
-// filters the owner's media strip down to the ids THIS run created and never
-// asserts "product 1 has exactly N media". The reorder operation, however, needs
-// the request set to be an EXACT permutation of the owner's ACTIVE strip, so the
-// suite first CLEAN-SLATES the owner (archives every currently-active asset via
-// the public list + the detach route) in `beforeAll` — afterwards the active
-// strip is exactly what this run attaches, making the reorder deterministic. The
-// `maxSortOrder` append slot counts archived rows, so created `sortOrder`s are
-// asserted as strictly ascending, never as fixed values. Only the seeded
-// product/variant and the seeded logins are relied on.
-
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
 const CUSTOMER_PASSWORD = 'customer1234';
 
-// Seeded fixtures (scripts/seeds/catalog-product*.sql): product 1 = aurora-desk-lamp
-// with variant 1 = AURORA-WARM.
 const SEEDED_PRODUCT_ID = 1;
 const SEEDED_VARIANT_ID = 1;
 
@@ -68,13 +44,8 @@ describe('Catalog media gateway endpoints (e2e)', () => {
   let apiGatewayApp: INestApplication;
   let catalogMicroservice: INestMicroservice;
 
-  // Per-run-unique URIs so the fixtures are visually distinct between runs (the
-  // `uri` column is not UNIQUE-constrained, but it keeps a re-run's rows legible).
   const stamp = Date.now();
 
-  // The three product-media ids this run creates (in creation order), and the
-  // single variant-media id — every assertion filters the owner strip down to
-  // these so the suite stays green amid seeded/prior-run media.
   let productMediaIds: number[] = [];
   let variantMediaId: number;
 
@@ -98,9 +69,6 @@ describe('Catalog media gateway endpoints (e2e)', () => {
     return body as IMediaBody[];
   };
 
-  // CLEAN-SLATE: archive every currently-active asset on the owner so this run
-  // owns the entire active strip (the reorder needs an exact active-set
-  // permutation). Idempotent and re-run safe — a second pass finds nothing active.
   const clearActiveMedia = async (auth: string, listPath: string): Promise<void> => {
     for (const media of await listMedia(listPath)) {
       await supertest(apiGatewayApp.getHttpServer())
@@ -182,13 +150,10 @@ describe('Catalog media gateway endpoints (e2e)', () => {
 
       productMediaIds = [image.id, video.id, document.id];
 
-      // Append slots are strictly ascending in creation order (the absolute
-      // values depend on archived siblings, so only the ordering is asserted).
       expect(image.sortOrder).toBeLessThan(video.sortOrder);
       expect(video.sortOrder).toBeLessThan(document.sortOrder);
       expect(image.status).toBe('active');
 
-      // Public browse returns them in creation order (filtered to this run's trio).
       const strip = await listMedia(`/api/catalog/products/${SEEDED_PRODUCT_ID}/media`);
       const ownStrip = strip.filter((m) => productMediaIds.includes(m.id)).map((m) => m.id);
       expect(ownStrip).toEqual(productMediaIds);
@@ -212,7 +177,6 @@ describe('Catalog media gateway endpoints (e2e)', () => {
         .map((m) => m.id);
       expect(ownStrip).toEqual(reversed);
 
-      // …and the public browse now reflects the reversed relative order.
       const strip = await listMedia(`/api/catalog/products/${SEEDED_PRODUCT_ID}/media`);
       const browsedOwn = strip.filter((m) => productMediaIds.includes(m.id)).map((m) => m.id);
       expect(browsedOwn).toEqual(reversed);
@@ -220,8 +184,6 @@ describe('Catalog media gateway endpoints (e2e)', () => {
 
     it('rejects a non-permutation set with a 409 CATALOG_MEDIA_REORDER_SET_MISMATCH', async () => {
       const auth = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
-      // Smuggle a foreign id alongside the real trio — not an exact permutation
-      // of the active set, so the bulk reorder writes nothing.
       const mismatched = [...productMediaIds, 999_999_999];
 
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
@@ -237,8 +199,6 @@ describe('Catalog media gateway endpoints (e2e)', () => {
   describe('detach is a state-guarded archive flip', () => {
     it('detaches the middle asset and preserves the relative order of the rest', async () => {
       const auth = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
-      // Current displayed order is the reversed trio; its middle is the same
-      // element regardless of direction (the second of three).
       const middleId = productMediaIds[1];
       const survivors = [...productMediaIds].reverse().filter((id) => id !== middleId);
 
@@ -291,7 +251,6 @@ describe('Catalog media gateway endpoints (e2e)', () => {
       const variantStrip = await listMedia(`/api/catalog/variants/${SEEDED_VARIANT_ID}/media`);
       expect(variantStrip.map((m) => m.id)).toContain(variantMediaId);
 
-      // The product strip is unchanged — media are owner-scoped by (type, id).
       const productStripAfter = (
         await listMedia(`/api/catalog/products/${SEEDED_PRODUCT_ID}/media`)
       )

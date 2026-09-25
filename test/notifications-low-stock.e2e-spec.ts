@@ -14,28 +14,12 @@ import {
   NotificationDeliveryE2ESpecDataSource,
 } from './data-source/notification-delivery.e2e-spec.data-source';
 
-// A low-stock adjustment fans out a SYSTEM/OPS notification (ADR-033). Staff drive a
-// self-provisioned variant's on-hand below the low-stock threshold; the inventory
-// microservice emits `inventory.stock.low` onto `notification_events`; the notification
-// microservice's `InventoryEventsConsumer` routes it through `RenderAndDispatchUseCase`,
-// which resolves the seeded `inventory.stock.low` template and dispatches to the operations
-// mailbox.
-//
-// Unlike a buyer notification, this one has NO customer — it is asserted (via a direct
-// `notification_delivery` row read) to go to `OPS_NOTIFICATIONS_EMAIL` with a NULL
-// `recipient_customer_id` (the system-row shape; not deduped, ADR-033). No retail
-// microservice is needed — provisioning + the adjustment + the alert exercise only
-// catalog → inventory → notification.
-//
-// Self-provisioned, disjoint fixture (`e2e-notif-lowstock-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const DEFAULT_WAREHOUSE = 'default-warehouse';
-// Joi default (`.env.local` does not override it) — the ops mailbox the alert is sent to.
 const OPS_EMAIL = 'ops@example.com';
-// The seeded `INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD`; on-hand at or below it fires the alert.
 const RECEIVE_QTY = 6;
-const ADJUST_DELTA = -3; // 6 - 3 = 3, at or below the threshold (5) → low-stock fires.
+const ADJUST_DELTA = -3;
 const EXPECTED_ON_HAND = RECEIVE_QTY + ADJUST_DELTA;
 
 interface ITokenResponse {
@@ -222,10 +206,8 @@ describe('Notifications — low-stock adjustment fans out to ops (e2e)', () => {
     expect(delivery.channel).toBe('email');
     expect(delivery.eventReferenceType).toBe('stock-low');
     expect(delivery.eventReferenceId).toBe(`${variantId}:${DEFAULT_WAREHOUSE}`);
-    // A system/ops alert: it goes to the ops mailbox and has no customer recipient.
     expect(delivery.recipientAddress).toBe(OPS_EMAIL);
     expect(delivery.recipientCustomerId).toBeNull();
-    // Rendered from the `inventory.stock.low` template against the event.
     expect(delivery.renderedBody).toContain(String(variantId));
     expect(delivery.renderedBody).toContain(String(EXPECTED_ON_HAND));
   });

@@ -15,20 +15,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 import { EventStoreE2ESpecDataSource } from './data-source/event-store.e2e-spec.data-source';
 import { ReturnsRefundsE2ESpecDataSource } from './data-source/returns-refunds.e2e-spec.data-source';
 
-// Idempotent Issue Refund (ADR-036) — the audit-integrity case. Refund is the one covered
-// operation that ALWAYS writes an `audit_log_entry` (the always-audit money seam, ADR-032).
-// A refund with an `Idempotency-Key`, replayed with the same key + body, returns the stored
-// `RefundView` (HTTP 200 + `Idempotent-Replay: true`) BEFORE the gateway call AND before the
-// audit emit — so one logical refund leaves exactly ONE refund row, does not double
-// `refunded_amount_minor`, and — the distinguishing oracle — writes exactly ONE
-// `audit.staff.action` into `ris_eventstore.audit_log_entry` (ADR-035). The two refund
-// requests are driven under one fixed `x-correlation-id`, so the audit rows can be counted
-// by that shared correlation id via direct SQL. The count is what the replay DID NOT emit,
-// so it is read off the table rather than through `GET /api/audit/entries` — a write-path
-// assertion must not depend on the read path, and this suite need not boot the event store's
-// query transport to make it.
-//
-// Self-provisioned, disjoint fixture (`e2e-idem-refund-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -107,8 +93,6 @@ describe('Idempotent Issue Refund: replay does not re-refund or re-audit (e2e)',
     return rows.filter((r) => r.action === REFUND_AUDIT_ACTION).length;
   };
 
-  // Audit ingestion is asynchronous (publish → broker → consume → insert), so poll for the
-  // first refund audit row before asserting the count.
   const waitForRefundAudit = async (deadlineMs = 30_000): Promise<void> => {
     const start = Date.now();
     while ((await refundAuditCount()) < 1) {
@@ -268,7 +252,6 @@ describe('Idempotent Issue Refund: replay does not re-refund or re-audit (e2e)',
     expect(place.status).toBe(HttpStatus.CREATED);
     order = place.body as IOrderBody;
 
-    // Capture so the payment is refundable.
     const capture = await server()
       .post(`/api/orders/${order.id}/payments/capture`)
       .set('Authorization', adminAuth)
@@ -322,7 +305,6 @@ describe('Idempotent Issue Refund: replay does not re-refund or re-audit (e2e)',
   });
 
   it('exactly one RefundIssued audit_log_entry despite the replay (the replay short-circuited before the audit)', async () => {
-    // Settle so a (wrong) second audit emission would have been ingested before the count.
     await settleTimestampRounding();
     expect(await refundAuditCount()).toBe(1);
   });

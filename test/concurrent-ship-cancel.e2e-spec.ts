@@ -11,39 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Concurrent ship-vs-cancel race on the SAME order (ADR-031). A Ship and a Cancel
-// hit one order at the same instant (both requests fired without awaiting the first).
-// EXACTLY ONE wins, and the loser does not invert state:
-//   - if Ship wins → the order is shipped-ward (fulfillment `shipped`, order not
-//     cancelled, payment captured) and the Cancel is `409 ORDER_NOT_CANCELLABLE`
-//     (a shipped fulfillment now exists);
-//   - if Cancel wins → the order is `cancelled` (payment voided, fulfillment
-//     `cancelled`) and the Ship is a 4xx (the fulfillment is no longer shippable —
-//     `409 FULFILLMENT_INVALID_STATUS_TRANSITION`).
-//
-// The guard is the Fulfillment/Order status preconditions re-checked INSIDE each use
-// case's transaction under a pessimistic write lock on the contended `fulfillment`
-// row: the two transitions serialise on that row, so the loser blocks until the
-// winner commits and then observes the committed status, which its precondition
-// rejects. This single-writer-per-status-transition guard is what the suite proves.
-//
-// **Not the OCC.** Optimistic concurrency on `order.version` is live (`runWithOrderWriteRetry`
-// wraps every order write, ADR-036/045) — it is simply not what settles *this* race. A lost CAS
-// retries; a lost status transition must be rejected outright, and only the pessimistic row lock
-// can decide which of two transitions on one fulfillment gets to try. Do not read a green run
-// here as evidence that the OCC serialises ship-vs-cancel; it does not.
-//
-// Winner-AGNOSTIC: the suite never assumes WHICH side wins — it classifies each race
-// by outcome and asserts the corresponding consistent end-state. It asserts DB-backed
-// PUBLIC state (the order GET + the fulfillment list), never a broker side effect or
-// an event spy, and never sleeps to "let things settle". Several independent races run
-// per invocation (each on a fresh order), and the whole suite must stay green across 5
-// consecutive runs.
-//
-// Self-provisioned, disjoint fixture (`e2e-ship-cancel-race-*`): its own variant with
-// ample stock, so the shared seeded variants are never touched and the per-race orders
-// never contend on inventory (the contention under test is the order/fulfillment
-// status transition, not stock).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -179,8 +146,6 @@ describe('Concurrent ship vs cancel on the same order (e2e)', () => {
     return (body as IFulfillmentBody[])[0];
   };
 
-  // Places a fresh one-line order (qty 1) and plans one full fulfillment, returning the
-  // ids the race needs. Each race gets its own order so the races are independent.
   const placeAndFulfill = async (
     index: number,
   ): Promise<{ orderId: number; fulfillmentId: number }> => {
@@ -213,14 +178,6 @@ describe('Concurrent ship vs cancel on the same order (e2e)', () => {
     return { orderId: order.id, fulfillmentId: (createFul.body as IFulfillmentBody).id };
   };
 
-  // Fires Ship and Cancel at the SAME order concurrently, capturing both outcomes
-  // WITHOUT throwing on a non-2xx (the loser's 4xx is an expected outcome). Both requests
-  // are constructed and dispatched in the same tick (Promise.all evaluates the array
-  // eagerly), so they truly contend on the fulfillment row lock. Which side reaches the
-  // lock first — and so wins — is environment-timing-dependent; the suite asserts NEITHER
-  // a specific winner (it classifies each race by its outcome), only that exactly one
-  // wins and the loser does not invert state. The deterministic reverse-order rejection
-  // (a ship of an already-cancelled fulfillment) is locked separately below.
   const raceShipCancel = async (
     orderId: number,
     fulfillmentId: number,
@@ -324,7 +281,6 @@ describe('Concurrent ship vs cancel on the same order (e2e)', () => {
         const { orderId, fulfillmentId } = await placeAndFulfill(index);
         const { ship, cancel } = await raceShipCancel(orderId, fulfillmentId, index);
 
-        // Exactly one 2xx and one 4xx — never both-win (state inversion) or both-lose.
         const wins = [ship, cancel].filter((o) => o.status >= 200 && o.status < 300);
         const losses = [ship, cancel].filter((o) => o.status >= 400 && o.status < 500);
         expect(wins).toHaveLength(1);
@@ -334,8 +290,6 @@ describe('Concurrent ship vs cancel on the same order (e2e)', () => {
         const fulfillment = await firstFulfillment(orderId);
 
         if (ship.status === (HttpStatus.OK as number)) {
-          // SHIP WON: the order shipped, so the cancel is rejected because a shipped
-          // fulfillment now exists (a state guard, not an authorization failure).
           expect(cancel.status).toBe(HttpStatus.CONFLICT);
           expect(cancel.body.code).toBe('ORDER_NOT_CANCELLABLE');
 
@@ -346,33 +300,22 @@ describe('Concurrent ship vs cancel on the same order (e2e)', () => {
           expect(fulfillment.status).toBe('shipped');
           winners.push('ship');
         } else {
-          // CANCEL WON: the order cancelled, so the ship is rejected because the
-          // fulfillment is no longer `pending` (a 4xx — the invalid status transition).
           expect(cancel.status).toBe(HttpStatus.OK);
           expect(ship.status).toBe(HttpStatus.CONFLICT);
           expect(ship.body.code).toBe('FULFILLMENT_INVALID_STATUS_TRANSITION');
 
           expect(order.status).toBe('cancelled');
-          // The authorized payment was voided (the payment ROW); the order's payment
-          // AXIS keeps its value (no `voided` member there — the two-enum orthogonality).
           expect(order.payment?.status).toBe('voided');
           expect(fulfillment.status).toBe('cancelled');
           winners.push('cancel');
         }
       }
 
-      // Sanity: every race resolved to exactly one winner (winner-agnostic — the mix of
-      // ship/cancel winners is environment-timing-dependent and intentionally not pinned).
       expect(winners).toHaveLength(RACE_COUNT);
     },
     timeout,
   );
 
-  // The deterministic analogue of the "cancel wins" race outcome: once an order is
-  // cancelled, its (now `cancelled`) fulfillment is no longer shippable. This pins the
-  // reverse-order rejection — the same in-transaction status guard that protects the
-  // race, exercised sequentially so it is asserted on every run regardless of which side
-  // tends to win the live race in this environment.
   it('a ship of an already-cancelled order’s fulfillment is rejected 409 FULFILLMENT_INVALID_STATUS_TRANSITION', async () => {
     const { orderId, fulfillmentId } = await placeAndFulfill(RACE_COUNT);
 
@@ -391,8 +334,6 @@ describe('Concurrent ship vs cancel on the same order (e2e)', () => {
     expect(ship.status).toBe(HttpStatus.CONFLICT);
     expect((ship.body as { code: string }).code).toBe('FULFILLMENT_INVALID_STATUS_TRANSITION');
 
-    // The rejected ship changed nothing: the order stays cancelled, the fulfillment
-    // cancelled, the payment voided (never captured).
     const order = await getOrder(orderId);
     expect(order.status).toBe('cancelled');
     expect(order.payment?.status).toBe('voided');

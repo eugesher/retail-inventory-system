@@ -11,24 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// THE canonical concurrent-oversell proof (ADR-030). Two carts race to reserve the
-// last unit of a freshly-provisioned variant (on-hand 1). The no-oversell guard
-// (`StockLevel.reserve` throws OUT_OF_STOCK when the ask exceeds `available`) runs
-// inside the bounded optimistic write protocol (version-checked compare-and-swap,
-// retried), so EXACTLY ONE racer wins; the other gets `409 INVENTORY_OUT_OF_STOCK`
-// with `available: 0`. After the winner places, the final state is consistent:
-// on-hand 1 / allocated 1 / reserved 0 / available 0, exactly one `allocation`
-// ledger row, and no negative counters anywhere.
-//
-// Stability contract: the suite never assumes WHICH racer wins (it sums the
-// outcomes), never sleeps to "let things settle", and asserts DB-backed reads (the
-// public stock read + the uncached movements ledger) — never a broker side effect
-// or an event spy. It must stay green across 5 consecutive runs after one infra
-// reload (the exact command lives in the implementation doc).
-//
-// Self-provisioned, disjoint fixtures (`e2e-oversell-*`): every scenario gets its
-// own variant with on-hand 1, so the shared seeded variants are never touched and
-// the two scenarios cannot interfere.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -120,8 +102,6 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
     return (body as ITokenResponse).accessToken;
   };
 
-  // A fresh registered customer per call — the second racer (the first is the
-  // seeded `customer@example.com`).
   const registerCustomer = async (): Promise<string> => {
     const email = `oversell-${stamp}-${Math.random().toString(36).slice(2, 8)}@example.com`;
     await server().post('/api/auth/customer/register').send({ email, password: CUSTOMER_PASSWORD });
@@ -211,9 +191,6 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
     return (body as IPageBody<IMovementBody>).items;
   };
 
-  // Fire one add-to-cart and capture its outcome WITHOUT throwing on a non-2xx —
-  // the loser's 409 is an expected outcome, not an error. Returning a plain object
-  // (not the live supertest Test) keeps the two in-flight requests independent.
   const addLine = async (
     racer: IRacer,
     variantId: number,
@@ -315,10 +292,8 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
       racerTwo.cartId = await openCart(racerTwo.token);
       const racers = [racerOne, racerTwo];
 
-      // Both adds in flight at once — true contention on the single stock_level row.
       const outcomes = await Promise.all(racers.map((racer) => addLine(racer, variantId, 1)));
 
-      // Winner-agnostic: sum the outcomes, never assume which index won.
       const wins = outcomes.filter((o) => o.status === (HttpStatus.OK as number));
       const conflicts = outcomes.filter((o) => o.status === (HttpStatus.CONFLICT as number));
       expect(wins).toHaveLength(1);
@@ -332,7 +307,6 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
       winner = racers[winnerIndex];
       loser = racers[1 - winnerIndex];
 
-      // The single unit is held by the winner: on-hand untouched, available 0.
       const level = await warehouseLevel(variantId);
       expect(level.quantityOnHand).toBe(1);
       expect(level.quantityReserved).toBe(1);
@@ -365,7 +339,6 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
       expect(level.quantityAllocated).toBe(1);
       expect(level.quantityReserved).toBe(0);
       expect(level.available).toBe(0);
-      // No counter ever goes negative — the oversell hole would surface here.
       expect(level.quantityOnHand).toBeGreaterThanOrEqual(0);
       expect(level.quantityAllocated).toBeGreaterThanOrEqual(0);
       expect(level.quantityReserved).toBeGreaterThanOrEqual(0);
@@ -380,10 +353,6 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
 
     it('consistency sweep: the ledger holds exactly the receipt + the allocation, totals stable', async () => {
       const movements = await listMovements(variantId);
-      // The loser's failed add left NO orphaned hold and NO stray ledger row: the
-      // variant's whole timeline is exactly the provisioning receipt (+1) and the
-      // winner's allocation (−1). A reserve writes no movement, so the winner's
-      // successful hold is invisible here too — only its allocation survives.
       const receipts = movements.filter((m) => m.type === 'receipt');
       const allocations = movements.filter((m) => m.type === 'allocation');
       expect(receipts).toHaveLength(1);
@@ -399,9 +368,6 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
     });
   });
 
-  // Second act: the release path under the same contention. Instead of placing,
-  // the winner REMOVES its line (release) and the loser can then reserve the freed
-  // unit. A separate fixture keeps it independent of the place scenario above.
   describe('release under contention frees the unit for the loser', () => {
     let variantId: number;
 
@@ -425,11 +391,9 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
       const winner = racers[winnerIndex];
       const loser = racers[1 - winnerIndex];
 
-      // The loser still cannot reserve while the winner holds the unit.
       const blocked = await addLine(loser, variantId, 1);
       expect(blocked.status).toBe(HttpStatus.CONFLICT);
 
-      // The winner abandons its line → the unit is released.
       const winnerCart = await server()
         .get(`/api/cart/${winner.cartId}`)
         .set('Authorization', `Bearer ${winner.token}`);
@@ -440,7 +404,6 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
       expect(remove.status).toBe(HttpStatus.OK);
       expect((await warehouseLevel(variantId)).available).toBe(1);
 
-      // Now the loser CAN reserve the freed unit.
       const retry = await addLine(loser, variantId, 1);
       expect(retry.status).toBe(HttpStatus.OK);
       const level = await warehouseLevel(variantId);
@@ -449,20 +412,9 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
     });
   });
 
-  // Third act: the no-oversell invariant holds under a concurrent DOUBLE place (ADR-036). A
-  // single buyer holds the one unit, then fires TWO Place requests at the same cart at the
-  // same instant under ONE `Idempotency-Key` — a double-submit. The cart-conversion
-  // compare-and-swap (`markConverted WHERE status='active'`) is the guard: exactly one request
-  // converts-and-allocates, and the loser's transaction rolls back (it surfaces a `409`, or an
-  // InnoDB deadlock `500` if the two writers cross on the cart-row lock — a retry then resolves
-  // the winner's order via the converted-cart idempotency path). Either way the loser writes
-  // NO order and NO allocation, so once the race is converged the ledger holds exactly ONE
-  // `allocation` movement — the concurrent double-submit never double-allocates.
   describe('concurrent double-place does not double-allocate', () => {
     let variantId: number;
 
-    // Fire one place, capturing the outcome without throwing on a non-2xx (the concurrent
-    // loser's 409/500 is an expected race outcome, not a test error).
     const place = async (racer: IRacer, key: string): Promise<IRaceOutcome> => {
       const res = await server()
         .post(`/api/cart/${racer.cartId}/place`)
@@ -481,38 +433,27 @@ describe('Concurrent oversell — two carts race for the last unit (e2e)', () =>
       };
       buyer.cartId = await openCart(buyer.token);
 
-      // Hold the single unit.
       const add = await addLine(buyer, variantId, 1);
       expect(add.status).toBe(HttpStatus.OK);
 
-      // Two places at once, same cart, same key — a concurrent double-submit. At least one
-      // wins; the other loses the cart-conversion CAS (409) or deadlocks (500) and rolls back.
       const key = `oversell-${stamp}-double-place`;
       const [a, b] = await Promise.all([place(buyer, key), place(buyer, key)]);
       const winners = [a, b].filter((o) => o.status >= 200 && o.status < 300);
       expect(winners.length).toBeGreaterThanOrEqual(1);
 
-      // Converge the race: a definitive follow-up place under the SAME key returns the winner's
-      // order — a store replay (200) or the converted-cart resolve (201) — WITHOUT allocating
-      // again. This is the "a retry resolves the winner's order" contract the place flow
-      // documents, and it yields the canonical order id regardless of how the race resolved.
       const settled = await place(buyer, key);
       expect(settled.status).toBeGreaterThanOrEqual(200);
       expect(settled.status).toBeLessThan(300);
       const orderId = (settled.body as { id: number }).id;
-      // Every 2xx racer resolved to that same one order — one logical place, one order.
       for (const w of winners) {
         expect((w.body as { id: number }).id).toBe(orderId);
       }
 
-      // The invariant: exactly ONE allocation row for the whole race — no duplicate under the
-      // concurrent double-place, and it references the single order.
       const allocations = (await listMovements(variantId)).filter((m) => m.type === 'allocation');
       expect(allocations).toHaveLength(1);
       expect(allocations[0].quantity).toBe(-1);
       expect(allocations[0].referenceId).toBe(String(orderId));
 
-      // Stock is consistent: the held unit became allocated exactly once, nothing negative.
       const level = await warehouseLevel(variantId);
       expect(level.quantityOnHand).toBe(1);
       expect(level.quantityAllocated).toBe(1);

@@ -125,6 +125,14 @@ refresh-then-commit rule are in ADR-030 §1. Beyond them:
   (`domain/stock-movement.model.ts`). The record is `Object.freeze`d.
 - **`occurredAt` is the Node clock when the use case built the row**, not the commit time. The
   mapper writes it explicitly. In a retried write it is the time of the attempt that won.
+- **`actor_id` is whatever the caller sent, except on Allocate, which always writes `NULL`**
+  (`AllocateStockUseCase`; every other writer takes `payload.actorId ?? null`). The gateway's staff
+  routes send the principal. Retail sends the caller on Commit Sale from Ship, on Restock From Return
+  from Inspect and on the Cancel Allocation of Cancel Order and Cancel Line, so an owner's own cancel
+  records the customer's id. It sends none on Remove Line's release or on Place's two compensations.
+  A timer sweep has none, and an operator sweep carries the operator.
+  `test/inventory-movements-audit.e2e-spec.ts` pins the receive, adjust, transfer, cart-release and
+  allocation rows.
 - **`movement_dedupe_key` is not mapped on the entity.** It is a stored generated column, and TypeORM
   must not write it (`infrastructure/persistence/stock-movement.entity.ts`). It is non-null for
   `sale` and `return` rows, keyed on reference plus `(variant, location)`, and for `release` rows
@@ -227,6 +235,11 @@ is never retried. The e2e suite runs both RPCs twice at once against MySQL
   touched. The per-item `stockLocationId` is not used.
 - **A failed invalidation is a `warn`.** The entry lives until its TTL, and the write still
   succeeds.
+- **Auto-init writes past the cache.** `AutoInitStockLevelUseCase` saves the zeroed level through
+  `saveStockLevel`, not `withInvalidation`. A read taken before it ran has cached a view with no
+  locations, and that view is served until the variant's next stock write or the TTL.
+  `test/inventory-auto-init.e2e-spec.ts` polls the table before its first HTTP read for this
+  reason.
 
 ## The reservation sweep
 

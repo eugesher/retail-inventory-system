@@ -7,32 +7,11 @@ import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/
 import { AppModule as CatalogMicroserviceAppModule } from '@retail-inventory-system/apps/catalog-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
-// Gateway-only HTTP walk of the category surface (ADR-029): hierarchy creation +
-// materialized `path`, subtree rebase on reparent, the cycle 409, the reclassify
-// idempotency + both browse endpoints, and the 401/403/404/409 gates. The catalog
-// microservice maps each typed `CatalogDomainException` onto an HTTP status via
-// `CatalogRpcExceptionFilter`, and the gateway's `throwRpcError` forwards both the
-// status and the typed `code` (e.g. `CATALOG_CATEGORY_CYCLE`) into the error body.
-//
-// COLLISION-PROOFING (read before editing). A later session seeds the categories
-// `electronics` / `phones` / `apparel`. To keep this suite green both before and
-// after that seed lands, every fixture here is API-created from the `menswear`
-// family (`menswear` / `shirts` / `trousers` / `oxford` / `clearance`), NEVER the
-// reserved seeded three. Each created slug additionally carries a per-run `stamp`
-// suffix so a second `yarn test:e2e:run` against living infra does not collide on
-// the UNIQUE slug constraint, and every membership assertion is RELATIVE — it
-// filters the product's full category list down to THIS run's slugs rather than
-// asserting an exact membership size (product 1 accumulates memberships across
-// runs and from the future seed). Only the seeded products/variants and the
-// seeded logins are relied on.
-
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
 const CUSTOMER_PASSWORD = 'customer1234';
 
-// The seeded active product the reclassify scenario attaches to categories
-// (scripts/seeds/catalog-product.sql: product 1 = aurora-desk-lamp).
 const SEEDED_PRODUCT_ID = 1;
 
 interface ITokenResponse {
@@ -91,17 +70,12 @@ describe('Catalog category gateway endpoints (e2e)', () => {
   let apiGatewayApp: INestApplication;
   let catalogMicroservice: INestMicroservice;
 
-  // Per-run-unique fixtures so re-running against living infra never trips the
-  // UNIQUE(slug) constraint. The base names stay in the `menswear` family (never
-  // the reserved seeded `electronics`/`phones`/`apparel`).
   const stamp = Date.now();
   const menswear = `menswear-${stamp}`;
   const shirts = `shirts-${stamp}`;
   const trousers = `trousers-${stamp}`;
   const oxford = `oxford-${stamp}`;
   const clearance = `clearance-${stamp}`;
-  // Every category this run created — used to filter flat lists + membership
-  // views down to this run's rows (the collision-proofing rule).
   const ownSlugs = new Set([menswear, shirts, trousers, oxford, clearance]);
 
   let menswearId: number;
@@ -121,7 +95,6 @@ describe('Catalog category gateway endpoints (e2e)', () => {
     return `Bearer ${(body as ITokenResponse).accessToken}`;
   };
 
-  // Convenience: create a category and return its parsed body, asserting 201.
   const createCategory = async (
     auth: string,
     payload: { name: string; slug: string; parentSlug?: string; sortOrder?: number },
@@ -259,11 +232,8 @@ describe('Catalog category gateway endpoints (e2e)', () => {
       expect(status).toBe(HttpStatus.OK);
       const reparented = body as IReparentBody;
       expect(reparented.category.path).toBe(`/${clearance}/${shirts}`);
-      // The grandchild oxford is the single rewritten descendant.
       expect(reparented.rewrittenDescendantCount).toBe(1);
 
-      // The descendant rewrite is observable through the tree read: oxford's
-      // path was rebased onto the new prefix in the same transaction.
       const tree = await supertest(apiGatewayApp.getHttpServer()).get(
         `/api/catalog/categories/${shirts}/tree`,
       );
@@ -277,7 +247,7 @@ describe('Catalog category gateway endpoints (e2e)', () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .patch(`/api/catalog/categories/${shirts}/parent`)
         .set('Authorization', auth)
-        .send({}); // absent newParentSlug → root demotion
+        .send({});
 
       expect(status).toBe(HttpStatus.OK);
       const reparented = body as IReparentBody;
@@ -297,7 +267,6 @@ describe('Catalog category gateway endpoints (e2e)', () => {
       const reparented = body as IReparentBody;
       expect(reparented.category.path).toBe(`/${menswear}/${shirts}`);
       expect(reparented.category.parentId).toBe(menswearId);
-      // oxford follows shirts back, rebased again.
       expect(reparented.rewrittenDescendantCount).toBe(1);
     });
   });
@@ -326,8 +295,6 @@ describe('Catalog category gateway endpoints (e2e)', () => {
       expect(status).toBe(HttpStatus.OK);
       const view = body as IProductCategoriesBody;
       expect(view.product.id).toBe(SEEDED_PRODUCT_ID);
-      // Relative assertion: the product's full membership is filtered to THIS
-      // run's slugs, both of which must be present.
       const ownMemberships = view.categories.map((c) => c.slug).filter((s) => ownSlugs.has(s));
       expect(ownMemberships.sort()).toEqual([menswear, shirts].sort());
     });
@@ -365,13 +332,8 @@ describe('Catalog category gateway endpoints (e2e)', () => {
         .filter((s) => ownSlugs.has(s));
       expect(ownMemberships).toEqual([shirts]);
 
-      // Direct membership in menswear is gone.
       expect(await browseProductIds(menswear)).not.toContain(SEEDED_PRODUCT_ID);
-      // …but with the subtree scope the product reappears, because it is still
-      // attached to shirts, a descendant of menswear (the includeDescendants
-      // path-prefix expansion).
       expect(await browseProductIds(menswear, true)).toContain(SEEDED_PRODUCT_ID);
-      // And it remains directly in shirts.
       expect(await browseProductIds(shirts)).toContain(SEEDED_PRODUCT_ID);
     });
   });
@@ -383,7 +345,7 @@ describe('Catalog category gateway endpoints (e2e)', () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .patch(`/api/catalog/categories/${menswear}/parent`)
         .set('Authorization', auth)
-        .send({ newParentSlug: oxford }); // oxford is a descendant of menswear
+        .send({ newParentSlug: oxford });
 
       expect(status).toBe(HttpStatus.CONFLICT);
       expect((body as IErrorBody).code).toBe('CATALOG_CATEGORY_CYCLE');

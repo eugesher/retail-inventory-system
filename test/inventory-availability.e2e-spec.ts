@@ -7,27 +7,10 @@ import { AppModule as ApiGatewayAppModule } from '@retail-inventory-system/apps/
 import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-system/apps/inventory-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
-// The inventory read path end-to-end: HTTP through the gateway's inventory module
-// (`/api/inventory/*`) → RabbitMQ (`inventory.stock-level.get` /
-// `inventory.location.list`) → the inventory microservice → MySQL, with Redis
-// cache-aside on the variant-stock read. The seed (scripts/seeds/stock-level.sql)
-// gives every catalog variant (ids 1..4) 100 on hand at `default-warehouse`, so
-// the public read returns a real figure without any consumer having run.
-
-// `admin@example.com` (seeded) carries every permission, including
-// `inventory:read`, so it is the positive fixture for the protected locations
-// route. The default warehouse id is provisioned by the migration.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const DEFAULT_WAREHOUSE = 'default-warehouse';
 
-// The absolute `available === 100` assertions read a seeded variant that NO other
-// suite consumes. The cart/order suites now reserve (add-to-cart) and allocate
-// (place) seeded stock, and they run before this suite in the shared single-DB
-// e2e pass — so variants 1 and 3 (which they touch) would show drifted `available`
-// here. Variant 2 is seeded identically (100 on hand) and is never reserved or
-// allocated by any suite, so its availability stays a stable 100 (the
-// disjoint-fixtures convention).
 const PRISTINE_VARIANT_ID = 2;
 
 interface ITokenResponse {
@@ -126,10 +109,6 @@ describe('Inventory availability read path (e2e)', () => {
     });
 
     it('serves the second identical read from the cache (miss then hit)', async () => {
-      // Cache-aside (ADR-002): the first read is a miss that loads from MySQL and
-      // writes the `VariantStockView` back under `ris:inventory:stock:v3:2:__all__`;
-      // the second is a hit served from Redis. The cached value is deterministic
-      // (the read use case sorts locations), so the two HTTP bodies are byte-equal.
       const first = await supertest(apiGatewayApp.getHttpServer()).get(
         `/api/inventory/variants/${PRISTINE_VARIANT_ID}/stock`,
       );
@@ -143,8 +122,6 @@ describe('Inventory availability read path (e2e)', () => {
     });
 
     it('returns a 200 zero-availability answer for a variant with no stock rows', async () => {
-      // An empty `locations` array is a valid availability answer — "zero
-      // available everywhere", not a 404.
       const { status, body } = await supertest(apiGatewayApp.getHttpServer()).get(
         '/api/inventory/variants/999/stock',
       );
