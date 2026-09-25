@@ -3,11 +3,7 @@ import boundariesPlugin from 'eslint-plugin-boundaries';
 import eslintPluginPrettier from 'eslint-plugin-prettier';
 import typescriptEslint from 'typescript-eslint';
 
-// Element-type taxonomy for eslint-plugin-boundaries (ADR-017).
-// `capture: ['app', 'module']` lets cross-service / cross-module isolation
-// be expressed as `app: '${from.app}'` / `module: '${from.module}'` matchers.
 const boundariesElements = [
-  // App layer elements (per-module hexagonal).
   {
     type: 'domain',
     pattern: 'apps/*/src/modules/*/domain/**',
@@ -44,43 +40,30 @@ const boundariesElements = [
     mode: 'file',
     capture: ['app', 'module'],
   },
-  // The one sanctioned cross-module barrel (ADR-024, ADR-041, ADR-017 §6).
-  // `auth` owns StaffUser / Customer / Role / Permission / ConsentRecord; the
-  // `iam` and `customer-admin` admin shells reuse its repositories and use
-  // cases rather than re-registering adapters over the same tables. MUST stay
-  // ahead of `nest-module` — the plugin takes the first matching pattern.
   {
     type: 'shared-module-barrel',
     pattern: 'apps/*/src/modules/auth/index.ts',
     mode: 'file',
     capture: ['app'],
   },
-  // Module composition root (ADR-041). `<m>.module.ts` assembles the four
-  // layers below it, and the module-root `index.ts` barrel is the only way in
-  // from outside — so both sit here rather than inside any one layer. The
-  // pattern matches direct children of a module folder only; the layer
-  // patterns above already claim everything nested deeper.
   {
     type: 'nest-module',
     pattern: 'apps/*/src/modules/*/*.ts',
     mode: 'file',
     capture: ['app', 'module'],
   },
-  // App-level bootstrap (composition root). Lives outside any single module.
   {
     type: 'app-bootstrap',
     pattern: ['apps/*/src/main.ts', 'apps/*/src/app/**'],
     mode: 'file',
     capture: ['app'],
   },
-  // App-shared utilities (e.g. apps/*/src/common/**).
   {
     type: 'app-shared',
     pattern: 'apps/*/src/common/**',
     mode: 'file',
     capture: ['app'],
   },
-  // Shared libs — one element type per lib (ADR-017 §2).
   { type: 'lib-auth', pattern: 'libs/auth/**', mode: 'file' },
   { type: 'lib-cache', pattern: 'libs/cache/**', mode: 'file' },
   { type: 'lib-common', pattern: 'libs/common/**', mode: 'file' },
@@ -92,15 +75,6 @@ const boundariesElements = [
   { type: 'lib-observability', pattern: 'libs/observability/**', mode: 'file' },
 ];
 
-// Per-element-type "same module" / "same app" target selectors. The
-// `{{from.captured.x}}` template expands at lint time to the source
-// element's captured `app` / `module` values, encoding the per-app and
-// per-module isolation lines from ADR-017 §3.
-//
-// v6 policy entries must be one of: a bare type string, a legacy
-// `[type, captured]` tuple, or a `DependencySelector` object with
-// `from` / `to` / `dependency`. Captured-value matching at the policy
-// level lives inside `to`, not at the top of the entry.
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 const sameModule = (/** @type {string} */ type) => ({
   to: {
@@ -118,44 +92,19 @@ const sameApp = (/** @type {string} */ type) => ({
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 const lib = (/** @type {string} */ type) => ({ to: { type } });
 
-// The `@retail-inventory-system/apps/*` aliases resolve to an app's `AppModule`. They exist for
-// the e2e harness, which boots whole apps in-process; an import of one from anywhere else would
-// make a deployable depend on the composition root of another.
-//
-// **Declared once and referenced from both `no-restricted-imports` entries below.** The
-// `apps/**/*.ts` block has to restate this pattern because a flat-config rule entry REPLACES
-// rather than merges — but restating the OBJECT is forced, while restating the TEXT was not, and
-// that is how the previous message stayed wrong for three months in two places at once. It named
-// `test/system-api.e2e-spec.ts` as "the E2E test entry point"; that file was deleted in
-// `e284009` (2026-06-10), and the restriction is really "everything outside test/ and spec/",
-// where the rule is switched off wholesale. The copy was made a month AFTER it became false.
 const APP_MODULE_IMPORT_PATTERN = {
   group: ['@retail-inventory-system/apps/*'],
   message:
     'An AppModule import is reserved for the e2e harness under test/ (and spec/), where this rule is switched off. Elsewhere it would make one deployable depend on the composition root of another — inject a port or import a lib instead.',
 };
 
-// Unified `boundaries/dependencies` rules (v6). With
-// `default: 'disallow'` + `checkAllOrigins: true` every dependency edge
-// — internal or external — must match an explicit allow rule. The
-// catch-all "allow any external module" rule at index 0 gives us that
-// blanket allow for npm packages; per-source disallow rules later in
-// the array layer specific denylists on top (last match wins).
 const dependencyRules = [
-  // 0. Blanket allow for any non-local target — npm packages (`origin:
-  //    external`) and node-core modules like `crypto` (`origin: core`).
-  //    The per-source disallow rules later in the array layer specific
-  //    denylists on top — last match wins, so this stays out of the way
-  //    of the architectural rules.
   { from: { type: '*' }, allow: { to: { origin: ['external', 'core'] } } },
 
-  // Domain — only ddd, common, contracts (enums/types), and own-module domain.
   {
     from: { type: 'domain' },
     allow: [sameModule('domain'), lib('lib-ddd'), lib('lib-common'), lib('lib-contracts')],
   },
-  // Application use-cases — own module's domain / ports / dto + ddd / common /
-  // contracts + lib-auth (port interfaces such as IAuthUserValidator).
   {
     from: { type: 'application-use-case' },
     allow: [
@@ -171,7 +120,6 @@ const dependencyRules = [
       lib('lib-auth'),
     ],
   },
-  // Application ports — domain types only.
   {
     from: { type: 'application-port' },
     allow: [
@@ -181,12 +129,10 @@ const dependencyRules = [
       lib('lib-contracts'),
     ],
   },
-  // Application DTOs — own-module domain + contracts.
   {
     from: { type: 'application-dto' },
     allow: [sameModule('domain'), lib('lib-contracts')],
   },
-  // Infrastructure — anything inside its own module + any shared lib.
   {
     from: { type: 'infrastructure' },
     allow: [
@@ -208,9 +154,6 @@ const dependencyRules = [
       lib('lib-observability'),
     ],
   },
-  // Presentation — application layer + contracts + auth + observability +
-  // messaging (ROUTING_KEYS only — adapter packages such as @keyv/redis or
-  // typeorm are kept out by the external disallow rule below).
   {
     from: { type: 'presentation' },
     allow: [
@@ -227,11 +170,6 @@ const dependencyRules = [
       lib('lib-observability'),
     ],
   },
-  // Nest module (module composition root, ADR-041) — the one file allowed to
-  // see every layer of its own module at once, because wiring them is its job.
-  // It may compose the `auth` module (`iam` / `customer-admin` import
-  // `AuthModule`); composing any *other* sibling is not allowed, so a new
-  // cross-module edge is a deliberate config change, not an accident.
   {
     from: { type: 'nest-module' },
     allow: [
@@ -254,7 +192,6 @@ const dependencyRules = [
       lib('lib-observability'),
     ],
   },
-  // App bootstrap (composition root) — anything inside its app + any lib.
   {
     from: { type: 'app-bootstrap' },
     allow: [
@@ -279,12 +216,10 @@ const dependencyRules = [
       lib('lib-observability'),
     ],
   },
-  // App-shared utilities — contracts + common only.
   {
     from: { type: 'app-shared' },
     allow: [sameApp('app-shared'), lib('lib-contracts'), lib('lib-common')],
   },
-  // Lib edges — kept narrow on purpose (ADR-017 §3).
   { from: { type: 'lib-ddd' }, allow: [lib('lib-ddd')] },
   { from: { type: 'lib-contracts' }, allow: [lib('lib-contracts')] },
   {
@@ -307,11 +242,6 @@ const dependencyRules = [
       lib('lib-database'),
     ],
   },
-  // `lib-database` may reach `lib-ddd` (ADR-043): `TypeormTransactionAdapter` implements
-  // `ITransactionPort`, an abstraction the domain kernel owns. That is dependency inversion
-  // in the correct direction — infrastructure depends on the domain's contract, never the
-  // reverse. The reverse stays shut: `lib-ddd`'s own allow list is `lib-ddd` alone, and its
-  // denylist forbids `typeorm` / `@nestjs/*`, so no cycle is expressible.
   {
     from: { type: 'lib-database' },
     allow: [lib('lib-database'), lib('lib-common'), lib('lib-contracts'), lib('lib-ddd')],
@@ -337,13 +267,7 @@ const dependencyRules = [
     from: { type: 'lib-auth' },
     allow: [lib('lib-auth'), lib('lib-common'), lib('lib-contracts'), lib('lib-observability')],
   },
-  // External-package denylists per source layer (ADR-017 §4). Each entry
-  // overrides the catch-all "allow any external module" rule at index 0.
-  // class-validator / class-transformer / @nestjs/swagger remain allowed
-  // in lib-contracts — the documented exception (contracts double as the
-  // HTTP/RPC wire-format DTOs that drive the Scalar OpenAPI viewer).
 
-  // Domain — no framework, no I/O, no logging.
   {
     from: { type: 'domain' },
     disallow: {
@@ -365,11 +289,6 @@ const dependencyRules = [
       },
     },
   },
-  // Application use-cases — no concrete adapters / Redis / Rabbit clients.
-  // `@nestjs/common` is intentionally allowed (use cases are Nest providers).
-  // Both `@nestjs/typeorm` and bare `typeorm` are forbidden — the transaction
-  // seam is the application-layer `ITransactionPort`; repository ports are
-  // the data-access seam. Use cases never touch TypeORM types directly.
   {
     from: { type: 'application-use-case' },
     disallow: {
@@ -389,8 +308,6 @@ const dependencyRules = [
       },
     },
   },
-  // Application ports — domain types only. No framework or transport
-  // packages may appear here; the ports are pure TypeScript contracts.
   {
     from: { type: 'application-port' },
     disallow: {
@@ -414,7 +331,6 @@ const dependencyRules = [
       },
     },
   },
-  // Application DTOs — plain TypeScript + class-validator/class-transformer.
   {
     from: { type: 'application-dto' },
     disallow: {
@@ -423,7 +339,6 @@ const dependencyRules = [
       },
     },
   },
-  // Presentation — no direct TypeORM repositories or Redis clients.
   {
     from: { type: 'presentation' },
     disallow: {
@@ -441,9 +356,6 @@ const dependencyRules = [
       },
     },
   },
-  // lib-contracts — plain TypeScript. class-validator / class-transformer /
-  // @nestjs/swagger are the documented exceptions (ADR-017 §4). TypeORM,
-  // Nest DI/runtime decorators, and microservice transports stay forbidden.
   {
     from: { type: 'lib-contracts' },
     disallow: {
@@ -465,7 +377,6 @@ const dependencyRules = [
       },
     },
   },
-  // lib-ddd — framework-free per recommendation §3.
   {
     from: { type: 'lib-ddd' },
     disallow: {
@@ -558,24 +469,9 @@ export default typescriptEslint.config(
     },
     rules: {},
   },
-  // Architecture lint (eslint-plugin-boundaries, ADR-017).
-  // The dependencies rule below is the source of truth for the per-module
-  // hexagonal layout — when in doubt about where a file should live, run
-  // `yarn lint` and let the boundaries plugin answer.
   {
     files: ['apps/**/*.ts', 'libs/**/*.ts'],
-    ignores: [
-      '**/spec/**',
-      '**/*.spec.ts',
-      '**/*.d.ts',
-      // Barrels are skipped as dependency *sources* only: a barrel re-exports
-      // its own folder, so it has nothing to violate, and the files it
-      // re-exports are linted on their own. They remain first-class dependency
-      // *targets* — a module-root `index.ts` is typed `nest-module` /
-      // `shared-module-barrel`, which is what makes a cross-module import
-      // routed through a barrel catchable at all (ADR-041).
-      '**/index.ts',
-    ],
+    ignores: ['**/spec/**', '**/*.spec.ts', '**/*.d.ts', '**/index.ts'],
     plugins: {
       boundaries: boundariesPlugin,
     },
@@ -599,33 +495,11 @@ export default typescriptEslint.config(
           rules: dependencyRules,
         },
       ],
-      // Every file under `apps/` and `libs/` must claim an element type. This
-      // only became enforceable once ADR-041 typed the module composition roots
-      // and the module-root barrels — before that, a file at `modules/<m>/` was
-      // invisible to the whole rule set, which is exactly how the placement
-      // drift went unnoticed. A new orphan file now fails CI instead.
       'boundaries/no-unknown-files': 'error',
       'boundaries/no-unknown': 'off',
       'boundaries/no-ignored': 'off',
     },
   },
-  // `ClientProxy` containment (ADR-009), now ENFORCED rather than reviewed.
-  //
-  // `eslint-plugin-boundaries` cannot express this: it types elements by path, and
-  // `@nestjs/microservices` is legitimately imported all over the app layer —
-  // `@EventPattern` in consumers, `@MessagePattern` + `@Payload` in presentation,
-  // `Transport` / `MicroserviceOptions` in `main.ts`. The one symbol that must stay
-  // contained is the outbound *client*, and `importNames` is the only mechanism that can
-  // name a symbol rather than a module.
-  //
-  // `ClientProxyFactory` / `ClientsModule` are unused in `apps/` today; they are listed
-  // because they are the same escape hatch by another name. `libs/messaging` is out of
-  // scope — building the clients is its job.
-  //
-  // This block re-states the base `no-restricted-imports` `patterns`: a flat-config rule
-  // entry REPLACES rather than merges, so omitting them would silently drop the
-  // AppModule-import restriction for every file under `apps/`. It restates the shared
-  // `APP_MODULE_IMPORT_PATTERN` object, not a second copy of its text — see the note there.
   {
     files: ['apps/**/*.ts'],
     ignores: ['apps/*/src/modules/*/infrastructure/messaging/**'],
@@ -646,14 +520,6 @@ export default typescriptEslint.config(
       ],
     },
   },
-  // The `ITransactionScope` → `EntityManager` downcast has ONE home (ADR-054):
-  // `entityManagerOf(scope)` in `libs/database/typeorm-transaction.adapter.ts`, the same file that
-  // mints the scope. A repository that joins a caller's transaction calls it instead of casting.
-  //
-  // Without this rule the helper would be a convention, and the fifteenth repository would cast
-  // again exactly as the first fourteen did — the count grew from 1 to 14 without anyone deciding
-  // it should. Specs are exempt: a spec's `{ … } as unknown as EntityManager` builds a FAKE manager,
-  // which is a test double, not a downcast of a real scope.
   {
     files: ['apps/**/*.ts'],
     ignores: ['**/spec/**', '**/*.spec.ts'],
@@ -685,7 +551,6 @@ export default typescriptEslint.config(
       '@typescript-eslint/no-require-imports': 'off',
     },
   },
-  // Allow console in utility scripts that run outside the NestJS context.
   {
     files: ['scripts/**/*.ts'],
     rules: {

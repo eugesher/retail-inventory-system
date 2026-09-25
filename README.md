@@ -383,7 +383,8 @@ The layering plus cross-service and cross-module isolation are enforced by
 - `application/use-cases/` may import its own module's `domain` + `application/ports` and
   the same lib set, plus `libs/auth` for port interfaces. Both `@nestjs/typeorm` and bare
   `typeorm` are denied.
-- `application/ports/` may import only `domain` types and `libs/contracts`.
+- `application/ports/` may import only its own module's `domain` and ports, `libs/ddd` and
+  `libs/contracts`.
 - `infrastructure/` is the only layer allowed to touch concrete adapters.
 - `presentation/` may import `application` + `libs/{auth,contracts,messaging,observability}`.
 - `<m>.module.ts` and the module-root `index.ts` are the `nest-module` element: they see every
@@ -397,7 +398,9 @@ The layering plus cross-service and cross-module isolation are enforced by
 
 Each rule has a fixture in [`spec/architecture-lint.spec.ts`](spec/architecture-lint.spec.ts)
 that intentionally violates it and asserts the expected `boundaries/*` ruleId fires — so
-silently weakening a rule fails the unit suite.
+silently weakening a rule fails the unit suite. How the plugin types a file and decides an import,
+and the lint rules that live outside it:
+[`docs/reference/architecture-lint.md`](docs/reference/architecture-lint.md).
 
 ### Recurring patterns
 

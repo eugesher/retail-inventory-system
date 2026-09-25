@@ -47,23 +47,23 @@ names the place it describes, so a reader can check it again.
 One file per area. A file is created when its area has something to say; there are no empty
 placeholders.
 
-| File                                               | Area                                                                    |
-| -------------------------------------------------- | ----------------------------------------------------------------------- |
-| [`wire-contracts.md`](wire-contracts.md)           | `libs/contracts` — payloads, views, enums, units                        |
-| [`shared-libraries.md`](shared-libraries.md)       | the other `libs/*`                                                      |
-| [`retail-orders.md`](retail-orders.md)             | retail `modules/orders/`                                                |
-| [`retail-cart.md`](retail-cart.md)                 | retail `modules/cart/`                                                  |
-| [`retail-returns.md`](retail-returns.md)           | retail `modules/returns/`                                               |
-| [`inventory.md`](inventory.md)                     | inventory `modules/stock/`                                              |
-| [`catalog-and-pricing.md`](catalog-and-pricing.md) | catalog `modules/catalog/`, `modules/pricing/`                          |
-| [`notifications.md`](notifications.md)             | notification `modules/notifications/`                                   |
-| [`event-store.md`](event-store.md)                 | event store `modules/audit-and-events/`                                 |
-| [`api-gateway.md`](api-gateway.md)                 | `apps/api-gateway`                                                      |
-| [`testing.md`](testing.md)                         | the e2e harness under `test/` and the repository self-checks in `spec/` |
-| `architecture-lint.md`                             | the rules in `eslint.config.mjs`                                        |
-| `persistence.md`                                   | schema facts from `migrations/` and the seeds under `scripts/`          |
-| `build-and-ci.md`                                  | Dockerfile, CI workflow, compose files, `.env.example`                  |
-| `http-api.md`                                      | the request collections under `http/`                                   |
+| File                                               | Area                                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`wire-contracts.md`](wire-contracts.md)           | `libs/contracts` — payloads, views, enums, units                               |
+| [`shared-libraries.md`](shared-libraries.md)       | the other `libs/*`                                                             |
+| [`retail-orders.md`](retail-orders.md)             | retail `modules/orders/`                                                       |
+| [`retail-cart.md`](retail-cart.md)                 | retail `modules/cart/`                                                         |
+| [`retail-returns.md`](retail-returns.md)           | retail `modules/returns/`                                                      |
+| [`inventory.md`](inventory.md)                     | inventory `modules/stock/`                                                     |
+| [`catalog-and-pricing.md`](catalog-and-pricing.md) | catalog `modules/catalog/`, `modules/pricing/`                                 |
+| [`notifications.md`](notifications.md)             | notification `modules/notifications/`                                          |
+| [`event-store.md`](event-store.md)                 | event store `modules/audit-and-events/`                                        |
+| [`api-gateway.md`](api-gateway.md)                 | `apps/api-gateway`                                                             |
+| [`testing.md`](testing.md)                         | the Jest configs, the e2e harness under `test/` and the self-checks in `spec/` |
+| [`architecture-lint.md`](architecture-lint.md)     | the rules in `eslint.config.mjs`                                               |
+| `persistence.md`                                   | schema facts from `migrations/` and the seeds under `scripts/`                 |
+| [`build-and-ci.md`](build-and-ci.md)               | the webpack configs, Dockerfile, CI workflow, compose files, `.env.example`    |
+| `http-api.md`                                      | the request collections under `http/`                                          |
 
 ## Shape of an area file
 

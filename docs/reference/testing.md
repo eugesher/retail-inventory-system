@@ -1,17 +1,24 @@
 # Testing
 
-This file covers how the end-to-end harness under `test/` works: how a suite boots the services,
+This file covers the two Jest configurations, the end-to-end harness under `test/` and the four
+repository self-checks under `spec/`. For the harness it covers how a suite boots the services,
 where configuration is read, how suites share one database, how they wait for asynchronous work, and
-the helpers that read and write MySQL directly. The commands, the capability-to-suite map and the
-"assert through public state" rule are in [`README.md` §9](../../README.md#testing). The seed data
-the suites start from is in [§10](../../README.md#10-seed-data), and the seeded logins are in
-[§1](../../README.md#seeded-logins).
+the helpers that read and write MySQL directly. For the self-checks it covers what each one asserts,
+what a red run means and how to fix it; the rationale is in the ADRs each section links. The
+commands, the capability-to-suite map and the "assert through public state" rule are in
+[`README.md` §9](../../README.md#testing). The seed data the suites start from is in
+[§10](../../README.md#10-seed-data), and the seeded logins are in [§1](../../README.md#seeded-logins).
 
 ## Running
 
-- **Every spec file runs serially in one process.** `test:e2e:run` and `test:run` both pass `-i`
-  (`package.json`). Jest orders the files by its own cache of earlier runs, so no suite may depend
-  on another having run first.
+- **Two configurations.** `jest.unit.config.js` runs every `*.spec.ts` under the repository root,
+  which includes `spec/`. `jest.e2e.config.js` runs `test/**/*.e2e-spec.ts` and adds the setup file.
+  Both build `moduleNameMapper` from `compilerOptions.paths` in `tsconfig.json`
+  (`ts-jest`'s `pathsToModuleNameMapper`), so a new `@retail-inventory-system/*` alias needs only
+  its `tsconfig.json` entry.
+- **Every spec file runs serially in one process.** `test:unit`, `test:e2e:run` and `test:run` all
+  pass `-i` (`package.json`). Jest orders the files by its own cache of earlier runs, so no suite may
+  depend on another having run first.
 - **The per-test and per-hook timeout is 120 s,** set with `jest.setTimeout` in
   `test/jest.setup.ts`. It cannot be `testTimeout` in `jest.e2e.config.js`: Jest 29 groups
   `testTimeout` with the global options, so under `yarn test:run` (`--projects`) a project
@@ -164,13 +171,142 @@ on `EVENTSTORE_DATABASE_URL`.
   and `PurgeAgedDeliveriesUseCase.execute(now)` let a suite move time forward without waiting or
   touching the system clock.
 
+## Repository self-check specs
+
+The four files in `spec/` test the repository rather than a service, and run in `yarn test:unit`.
+Each one fails with a message that names what to change. None of them is made green by an allowlist
+or by loosening its own assertions.
+
+### `architecture-lint.spec.ts`
+
+- **It lints its fixtures with the production config as ESLint resolves it.** `beforeAll` runs
+  `npx eslint --print-config` on `PROBE_FILE`, a gateway use case the `boundaries` block applies to.
+  It then builds a `Linter` from the answer's `boundaries/elements`, `boundaries/dependencies` and
+  `boundaries/no-unknown-files`. The config is taken after every block has been merged, so a lower
+  severity, a narrower `disallow` and a later block that overrides an earlier one all reach the
+  fixtures. If the probe comes back with no `boundaries/elements`, `beforeAll` throws instead of
+  letting every fixture pass.
+- **ESLint runs as a child process because it cannot run inside Jest.**
+  `ESLint#calculateConfigForFile` loads `eslint.config.mjs` with a dynamic `import()`, and Jest's VM
+  sandbox rejects it with "A dynamic import callback was invoked without --experimental-vm-modules"
+  (checked against Jest 29.7.0 and ESLint 10.1.0). The spawn happens once, under a 120 s hook
+  timeout.
+- **Three tests read the config itself:**
+  - `no-unknown-files` and `dependencies` are at `error`;
+  - `dependencies` denies by default;
+  - `shared-module-barrel` comes before `nest-module`.
+
+  A fixture cannot catch the first two, because it only asks whether a ruleId is reported. The
+  order is also caught by the `auth`-barrel fixture, which goes red when the barrel is typed
+  `nest-module`. The severity test is a second line of defence: `yarn lint` runs with
+  `--max-warnings 0`, so a `warn` would still fail CI today.
+
+- **The fixtures are the independent expectation.** Each one writes an import into a virtual file
+  at a path the element patterns place, then asserts the ruleId. A fixture that crosses elements
+  imports a real file, because the plugin types the target by its resolved path
+  ([ADR-017](../adr/017-architecture-lint-via-eslint-boundaries.md) §7). An import of a file that
+  does not exist reports nothing. So when a target file moves, a fixture that expects a violation
+  goes red, but one that expects none keeps passing and proves nothing.
+- **The event store's two repositories are checked as text.** A structural block reads
+  `domain-event-typeorm.repository.ts` and `audit-log-entry-typeorm.repository.ts` and asserts four
+  things about each file:
+  - it declares `export class …TypeormRepository implements I…RepositoryPort`;
+  - it does not `extends BaseTypeormRepository`;
+  - it declares `public async append(`;
+  - nowhere in the file is `save`, `update`, `delete`, `softDelete` or `remove` followed by `(`.
+
+  The last check is a regular expression over the source, so the same word in a string or a query
+  builder call turns it red too.
+
+- **When it goes red:** make the code satisfy the rule, and move a misplaced file to where
+  `yarn lint` says it belongs ([`architecture-lint.md`](architecture-lint.md)). A red fixture after an
+  `eslint-plugin-boundaries` upgrade means the plugin's semantics changed. Understand the change
+  before touching the config.
+
+### `port-method-callers.spec.ts`
+
+Every callable member of a port has a production caller
+([ADR-049](../adr/049-the-port-methods-nothing-calls.md)).
+
+- **What is scanned:** each top-level `interface` in a file under
+  `apps/*/src/modules/*/application/ports/`. A member counts if it is a method signature or a
+  property whose type is a function type; overloads count once. Ports in `libs/`, such as
+  `ITransactionPort`, `ICachePort` and `IAuditLogPublisher`, are not scanned, and neither are `type`
+  aliases.
+- **What counts as a caller:** a reference found by TypeScript's find-references. It has to be the
+  name in a property access `x.member`, where `x` is not a bare `this`. It also has to sit in a file
+  under `apps/` that is not in a `spec/` folder and is not a `*.spec.ts` or `*.e2e-spec.ts` file. A
+  call through the implementing class's type counts. An adapter's `this.member()` does not, and
+  neither does a call from `libs/`, `test/` or `scripts/`. The check does not look at reachability,
+  so a call from dead code counts.
+- **Why it is a spec and not a lint rule.** Whether anything calls a member depends on the whole
+  program: deleting the last call in one file changes the verdict for a port in another. ESLint
+  lints and caches file by file, so it would not re-check the port.
+- **Blind spots, both false reds:** an element access (`repo['member']()`) and a destructured method
+  (`const { member } = repo`) are not recognised. Write the call plainly.
+- **It checks that it can fail.** The language service is built over the root `tsconfig.json`, which
+  has no `include`, so it takes every `.ts` under the root. On top of that it adds an in-memory
+  fixture app, `__port-callers-fixture__`. The host reports the fixture's directories as existing,
+  because module resolution skips a candidate whose directory does not exist. The first test pins
+  the four fixture members the scan must report. The second test pins that the set of scanned apps
+  equals the directories under `apps/`. The scan takes about 20 s, under a 300 s hook timeout.
+- **When it goes red:** delete the method from the port, its adapter and its spec. If the adapter
+  needs it internally, make it private on the adapter instead (ADR-049 §1–§2). Never allowlist it.
+
+### `transition-windows.spec.ts`
+
+`OPEN_WINDOWS` is the register of obligations queued behind a condition. The rule, the three tests
+and what does not belong in the register are in
+[ADR-053](../adr/053-how-a-transition-window-closes.md).
+
+- **The fields:**
+  - `id` is a stable handle for the failure message;
+  - `what` is the obligation;
+  - `condition` is the event that discharges it, which somebody must be able to notice;
+  - `owner` is a ticket or a person, not "the team";
+  - `reviewBy` is an ISO date;
+  - `adr` is `ADR-NNN`.
+- **`reviewBy` is read as midnight UTC.** A date-only ISO string parses as UTC, so a window turns
+  red at 00:00 UTC on its review day and stays red after that. A malformed date is rejected by the
+  second test, since `Invalid Date` compares `false` against everything.
+- **When it goes red:** discharge the obligation, or move the date on purpose and say why in the
+  commit, or delete the entry with the reasoning. Never delete it just to turn CI green (ADR-053).
+
+### `extension-guides.spec.ts`
+
+It enforces the guide contract written in
+[`docs/extensions/README.md`](../extensions/README.md#how-these-guides-are-written): front matter,
+the cluster folder, the six sections, and live `attaches_to` paths
+([ADR-055](../adr/055-where-deliberately-unbuilt-work-is-recorded.md)). Beyond that contract:
+
+- **The folder's size is pinned.** `EXPECTED_TOTAL` (64) and `EXPECTED_PER_CLUSTER` are literals. A
+  guide added, deleted or moved to another cluster means editing them and the matching table in
+  `docs/extensions/README.md` in the same change. `CLUSTER_DIRS` spells out the nine folder names
+  instead of deriving them, so renaming a folder fails until the map is edited too.
+- **Front matter is parsed by hand.** The parser reads `key: value` lines and one indented list
+  (`attaches_to`); it knows nothing else about YAML. A quoted value is compared with its quotes.
+- **Headings are compared as text.** A guide must have exactly the six `## ` lines, in order, and
+  no other; a `## ` line inside a fenced code block counts. The `title` must equal the first `# `
+  line.
+- **Two words and a path are banned.** A guide or the index fails if it contains `tmp/`, or the
+  whole word "epic" or "task" in any case. The spec builds those strings from fragments so that it
+  does not contain them itself.
+- **Links are checked by file, not by anchor.** Every relative link in a guide and in the index must
+  resolve once its `#fragment` is cut off; `http(s)` and `mailto:` links are skipped. In the index,
+  only a link of the form `<folder>/<file>.md` counts as a guide row, and every guide must be linked
+  exactly once.
+
 ## Failure modes
 
-| What breaks                                                                         | How it shows                                                      | What recovers it                                                                      |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| A route reaches a service the suite did not boot, or the query transport is missing | The test times out after 120 s instead of failing fast            | Boot that service, or the event store's hybrid form                                   |
-| An environment variable is set after the `AppModule` loaded                         | The override is ignored; the suite may pass while proving nothing | Set it first and load the app modules with a dynamic `import()`                       |
-| Staggered `supertest` calls against a server that is not listening                  | `ECONNRESET` on the later call                                    | `listen(0)` before the calls                                                          |
-| A helper binds a `Date` without `timezone: 'Z'`                                     | A row aged by minutes is off by the host's UTC offset             | Pin the helper's connection to UTC, or do the arithmetic in MySQL                     |
-| A stock read over HTTP before auto-init ran                                         | The variant keeps answering with no locations until the cache TTL | Poll `stock_level` first                                                              |
-| A timer registered through `SchedulerRegistry` is not deleted on close              | The Jest worker never exits                                       | Delete it in `onModuleDestroy` ([`inventory.md`](inventory.md#the-reservation-sweep)) |
+| What breaks                                                                         | How it shows                                                                                 | What recovers it                                                                      |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| A route reaches a service the suite did not boot, or the query transport is missing | The test times out after 120 s instead of failing fast                                       | Boot that service, or the event store's hybrid form                                   |
+| An environment variable is set after the `AppModule` loaded                         | The override is ignored; the suite may pass while proving nothing                            | Set it first and load the app modules with a dynamic `import()`                       |
+| Staggered `supertest` calls against a server that is not listening                  | `ECONNRESET` on the later call                                                               | `listen(0)` before the calls                                                          |
+| A helper binds a `Date` without `timezone: 'Z'`                                     | A row aged by minutes is off by the host's UTC offset                                        | Pin the helper's connection to UTC, or do the arithmetic in MySQL                     |
+| A stock read over HTTP before auto-init ran                                         | The variant keeps answering with no locations until the cache TTL                            | Poll `stock_level` first                                                              |
+| A timer registered through `SchedulerRegistry` is not deleted on close              | The Jest worker never exits                                                                  | Delete it in `onModuleDestroy` ([`inventory.md`](inventory.md#the-reservation-sweep)) |
+| A port method is called only as `repo['m']()` or through destructuring              | `port-method-callers` reports it as uncalled                                                 | Write the call as `repo.m()`                                                          |
+| An `architecture-lint` fixture's target file is moved or renamed                    | A fixture expecting a violation goes red; one expecting none passes without proving anything | Point the fixture's import at the file's new path                                     |
+| A guide or the extensions index contains `tmp/`, "epic" or "task"                   | `extension-guides` goes red                                                                  | Reword it                                                                             |
+| A transition window's `reviewBy` arrives                                            | `transition-windows` goes red from 00:00 UTC that day                                        | Discharge it, or move the date and say why in the commit (ADR-053)                    |
