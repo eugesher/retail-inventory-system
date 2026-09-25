@@ -38,7 +38,8 @@ start at [`docs/adr/index.md`](docs/adr/index.md).
 
 ### Prerequisites
 
-Node 20+, Yarn, Docker Compose.
+Node at the version in [`.nvmrc`](.nvmrc) (`nvm use`), Yarn (`corepack enable`; the release checked
+in under `.yarn/releases/` is the one that runs), Docker Compose.
 
 ### Run it
 
@@ -1316,7 +1317,8 @@ seeded bundles live in `scripts/test-db-seed.ts`.
 
 A new code auto-seeds to `admin` only when it is also added to the `PERMISSION_SEEDS` array
 in `scripts/test-db-seed.ts` — the `admin` role binds `Object.values(PermissionCodeEnum)`,
-but the seeder resolves each code's row id from that array.
+but the seeder resolves each code's row id from that array. A code missing from it makes
+`yarn test:seed` fail, naming the code.
 
 Guard a controller method on a precise code:
 
@@ -1357,41 +1359,59 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 | `REDIS_URL`                   | `redis://…`                                                                                                                                                   |
 | `JWT_ACCESS_SECRET`           | ≥ 32 chars                                                                                                                                                    |
 | `JWT_REFRESH_SECRET`          | ≥ 32 chars; **must differ** from the access secret so it can be rotated independently                                                                         |
-| `OTEL_SERVICE_NAME`           | distinct per service — Jaeger's "Service" filter                                                                                                              |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | e.g. `http://otel-collector:4318/v1/traces`                                                                                                                   |
+| `OTEL_SERVICE_NAME`           | distinct per service — Jaeger's "Service" filter. The tracer reads it from the process environment only ([below](#values-read-before-envlocal-loads))         |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | e.g. `http://otel-collector:4318/v1/traces`. Read by the tracer from the process environment only                                                             |
 
 ### Defaulted
 
-| Variable                                  | Default                     | Role                                                                                                                                                                                                                           |
-| ----------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `API_GATEWAY_PREFIX`                      | —                           | global route prefix (`api` in compose)                                                                                                                                                                                         |
-| `API_GATEWAY_USE_API_REFERENCE`           | `NODE_ENV !== 'production'` | serve `/api/reference`                                                                                                                                                                                                         |
-| `HEALTH_PROBE_TIMEOUT_MS`                 | `2000`                      | bounds **one** liveness probe, not the fan-out — the five run concurrently ([§6](#6-http-api))                                                                                                                                 |
-| `DATABASE_LOGGING`                        | `NODE_ENV !== 'production'` | TypeORM query log                                                                                                                                                                                                              |
-| `DEFAULT_CURRENCY`                        | `USD`                       | ISO-4217 currency the catalog publish price gate resolves against, a new cart opens in, and a gateway price read defaults to                                                                                                   |
-| `LOG_LEVEL`                               | `debug` dev / `info` prod   | `trace` … `fatal`                                                                                                                                                                                                              |
-| `CACHE_TTL_MS_DEFAULT`                    | `60000`                     | global default for an unscoped `set()`                                                                                                                                                                                         |
-| `CACHE_TTL_MS_PRODUCT_STOCK`              | `60000`                     | TTL for a cached availability read (the name predates the running-totals rewrite)                                                                                                                                              |
-| `RESERVATION_TTL_MINUTES`                 | `15`                        | hold lifetime — `expiresAt = now + this` on every Reserve                                                                                                                                                                      |
-| `RESERVATION_SWEEP_BATCH_SIZE`            | `200`                       | rows one expired-reservation sweep scans and expires; a ceiling a caller cannot raise                                                                                                                                          |
-| `RESERVATION_SWEEP_TRANSACTION_SIZE`      | `25`                        | rows one sweep transaction expires — bounds how long it holds row locks                                                                                                                                                        |
-| `RESERVATION_SWEEP_INTERVAL_SECONDS`      | `60`                        | seconds between sweep invocations; decides how promptly an already-expired hold is reclaimed                                                                                                                                   |
-| `RETURN_WINDOW_DAYS`                      | `30`                        | a `shipped` order is returnable only within this window; a `delivered` one always is                                                                                                                                           |
-| `OCC_RETRY_ATTEMPTS`                      | `5`                         | bounded retry budget for version-checked writes                                                                                                                                                                                |
-| `IDEMPOTENCY_KEY_TTL_HOURS`               | `24`                        | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows                                                                                                                                        |
-| `CAPTURE_CLAIM_STALE_MINUTES`             | `15`                        | how long a payment may sit `capturing` before the report names it; the report resolves nothing ([§13](#13-background-jobs))                                                                                                    |
-| `OPS_NOTIFICATIONS_EMAIL`                 | `ops@example.com`           | mailbox for system-only notifications with no customer recipient                                                                                                                                                               |
-| `MAX_DELIVERY_ATTEMPTS`                   | `3`                         | attempts before a delivery is abandoned and `notifications.delivery.failed` is emitted                                                                                                                                         |
-| `RETENTION_DELIVERY_DAYS`                 | `90`                        | delivery-row retention horizon; the nightly purge hard-deletes rows older than this ([§13](#13-background-jobs)). A purged row no longer dedupes its event, so a redelivery that arrives after the horizon is dispatched again |
-| `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300`                       | staleness safety net; the consent cache is kept fresh by events, not TTL                                                                                                                                                       |
-| `NOTIFIER_TEST_FLAKY`                     | `false`                     | **test-only** — swaps in a flaky notifier that fails the first dispatch of any `__FAIL_ONCE__`-marked body. Never set it outside the retry e2e suite.                                                                          |
-| `AUTH_ARGON2_MEMORY_COST`                 | `19456` KiB                 | OWASP 2024 minimum for argon2id                                                                                                                                                                                                |
-| `AUTH_ARGON2_TIME_COST`                   | `2`                         | iterations                                                                                                                                                                                                                     |
-| `AUTH_ARGON2_PARALLELISM`                 | `1`                         | threads                                                                                                                                                                                                                        |
-| `JWT_ACCESS_EXPIRES_IN`                   | `15m`                       | `ms`-style string                                                                                                                                                                                                              |
-| `JWT_REFRESH_EXPIRES_IN`                  | `7d`                        |                                                                                                                                                                                                                                |
-| `OTEL_RESOURCE_ATTRIBUTES`                | —                           | merged into the OTel `Resource`                                                                                                                                                                                                |
-| `OTEL_SDK_DISABLED`                       | `false`                     | short-circuit the SDK at boot                                                                                                                                                                                                  |
+| Variable                                  | Default                     | Role                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `API_GATEWAY_PREFIX`                      | —                           | global route prefix (`api` in `.env.example`); unset, the routes carry no prefix. The reference stays at `/api/reference`, a fixed path in `main.ts`                                                                                                                                                                       |
+| `API_GATEWAY_USE_API_REFERENCE`           | `NODE_ENV !== 'production'` | serve `/api/reference`                                                                                                                                                                                                                                                                                                     |
+| `HEALTH_PROBE_TIMEOUT_MS`                 | `2000`                      | bounds **one** liveness probe, not the fan-out — the five run concurrently ([§6](#6-http-api))                                                                                                                                                                                                                             |
+| `DATABASE_LOGGING`                        | `NODE_ENV !== 'production'` | TypeORM query log                                                                                                                                                                                                                                                                                                          |
+| `DEFAULT_CURRENCY`                        | `USD`                       | ISO-4217 currency the catalog publish price gate resolves against, a new cart opens in, and a gateway price read defaults to. Three letters, upper-cased on load (`eur` → `EUR`). Give `api-gateway`, `catalog-microservice` and `retail-microservice` the same value: a service without it boots on `USD` with no warning |
+| `LOG_LEVEL`                               | `debug` dev / `info` prod   | `trace` … `fatal`                                                                                                                                                                                                                                                                                                          |
+| `CACHE_TTL_MS_DEFAULT`                    | `60000`                     | global default for an unscoped `set()`                                                                                                                                                                                                                                                                                     |
+| `CACHE_TTL_MS_PRODUCT_STOCK`              | `60000`                     | TTL for a cached availability read (the name predates the running-totals rewrite)                                                                                                                                                                                                                                          |
+| `RESERVATION_TTL_MINUTES`                 | `15`                        | hold lifetime — `expiresAt = now + this` on every Reserve                                                                                                                                                                                                                                                                  |
+| `RESERVATION_SWEEP_BATCH_SIZE`            | `200`                       | rows one expired-reservation sweep scans and expires; a ceiling a caller cannot raise                                                                                                                                                                                                                                      |
+| `RESERVATION_SWEEP_TRANSACTION_SIZE`      | `25`                        | rows one sweep transaction expires — bounds how long it holds row locks                                                                                                                                                                                                                                                    |
+| `RESERVATION_SWEEP_INTERVAL_SECONDS`      | `60`                        | seconds between sweep invocations; decides how promptly an already-expired hold is reclaimed                                                                                                                                                                                                                               |
+| `RETURN_WINDOW_DAYS`                      | `30`                        | a `shipped` order is returnable only within this window; a `delivered` one always is                                                                                                                                                                                                                                       |
+| `OCC_RETRY_ATTEMPTS`                      | `5`                         | bounded retry budget for version-checked writes                                                                                                                                                                                                                                                                            |
+| `IDEMPOTENCY_KEY_TTL_HOURS`               | `24`                        | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows                                                                                                                                                                                                                                    |
+| `CAPTURE_CLAIM_STALE_MINUTES`             | `15`                        | how long a payment may sit `capturing` before the report names it; the report resolves nothing ([§13](#13-background-jobs))                                                                                                                                                                                                |
+| `OPS_NOTIFICATIONS_EMAIL`                 | `ops@example.com`           | mailbox for system-only notifications with no customer recipient                                                                                                                                                                                                                                                           |
+| `MAX_DELIVERY_ATTEMPTS`                   | `3`                         | attempts before a delivery is abandoned and `notifications.delivery.failed` is emitted                                                                                                                                                                                                                                     |
+| `RETENTION_DELIVERY_DAYS`                 | `90`                        | delivery-row retention horizon; the nightly purge hard-deletes rows older than this ([§13](#13-background-jobs)). A purged row no longer dedupes its event, so a redelivery that arrives after the horizon is dispatched again                                                                                             |
+| `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300`                       | staleness safety net; the consent cache is kept fresh by events, not TTL                                                                                                                                                                                                                                                   |
+| `NOTIFIER_TEST_FLAKY`                     | `false`                     | **test-only** — swaps in a flaky notifier that fails the first dispatch of any `__FAIL_ONCE__`-marked body. Never set it outside the retry e2e suite.                                                                                                                                                                      |
+| `AUTH_ARGON2_MEMORY_COST`                 | `19456` KiB                 | OWASP 2024 minimum for argon2id                                                                                                                                                                                                                                                                                            |
+| `AUTH_ARGON2_TIME_COST`                   | `2`                         | iterations                                                                                                                                                                                                                                                                                                                 |
+| `AUTH_ARGON2_PARALLELISM`                 | `1`                         | threads                                                                                                                                                                                                                                                                                                                    |
+| `JWT_ACCESS_EXPIRES_IN`                   | `15m`                       | `ms`-style string                                                                                                                                                                                                                                                                                                          |
+| `JWT_REFRESH_EXPIRES_IN`                  | `7d`                        |                                                                                                                                                                                                                                                                                                                            |
+| `OTEL_RESOURCE_ATTRIBUTES`                | —                           | merged into the OTel `Resource` (e.g. `team=platform`); read from the process environment only                                                                                                                                                                                                                             |
+| `OTEL_SDK_DISABLED`                       | `false`                     | short-circuit the SDK at boot. Only the exact string `true` disables it, and only from the process environment: the tracer compares the raw value, so `TRUE` passes the schema and leaves the SDK on                                                                                                                       |
+
+#### Values read before `.env.local` loads
+
+`ConfigModule` loads `.env.local` and `.env` when an app's `AppModule` is imported. Two things run
+earlier and see only the process environment:
+
+- the tracer, the first import of every `main.ts`, which reads `OTEL_SDK_DISABLED`,
+  `OTEL_SERVICE_NAME`, `NODE_ENV` and the exporter's `OTEL_EXPORTER_OTLP_*` variables
+  (`libs/observability/tracer.ts`);
+- the schema's `API_GATEWAY_USE_API_REFERENCE` and `DATABASE_LOGGING` defaults, which are computed
+  from `NODE_ENV` when `libs/config` is loaded.
+
+For a host-side `yarn start:dev`, the `OTEL_*` values in `.env.local` pass validation and never reach
+the tracer. Every service reports `service.name` as `unknown-service` unless the shell exports
+`OTEL_SERVICE_NAME`. Spans still reach the collector, because the exporter's own default,
+`http://localhost:4318/v1/traces`, is where it listens. In the same way, a `NODE_ENV=production`
+that only `.env.local` sets still leaves the API reference and the query log on. Compose and CI set
+these variables in the process environment.
 
 ---
 
@@ -1403,20 +1423,21 @@ Six service names are valid everywhere a `<service>` appears: `api-gateway`,
 `inventory-microservice`, `retail-microservice`, `notification-microservice`,
 `catalog-microservice`, `event-store-microservice`.
 
-| Script                              | Description                                                                      |
-| ----------------------------------- | -------------------------------------------------------------------------------- |
-| `yarn start:dev`                    | Start all six services concurrently, watch reload (`scripts/bash/start-dev.sh`). |
-| `yarn start:dev:<service>`          | Start one service with watch reload.                                             |
-| `yarn start:prod:<service>`         | Run a built service from `dist/`.                                                |
-| `yarn build`                        | `nest build --all`.                                                              |
-| `yarn build:<service>`              | Build one app.                                                                   |
-| `yarn lint`                         | Full ESLint pass incl. `boundaries/*`, `--max-warnings 0` (CI gate).             |
-| `yarn lint:fix`                     | Auto-fix what can be auto-fixed.                                                 |
-| `yarn format` / `yarn format:check` | Prettier write / check-only (CI gate).                                           |
+| Script                              | Description                                                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `yarn start:dev`                    | Start all six services concurrently, watch reload (`scripts/bash/start-dev.sh`).                                                           |
+| `yarn start:dev:<service>`          | Start one service with watch reload.                                                                                                       |
+| `yarn start:prod:<service>`         | Run a built service from `dist/`.                                                                                                          |
+| `yarn build`                        | `nest build --all`.                                                                                                                        |
+| `yarn build:<service>`              | Build one app.                                                                                                                             |
+| `yarn lint`                         | Full ESLint pass incl. `boundaries/*`, `--max-warnings 0` (CI gate).                                                                       |
+| `yarn lint:fix`                     | Auto-fix what can be auto-fixed.                                                                                                           |
+| `yarn format` / `yarn format:check` | Prettier write / check over `apps/` and `libs/`. CI does not run it: `yarn lint` enforces the same formatting through `prettier/prettier`. |
 
 ### Migrations
 
-Two pipelines, two `migrations` ledgers.
+Two pipelines, two `migrations` ledgers. How they are wired, and the schema facts the DDL does not
+state: [`docs/reference/persistence.md`](docs/reference/persistence.md).
 
 | Script                                                                      | Target                                                 |
 | --------------------------------------------------------------------------- | ------------------------------------------------------ |
@@ -1486,9 +1507,14 @@ Every endpoint is authored in **both** libraries, in lockstep: Kulala `*.http` f
 
 ## 10. Seed data
 
-`yarn test:seed` is **idempotent** — every row uses a fixed id and `INSERT IGNORE` (or a
-`WHERE NOT EXISTS` guard where there is no surrogate id), so re-running it never duplicates
-or errors. SQL files apply in FK-safe order (`scripts/utils/test-db-seed.util.ts`).
+`yarn test:seed` is **idempotent**: re-running it never duplicates a row or errors. It is not a
+reset. The seeded users are upserted, so a re-run restores their passwords and status and clears
+their refresh-token hash, which makes an earlier refresh token fail. Every other row is `INSERT IGNORE`d against a fixed
+id or natural key, or guarded by `WHERE NOT EXISTS` where the id is auto-increment. A fixture row
+that a test changed therefore keeps its changes. SQL files apply in FK-safe order
+(`scripts/utils/test-db-seed.util.ts`). The parser behind them splits on every `;` and drops
+everything after `--`, even inside a string
+([`docs/reference/persistence.md`](docs/reference/persistence.md#the-test-seed-yarn-testseed)).
 
 The migration auto-provisions exactly one `StockLocation` — `default-warehouse` — before any
 seed runs, so there is always a location to read from and write to.

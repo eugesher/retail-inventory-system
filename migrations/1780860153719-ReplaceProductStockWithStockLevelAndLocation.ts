@@ -1,24 +1,11 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-// Replaces the append-only `product_stock` ledger (+ its `product_stock_action`
-// lookup and the `storage` table) with per-location `StockLevel` running totals
-// (`stock_level`) anchored on location-aware `stock_location` rows. All keys
-// move from `productId` to `variantId` — `stock_level.variant_id` is a real
-// cross-service FK to the catalog `product_variant(id)` (both tables share the
-// one MySQL connection). See docs/adr/027-stocklevel-running-totals-and-stocklocation.md.
 export class ReplaceProductStockWithStockLevelAndLocation1780860153719 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // `product_stock` first — it carries the FKs onto `storage` /
-    // `product_stock_action`; dropping it releases them so the lookups drop
-    // cleanly. (`product` was already dropped by an earlier migration.)
     await queryRunner.query('DROP TABLE IF EXISTS product_stock;');
     await queryRunner.query('DROP TABLE IF EXISTS product_stock_action;');
     await queryRunner.query('DROP TABLE IF EXISTS storage;');
 
-    // `id` is a caller-assigned VARCHAR(64) string PK (`default-warehouse`),
-    // diverging from the project's auto-increment integer PK convention.
-    // `deleted_at` is present because the entity extends `BaseEntity`; it stays
-    // INERT — soft-delete is via the `active` flag (ADR-027).
     await queryRunner.query(`
       CREATE TABLE stock_location (
         id          VARCHAR(64)  NOT NULL PRIMARY KEY,
@@ -35,12 +22,6 @@ export class ReplaceProductStockWithStockLevelAndLocation1780860153719 implement
       );
     `);
 
-    // `version` ships now (optimistic-concurrency token) though the no-oversell
-    // invariant it guards is enforced by a later capability — shipping the
-    // column from the start makes that retrofit non-destructive. The three
-    // `CHECK` constraints back the non-negative-quantity invariants at the DB
-    // (MySQL 8.4 enforces CHECK). `id` widens the entity's int PK to BIGINT
-    // (`synchronize` is off, so the migration is the source of truth).
     await queryRunner.query(`
       CREATE TABLE stock_level (
         id                 BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -67,8 +48,6 @@ export class ReplaceProductStockWithStockLevelAndLocation1780860153719 implement
       'CREATE INDEX IDX_STOCK_LEVEL_LOCATION ON stock_level (stock_location_id);',
     );
 
-    // Exactly one default StockLocation, idempotently provisioned: a re-run hits
-    // the PK (and the UNIQUE code) and no-ops rather than erroring (ADR-027).
     await queryRunner.query(`
       INSERT INTO stock_location (id, name, code, type, active)
       VALUES ('default-warehouse', 'Default Warehouse', 'default-warehouse', 'warehouse', TRUE)
@@ -77,16 +56,9 @@ export class ReplaceProductStockWithStockLevelAndLocation1780860153719 implement
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    // Reverse in dependency order: `stock_level` (FKs onto `stock_location` +
-    // `product_variant`) before `stock_location`.
     await queryRunner.query('DROP TABLE IF EXISTS stock_level;');
     await queryRunner.query('DROP TABLE IF EXISTS stock_location;');
 
-    // Recreate the prior ledger shape so a revert returns the schema to its
-    // earlier state cleanly. `storage` + `product_stock_action` first (the
-    // `product_stock` FKs target them). `product_stock` has NO `product` FK —
-    // that was dropped by the inventory-product-stub removal — but keeps the
-    // `order_product_id` FK added afterwards.
     await queryRunner.query(`
       CREATE TABLE storage (
         id         VARCHAR(36) PRIMARY KEY,
@@ -123,8 +95,6 @@ export class ReplaceProductStockWithStockLevelAndLocation1780860153719 implement
       );
     `);
 
-    // Re-seed the rows InitStarterEntities provisioned alongside these tables so
-    // the revert is a faithful restore of the prior state.
     await queryRunner.query(`
       INSERT INTO storage (id, name) VALUES ('head-warehouse', 'Head Warehouse');
     `);

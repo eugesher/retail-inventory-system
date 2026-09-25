@@ -61,8 +61,8 @@ placeholders.
 | [`api-gateway.md`](api-gateway.md)                 | `apps/api-gateway`                                                             |
 | [`testing.md`](testing.md)                         | the Jest configs, the e2e harness under `test/` and the self-checks in `spec/` |
 | [`architecture-lint.md`](architecture-lint.md)     | the rules in `eslint.config.mjs`                                               |
-| `persistence.md`                                   | schema facts from `migrations/` and the seeds under `scripts/`                 |
-| [`build-and-ci.md`](build-and-ci.md)               | the webpack configs, Dockerfile, CI workflow, compose files, `.env.example`    |
+| [`persistence.md`](persistence.md)                 | the schema from `migrations/`, the two migration pipelines, the test seed      |
+| [`build-and-ci.md`](build-and-ci.md)               | Node/Yarn, the webpack configs, Dockerfile, CI, pre-commit hook, compose files |
 | `http-api.md`                                      | the request collections under `http/`                                          |
 
 ## Shape of an area file

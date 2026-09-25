@@ -5,10 +5,6 @@ import { join, resolve } from 'path';
 ((): void => {
   const args = process.argv.slice(2);
 
-  // An optional `--dir <subdir>` flag selects the migrations subfolder to scaffold
-  // into — e.g. `--dir eventstore` targets `migrations/eventstore/` for the isolated
-  // `ris_eventstore` schema (ADR-034). With no flag the target is the `migrations/`
-  // root (the operational `retail_db`), so plain `migration:create` is unchanged.
   let subdir = '';
   const positional: string[] = [];
 

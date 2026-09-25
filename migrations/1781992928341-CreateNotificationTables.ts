@@ -1,51 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-// Creates the notification microservice's first two tables — `notification_template`
-// (the versioned, per `(event_type, channel, locale)` registry that backs every
-// rendered notification) and `notification_delivery` (the queryable audit trail of one
-// outgoing notification) — in the shared `retail_db`
-// (docs/adr/033-notification-templates-deliveries-and-render-dispatch.md).
-//
-// Both keep `BaseEntity`'s numeric PK widened to BIGINT UNSIGNED (`synchronize` is off,
-// so this migration is the source of truth) plus `created_at` / `updated_at` /
-// `deleted_at`. `deleted_at` stays INERT on both, and for two different reasons: a
-// template is soft-deleted via the `active` flag, while a delivery is never soft-deleted
-// at all — the row IS the dedupe anchor below, so one hidden from the dedupe query means
-// the same notification sends twice.
-//
-// This migration was written expecting a `RETENTION_DELIVERY_DAYS` purge to follow it, and for a
-// long time none did: the key sat in the shared Joi schema with no DI token, no provider and no
-// reader, so an operator who set it got a clean boot and no purge while this table grew for the
-// life of the deployment. **That gap is closed** (ISSUE-08). `PurgeAgedDeliveriesUseCase` +
-// `DeliveryRetentionScheduler` hard-`DELETE` rows past the horizon nightly, in bounded batches —
-// so `created_at` is a retention column, not just an audit timestamp. The coupling that buys:
-// purging a row retires its dedupe anchor with it, which is safe only because a broker will not
-// redeliver a message that old. See `INotificationDeliveryRepositoryPort.deleteOlderThan`, which
-// states it in full.
-//
-// `notification_template.version` is the BUSINESS version (a plain INT that climbs on
-// every edit — old rows retained for audit/rollback), part of the natural key, NOT an
-// optimistic-lock token; the registry ships no OCC column (last-writer-wins, the catalog
-// stance). The UNIQUE `(event_type, channel, locale, version)` makes every version a
-// distinct retained row; the `(event_type, channel, locale, active)` index backs the
-// "find latest active" hot-path query.
-//
-// `notification_delivery.template_id` FKs `notification_template(id)` `ON DELETE
-// RESTRICT` so deliveries outlive template-edit churn. The **double-dispatch guard** is
-// the STORED generated column `delivery_dedupe_key`: MySQL has no partial unique index,
-// so (following the `price.open_scope_key` precedent) the column is non-NULL only when
-// `recipient_customer_id IS NOT NULL`, and a UNIQUE index over it permits at most one
-// customer-facing delivery per `(template_id, event_reference_type, event_reference_id,
-// channel, recipient_customer_id)`. `template_id` is part of the key so two DISTINCT
-// event types that share one business reference — e.g. the `retail.return.requested` /
-// `.authorized` / `.received` / `.inspected` family, all keyed on the same `rmaId` /
-// `recipient_customer_id` — each resolve to their own template and are NOT collapsed into
-// a single delivery (without it, only the first lifecycle email would ever send). A TRUE
-// redelivery of the SAME event resolves to the same active template, so two consumers
-// racing it collide on the INSERT and the loser catches `ER_DUP_ENTRY`. System/ops
-// notifications (`recipient_customer_id IS NULL`) carry a NULL key and are NOT deduped
-// (MySQL treats multiple NULLs as distinct, so each low-stock alert is a fresh row). The
-// column is computed by MySQL — no application code ever writes it.
 export class CreateNotificationTables1781992928341 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
@@ -101,24 +55,18 @@ export class CreateNotificationTables1781992928341 implements MigrationInterface
           REFERENCES notification_template (id) ON DELETE RESTRICT
       );
     `);
-    // The retry sweeper scan: `status = 'failed' AND attempt_count < max`, ordered by
-    // `last_attempt_at` (oldest-first).
     await queryRunner.query(
       'CREATE INDEX IDX_NOTIFICATION_DELIVERY_RETRY ON notification_delivery (status, last_attempt_at);',
     );
-    // Audit lookups by the triggering business event.
     await queryRunner.query(
       'CREATE INDEX IDX_NOTIFICATION_DELIVERY_EVENT ON notification_delivery (event_reference_type, event_reference_id);',
     );
-    // Per-customer delivery history, newest-first.
     await queryRunner.query(
       'CREATE INDEX IDX_NOTIFICATION_DELIVERY_RECIPIENT ON notification_delivery (recipient_customer_id, created_at);',
     );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    // Drop in reverse FK order: `notification_delivery` (FKs `notification_template`),
-    // then `notification_template`.
     await queryRunner.query('DROP TABLE IF EXISTS notification_delivery;');
     await queryRunner.query('DROP TABLE IF EXISTS notification_template;');
   }
