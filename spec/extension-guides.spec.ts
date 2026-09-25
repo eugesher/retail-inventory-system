@@ -1,28 +1,3 @@
-// The structure check for `docs/extensions/` — the folder of sketches describing how capabilities
-// outside the universal core would attach if a business ever needed them (ADR-055).
-//
-// **Why a folder of prose gets a test at all.** Sixty-odd hand-written files with a hand-maintained
-// index and no check is the decay pattern this repository has already paid for twice (ADR-046,
-// ADR-053): an assertion that is believed is an assertion nobody rechecks.
-//
-// **What decays, specifically.** Not the guides' subject matter — a guide is deleted by whoever
-// builds the capability, and they are reading it at the time. What rots is the *anchor*: a guide
-// says "attaches to the `Order` aggregate at `<path>`", a module moves eight months later in a
-// change that has nothing to do with extensions, and the sentence is silently false. ADR-053 says
-// to prefer a mechanical condition over a review date wherever one fits, and this one fits: every
-// guide declares its attachment points in front matter, and the check below asserts they exist. The
-// build goes red on the commit that moves the module, when a human is already looking at that seam.
-//
-// **What this check deliberately cannot do:** it reaches the paths, never the prose. A guide whose
-// sketch describes an architecture three refactors old passes every assertion here. Saying so is the
-// point — a reader who believes the folder is machine-verified will trust it further than it earns.
-//
-// **The counts below were deliberately absent while the folder was being filled in** — a count that
-// fails for eight consecutive sittings is a count everyone learns to skip. They went in on the
-// change that completed the folder, and from here they are what notices a guide being added or
-// deleted without the index being touched. Changing a count is fine; changing it *without* touching
-// `README.md` in the same commit is the thing they exist to make impossible.
-
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
@@ -30,8 +5,6 @@ const REPO_ROOT = resolve(__dirname, '..');
 const EXTENSIONS_DIR = join(REPO_ROOT, 'docs', 'extensions');
 const INDEX_FILE = join(EXTENSIONS_DIR, 'README.md');
 
-// Verbatim, and pinned against a literal list: a typo in `cluster` silently removes a guide from its
-// section of the index while every other assertion still passes.
 const CLUSTERS = [
   'Product Catalog',
   'Inventory',
@@ -44,10 +17,6 @@ const CLUSTERS = [
   'Physical Retail',
 ] as const;
 
-// The size of the finished folder, and how it is distributed. The per-cluster figures are the
-// assertion that earns its keep: a guide filed under the wrong `cluster` still has valid front
-// matter, six correct sections, live `attaches_to` paths and an index row — **every other check here
-// passes** — and it is simply absent from the section of the index a reader would look in.
 const EXPECTED_TOTAL = 64;
 
 const EXPECTED_PER_CLUSTER: Record<(typeof CLUSTERS)[number], number> = {
@@ -62,16 +31,6 @@ const EXPECTED_PER_CLUSTER: Record<(typeof CLUSTERS)[number], number> = {
   'Physical Retail': 1,
 };
 
-// A guide lives in the directory its cluster names, so the cluster now has **two** representations
-// that can disagree: the folder a file sits in and the `cluster` key in its front matter. This map is
-// the join between them.
-//
-// Every entry below happens to be what lower-casing the cluster name and replacing ` & ` with `-and-`
-// would produce, so a slugify would pass today. It is written out anyway, because a derived
-// expectation cannot fail: `slug(cluster)` compared against a folder named by the same rule asserts
-// that the rule equals itself, and the day the convention changes it re-derives to the new answer and
-// stays green. Spelling the nine names out makes the folder layout a *fact the test pins*, so renaming
-// a directory turns the suite red until someone confirms the rename was intended.
 const CLUSTER_DIRS: Record<(typeof CLUSTERS)[number], string> = {
   'Product Catalog': 'product-catalog',
   Inventory: 'inventory',
@@ -84,8 +43,6 @@ const CLUSTER_DIRS: Record<(typeof CLUSTERS)[number], string> = {
   'Physical Retail': 'physical-retail',
 };
 
-// The unit is `capability` — this repository's own word for a slice of work, the one
-// `docs/implementation/` is organised by. Note the en-dash in the middle value.
 const EFFORTS = ['1 capability', '2–3 capabilities', 'subsystem-scale (5+ capabilities)'] as const;
 
 const SECTIONS = [
@@ -97,10 +54,6 @@ const SECTIONS = [
   '## Effort sketch',
 ] as const;
 
-// The orchestration-scratch path prefix and the two words that would betray the planning workflow
-// these guides came out of. All three are assembled from fragments rather than written out, so that
-// the repository-wide self-containment grep does not flag this file for containing the very patterns
-// it enforces — a checker that trips its own check teaches people to ignore the check.
 const SCRATCH_PREFIX = 'tm' + 'p/';
 const PLANNING_WORDS = ['ep' + 'ic', 'ta' + 'sk'];
 
@@ -109,13 +62,9 @@ interface IGuide {
   body: string;
   frontMatter: Record<string, string>;
   attachesTo: string[];
-  /** Every key seen in the front matter block, so a missing one can be named rather than inferred. */
   hasFrontMatter: boolean;
 }
 
-// A four-key block with one list. Parsed by hand on purpose: adding a YAML dependency to check a
-// convention this small would cost more than the convention is worth, and
-// `transition-windows.spec.ts` sets the precedent for keeping a check's own machinery minimal.
 function parseGuide(name: string): IGuide {
   const raw = readFileSync(join(EXTENSIONS_DIR, name), 'utf8');
   const lines = raw.split('\n');
@@ -151,8 +100,6 @@ function parseGuide(name: string): IGuide {
   return guide;
 }
 
-// Relative markdown links only: `http(s)` targets are somebody else's uptime problem, and a bare
-// `#anchor` points inside the file it is written in.
 function relativeLinksIn(markdown: string): string[] {
   const links: string[] = [];
   const pattern = /\]\(([^)]+)\)/g;
@@ -167,10 +114,6 @@ function relativeLinksIn(markdown: string): string[] {
   return links;
 }
 
-// Guides live one directory down, in a per-cluster folder; the index stays at the root beside them.
-// A `name` is therefore `<cluster-dir>/<file>.md` throughout this file — it is what every message
-// prints and what `join(EXTENSIONS_DIR, name)` resolves, so nothing below needs to know the split.
-// Read with `withFileTypes` so a stray file at the root is simply not a guide rather than a crash.
 const guideNames = existsSync(EXTENSIONS_DIR)
   ? readdirSync(EXTENSIONS_DIR, { withFileTypes: true })
       .filter((e) => e.isDirectory())
@@ -222,11 +165,6 @@ describe('extension guides (ADR-055)', () => {
     expect(violations).toEqual([]);
   });
 
-  // The cluster is written twice — once as the folder the file sits in, once as front matter — and
-  // the two are what the reader and the index respectively go by. A guide dragged into the wrong
-  // folder keeps a correct `cluster`, so the per-cluster **counts** above still balance and only this
-  // assertion notices; a guide whose front matter was edited without moving the file is the same
-  // failure seen from the other side. Both land here, and the message names which half to trust.
   it('every guide sits in the directory its cluster names', () => {
     const violations: string[] = [];
 
@@ -288,8 +226,6 @@ describe('extension guides (ADR-055)', () => {
     expect(violations).toEqual([]);
   });
 
-  // **The assertion this whole file exists for** (ADR-055). The message names the guide AND the dead
-  // path: a red build reading `expected true to be false` teaches the next person to delete the test.
   it('every attaches_to path exists on disk', () => {
     const violations: string[] = [];
 
@@ -345,7 +281,6 @@ describe('extension guides (ADR-055)', () => {
     expect(violations).toEqual([]);
   });
 
-  // The self-containment rule, pinned as a test rather than left to a grep somebody remembers to run.
   it('no guide references the orchestration scratch tree or names the planning workflow', () => {
     const violations: string[] = [];
     const files = [...guides, { name: 'README.md', body: readFileSync(INDEX_FILE, 'utf8') }];
@@ -380,11 +315,6 @@ describe('extension guides (ADR-055)', () => {
 
   describe('the index', () => {
     const indexBody = existsSync(INDEX_FILE) ? readFileSync(INDEX_FILE, 'utf8') : '';
-    // Only links *down* into a cluster folder count as index entries: exactly one slash, no `../`.
-    // The tier table links out to ADRs and the root README with `../../`, and those are checked
-    // separately below. Matching the shape rather than a directory whitelist is deliberate — a row
-    // pointing at `made-up-cluster/foo.md` should reach the dead-link assertion, not be filtered out
-    // of the count and disappear.
     const linkedGuides = relativeLinksIn(indexBody).filter(
       (t) => t.endsWith('.md') && !t.startsWith('.') && t.split('/').length === 2,
     );
@@ -398,13 +328,9 @@ describe('extension guides (ADR-055)', () => {
         .filter(([, n]) => n > 1)
         .map(([n, c]) => `${n} (${c}×)`);
 
-      // A guide not yet authored is absent from both sides, so this holds while the folder fills up.
       expect({ orphans, duplicates }).toEqual({ orphans: [], duplicates: [] });
     });
 
-    // The bijection above holds for any size — including a half-filled folder, which is why it was
-    // safe to have from the start. Pinning the size is what turns it into "the index lists all of
-    // them": an orphan guide and a missing row are now two different failures, not one silence.
     it('links exactly as many files as the folder holds', () => {
       const unique = new Set(linkedGuides);
       const violations: string[] = [];
