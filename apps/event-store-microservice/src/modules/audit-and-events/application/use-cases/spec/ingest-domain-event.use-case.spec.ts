@@ -8,8 +8,6 @@ import { DomainEvent } from '../../../domain';
 import { IDomainEventAppendResult, IDomainEventRepositoryPort } from '../../ports';
 import { IngestDomainEventUseCase } from '../ingest-domain-event.use-case';
 
-// A fake firehose repository that records every appended event and lets a test program
-// the next `append` outcome (inserted vs. duplicate) or make it throw.
 class FakeDomainEventRepository implements IDomainEventRepositoryPort {
   public readonly appended: DomainEvent[] = [];
   private nextInserted = true;
@@ -31,8 +29,6 @@ class FakeDomainEventRepository implements IDomainEventRepositoryPort {
     return Promise.resolve({ inserted: this.nextInserted });
   }
 
-  // Present only to satisfy the port; the ingest path never reads. The read surface is
-  // exercised by `query-domain-events.use-case.spec.ts`.
   public listByCorrelationId(): Promise<DomainEvent[]> {
     return Promise.reject(new Error('the trace read is not exercised by the ingest spec'));
   }
@@ -96,8 +92,6 @@ describe('IngestDomainEventUseCase', () => {
 
     await expect(useCase.execute(ROUTING_KEY, wirePayload())).resolves.toBeUndefined();
 
-    // The append was attempted once; the repository reported `{ inserted: false }` and the
-    // use case neither threw nor logged an error.
     expect(repository.appended).toHaveLength(1);
     expect(logger.warn).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();
