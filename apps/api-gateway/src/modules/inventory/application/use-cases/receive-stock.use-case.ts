@@ -6,10 +6,6 @@ import { StockLevelView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { IInventoryGatewayPort, INVENTORY_GATEWAY_PORT, IReceiveStockCommand } from '../ports';
 
-// Thin gateway-side orchestrator over the `inventory.stock-level.receive` RPC.
-// The running-total mutation, cache invalidation, and event emission are the
-// inventory microservice's responsibility — the gateway only threads the
-// correlation id and maps a downstream error onto the right HTTP status.
 @Injectable()
 export class ReceiveStockUseCase {
   constructor(

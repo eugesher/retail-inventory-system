@@ -6,13 +6,6 @@ import { ICurrentUser, OrderView, PermissionCodeEnum } from '@retail-inventory-s
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Reads one order by id. The route carries **no `@RequiresPermission`** (that would
-// block the owning customer, who carries no permissions — ADR-024). Instead this use
-// case computes the staff override from `@CurrentUser().permissions` — `canReadAny` is
-// true iff the caller holds `order:read` — and folds `@CurrentUser().id` into
-// `actorId`. The retail use case is the single enforcement point: it allows the read
-// if `canReadAny` OR the caller owns the order, else answers 403 (surfaced here as
-// `ForbiddenException` via `throwRpcError`); a missing order is a 404.
 @Injectable()
 export class GetOrderUseCase {
   constructor(

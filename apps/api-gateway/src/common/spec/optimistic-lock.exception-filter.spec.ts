@@ -4,13 +4,8 @@ import { OptimisticLockVersionMismatchError, QueryFailedError } from 'typeorm';
 
 import { OptimisticLockExceptionFilter } from '../filters';
 
-// The filter delegates the actual response rendering to `BaseExceptionFilter`. We
-// spy on the parent `catch` so the test asserts *what* gets delegated (a remapped
-// 409 ConflictException carrying the uniform contract vs. the untouched original)
-// without standing up an HTTP adapter — the `DuplicateKeyExceptionFilter` spec
-// pattern.
 describe('OptimisticLockExceptionFilter', () => {
-  const host = {} as ArgumentsHost; // unused once super.catch is stubbed
+  const host = {} as ArgumentsHost;
 
   let superCatch: jest.SpyInstance;
 
@@ -26,8 +21,6 @@ describe('OptimisticLockExceptionFilter', () => {
 
   it('remaps an OptimisticLockVersionMismatchError to a 409 with { code: VERSION_MISMATCH, currentVersion }', () => {
     const filter = new OptimisticLockExceptionFilter();
-    // Constructor: (entity, expectedVersion, actualVersion). The actual version is
-    // the current one the caller should refetch.
     const error = new OptimisticLockVersionMismatchError('StaffUser', 3, 5);
 
     filter.catch(error, host);
@@ -44,7 +37,6 @@ describe('OptimisticLockExceptionFilter', () => {
 
   it('omits currentVersion when the message carries no parseable actual version', () => {
     const filter = new OptimisticLockExceptionFilter();
-    // A Date-versioned entity puts a non-numeric actual version in the message.
     const error = new OptimisticLockVersionMismatchError(
       'StaffUser',
       new Date('2026-01-01T00:00:00Z'),

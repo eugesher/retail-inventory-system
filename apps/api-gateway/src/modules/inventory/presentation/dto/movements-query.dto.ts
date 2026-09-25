@@ -4,19 +4,6 @@ import { IsEnum, IsInt, IsISO8601, IsOptional, Max, Min } from 'class-validator'
 
 import { StockMovementTypeEnum } from '@retail-inventory-system/contracts';
 
-// Query string for `GET /api/inventory/variants/:variantId/movements` — the audit
-// read of a variant's `stock_movement` ledger. Every parameter is optional.
-//
-// `page` / `pageSize` arrive as strings and are coerced via `@Type(() => Number)`
-// (the global `ValidationPipe` runs with `transform: true`); the controller
-// defaults them at the edge (`page`→1, `pageSize`→20) and maps `pageSize` onto the
-// RPC payload's `size` (the orders-list `?page/?pageSize` precedent). Unlike the
-// orders list, the page-size ceiling is enforced **here** with `@Max(100)` — the
-// inventory audit use case does not cap, so the gateway DTO is the guard.
-//
-// `type` narrows to one movement kind; `from` / `to` are ISO-8601 instants that
-// bound `occurredAt` inclusively. The `@IsISO8601()` validators are the gate that
-// lets the downstream use case treat any value that reaches it as well-formed.
 export class MovementsQueryDto {
   @ApiPropertyOptional({ example: 1, minimum: 1, description: '1-based page index' })
   @IsOptional()

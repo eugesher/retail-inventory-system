@@ -2,12 +2,6 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
-// Query string for `GET /api/catalog/products`. `page`/`pageSize` arrive as
-// strings and are coerced via `@Type(() => Number)` (the global `ValidationPipe`
-// runs with `transform: true`). The upper page-size cap is owned by the
-// downstream `ListProductsUseCase` (it caps at 100), so the gateway only
-// enforces the positive-integer floor here. `status` defaults to `active` on the
-// read path — browse hides non-active products (ADR-025).
 export class ListProductsQueryDto {
   @ApiPropertyOptional({ enum: ['active', 'draft', 'archived'], example: 'active' })
   @IsOptional()

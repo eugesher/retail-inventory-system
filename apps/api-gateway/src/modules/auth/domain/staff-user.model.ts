@@ -90,9 +90,6 @@ export class StaffUser extends AggregateRoot<string> {
     return this._roles.map((role) => role.name);
   }
 
-  // The JWT permissions claim is the deduped, sorted union of every bound
-  // role's permission set. Login and refresh must mint it identically, so the
-  // computation lives on the aggregate rather than being copied to each caller.
   public get permissionCodes(): PermissionCodeEnum[] {
     return Array.from(new Set(this._roles.flatMap((role) => Array.from(role.permissions)))).sort();
   }
@@ -148,9 +145,6 @@ export class StaffUser extends AggregateRoot<string> {
     this.addDomainEvent(new StaffUserLoggedInEvent(this.id, this._email));
   }
 
-  // The IAM use case computes the diff (the *added* names after dedupe) and
-  // hands it in — keeping the diff calculation out of the aggregate avoids
-  // baking IAM-specific logic into the domain. The aggregate just records.
   public recordRolesAssigned(addedRoleNames: readonly string[]): void {
     if (addedRoleNames.length === 0) return;
     this.addDomainEvent(new StaffUserRolesAssignedEvent(this.id, addedRoleNames));
@@ -160,9 +154,6 @@ export class StaffUser extends AggregateRoot<string> {
     this.addDomainEvent(new StaffUserRoleRevokedEvent(this.id, roleName));
   }
 
-  // `passwordHash` and `refreshTokenHash` must never leak through structured
-  // logging or response serialization — `JSON.stringify` is the most common
-  // accidental egress in NestJS request handlers.
   public toJSON(): Record<string, unknown> {
     return {
       id: this.id,

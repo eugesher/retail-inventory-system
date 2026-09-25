@@ -53,8 +53,6 @@ export class RefreshTokenUseCase {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    // Resolve across both identity spaces — staff and customers share the
-    // `/auth/refresh` route and both are issued refresh tokens at login.
     const resolved = await resolveAuthSubject(this.staff, this.customers, payload.sub);
     const subject = resolved?.subject;
     if (!resolved || !subject || !subject.isActive || !subject.refreshTokenHash) {
@@ -73,9 +71,6 @@ export class RefreshTokenUseCase {
 
     const matches = await this.hasher.verify(subject.refreshTokenHash, command.refreshToken);
     if (!matches) {
-      // Rotation reuse — clear the live hash so a leaked stale refresh token can't roll forward
-      // (ADR-010 §3, "Refresh-token rotation with reuse detection" — a live section; only that
-      // ADR's *RBAC model* was superseded, by ADR-024).
       subject.rotateRefreshTokenHash(null);
       await resolved.persist();
       this.logger.warn({ userId: subject.id }, 'RefreshFailed: rotation reuse detected');
@@ -96,8 +91,6 @@ export class RefreshTokenUseCase {
 
     const accessToken = await this.tokens.issueAccessToken({
       sub: subject.id,
-      // The `!subject.isActive` guard above rejected any tombstoned customer, so
-      // the subject's email is a real string here (never a session for a tombstone).
       email: subject.email!,
       roles: resolved.roles,
       permissions: resolved.permissions,

@@ -12,10 +12,6 @@ import {
   IPriceQueryRequest,
 } from '../ports';
 
-// Select Applicable Price: the deterministic `(variantId, currency, asOf)` → a
-// single Price, or `null` when none is in effect. The `null` is surfaced
-// unchanged (the route returns `200` with a `null` body); the resolution policy
-// (priority DESC, then validFrom DESC) lives in the catalog use case, not here.
 @Injectable()
 export class GetApplicablePriceUseCase {
   constructor(
@@ -33,12 +29,6 @@ export class GetApplicablePriceUseCase {
   ): Promise<PriceView | null> {
     this.logger.assign({ correlationId });
 
-    // **Resolve the currency scope BEFORE the RPC** (ISSUE-11). The caller may omit `?currency=`; the
-    // DTO no longer fills it with a literal `'USD'`, so this is where it acquires a value — from the
-    // deployment's configured `DEFAULT_CURRENCY`, the same variable the catalog prices against.
-    //
-    // On a shop configured `DEFAULT_CURRENCY=EUR`, this endpoint used to ask the catalog for a **USD**
-    // price it does not stock and answer `200` with a `null` body — for every variant.
     const command: IPriceQueryCommand = {
       ...query,
       currency: query.currency ?? this.defaultCurrency,

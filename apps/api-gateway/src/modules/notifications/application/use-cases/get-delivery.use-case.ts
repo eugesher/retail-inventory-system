@@ -6,10 +6,6 @@ import { NotificationDeliveryView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { IGetDeliveryQuery, INotificationsGatewayPort, NOTIFICATIONS_GATEWAY_PORT } from '../ports';
 
-// Thin gateway-side orchestrator over the `notification.delivery.get` RPC — the
-// single-row drill-down by id (incl. the materialized `renderedBody`). The gateway
-// threads the correlation id and maps a downstream rejection (an unknown id is a
-// 404) onto the right HTTP status via `throwRpcError`.
 @Injectable()
 export class GetDeliveryUseCase {
   constructor(

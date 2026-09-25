@@ -9,10 +9,6 @@ interface IRoleProps {
 
 const ROLE_NAME_REGEX = /^[a-z][a-z0-9-]*$/;
 
-// Kebab-case name + set of permission codes. `permissions` is a Set so
-// duplicate `addPermission(code)` calls collapse to a no-op without the
-// caller having to dedupe first. `RoleEntity` flattens this to a join
-// table at the persistence boundary; see `role.mapper.ts`.
 export class RoleAggregate extends AggregateRoot<string> {
   private _description: string | null;
   private readonly _name: string;

@@ -6,11 +6,6 @@ import { ICurrentUser, ReturnRequestView } from '@retail-inventory-system/contra
 import { throwRpcError } from '../../../../common/utils';
 import { IReturnsGatewayPort, RETURNS_GATEWAY_PORT } from '../ports';
 
-// Walks a `requested` RMA → `rejected` (terminal). The route is
-// `@RequiresPermission('order:return-authorize')`-gated — **staff-only**. This use case
-// folds `@CurrentUser().id` into `actorId` and forwards the supplied `reason`, which the
-// retail use case appends to the RMA's `notes` (no schema change) and rides on the
-// `retail.return.rejected` event. Returns the rejected `ReturnRequestView` (200).
 @Injectable()
 export class RejectReturnUseCase {
   constructor(

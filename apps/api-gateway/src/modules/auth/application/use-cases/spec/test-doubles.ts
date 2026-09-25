@@ -44,14 +44,11 @@ export class InMemoryStaffUserRepository implements IStaffUserRepositoryPort {
     return Promise.resolve(this.byId.get(id)?.isActive ?? false);
   }
 
-  // Reconstituted, like the real adapter — see `asReconstituted` (ADR-060).
   public save(user: StaffUser): Promise<StaffUser> {
     this.byId.set(user.id, user);
     return Promise.resolve(asReconstituted(user));
   }
 
-  // Arrangement only — NOT on the port (ADR-049). Drops the row so a spec can assert
-  // that a token minted for a staff user who no longer exists is rejected.
   public remove(id: string): void {
     this.byId.delete(id);
   }
@@ -78,11 +75,9 @@ export class InMemoryCustomerRepository implements ICustomerRepositoryPort {
 
   public existsAuthenticatableById(id: string): Promise<boolean> {
     const customer = this.byId.get(id);
-    // A guest is authenticatable alongside an active customer (Q1/Q7).
     return Promise.resolve(customer?.status === 'active' || customer?.status === 'guest');
   }
 
-  // Reconstituted, like the real adapter — see `asReconstituted` (ADR-060).
   public save(customer: Customer): Promise<Customer> {
     this.byId.set(customer.id, customer);
     return Promise.resolve(asReconstituted(customer));
@@ -103,8 +98,6 @@ export class InMemoryConsentRecordRepository implements IConsentRecordRepository
 
   public save(record: ConsentRecord): Promise<ConsentRecord> {
     this.saveCount += 1;
-    // Simulate the real repository's DB `@UpdateDateColumn` stamp + re-read: a
-    // saved row always comes back with a fresh, non-null `updatedAt`.
     const stamped = ConsentRecord.rehydrate(record.customerId, {
       transactionalEmail: record.transactionalEmail,
       marketingEmail: record.marketingEmail,
@@ -117,8 +110,6 @@ export class InMemoryConsentRecordRepository implements IConsentRecordRepository
   }
 }
 
-// Recording fake for ICustomerEventsPublisherPort — collects the emitted inputs so
-// specs can assert the `customer.consent.updated` / `customer.erased` fan-out.
 export class FakeCustomerEventsPublisher implements ICustomerEventsPublisherPort {
   public readonly consentUpdated: IConsentUpdatedPublishInput[] = [];
   public readonly erased: ICustomerErasedPublishInput[] = [];
@@ -134,9 +125,6 @@ export class FakeCustomerEventsPublisher implements ICustomerEventsPublisherPort
   }
 }
 
-// Recording fake for ICustomerErasureWriterPort — captures the `Customer` handed to
-// `persistErasure` (post-`erase()`), so the erase use-case spec can assert the
-// aggregate's PII is nulled and count writes (for the idempotency short-circuit).
 export class RecordingCustomerErasureWriter implements ICustomerErasureWriterPort {
   public readonly persisted: Customer[] = [];
 
@@ -146,7 +134,6 @@ export class RecordingCustomerErasureWriter implements ICustomerErasureWriterPor
   }
 }
 
-// Plaintext-prefixing fake — avoids real argon2's intentional cost in unit tests.
 export class FakeHasher implements IPasswordPort {
   public hash(plain: string): Promise<string> {
     return Promise.resolve(`hash:${plain}`);
@@ -193,8 +180,6 @@ export class FakeTokenAdapter implements ITokenPort {
   }
 }
 
-// Recording fake for IAuditLogPublisher — collects the published events so
-// specs can assert event-name + payload shape per audit point.
 export class FakeAuditLogPublisher implements IAuditLogPublisher {
   public readonly published: IAuditLogEvent[] = [];
 

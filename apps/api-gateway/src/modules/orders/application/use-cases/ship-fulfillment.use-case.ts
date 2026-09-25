@@ -11,15 +11,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Ships a `pending` fulfillment. The route is `@RequiresPermission('order:fulfill')`-
-// gated (staff-only — a customer cannot ship), so `isStaffFulfill` resolved from
-// `@CurrentUser().permissions` is always `true` here; the retail use case remains the
-// single enforcement point (ADR-024 / ADR-028 §7). The ship captures an authorized
-// payment inline (Q5 ship-triggered capture — blocked if the gateway declines). The
-// **required** `Idempotency-Key` (ADR-036) is forwarded and deduped retail-side; the use
-// case resolves the `IIdempotentResult<FulfillmentView>` envelope so the controller can set
-// the `Idempotent-Replay: true` header on a served replay (a non-`pending` re-ship is a 409
-// backstop). The order's advanced statuses are observable via `GET /api/orders/:orderId`.
 @Injectable()
 export class ShipFulfillmentUseCase {
   constructor(

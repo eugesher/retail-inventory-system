@@ -31,10 +31,6 @@ import {
   ITransferStockCommand,
 } from '../../application/ports';
 
-// The single `ClientProxy` holder for the inventory gateway module (ADR-009 /
-// ADR-020). Each method materializes the RPC with `firstValueFrom` and stitches
-// the transport-level `correlationId` onto the wire payload; everything else in
-// the module depends on `IInventoryGatewayPort`, never on `@nestjs/microservices`.
 @Injectable()
 export class InventoryRabbitmqAdapter implements IInventoryGatewayPort {
   constructor(
@@ -102,10 +98,6 @@ export class InventoryRabbitmqAdapter implements IInventoryGatewayPort {
     );
   }
 
-  // The audit-list, manual-release and sweep RPCs take the FULL wire payload (the
-  // controller already folded the REQUIRED `correlationId` + the release's
-  // `reason` / `actorId`), so unlike the methods above there is no separate
-  // `correlationId` argument to stitch — the payload is sent verbatim.
   public async listVariantMovements(
     payload: IStockMovementListPayload,
   ): Promise<IPage<StockMovementView>> {

@@ -1,16 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
-// Request body for `POST /api/notifications/marketing/send` (staff, notifications:write,
-// ADR-037). The operator names a customer + supplies the recipient email; the gateway
-// resolves the marketing `eventType` default and mints the per-request `campaignId`
-// before dispatching the RPC. The notification service's consent-gate then decides send
-// vs `skipped-no-consent` — the endpoint itself never inspects consent.
-//
-// `customerEmail` is a documented operator input rather than a server-side lookup of the
-// gateway `auth` module's `customer` table: reading that table from the notifications
-// gateway module would cross a module boundary for no functional gain here, so the
-// simpler, boundary-clean shape carries the email on the request (ADR-037).
 export class SendMarketingRequestDto {
   @ApiProperty({
     example: '11111111-1111-4111-8111-111111111111',

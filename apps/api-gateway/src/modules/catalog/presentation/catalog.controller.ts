@@ -61,14 +61,6 @@ import {
   SetPriceRequestDto,
 } from './dto';
 
-// HTTP surface over the catalog microservice's catalog + pricing RPCs (ADR-009).
-// Write routes are permission-gated per ADR-024 — `catalog:write` for the
-// register/add-variant/archive mutations, `catalog:publish` for the publish
-// transition, and `pricing:write` for the price/tax mutations; customer tokens
-// carry no `permissions` claim, so the write routes are staff-only by
-// construction. Read routes are `@Public()` so an unauthenticated shopper can
-// browse the catalogue and read prices. The gateway holds no pricing logic of
-// its own — each method is a thin port→adapter pass to `catalog_queue`.
 @ApiTags('Catalog')
 @Controller('catalog')
 export class CatalogController {
@@ -152,9 +144,6 @@ export class CatalogController {
   @ApiExtraModels(ProductWithVariantsView)
   @ApiOkResponse({
     description: 'Active products with their active variants, paginated',
-    // The handler returns the `IPage` envelope ({ items, total, page, size }),
-    // not a bare array — describe the real shape so generated clients read
-    // `body.items` rather than indexing the response as an array.
     schema: {
       type: 'object',
       properties: {
@@ -232,9 +221,6 @@ export class CatalogController {
   @Public()
   @ApiOperation({ summary: 'Resolve the single applicable price for a variant at an instant' })
   @ApiParam({ name: 'variantId', type: Number, example: 1 })
-  // No price in effect surfaces the catalog `catalog.price.select` `null`
-  // unchanged: a `200` with a `null` body (the gateway is a thin pass-through —
-  // it does not promote "no price" to a 404).
   @ApiOkResponse({
     description: 'The applicable price, or a `null` body when none is in effect',
     type: PriceView,

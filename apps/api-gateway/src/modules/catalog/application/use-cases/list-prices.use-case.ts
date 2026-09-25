@@ -12,8 +12,6 @@ import {
   IPriceQueryRequest,
 } from '../ports';
 
-// List every Price row in effect for `(variantId, currency)` at `asOf` (no
-// collapse — the resolution to a single applicable price is a separate query).
 @Injectable()
 export class ListPricesUseCase {
   constructor(
@@ -28,9 +26,6 @@ export class ListPricesUseCase {
   public async execute(query: IPriceQueryRequest, correlationId: string): Promise<PriceView[]> {
     this.logger.assign({ correlationId });
 
-    // **Resolve the currency scope BEFORE the RPC** (ISSUE-11) — see `GetApplicablePriceUseCase`. On a
-    // non-USD shop this endpoint used to answer `[]` for every variant, because the DTO put `USD` on the
-    // wire for a caller who never asked for it.
     const command: IPriceQueryCommand = {
       ...query,
       currency: query.currency ?? this.defaultCurrency,

@@ -6,10 +6,6 @@ import { PriceView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CATALOG_GATEWAY_PORT, ICatalogGatewayPort, ISetPriceCommand } from '../ports';
 
-// Set or schedule a price for a variant. One command backs both outcomes — an
-// omitted/past `validFrom` is an immediate Set, a future `validFrom` schedules
-// one — the distinction is the catalog microservice's; the gateway is a thin
-// pass-through (ADR-009).
 @Injectable()
 export class SetPriceUseCase {
   constructor(

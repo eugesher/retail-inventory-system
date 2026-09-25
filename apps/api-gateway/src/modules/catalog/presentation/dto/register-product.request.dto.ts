@@ -3,10 +3,6 @@ import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-valid
 
 import { SLUG_PATTERN, SLUG_REGEX } from './validation.constants';
 
-// Request body for `POST /api/catalog/products`. The catalog domain has the
-// final say on name/slug non-emptiness and the repository owns slug uniqueness;
-// these decorators are the gateway's edge guard so a malformed request fails
-// fast with a 400 before an RPC is dispatched.
 export class RegisterProductRequestDto {
   @ApiProperty({ example: 'Aeron Chair', minLength: 1, maxLength: 255 })
   @IsString()

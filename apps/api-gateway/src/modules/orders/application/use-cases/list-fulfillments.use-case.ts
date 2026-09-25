@@ -10,13 +10,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Lists one order's fulfillments newest-first. The route carries **no
-// `@RequiresPermission`** (that would block the owning customer — ADR-024); this use
-// case resolves the staff override `canReadAny` from `@CurrentUser().permissions`
-// (true iff the caller holds `order:read`) and folds `@CurrentUser().id` into
-// `actorId`. The retail use case is the single enforcement point: it allows the list
-// if `canReadAny` OR the caller owns the order, else 403. An order with no
-// fulfillments resolves to an empty array (never 404).
 @Injectable()
 export class ListFulfillmentsUseCase {
   constructor(

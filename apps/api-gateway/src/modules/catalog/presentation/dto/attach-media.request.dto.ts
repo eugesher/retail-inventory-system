@@ -11,15 +11,6 @@ import {
 
 import { MediaAssetTypeEnum, MediaOwnerTypeEnum } from '@retail-inventory-system/contracts';
 
-// Request body for `POST /api/catalog/media`. Attaches a new media asset to the
-// owner identified by `(ownerType, ownerId)`. The owner is addressed by its
-// BIGINT id (an operator attaching media already holds the product/variant id);
-// the catalog use case probes that id against the matching table for existence
-// (a miss → 404 `MEDIA_OWNER_NOT_FOUND`). `uri` is an OPAQUE, already-uploaded
-// reference (`https://…` / `s3://…`) — the catalog neither uploads nor validates
-// the scheme (ADR-029 §4); the edge guard only bounds its length. There is NO
-// `sortOrder` field — attach always appends (`max(sort_order) + 1`); reordering is
-// the separate `PATCH /api/catalog/media/reorder` operation.
 export class AttachMediaRequestDto {
   @ApiProperty({ enum: MediaOwnerTypeEnum, example: MediaOwnerTypeEnum.PRODUCT })
   @IsEnum(MediaOwnerTypeEnum)

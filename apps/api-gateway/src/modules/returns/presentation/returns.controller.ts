@@ -40,26 +40,6 @@ import {
 } from '../application/use-cases';
 import { InspectReturnRequestDto, OpenReturnRequestDto, RejectReturnRequestDto } from './dto';
 
-// HTTP surface over the retail microservice's eight return-lifecycle (RMA) RPCs
-// (ADR-009, ADR-032). The controller has **no path prefix** — it serves both the
-// order-scoped Open + List (`/api/orders/:orderId/returns`) and the RMA-scoped lifecycle
-// routes (`/api/returns/:rmaId/*`) — so it sits alongside the orders controller without a
-// route clash (Nest resolves by full path). Every route is bearer-protected by default
-// (the global `JwtAuthGuard`). Two authorization shapes coexist (ADR-024 / ADR-028 §7):
-//
-//   - **Owner-or-staff** (Open, Get RMA, List RMAs) carry **no `@RequiresPermission`** —
-//     that would block the owning customer, who carries no permissions. The owner-check
-//     (`order.customerId === @CurrentUser().id`) lives in the retail use case; the staff
-//     override (`order:return-authorize` for Open, `order:read` for the reads) is computed
-//     in the gateway use case from `@CurrentUser().permissions` and forwarded as a boolean.
-//   - **Staff-only** (Authorize, Reject, Close — `order:return-authorize`; Receive,
-//     Inspect — `inventory:receive-return`) ARE gated with `@RequiresPermission`: a customer
-//     cannot authorize a return, receive goods, or record an inspection. The use case still
-//     folds `@CurrentUser().id` into `actorId` for the audit/restock attribution.
-//
-// A non-owner non-staff caller gets a 403; an unauthenticated caller a 401. Typed upstream
-// codes (`RETURN_*`) surface as 400/403/404/409 via `throwRpcError`. `orderId` / `rmaId`
-// are BIGINT ids (numeric params via `ParseIntPipe`).
 @ApiTags('Return')
 @ApiBearerAuth()
 @Controller()

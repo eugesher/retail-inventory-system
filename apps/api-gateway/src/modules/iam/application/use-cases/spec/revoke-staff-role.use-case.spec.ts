@@ -29,9 +29,6 @@ describe('RevokeStaffRoleUseCase', () => {
     useCase = new RevokeStaffRoleUseCase(staffUsers, audit);
   });
 
-  // The recorded `StaffUserRoleRevokedEvent` is asserted in `staff-user.model.spec.ts` — see the
-  // note in `assign-staff-role.use-case.spec.ts` for why it cannot honestly be asserted off a
-  // `save()` return.
   it('revokes a role', async () => {
     staffUsers.seed(
       StaffUser.register('staff-1', {

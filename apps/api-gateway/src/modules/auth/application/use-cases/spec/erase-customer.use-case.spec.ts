@@ -57,7 +57,6 @@ describe('EraseCustomerUseCase', () => {
     expect(result.status).toBe('deleted');
     expect(result.erasedAt).not.toBeNull();
 
-    // The writer received a customer whose PII is fully nulled.
     expect(writer.persisted).toHaveLength(1);
     const erased = writer.persisted[0];
     expect(erased.status).toBe('deleted');
@@ -87,7 +86,6 @@ describe('EraseCustomerUseCase', () => {
       after: { status: 'deleted' },
     });
 
-    // Belt-and-braces: no PII string anywhere in the audit payload.
     const serialized = JSON.stringify(entry.payload);
     expect(serialized).not.toContain('buyer@example.com');
     expect(serialized).not.toContain('Buy');
@@ -135,7 +133,6 @@ describe('EraseCustomerUseCase', () => {
     expect(writer.persisted).toHaveLength(0);
     expect(audit.published).toHaveLength(0);
     expect(events.erased).toHaveLength(0);
-    // The customer is untouched.
     const stillLive = await customers.findById(CUSTOMER_ID);
     expect(stillLive!.status).toBe('active');
     expect(stillLive!.email).toBe('buyer@example.com');

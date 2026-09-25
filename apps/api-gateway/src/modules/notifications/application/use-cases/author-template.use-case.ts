@@ -10,10 +10,6 @@ import {
   NOTIFICATIONS_GATEWAY_PORT,
 } from '../ports';
 
-// Thin gateway-side orchestrator over the `notification.template.author` RPC. The
-// version derivation, the channel-specific subject rule, and the duplicate-version
-// guard are the notification microservice's responsibility — the gateway only
-// threads the correlation id and maps a downstream error onto the right HTTP status.
 @Injectable()
 export class AuthorTemplateUseCase {
   constructor(

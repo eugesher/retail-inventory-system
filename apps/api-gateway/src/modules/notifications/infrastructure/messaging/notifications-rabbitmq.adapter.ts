@@ -28,12 +28,6 @@ import {
   MarketingSendResult,
 } from '../../application/ports';
 
-// The single `ClientProxy` holder for the notifications gateway module (ADR-009 /
-// ADR-020). Each method materializes the RPC with `firstValueFrom` and stitches the
-// transport-level `correlationId` onto the wire payload; everything else in the
-// module depends on `INotificationsGatewayPort`, never on `@nestjs/microservices`.
-// The RPCs land on `notification_events` (the notification service's queue) via the
-// `NOTIFICATION_MICROSERVICE` client.
 @Injectable()
 export class NotificationsRabbitmqAdapter implements INotificationsGatewayPort {
   constructor(

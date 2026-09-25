@@ -21,7 +21,6 @@ describe('RecordConsentUseCase', () => {
     });
 
     expect(consents.saveCount).toBe(1);
-    // Only `marketingEmail` was supplied; the other three keep their defaults.
     expect(view).toMatchObject({
       customerId: 'cust-1',
       transactionalEmail: true,
@@ -29,7 +28,6 @@ describe('RecordConsentUseCase', () => {
       marketingSms: false,
       dataRetentionPolicy: 'default-7-years',
     });
-    // The DB stamp gives a first-write row a non-null `updatedAt`.
     expect(view.updatedAt).not.toBeNull();
   });
 
@@ -50,7 +48,6 @@ describe('RecordConsentUseCase', () => {
       correlationId: 'corr-2',
     });
 
-    // Only `marketingEmail` flips; `marketingSms` (true) and the rest are untouched.
     expect(view).toMatchObject({
       customerId: 'cust-2',
       transactionalEmail: true,
@@ -72,7 +69,6 @@ describe('RecordConsentUseCase', () => {
     expect(publisher.consentUpdated).toHaveLength(1);
     const [emitted] = publisher.consentUpdated;
     expect(emitted.correlationId).toBe('corr-3');
-    // The emitted record IS the saved one — its view matches the returned view.
     expect(emitted.record.toView()).toEqual(view);
     expect(emitted.record.transactionalEmail).toBe(false);
     expect(emitted.record.marketingSms).toBe(true);

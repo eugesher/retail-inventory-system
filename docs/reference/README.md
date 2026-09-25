@@ -58,7 +58,7 @@ placeholders.
 | [`catalog-and-pricing.md`](catalog-and-pricing.md) | catalog `modules/catalog/`, `modules/pricing/`                          |
 | [`notifications.md`](notifications.md)             | notification `modules/notifications/`                                   |
 | [`event-store.md`](event-store.md)                 | event store `modules/audit-and-events/`                                 |
-| `api-gateway.md`                                   | `apps/api-gateway`                                                      |
+| [`api-gateway.md`](api-gateway.md)                 | `apps/api-gateway`                                                      |
 | `testing.md`                                       | the e2e harness under `test/` and the repository self-checks in `spec/` |
 | `architecture-lint.md`                             | the rules in `eslint.config.mjs`                                        |
 | `persistence.md`                                   | schema facts from `migrations/` and the seeds under `scripts/`          |

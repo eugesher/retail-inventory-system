@@ -10,11 +10,6 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-// One line on the Create Fulfillment body — which `OrderLine` quantity is included in
-// this shipment. `orderLineId` points back at the placed order's line; `quantity` is a
-// positive integer count of units. The retail use case enforces the cross-fulfillment
-// sum invariant (already-fulfilled + requested ≤ ordered) — the gateway only validates
-// the shape here.
 export class FulfillmentLineInputDto {
   @ApiProperty({ example: 1, minimum: 1, description: 'The placed order line id' })
   @IsInt()
@@ -27,15 +22,6 @@ export class FulfillmentLineInputDto {
   public quantity: number;
 }
 
-// Request body for `POST /api/orders/:orderId/fulfillments`. `stockLocationId` is
-// optional — the retail use case defaults it to `default-warehouse`. **One fulfillment ships
-// from exactly one location**: to split an order across warehouses, create one fulfillment per
-// location. `lines` must be a non-empty array of
-// `FulfillmentLineInputDto`; `@ValidateNested({ each: true })` + `@Type` make
-// class-validator recurse into each entry, and `@ArrayNotEmpty` rejects an empty
-// shipment at the edge (the domain `Fulfillment.create` is the backstop). The
-// `actorId` / staff-override flags are never sent by the caller — the controller folds
-// in `@CurrentUser()` and the route's `@RequiresPermission('order:fulfill')` gate.
 export class CreateFulfillmentRequestDto {
   @ApiPropertyOptional({
     example: 'default-warehouse',

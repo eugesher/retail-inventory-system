@@ -6,19 +6,6 @@ import { ICurrentUser, IIdempotentResult, RefundView } from '@retail-inventory-s
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Issues a refund against an order's captured payment. The route is
-// `@RequiresPermission('order:refund')`-gated — issuing a refund is a **staff-only**
-// operation (a customer cannot refund itself), so the permission gate is the right shape
-// (ADR-024). This use case folds `@CurrentUser().id` into `actorId` (the staff caller,
-// recorded on the audit row); the manual endpoint always sends a real actor string (the
-// system-`null` actor is reserved for the retail auto-refund-from-cancel consumer, which
-// never crosses the gateway, ADR-032). The **required** `Idempotency-Key` (ADR-036) is
-// forwarded and deduped retail-side (the gateway-reference natural idempotency + the
-// `refunded_amount_minor` ceiling remain the backstop against an over-refund). The use case
-// resolves the `IIdempotentResult<RefundView>` envelope so the controller can set the
-// `Idempotent-Replay: true` header + a `200` status on a served replay (a fresh issue is
-// `201`). The retail use case validates the captured precondition + the refundable ceiling
-// and returns the `RefundView` (`status='issued'`, or `status='failed'` on a gateway decline).
 @Injectable()
 export class IssueRefundUseCase {
   constructor(

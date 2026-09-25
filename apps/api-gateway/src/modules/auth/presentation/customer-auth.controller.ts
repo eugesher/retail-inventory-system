@@ -109,8 +109,6 @@ export class CustomerAuthController {
   private toDto(customer: Customer): CurrentCustomerResponseDto {
     return {
       id: customer.id,
-      // GET /me is guarded to authenticatable (active/guest) customers, so the
-      // email is a real string — a tombstoned customer cannot reach here.
       email: customer.email!,
       status: customer.status,
       firstName: customer.firstName,

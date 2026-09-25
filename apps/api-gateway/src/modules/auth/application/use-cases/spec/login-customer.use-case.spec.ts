@@ -142,7 +142,6 @@ describe('LoginCustomerUseCase', () => {
 
       await expect(
         useCase.execute({
-          // A seeded live customer always has a non-null email.
           email: customer.email!,
           password: 'WRONG',
           correlationId: 'cid-c-bad',

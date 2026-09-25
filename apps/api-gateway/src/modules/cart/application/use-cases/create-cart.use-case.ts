@@ -6,11 +6,6 @@ import { CartView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CART_GATEWAY_PORT, ICartCreateCommand, ICartGatewayPort } from '../ports';
 
-// Opens a new cart for the authenticated caller. The controller folds
-// `@CurrentUser().id` into `customerId`, so the cart is always owned by the
-// bearer subject (a registered or guest customer). Thin orchestration — the cart
-// lifecycle lives in the retail microservice; the gateway threads the correlation
-// id and maps a downstream error onto the right HTTP status.
 @Injectable()
 export class CreateCartUseCase {
   constructor(

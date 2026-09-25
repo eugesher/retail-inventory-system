@@ -18,10 +18,6 @@ import {
 
 export const CATALOG_GATEWAY_PORT = Symbol('CATALOG_GATEWAY_PORT');
 
-// Business-shaped command/query inputs for the gateway catalog port. They
-// deliberately omit `correlationId` — that is a transport concern threaded
-// separately and stitched onto the wire payload inside the adapter (the same
-// split `IGetProductStockQuery` follows in the inventory gateway module).
 export interface IRegisterProductCommand {
   name: string;
   slug: string;
@@ -44,12 +40,6 @@ export interface IListProductsCommand {
   search?: string;
 }
 
-// Pricing/tax command + query inputs. `variantId` is resolved from the route
-// param (the downstream backbone key, ADR-025) and folded into the command in
-// the controller, the same split `ICreateVariantCommand` follows for
-// `productId`. Timestamps are ISO-8601 strings on the wire; `amountMinor` is an
-// integer count of minor units (cents). The pricing domain has the final say on
-// every invariant — these shapes are the gateway's edge contract.
 export interface ISetPriceCommand {
   variantId: number;
   currency: string;
@@ -59,23 +49,12 @@ export interface ISetPriceCommand {
   priority?: number;
 }
 
-// What the RPC carries: a **resolved** currency scope. `currency` is required, and stays required —
-// `IPriceQuery`'s own comment states the rule (*"the currency scope is required on the wire —
-// defaulting it is a gateway-DTO concern, not a contract one"*), and this fix keeps it.
 export interface IPriceQueryCommand {
   variantId: number;
   currency: string;
   asOf?: string;
 }
 
-// What arrives from the edge: the caller may omit the currency, and the gateway use case resolves it
-// from `CATALOG_GATEWAY_DEFAULT_CURRENCY` before dispatching (ISSUE-11).
-//
-// **The two types differ by exactly one `?`, and that is the whole point.** The DTO used to default
-// `currency` to a literal `'USD'`, which made the distinction invisible: every request looked
-// resolved, and on a non-USD shop every one of them was resolved *wrongly*. Splitting the shapes puts
-// the resolution somewhere it can read the configuration — and makes the compiler refuse a path that
-// forgets to.
 export interface IPriceQueryRequest {
   variantId: number;
   currency?: string;
@@ -93,11 +72,6 @@ export interface IAttachVariantTaxCategoryCommand {
   taxCategoryCode: string;
 }
 
-// Category command/query inputs. Both category nodes are addressed by **slug** —
-// the stable, human-supplied handle the gateway already holds; the catalog use
-// cases resolve a slug to a row (ADR-029). `correlationId` is threaded separately
-// (the existing split). The catalog domain owns every invariant — these shapes
-// are the gateway's edge contract.
 export interface ICreateCategoryCommand {
   name: string;
   slug: string;
@@ -107,8 +81,6 @@ export interface ICreateCategoryCommand {
 
 export interface IReparentCategoryCommand {
   slug: string;
-  // `null` or an omitted value demotes the category to a root (`path = /<slug>`);
-  // a non-null slug reparents under that category.
   newParentSlug?: string | null;
 }
 
@@ -129,11 +101,6 @@ export interface IReclassifyProductCommand {
   detachCategorySlugs: string[];
 }
 
-// Media command/query inputs. The owner is addressed by its BIGINT id (resolved
-// from the route param — the product/variant id an operator already holds), and
-// `ownerType` is the polymorphic discriminator (ADR-029 §4). Attach always
-// appends, so it carries no `sortOrder` (reordering is the separate operation);
-// detach is addressed by the media row's own id, so it needs no command shape.
 export interface IAttachMediaCommand {
   ownerType: MediaOwnerTypeEnum;
   ownerId: number;
@@ -153,13 +120,6 @@ export interface IListMediaCommand {
   ownerId: number;
 }
 
-// The gateway-side seam onto the catalog microservice's RPCs — products,
-// pricing, tax categories, categories and media (one method per RPC, declared
-// below). The concrete implementation (`CatalogRabbitmqAdapter`) is the only
-// holder of a `ClientProxy`; use cases and the controller depend on this
-// interface (ADR-009). Methods return the wire response DTOs from
-// `lib-contracts` so the HTTP layer surfaces the catalog's own view shapes
-// unchanged.
 export interface ICatalogGatewayPort {
   registerProduct(command: IRegisterProductCommand, correlationId: string): Promise<ProductView>;
   createVariant(command: ICreateVariantCommand, correlationId: string): Promise<ProductVariantView>;
@@ -173,10 +133,6 @@ export interface ICatalogGatewayPort {
   getVariant(variantId: number, correlationId: string): Promise<VariantWithProductView>;
   setPrice(command: ISetPriceCommand, correlationId: string): Promise<PriceView>;
   listPrices(query: IPriceQueryCommand, correlationId: string): Promise<PriceView[]>;
-  // The catalog `catalog.price.select` RPC resolves to a single Price or `null`
-  // when none is in effect for the `(variantId, currency)` scope at `asOf`; the
-  // gateway surfaces that `null` unchanged (the route returns `200` with a
-  // `null` body — see `CatalogController.getApplicablePrice`).
   getApplicablePrice(query: IPriceQueryCommand, correlationId: string): Promise<PriceView | null>;
   createTaxCategory(
     command: ICreateTaxCategoryCommand,
@@ -187,9 +143,6 @@ export interface ICatalogGatewayPort {
     command: IAttachVariantTaxCategoryCommand,
     correlationId: string,
   ): Promise<VariantTaxHeaderView>;
-  // Category surface (`catalog.category.*` + `catalog.product.reclassify`). The
-  // tree read is addressed by a bare slug (the only query input it carries), so
-  // it takes the slug directly rather than a command object.
   createCategory(command: ICreateCategoryCommand, correlationId: string): Promise<CategoryView>;
   reparentCategory(
     command: IReparentCategoryCommand,
@@ -205,8 +158,6 @@ export interface ICatalogGatewayPort {
     command: IReclassifyProductCommand,
     correlationId: string,
   ): Promise<ProductCategoriesView>;
-  // Media surface (`catalog.media.*`). Detach is addressed by the media row's own
-  // globally-unique id, so it takes the id directly rather than a command object.
   attachMedia(command: IAttachMediaCommand, correlationId: string): Promise<MediaAssetView>;
   reorderMedia(command: IReorderMediaCommand, correlationId: string): Promise<MediaAssetView[]>;
   detachMedia(mediaId: number, correlationId: string): Promise<MediaAssetView>;

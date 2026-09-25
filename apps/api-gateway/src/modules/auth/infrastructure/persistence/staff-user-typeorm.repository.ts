@@ -31,17 +31,12 @@ export class StaffUserTypeormRepository implements IStaffUserRepositoryPort {
   }
 
   public existsActiveById(id: string): Promise<boolean> {
-    // `@DeleteDateColumn` makes `existsBy` skip soft-deleted rows, so this
-    // mirrors `StaffUser.isActive` (active status + not deleted) with one
-    // indexed lookup and no relation joins.
     return this.repository.existsBy({ id, status: 'active' });
   }
 
   public async save(user: StaffUser): Promise<StaffUser> {
     const partial = StaffUserMapper.toEntity(user);
     await this.repository.save(partial);
-    // Re-load so the returned aggregate reflects DB-resolved relations
-    // (notably the staff_user_roles join and inflated permission sets).
     const reloaded = await this.repository.findOne({
       where: { id: user.id },
       relations: ['roles', 'roles.permissions'],

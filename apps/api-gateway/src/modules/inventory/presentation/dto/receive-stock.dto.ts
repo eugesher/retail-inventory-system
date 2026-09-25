@@ -1,10 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsPositive, IsString, MaxLength } from 'class-validator';
 
-// Request body for `POST /api/inventory/variants/:variantId/stock/receive`. The
-// inventory domain has the final say (it re-validates the positive quantity and
-// the location's existence/active state); these decorators are the gateway's edge
-// guard so a malformed request fails fast with a 400 before an RPC is dispatched.
 export class ReceiveStockRequestDto {
   @ApiPropertyOptional({
     example: 'default-warehouse',
