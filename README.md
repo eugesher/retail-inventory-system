@@ -1980,6 +1980,11 @@ carries the admission question that routes a sentence to one or the other, and
 | `eslint.config.mjs`                            | The authoritative answer to "where does this file belong".                                                                                                                                                                                                                               |
 | The `*RpcExceptionFilter` of each module       | The authoritative error-code → HTTP-status tables.                                                                                                                                                                                                                                       |
 
+**The code carries no comments** ([ADR-064](docs/adr/064-code-carries-no-comments.md)): what a
+comment would have said belongs in one of the places above, and
+[`spec/no-code-comments.spec.ts`](spec/no-code-comments.spec.ts) fails on any comment that is not a
+functional directive (`eslint-disable…`, `@ts-…`, `prettier-ignore`, …).
+
 When you make an architectural decision, **write an ADR** — next free 3-digit number,
 allocated at first commit. If a decision is later reversed, write a new ADR that
 **supersedes** the old one; do not edit the old one in place beyond flipping its `Status` and

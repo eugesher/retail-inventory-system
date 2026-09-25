@@ -2,10 +2,12 @@
 
 Guidance for Claude Code (claude.ai/code) when working with code in this repository.
 
-**A map, not a manual.** *What exists and where*, plus constraints and landmines. Operation
-mechanics, business rules, rationale, and history belong in the code, each module's
-`*RpcExceptionFilter`, [`docs/adr/`](docs/adr/), and [`README.md`](README.md). Cite them; never
-summarise them here — a stale copy is worse than none, because an agent trusts this file.
+**A map, not a manual.** *What exists and where*, plus constraints and landmines. Rationale and
+history belong in [`docs/adr/`](docs/adr/); how the system behaves now, in
+[`docs/reference/`](docs/reference/) and [`README.md`](README.md); the code → status table, in each
+module's `*RpcExceptionFilter`. The code itself carries no comments
+([ADR-064](docs/adr/064-code-carries-no-comments.md)). Cite them; never summarise them here — a
+stale copy is worse than none, because an agent trusts this file.
 
 **Nothing cites this file.** References point *out* of it, never *in*: no code comment, no ADR,
 no doc under [`docs/`](docs/), no `README.md`, no request fixture may name `CLAUDE.md` or link to
@@ -28,10 +30,10 @@ yarn start:prod:<service>               # run a built service from dist/
 yarn build                              # nest build --all
 yarn build:<service>
 
-# Code quality (CI runs lint → build)
-yarn lint                               # ESLint incl. boundaries/*, --max-warnings 0
+# Code quality (CI runs lint → build → test:unit → e2e)
+yarn lint                               # ESLint incl. boundaries/* and prettier/prettier, --max-warnings 0
 yarn lint:fix
-yarn format:check
+yarn format:check                       # not a CI step — lint already fails on formatting
 yarn format
 
 # Migrations — retail_db (operational)
@@ -73,7 +75,13 @@ Non-obvious facts, each worth a debugging cycle.
 
 **RabbitMQ**
 
-- **Never rethrow from an `@EventPattern`** — the broker blind-redelivers in a hot loop.
+- **Never rethrow from an `@EventPattern`** (ADR-011 §7) — but not for fear of a redelivery loop:
+  Nest logs the throw and sends no `nack`. What does redeliver is the ack mode.
+  `notification_events` and `event_store_firehose_queue` run `noAck: false` and nothing acks, so
+  every channel close hands every message back
+  ([`notifications.md`](docs/reference/notifications.md#what-the-queue-does-with-a-message),
+  [`event-store.md`](docs/reference/event-store.md#what-the-queues-do-with-a-message)); every
+  other queue is auto-ack.
 - The firehose binds a **lone `#`**, not `#.#`. RabbitMQ routes both, but Nest's
   `matchRmqPattern` nacks every multi-word routing key under `#.#`.
 - **Producer targets the consumer's queue** (ADR-008/020): an event is emitted onto the
@@ -90,8 +98,8 @@ Non-obvious facts, each worth a debugging cycle.
 - MySQL treats `NULL`s as distinct inside a UNIQUE. `domain_event.correlation_id` is `NOT NULL DEFAULT ''`
   (`IngestDomainEventUseCase` coalesces an empty one to `''`) — an event ingested without one is
   reachable by **no** `correlationId` filter and by no trace.
-  `audit_log_entry.correlation_id` is nullable, and a `WHERE correlation_id = ?` never
-  matches a null row either.
+  `audit_log_entry.correlation_id` is nullable, but nothing writes a NULL there either:
+  `toAuditStaffActionEvent` and `IngestAuditLogUseCase` both coalesce a missing one to `''`.
 - `audit_log_entry.action` holds the `IAuditLogEvent.name` string (`StaffUserRolesAssigned`,
   `RefundIssued`) — **never** a `PermissionCodeEnum` value. A permission code in an `?action=`
   filter is a well-formed query that matches nothing.
@@ -103,14 +111,16 @@ Non-obvious facts, each worth a debugging cycle.
   zone**; `new Date('2026-06-01')` resolves as UTC. `timezone: 'Z'` does not reach this — it is
   `Date` parsing, not driver serialization. `@IsISO8601()` accepts the zone-less form, so pin a
   `from`/`to` bound to UTC before parsing (the event store's `parseInstant`, the gateway's
-  `IsOnOrAfter`).
+  `IsOnOrAfter`). Inventory's `ListStockMovementsUseCase.parseInstant` does **not** pin: a zone-less
+  movements bound reads in host time.
 - Append-only tables (`stock_movement`, `domain_event`, `audit_log_entry`,
   `idempotency_key`) implement their repository port **directly**, never through
   `BaseTypeormRepository`.
 - `condition` is a MySQL reserved word — backticked in the `return_line` migration.
 - Never annotate an `<x>Entities` const with `TypeOrmModuleOptions['entities']` — a *parameter*
   type (`MixedList | undefined`), so the value stops being spreadable and stops satisfying
-  `forFeature`. Leave it unannotated (note on `DatabaseModule.forRoot`).
+  `forFeature`. Leave it unannotated
+  ([`shared-libraries.md`](docs/reference/shared-libraries.md#leave-an-entity-list-unannotated)).
 - `order_line.quantity` never shrinks; the units still owed are `OrderLine.activeQuantity`
   (`quantity − cancelled_quantity`, ADR-040).
   Using `quantity` re-releases cancelled units against the **shared** per-`(variant,
@@ -143,13 +153,15 @@ Non-obvious facts, each worth a debugging cycle.
   Those **three** currency tokens all read the one `DEFAULT_CURRENCY` var, deliberately: a catalog
   quoting EUR, a cart opening in USD and a price read scoped to a third would each be wrong in a
   different direction — and `Order.currency` is immutable, so the wrong unit is baked in forever.
-  **No currency default is a literal anywhere.**
+  The default is Joi's `default('USD')` (`libs/config/config-module.config.ts`); the `?? 'USD'` in
+  the three providers' factories is unreachable behind it. **Add no other currency literal.**
   `RESERVATION_SWEEP_INTERVAL_SECONDS` is the one an **infrastructure** class injects, so
   `ReservationSweepScheduler` registers its timer via `SchedulerRegistry.addInterval` in
   `onModuleInit` — and **must** `deleteInterval` in `onModuleDestroy`, or a leaked timer hangs
   the Jest e2e worker.
-- A new `PermissionCodeEnum` member auto-seeds to the `admin` role **only if** it is also
-  added to `PERMISSION_SEEDS` in `scripts/test-db-seed.ts`.
+- A new `PermissionCodeEnum` member **must** also be added to `PERMISSION_SEEDS` in
+  `scripts/test-db-seed.ts`: the `admin` role seeds with every enum value, and one missing from
+  `PERMISSION_SEEDS` makes `yarn test:seed` throw.
 - `EVENTSTORE_DATABASE_URL` is a **required** Joi key in the shared schema, so it must be
   set for every service — but only the event store opens it.
 
@@ -176,6 +188,9 @@ Non-obvious facts, each worth a debugging cycle.
   element order turns the suite red. Weaken nothing to make code pass; you will be told.
 - `test:infra:reload` runs **both** migration pipelines; `yarn migration:run` alone leaves
   `ris_eventstore` empty.
+- **Code carries no comments** — not a `//`, a `/* */`, a JSDoc block, a SQL `--` or a YAML `#`.
+  The only exceptions are functional directives (`eslint-disable…`, `@ts-…`, `prettier-ignore`,
+  …); `spec/no-code-comments.spec.ts` fails on anything else (ADR-064, and see below).
 
 ## Cross-cutting conventions
 
@@ -401,7 +416,8 @@ gateway's **`CHAR(36)` UUID** (not a BIGINT, despite `orderId`/`orderLineId` bei
 `ReturnDomainException` + `ReturnErrorCodeEnum`.
 Ports: `RETURN_REQUEST_REPOSITORY`, `RETURN_ORDER_READER` (raw SQL over `order` /
 `order_line` / `fulfillment` — never imports `orders/`), `RETURN_EVENTS_PUBLISHER`,
-`INVENTORY_RESTOCK_GATEWAY`, `RETURN_CUSTOMER_CONTACT_READER`, `TRANSACTION_PORT`,
+`INVENTORY_RESTOCK_GATEWAY`, `RETURN_CUSTOMER_CONTACT_READER`, `RETURNS_UNIT_OF_WORK` (the
+module's `IUnitOfWorkRunner` — `returns` no longer binds `TRANSACTION_PORT`, ADR-063),
 `RETURN_WINDOW_DAYS`, `OCC_RETRY_ATTEMPTS`.
 Returns may not import `orders/`, so what looks duplicated between the two is deliberate.
 ADR-056's test decides what may be lifted — *does the signature name a module-owned type?* —
@@ -441,8 +457,9 @@ duplicated here. Path aliases `@retail-inventory-system/<name>` (`tsconfig.json`
 What the map must carry that README does not:
 
 - **`ddd` and `contracts` are framework-free.** No `@nestjs/*`, no TypeORM. `ddd` also holds the
-  shared transaction seam (`ITransactionPort` / `TRANSACTION_PORT`, ADR-043) — it is there and
-  not in `database` because `application/ports` may import only `lib-ddd` / `lib-contracts`.
+  shared transaction seam (`ITransactionPort` / `TRANSACTION_PORT`, ADR-043, bound by `stock` and
+  `orders`) and its successor `IUnitOfWorkRunner` (ADR-063) — they are there and not in `database`
+  because `application/ports` may import only `lib-ddd` / `lib-contracts`.
 - **`common/concurrency/`** holds `OCC_RETRY_ATTEMPTS` **and** `runWithOccRetry` — the one OCC
   retry protocol (ADR-045); a module's `*-write.ts` only binds to it.
 - **`observability/tracer`, `observability/testing` and `ddd/testing` are deep-import paths** with
@@ -513,7 +530,9 @@ nullable — a tombstone); `*_line.variant_id` → `product_variant`;
 (`ON DELETE SET NULL`); `consent_record.customer_id` → `customer` (`ON DELETE CASCADE`);
 `category.parent_id` self-FK (`ON DELETE SET NULL`).
 
-`media_asset.owner_id` and `stock_movement.reference_id` are **polymorphic and FK-less**.
+`media_asset.owner_id`, `address.owner_id` and `stock_movement.reference_id` are **polymorphic
+and FK-less**; `fulfillment.stock_location_id` has no FK either. The full list:
+[`persistence.md`](docs/reference/persistence.md#foreign-keys-and-deletes).
 `customer.email` and the five `address` PII columns are **nullable** so an erase can null
 them in place (ADR-037).
 
@@ -527,7 +546,19 @@ no `updated_at` / `deleted_at` at all, only `received_at` beside `occurred_at`.
 
 Rules and target state live as ADRs under [`docs/adr/`](docs/adr/) — see
 [`docs/adr/index.md`](docs/adr/index.md). Write one per architectural decision, under ADR-003's
-rules. **Next free number is `063`.** On a feature branch an ADR is still a draft.
+rules. **Next free number is `065`.** On a feature branch an ADR is still a draft.
+
+How the system behaves **now**, where the code does not say it plainly, lives under
+[`docs/reference/`](docs/reference/): one file per area, every claim anchored by path + symbol,
+indexed and governed by its [`README.md`](docs/reference/README.md). A change to behaviour described
+there updates or deletes the entry in the same PR.
+
+**Code carries no comments** (ADR-064) — `spec/no-code-comments.spec.ts` enforces it. It parses
+every TS/JS file with TypeScript and scans `.sql`, the `#`-comment formats (Dockerfile, YAML, shell,
+env, ignore, TOML, Python) and `.http` files, and reports `file:line` for anything that is not one
+of the functional directives listed in its `DIRECTIVES` array. A red means: delete the comment; if
+it said something true that the code does not, write that in `docs/reference/<area>.md` or an ADR.
+**Never allowlist, and never add a directive to hide one.**
 
 Per-capability walkthroughs live under [`docs/implementation/`](docs/implementation/),
 numbered by delivery order. Point-in-time review findings live under

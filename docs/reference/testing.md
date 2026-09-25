@@ -1,10 +1,15 @@
 # Testing
 
-This file covers the two Jest configurations, the end-to-end harness under `test/` and the four
+This file covers the two Jest configurations, the end-to-end harness under `test/` and the five
 repository self-checks under `spec/`. For the harness it covers how a suite boots the services,
 where configuration is read, how suites share one database, how they wait for asynchronous work, and
 the helpers that read and write MySQL directly. For the self-checks it covers what each one asserts,
-what a red run means and how to fix it; the rationale is in the ADRs each section links. The
+what a red run means and how to fix it. Their rationale is in
+[ADR-017](../adr/017-architecture-lint-via-eslint-boundaries.md) (architecture lint),
+[ADR-049](../adr/049-the-port-methods-nothing-calls.md) (port-method callers),
+[ADR-053](../adr/053-how-a-transition-window-closes.md) (transition windows),
+[ADR-055](../adr/055-where-deliberately-unbuilt-work-is-recorded.md) (extension guides) and
+[ADR-064](../adr/064-code-carries-no-comments.md) (no code comments). The
 commands, the capability-to-suite map and the "assert through public state" rule are in
 [`README.md` §9](../../README.md#testing). The seed data the suites start from is in
 [§10](../../README.md#10-seed-data), and the seeded logins are in [§1](../../README.md#seeded-logins).
@@ -173,7 +178,7 @@ on `EVENTSTORE_DATABASE_URL`.
 
 ## Repository self-check specs
 
-The four files in `spec/` test the repository rather than a service, and run in `yarn test:unit`.
+The five files in `spec/` test the repository rather than a service, and run in `yarn test:unit`.
 Each one fails with a message that names what to change. None of them is made green by an allowlist
 or by loosening its own assertions.
 
@@ -296,6 +301,39 @@ the cluster folder, the six sections, and live `attaches_to` paths
   only a link of the form `<folder>/<file>.md` counts as a guide row, and every guide must be linked
   exactly once.
 
+### `no-code-comments.spec.ts`
+
+The code carries no comments, apart from functional directives
+([ADR-064](../adr/064-code-carries-no-comments.md)).
+
+- **What is scanned:** every file `git ls-files --cached --others --exclude-standard` lists, minus
+  `.yarn/`, so a new file is checked before it is staged. Each file is scanned by its type:
+  - `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` — parsed by TypeScript, and every
+    leading and trailing comment range around every token is collected. A comment inside a string, a
+    template or a regular expression is not a comment range, so it is never reported;
+  - `.sql` — `--`, `#` and `/* */` outside a `'…'`, `"…"` or `` `…` `` literal;
+  - `Dockerfile*`, `.yml`, `.yaml`, `.sh`, `.env`, `.env.example`, `.toml`, `.py`, `.gitignore`,
+    `.dockerignore` and `.husky/*` — a line whose first non-blank character is `#`, except a shebang
+    on line 1;
+  - `.http` — a line starting with `#` or `//`, except a bare `###` and a `# @…` / `// @…` directive.
+- **The directives are one array, `DIRECTIVES`.** A comment is kept when its text, with the comment
+  markers stripped, starts with one of them: `eslint-disable…` / `eslint-enable`, `global`,
+  `@ts-expect-error` / `@ts-ignore` / `@ts-nocheck` / `@ts-check`, `prettier-ignore`,
+  `istanbul ignore` / `c8 ignore`, a webpack magic comment, `/// <reference … />`, and a JSDoc
+  `@type` / `@typedef` / `@satisfies` in a `.js`, `.mjs` or `.cjs` file only. In a `.ts` file that
+  JSDoc is prose and is reported.
+- **Blind spots, all false greens:** a trailing `#` comment in YAML, shell, a Dockerfile or `.env`;
+  a Python docstring; SQL comments inside a TypeScript string, such as a migration's DDL. ADR-064 §4
+  says why each is left to review.
+- **It checks that it can fail.** The first four tests run the detector over in-memory fixtures:
+  a TypeScript source with a comment of every kind and every directive, read once as `.ts` and once
+  as `.mjs`; SQL with comment markers inside and outside quotes; a shell file and an `.http` file.
+  Each pins the exact line numbers it must report. Another test pins that the scan sees more than a
+  thousand code files, this spec among them, and nothing under `.yarn/`.
+- **When it goes red:** delete the comment. If it said something true that the code does not, write
+  that in the area's file here in `docs/reference/`, or in an ADR if it is a decision. Never
+  allowlist it, and never add a directive to hide it.
+
 ## Failure modes
 
 | What breaks                                                                         | How it shows                                                                                 | What recovers it                                                                      |
@@ -310,3 +348,4 @@ the cluster folder, the six sections, and live `attaches_to` paths
 | An `architecture-lint` fixture's target file is moved or renamed                    | A fixture expecting a violation goes red; one expecting none passes without proving anything | Point the fixture's import at the file's new path                                     |
 | A guide or the extensions index contains `tmp/`, "epic" or "task"                   | `extension-guides` goes red                                                                  | Reword it                                                                             |
 | A transition window's `reviewBy` arrives                                            | `transition-windows` goes red from 00:00 UTC that day                                        | Discharge it, or move the date and say why in the commit (ADR-053)                    |
+| A comment is added anywhere the self-check scans                                    | `no-code-comments` goes red with its `file:line`                                             | Delete it; move what it said to `docs/reference/` or an ADR (ADR-064)                 |
