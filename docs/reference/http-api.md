@@ -4,7 +4,10 @@ This file covers the two request collections under `http/`: how they are wired, 
 from the running system, and what a run of them does today. What each route does, who may call it
 and what it answers are in [`README.md` §6](../../README.md#6-http-api) and the gateway controllers.
 How the Posting collection maps Kulala's chaining onto session variables is in
-[`http/posting/README.md`](../../http/posting/README.md).
+[`http/posting/README.md`](../../http/posting/README.md). No ADR governs the collections themselves;
+the `Idempotency-Key` headers their place, capture, ship and refund requests send follow
+[ADR-036](../adr/036-idempotency-key-store-and-enforced-occ.md), and the collections hold no prose
+because of [ADR-064](../adr/064-code-carries-no-comments.md).
 
 ## Layout
 
