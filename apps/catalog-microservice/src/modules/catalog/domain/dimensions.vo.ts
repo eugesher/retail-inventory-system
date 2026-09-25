@@ -8,10 +8,6 @@ interface IDimensionsProps extends Record<string, unknown> {
   h: number;
 }
 
-// Physical bounding box in millimetres. Each axis is a non-negative integer —
-// symmetric with the `weightG` invariant (grams, non-negative integer). The
-// field is optional on a variant; an absent box is `null`, never a
-// zero-valued Dimensions, so "unknown size" and "zero size" stay distinct.
 export class Dimensions extends ValueObject<IDimensionsProps> {
   constructor(props: IDimensionsProps) {
     for (const axis of ['l', 'w', 'h'] as const) {

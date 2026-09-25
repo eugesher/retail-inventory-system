@@ -12,39 +12,14 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
-// `GET /api/audit/events` — the operator read of the event store's `domain_event`
-// firehose log (ADR-039), driven through the gateway against a real Place Order.
-//
-// The suite answers the capability's actual claim: **one HTTP call reassembles the whole
-// causal chain of one request, across every service that produced part of it.** The order
-// is placed under a fixed `x-correlation-id`, so the cart events (retail), the reserve /
-// allocate events (inventory) and the order / payment events (retail) all land in
-// `domain_event` under one id — and `?correlationId=` hands them back together.
-//
-// THE BOOT. The event store must connect BOTH of its transports: the firehose queue that
-// ingests the chain, and `event_store_query_queue` that answers the three `audit.*` RPCs.
-// A second transport rules out `NestFactory.createMicroservice` (an `INestMicroservice`
-// has no `connectMicroservice`), so the suite mirrors the service's own hybrid `main.ts`:
-// `create` → two `connectMicroservice` → `init()` → `startAllMicroservices()`, and never
-// `listen()`. Booting only the firehose queue would leave `/api/audit/*` HANGING rather
-// than failing: the query queue is durable, so the broker accepts a message nobody
-// consumes and the gateway waits forever for a reply.
-//
-// Ingestion is asynchronous, so the chain is polled for through the query API itself
-// rather than read once.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
-// `warehouse-staff` bundles the `inventory:*` codes and NOT `audit:read` — the clean 403
-// fixture for a staff token that is authenticated but unauthorized.
 const WAREHOUSE_EMAIL = 'warehouse@example.com';
 const WAREHOUSE_PASSWORD = 'warehouse1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
 const CUSTOMER_PASSWORD = 'customer1234';
 const CORRELATION_HEADER = 'x-correlation-id';
 
-// The routing keys a Place Order dual-publishes onto `ris.events`; each is stored verbatim
-// as `domain_event.event_type`. Kept in step with `test/event-store-firehose.e2e-spec.ts`,
-// which proves the same chain by reading the table directly.
 const KEY_CART_CREATED = 'retail.cart.created';
 const KEY_CART_LINE_ADDED = 'retail.cart.line-added';
 const KEY_STOCK_RESERVED = 'inventory.stock.reserved';
@@ -64,8 +39,6 @@ const EXPECTED_CHAIN_KEYS = [
 const RETAIL_PRODUCER = 'retail-microservice';
 const INVENTORY_PRODUCER = 'inventory-microservice';
 
-// The event store's ceiling, declared in ONE place (its query use case) and inherited by
-// every caller. The gateway DTO deliberately carries no `@Max`.
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -129,8 +102,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
   ): Promise<supertest.Response> =>
     server().get(`/api/audit/events${query}`).set('Authorization', auth);
 
-  // Poll the query API — not the table — until the chain has been ingested. That makes the
-  // read path itself part of the assertion.
   const waitForChain = async (deadlineMs = 30_000): Promise<IDomainEventItem[]> => {
     const start = Date.now();
     for (;;) {
@@ -194,11 +165,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
       MicroserviceQueueEnum.INVENTORY_QUEUE,
     );
 
-    // The event store's hybrid boot, exactly as its `main.ts` does it. `init()` MUST run
-    // before `startAllMicroservices()` — `connectMicroservice` marks each transport
-    // initialized, so their own `listen()` skips the lifecycle hooks and only `init()`
-    // opens the `ris_eventstore` connection. `listen()` is never called: the service has
-    // no HTTP surface.
     eventStoreApp = await NestFactory.create(EventStoreMicroserviceAppModule, { logger: false });
     eventStoreApp.connectMicroservice<MicroserviceOptions>(
       {
@@ -257,7 +223,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
       .send({ email: CUSTOMER_EMAIL, password: CUSTOMER_PASSWORD });
     customerToken = (customerLogin.body as ITokenResponse).accessToken;
 
-    // Self-provisioned, disjoint fixture.
     const productRes = await server()
       .post('/api/catalog/products')
       .set('Authorization', adminAuth)
@@ -295,9 +260,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
       .send({ quantity: 10 });
     expect(receiveRes.status).toBe(HttpStatus.OK);
 
-    // The whole flow under ONE correlation id: `CorrelationMiddleware` honours the inbound
-    // header and every producer threads it onto the wire event, including across the
-    // retail → inventory RPC.
     const create = await server()
       .post('/api/cart')
       .set('Authorization', `Bearer ${customerToken}`)
@@ -338,12 +300,8 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
     for (const key of EXPECTED_CHAIN_KEYS) {
       expect(present).toContain(key);
     }
-    // The filter is exact: nothing from another request leaked into the page.
     expect(items.every((item) => item.correlationId === correlationId)).toBe(true);
 
-    // The two LIST routes read backwards (`occurred_at DESC, id DESC`) — an operator opens
-    // them to see what just happened. Only the trace reads forward. `occurred_at` has
-    // second granularity here, so ties are broken on the descending id.
     for (let i = 1; i < items.length; i++) {
       const previous = items[i - 1];
       const current = items[i];
@@ -361,8 +319,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
     const items = await waitForChain();
     const producers = new Set(items.map((item) => item.producer));
 
-    // The capability's actual claim: reassembling a request means crossing service
-    // boundaries, not reading one service's log.
     expect(producers).toContain(RETAIL_PRODUCER);
     expect(producers).toContain(INVENTORY_PRODUCER);
     expect(producers.size).toBeGreaterThanOrEqual(2);
@@ -378,9 +334,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
       expect(item.aggregateType).toBe('order');
       expect(item.aggregateId).toBe(String(orderId));
     }
-    // `aggregate_type` is the routing key's SECOND token, so this order's payment /
-    // allocation events are filed under `payment` / `stock` against their own ids — the
-    // aggregate filter is per-token, and the correlation filter is what reunites them.
     expect(page.items.some((item) => item.eventType === KEY_ORDER_PLACED)).toBe(true);
     expect(page.items.some((item) => item.eventType === KEY_PAYMENT_AUTHORIZED)).toBe(false);
   });
@@ -389,8 +342,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
     const capped = await queryEvents(`?pageSize=500`);
     expect(capped.status).toBe(HttpStatus.OK);
     const cappedPage = capped.body as IPageBody<IDomainEventItem>;
-    // The cap lives in the event store's use case, in ONE place: a direct RPC caller that
-    // never passes through this gateway inherits it too. The gateway DTO has no `@Max`.
     expect(cappedPage.size).toBe(MAX_PAGE_SIZE);
     expect(cappedPage.items.length).toBeLessThanOrEqual(MAX_PAGE_SIZE);
 
@@ -402,9 +353,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
   });
 
   it('rejects a transposed from/to window with 400 rather than answering an empty page', async () => {
-    // The event store reads an inverted `BETWEEN` as the empty set, so the DTO is the only
-    // place an operator's transposed dates surface as an error instead of as "nothing
-    // happened".
     const res = await queryEvents(`?from=2030-01-01T00:00:00.000Z&to=2020-01-01T00:00:00.000Z`);
     expect(res.status).toBe(HttpStatus.BAD_REQUEST);
   });
@@ -413,8 +361,6 @@ describe('GET /api/audit/events — the firehose read (e2e)', () => {
     const forbidden = await queryEvents('', warehouseAuth);
     expect(forbidden.status).toBe(HttpStatus.FORBIDDEN);
 
-    // A customer JWT carries no `permissions` claim at all, so a code-gated route is
-    // staff-only by construction (ADR-024).
     const customer = await queryEvents('', `Bearer ${customerToken}`);
     expect(customer.status).toBe(HttpStatus.FORBIDDEN);
 

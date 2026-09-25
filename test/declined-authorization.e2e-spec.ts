@@ -17,22 +17,6 @@ import { PAYMENT_GATEWAY } from '../apps/retail-microservice/src/modules/orders/
 import type { IPaymentGatewayPort } from '../apps/retail-microservice/src/modules/orders/application/ports';
 import { CaptureClaimE2ESpecDataSource } from './data-source/capture-claim.e2e-spec.data-source';
 
-// THE proof for ISSUE-06 (ADR-052): **a declined authorization leaves nothing behind.**
-//
-// `PlaceOrderUseCase` commits the order, converts the cart and allocates the stock — and only *then*
-// asks the gateway. A decline used to escape uncaught, and the commit stayed: an order reading
-// `pending` / `none` (indistinguishable from a healthy one), a cart destroyed by the conversion CAS,
-// stock allocated **forever**, and no compensation of any kind. The order could never ship (Ship
-// refuses an order with no `Payment`) and nothing cancelled it — the three background timers are the
-// reservation sweep, the delivery retry and the idempotency purge, and **none reconciles orders**.
-//
-// And then the retry reported **success**: the cart is `converted`, so the repeat-place path returned
-// the dead order as a `200` with `payment: undefined`. **The customer whose card was declined was
-// told their order went through.**
-//
-// **No existing test could reach this path.** The bound `FakePaymentGatewayAdapter` always approves —
-// so the spy below arms a single decline. `ORDER_PAYMENT_NOT_APPROVED` is a typed, modelled error
-// code: **someone expected declines, and then nobody tested one.**
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -96,8 +80,6 @@ describe('A declined authorization leaves no orphan (e2e)', () => {
     }
   };
 
-  // The public availability read — the number a shopper sees, and the one that used to be short by
-  // the orphan's allocation forever.
   const availableNow = async (): Promise<number> => {
     const { body } = await server().get(`/api/inventory/variants/${variantId}/stock`);
     return (body as { totalAvailable: number }).totalAvailable;
@@ -140,7 +122,6 @@ describe('A declined authorization leaves no orphan (e2e)', () => {
     return variant;
   };
 
-  // A cart with one line, ready to place.
   const openCart = async (quantity: number): Promise<string> => {
     const cartRes = await server()
       .post('/api/cart')
@@ -163,8 +144,6 @@ describe('A declined authorization leaves no orphan (e2e)', () => {
       .set('Idempotency-Key', idempotencyKey)
       .send({ shippingAddress: ADDRESS, billingAddress: ADDRESS, paymentMethod: 'tok_visa' });
 
-  // Arm exactly ONE decline. The real adapter is untouched for every other call, so the happy-path
-  // regression in this same file exercises the genuine article.
   const declineOnce = (): void => {
     authorizeSpy.mockImplementationOnce(() =>
       Promise.resolve({
@@ -263,13 +242,8 @@ describe('A declined authorization leaves no orphan (e2e)', () => {
       expect(res.status).toBe(HttpStatus.CONFLICT);
       expect((res.body as { code: string }).code).toBe('ORDER_PAYMENT_NOT_APPROVED');
 
-      // **The stock came back.** It used to stay allocated against an order that could never ship, and
-      // nothing in the system would ever have released it — `available` was short of it forever.
       expect(await availableNow()).toBe(before);
 
-      // The order exists (the cart-conversion CAS committed it and cannot be reversed), but it is
-      // visibly dead: the lifecycle axis says THAT, the payment axis says WHY (ADR-028 §2's
-      // orthogonality). It used to read `pending` / `none` — indistinguishable from a healthy order.
       const orders = await dataSource.query(
         `SELECT status, payment_status FROM \`order\` WHERE source_cart_id = ?;`,
         [cartId],
@@ -278,15 +252,13 @@ describe('A declined authorization leaves no orphan (e2e)', () => {
       expect(orders[0].status).toBe(OrderStatusEnum.CANCELLED);
       expect(orders[0].payment_status).toBe(OrderPaymentStatusEnum.FAILED);
 
-      // And no payment row was ever written — the authorize never approved.
       expect(await dataSource.getPayment(orders[0].id)).toBeUndefined();
     },
     timeout,
   );
 
-  // **The assertion that makes ISSUE-06 `high` rather than `medium`.**
   it(
-    'REFUSES the retry — the customer is not told their declined order went through',
+    'REFUSES a retry under a fresh Idempotency-Key — the customer is not told their declined order went through',
     async () => {
       const cartId = await openCart(2);
       declineOnce();
@@ -294,21 +266,14 @@ describe('A declined authorization leaves no orphan (e2e)', () => {
       const first = await place(cartId, `decl-retry-a-${stamp}`);
       expect(first.status).toBe(HttpStatus.CONFLICT);
 
-      // The customer tries again. The cart is `converted` (the CAS is the double-place guard and cannot
-      // be reversed), so the repeat-place path fires. A FRESH idempotency key, so the request-level
-      // replay guard does not fire and we reach the converted-cart branch for real.
       const retry = await place(cartId, `decl-retry-b-${stamp}`);
 
-      // On the parent commit this is a **201 with a fully-formed OrderView** — order number, totals,
-      // `status: "pending"`, `payment: undefined`. A successful placement, for an order nobody paid for.
       expect(retry.status).toBe(HttpStatus.CONFLICT);
       expect((retry.body as { code: string }).code).toBe('ORDER_PAYMENT_NOT_APPROVED');
     },
     timeout,
   );
 
-  // The regression guard: the new try/catch must not swallow or alter the happy path. This one runs
-  // the REAL adapter — no spy armed — so it exercises the genuine authorize.
   it(
     'the happy path is unchanged — a successful place still converts, allocates and authorizes',
     async () => {
@@ -328,7 +293,6 @@ describe('A declined authorization leaves no orphan (e2e)', () => {
       expect(view.paymentStatus).toBe(OrderPaymentStatusEnum.AUTHORIZED);
       expect(view.payment).toBeDefined();
 
-      // The stock IS held for a live order — that is the point of allocating.
       expect(await availableNow()).toBe(before - 1);
     },
     timeout,

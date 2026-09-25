@@ -1,10 +1,3 @@
-// The physical (or virtual) place stock is held. Framework-free per ADR-004:
-// no `@nestjs/*`, no `typeorm`, no `class-validator` on the model — invariants
-// throw a plain `Error`. That is deliberate, not an absence: the context does
-// have an `InventoryDomainException` (introduced with Receive/Adjust), but it is
-// reserved for caller-reachable states; a `StockLocation` construction breach is
-// internal drift, so it stays a plain `Error` (see `stock-level.model.ts`).
-
 export enum StockLocationTypeEnum {
   WAREHOUSE = 'warehouse',
   STORE = 'store',
@@ -23,7 +16,6 @@ interface IStockLocationProps {
   updatedAt?: Date;
 }
 
-// A GLN (Global Location Number) is exactly 13 digits when present.
 const GLN_PATTERN = /^\d{13}$/;
 
 export class StockLocation {
@@ -53,9 +45,6 @@ export class StockLocation {
     this.type = props.type;
     this.address = props.address ?? null;
     this.gln = gln;
-    // `active` is the lifecycle flag; soft-delete flips it to `false`. The
-    // persistence layer's inherited `deletedAt` column stays inert (ADR-027),
-    // mirroring how the catalog tables leave `deletedAt` untouched.
     this._active = props.active ?? true;
     this.createdAt = props.createdAt;
     this.updatedAt = props.updatedAt;
@@ -71,10 +60,6 @@ export class StockLocation {
     return this._active;
   }
 
-  // Soft-delete via the `active` flag — never a `deletedAt` timestamp. `code`
-  // uniqueness is repository-level (a UNIQUE constraint), not model-enforced:
-  // the aggregate cannot see its siblings, so it trusts the repository (mirrors
-  // the catalog `slug`/`sku` convention, ADR-025).
   public deactivate(): void {
     this._active = false;
   }

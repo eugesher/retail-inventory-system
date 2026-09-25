@@ -53,11 +53,6 @@ const reloadedEntity = (overrides: Partial<ReturnRequestEntity> = {}): ReturnReq
     ...overrides,
   }) as unknown as ReturnRequestEntity;
 
-// The write-capable half (ADR-063) — bound to a fake transactional `EntityManager`
-// directly, the way `ReturnsUnitOfWorkAdapter.build` constructs one per unit of work. The
-// `save (new request)` / `save (existing request)` behavior is unchanged from the pre-UoW
-// `ReturnRequestTypeormRepository.save`; only the manager it runs against moved from an
-// internal `manager.transaction(...)` call to the constructor.
 describe('ReturnRequestWriteTypeormRepository', () => {
   describe('save (new request)', () => {
     it('inserts the root, finalizes the RMA number from the generated id, persists lines, then re-reads', async () => {
@@ -79,8 +74,6 @@ describe('ReturnRequestWriteTypeormRepository', () => {
 
       const result = await repository.save(request);
 
-      // The root is inserted, then the RMA number is finalized via a targeted UPDATE
-      // keyed on the generated id (the order-number idiom; year from requestedAt).
       expect(txnRequestRepo.save).toHaveBeenCalledTimes(1);
       const [whereArg, setArg] = txnRequestRepo.update.mock.calls[0] as [
         { id: number },
@@ -88,12 +81,10 @@ describe('ReturnRequestWriteTypeormRepository', () => {
       ];
       expect(whereArg).toEqual({ id: 1 });
       expect(setArg.rmaNumber).toBe('RMA-2026-00000001');
-      // The line is inserted owning the generated request id.
       const [lineEntities] = txnLineRepo.save.mock.calls[0] as [
         { returnRequest: { id: number } }[],
       ];
       expect(lineEntities[0].returnRequest.id).toBe(1);
-      // The returned aggregate carries the re-read concrete ids + rma + version.
       expect(result.id).toBe(1);
       expect(result.rmaNumber).toBe('RMA-2026-00000001');
       expect(result.lines[0].id).toBe(50);
@@ -136,14 +127,11 @@ describe('ReturnRequestWriteTypeormRepository', () => {
 
       const result = await repository.save(request);
 
-      // No `expectedVersion` — the plain managed save, not the version-checked CAS. The
-      // root save carries the concrete id but NOT the immutable rma_number.
       const [savedPartial] = txnRequestRepo.save.mock.calls[0] as [
         { id: number; rmaNumber?: string },
       ];
       expect(savedPartial.id).toBe(1);
       expect('rmaNumber' in savedPartial).toBe(false);
-      // No re-finalize UPDATE on an existing row; the lines ARE re-persisted.
       expect(txnRequestRepo.update).not.toHaveBeenCalled();
       expect(txnLineRepo.save).toHaveBeenCalledTimes(1);
       expect(result.status).toBe(ReturnStatusEnum.AUTHORIZED);

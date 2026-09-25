@@ -42,7 +42,7 @@ describe('CommitSaleUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
   });
@@ -87,26 +87,22 @@ describe('CommitSaleUseCase', () => {
       committed: [{ variantId: VARIANT_ID, stockLocationId: LOCATION, quantity: 4 }],
     });
 
-    // Both counters fell by the shipped quantity; reserved untouched; available
-    // unchanged (both decremented counters subtract from it: 10−4−2=4 → 6−0−2=4).
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(level?.quantityOnHand).toBe(6);
     expect(level?.quantityAllocated).toBe(0);
     expect(level?.quantityReserved).toBe(2);
     expect(level?.available).toBe(4);
 
-    // Exactly one `sale` movement, strictly negative, referencing the fulfillment.
     expect(movements.appended).toHaveLength(1);
     const movement = movements.appended[0];
     expect(movement.type).toBe(StockMovementTypeEnum.SALE);
     expect(movement.quantity).toBe(-4);
-    expect(movement.quantity).toBeLessThan(0); // the sign invariant, explicit
+    expect(movement.quantity).toBeLessThan(0);
     expect(movement.referenceType).toBe('fulfillment');
     expect(movement.referenceId).toBe(FULFILLMENT_ID);
     expect(movement.reasonCode).toBeNull();
     expect(movement.actorId).toBeNull();
 
-    // committed event + recorded event, both correlated.
     expect(publisher.committed).toHaveLength(1);
     expect(publisher.committed[0].event.aggregateId).toBe(VARIANT_ID);
     expect(publisher.committed[0].event.quantity).toBe(4);
@@ -115,13 +111,11 @@ describe('CommitSaleUseCase', () => {
     expect(publisher.committed[0].correlationId).toBe(CORRELATION_ID);
     expect(publisher.movementsRecorded).toHaveLength(1);
 
-    // Cache invalidated for the touched (variant, location).
     expect(cache.invalidations).toHaveLength(1);
     expect(cache.invalidations[0].items).toEqual([
       { variantId: VARIANT_ID, stockLocationId: LOCATION },
     ]);
 
-    // The movement joined the counter's transaction (same scope reference).
     expect(transaction.calls).toBe(1);
     expect(movements.appendScopes[0]).toBe(transaction.lastScope);
   });
@@ -137,7 +131,6 @@ describe('CommitSaleUseCase', () => {
   it('is idempotent on fulfillmentId — a replay decrements nothing and re-returns the lines', async () => {
     seedLevel({ onHand: 10, allocated: 4 });
 
-    // First commit.
     await commit([{ variantId: VARIANT_ID, quantity: 4 }]);
     const afterFirst = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(afterFirst?.quantityOnHand).toBe(6);
@@ -145,21 +138,17 @@ describe('CommitSaleUseCase', () => {
     expect(movements.appended).toHaveLength(1);
     const callsAfterFirst = transaction.calls;
 
-    // Replay (same fulfillmentId): a sale movement already references it, so the
-    // commit short-circuits — no second decrement, no new movement, no new
-    // transaction, no cache invalidation — but it re-returns the request's lines.
     const replay = await commit([{ variantId: VARIANT_ID, quantity: 4 }]);
     expect(replay).toEqual({
       committed: [{ variantId: VARIANT_ID, stockLocationId: LOCATION, quantity: 4 }],
     });
 
     const afterReplay = await repository.findStockLevel(VARIANT_ID, LOCATION);
-    expect(afterReplay?.quantityOnHand).toBe(6); // unchanged
-    expect(afterReplay?.quantityAllocated).toBe(0); // unchanged
-    expect(movements.appended).toHaveLength(1); // no second movement
-    expect(transaction.calls).toBe(callsAfterFirst); // no second transaction
-    expect(cache.invalidations).toHaveLength(1); // only the first commit invalidated
-    // No second committed event fired on the replay path.
+    expect(afterReplay?.quantityOnHand).toBe(6);
+    expect(afterReplay?.quantityAllocated).toBe(0);
+    expect(movements.appended).toHaveLength(1);
+    expect(transaction.calls).toBe(callsAfterFirst);
+    expect(cache.invalidations).toHaveLength(1);
     expect(publisher.committed).toHaveLength(1);
   });
 
@@ -188,8 +177,7 @@ describe('CommitSaleUseCase', () => {
   });
 
   it('an on-hand shortfall on a later line rolls the whole commit back (all-lines-atomic)', async () => {
-    seedLevel({ variantId: 1, onHand: 10, allocated: 3 }); // line A fits
-    // line B: allocated allows 5, but on-hand is only 2 → STOCK_RESULT_NEGATIVE.
+    seedLevel({ variantId: 1, onHand: 10, allocated: 3 });
     seedLevel({ variantId: 2, onHand: 2, allocated: 5 });
 
     const error = await commit([
@@ -201,7 +189,6 @@ describe('CommitSaleUseCase', () => {
     expect((error as InventoryDomainException).code).toBe(
       InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
     );
-    // The earlier line's would-be ship never landed.
     expect((await repository.findStockLevel(1, LOCATION))?.quantityOnHand).toBe(10);
     expect((await repository.findStockLevel(1, LOCATION))?.quantityAllocated).toBe(3);
     expect(movements.appended).toHaveLength(0);
@@ -214,7 +201,6 @@ describe('CommitSaleUseCase', () => {
 
     const error = await commit([{ variantId: VARIANT_ID, quantity: 3 }]).catch((e: unknown) => e);
 
-    // Shipping more than is allocated is a counter drift — an internal bug, a 500.
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(InventoryDomainException);
     expect((await repository.findStockLevel(VARIANT_ID, LOCATION))?.quantityAllocated).toBe(2);
@@ -222,7 +208,6 @@ describe('CommitSaleUseCase', () => {
   });
 
   it('re-fires low-stock when the post-commit on-hand falls at/below the threshold', async () => {
-    // Threshold is 5: ship 3 of 7 on-hand → 4 ≤ 5 fires the depletion alert.
     seedLevel({ onHand: 7, allocated: 3 });
 
     await commit([{ variantId: VARIANT_ID, quantity: 3 }]);
@@ -233,7 +218,6 @@ describe('CommitSaleUseCase', () => {
   });
 
   it('does not fire low-stock when the post-commit on-hand stays above the threshold', async () => {
-    // Ship 3 of 10 → 7 > 5: no alert.
     seedLevel({ onHand: 10, allocated: 4 });
 
     await commit([{ variantId: VARIANT_ID, quantity: 3 }]);
@@ -249,8 +233,6 @@ describe('CommitSaleUseCase', () => {
 
     expect(transaction.calls).toBe(2);
     expect((await repository.findStockLevel(VARIANT_ID, LOCATION))?.quantityOnHand).toBe(6);
-    // Exactly one movement despite the burned attempt (the append runs after the
-    // version-checked persist, so a lost CAS leaves no orphan row).
     expect(movements.appended).toHaveLength(1);
   });
 
@@ -273,10 +255,6 @@ describe('CommitSaleUseCase', () => {
     });
   });
 
-  // The ledger UNIQUE (`UC_STOCK_MOVEMENT_DEDUPE`) is what actually makes this operation
-  // idempotent against a CONCURRENT redelivery; the `existsByReference` probe is only the
-  // sequential fast path. An in-memory double has no UNIQUE to break, so the spec arms
-  // the driver error the real adapter would raise and asserts the translation.
   describe('losing a concurrent race must be a successful no-op, never a throw', () => {
     it('translates the ledger duplicate-key error into the same replay result', async () => {
       seedLevel({ onHand: 10, allocated: 4 });
@@ -284,9 +262,6 @@ describe('CommitSaleUseCase', () => {
 
       const result = await commit([{ variantId: VARIANT_ID, quantity: 4 }]);
 
-      // The winner's outcome, re-reported. **Not a throw**: this runs under an
-      // `@MessagePattern`, and an exception out of one is blind-redelivered by the broker
-      // in a hot loop — which would put a third delivery on the same fulfillment.
       expect(result).toEqual({
         committed: [{ variantId: VARIANT_ID, stockLocationId: LOCATION, quantity: 4 }],
       });
@@ -294,11 +269,6 @@ describe('CommitSaleUseCase', () => {
     });
   });
 
-  // Two lines on one `(variant, location)` would generate the SAME dedupe key, and the
-  // duplicate-key catch above would then misread the payload's own collision as a replay
-  // — reporting a commit that never happened. Rejecting it here is what keeps that error
-  // unambiguous. Retail cannot produce such a payload (a cart merges lines by variant),
-  // but the RPC is directly reachable over RabbitMQ.
   it('rejects two lines that share a (variant, location) level', async () => {
     seedLevel({ onHand: 10, allocated: 4 });
 

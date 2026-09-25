@@ -38,7 +38,8 @@ start at [`docs/adr/index.md`](docs/adr/index.md).
 
 ### Prerequisites
 
-Node 20+, Yarn, Docker Compose.
+Node at the version in [`.nvmrc`](.nvmrc) (`nvm use`), Yarn (`corepack enable`; the release checked
+in under `.yarn/releases/` is the one that runs), Docker Compose.
 
 ### Run it
 
@@ -224,7 +225,9 @@ exchange and is not bound to this exchange at all.
 **Delivery guarantee.** The bus is at-least-once and dual-publish has no transactional
 outbox, so the firehose may see an event twice. `domain_event` absorbs the redelivery on a
 composite UNIQUE (the idempotent-consumer pattern); `audit_log_entry` intentionally keeps
-every occurrence.
+every occurrence. The firehose queue never acknowledges a message, so every stop, restart or
+`consumer_timeout` delivers its whole history again, and that UNIQUE can also merge two distinct
+events ([`docs/reference/event-store.md`](docs/reference/event-store.md#what-the-queues-do-with-a-message)).
 
 ### RPC surface
 
@@ -324,17 +327,17 @@ spec/                # repository-integrity specs: architecture-lint fixtures,
 
 Imported via path aliases as `@retail-inventory-system/<name>`.
 
-| Library         | What it gives you                                                                                                                                                                                                                                                                                                               |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `contracts`     | Wire contracts — `microservices/`, `auth/`, `audit/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs.                                                                                                                      |
-| `ddd`           | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`. **No `@nestjs/*`, no TypeORM.**                                                                                                                                                                                    |
-| `common`        | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token).                                                                                                                                                      |
-| `database`      | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`.                                                                                                                                                                 |
-| `messaging`     | `clients/` — `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore,RisEvents}Module`, the per-queue `ClientProxy` providers a module imports. Plus `RisEventsMirrorPublisher`, `sendPreservingRpcError` (the cross-service `send` that preserves the upstream `{ code, details }`), `ROUTING_KEYS`, `EXCHANGES`. |
-| `cache`         | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel-spanned), global `CacheModule`, `@Cacheable()`, `CACHE_KEYS`.                                                                                                                                                     |
-| `observability` | `LoggerModuleConfig` (Pino + trace correlation); `correlation/` — `CorrelationMiddleware`, `@CorrelationId()`, `CORRELATION_ID_HEADER`. OTel `tracer.ts` side-effect bootstrap (deep-import path).                                                                                                                              |
-| `auth`          | `AuthModule.forRootAsync()`, `JwtStrategy`; `guards/` — the three global guards + `enforceRequiredClaim` (their shared claim check); `decorators/` — `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`.                                                                              |
-| `config`        | `configModuleConfig` — the Joi env schema.                                                                                                                                                                                                                                                                                      |
+| Library         | What it gives you                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contracts`     | Wire contracts — `microservices/`, `auth/`, `audit/`, `retail/`, `inventory/`, `catalog/`, `notifications/`. Plain TypeScript; class-validator / Swagger decorators are the documented exception for DTOs.                                                                                                                                                                                        |
+| `ddd`           | `Entity<TId>`, `AggregateRoot<TId>` (`pullDomainEvents()`), `ValueObject`, `DomainEvent`, `IRepositoryPort`, the transaction seams `ITransactionPort` / `TRANSACTION_PORT` and `IUnitOfWorkRunner`. **No `@nestjs/*`, no TypeORM.**                                                                                                                                                               |
+| `common`        | `Result`, `DomainException`, `IPage` / `IPageRequest`, `Maybe` / `Nullable`, `clampPageWindow`, `bodyFingerprint` (request digest), `OCC_RETRY_ATTEMPTS` (the shared OCC retry-budget token) + `runWithOccRetry` (the OCC retry protocol), `retryThenLogForReplay` (the post-commit cross-service retry).                                                                                         |
+| `database`      | `BaseEntity`, `BaseTypeormRepository`, `SnakeNamingStrategy`, `DatabaseModule.forRoot(entities)` / `.forFeature(...)` / `.forRootWithUrl(entities, urlEnvVar)`, `TypeormTransactionAdapter` + `entityManagerOf`, `TypeormUnitOfWorkRunner`.                                                                                                                                                       |
+| `messaging`     | `clients/` — `MicroserviceClient{Retail,Inventory,Notification,Catalog,EventStore,RisEvents}Module`, the per-queue `ClientProxy` providers a module imports. Plus `RisEventsMirrorPublisher` and `emitBestEffort` (the bounded, non-throwing post-commit emit), `sendPreservingRpcError` (the cross-service `send` that preserves the upstream `{ code, details }`), `ROUTING_KEYS`, `EXCHANGES`. |
+| `cache`         | `ICachePort` (`get`/`set`/`del`/`wrap`/`delByPrefix`/`singleFlight`), `CACHE_PORT`, `RedisCacheAdapter` (OTel-spanned), global `CacheModule`, `@Cacheable()`, `CACHE_KEYS`.                                                                                                                                                                                                                       |
+| `observability` | `LoggerModuleConfig` (Pino + trace correlation); `correlation/` — `CorrelationMiddleware`, `@CorrelationId()`, `CORRELATION_ID_HEADER`. OTel `tracer.ts` side-effect bootstrap (deep-import path).                                                                                                                                                                                                |
+| `auth`          | `AuthModule.forRootAsync()`, `JwtStrategy`; `guards/` — the three global guards + `enforceRequiredClaim` (their shared claim check); `decorators/` — `@Public()` / `@Roles()` / `@RequiresPermission()` / `@CurrentUser()`. Re-exports `RoleEnum`.                                                                                                                                                |
+| `config`        | `configModuleConfig` — the Joi env schema.                                                                                                                                                                                                                                                                                                                                                        |
 
 ### The per-module hexagon
 
@@ -381,7 +384,8 @@ The layering plus cross-service and cross-module isolation are enforced by
 - `application/use-cases/` may import its own module's `domain` + `application/ports` and
   the same lib set, plus `libs/auth` for port interfaces. Both `@nestjs/typeorm` and bare
   `typeorm` are denied.
-- `application/ports/` may import only `domain` types and `libs/contracts`.
+- `application/ports/` may import only its own module's `domain` and ports, `libs/ddd` and
+  `libs/contracts`.
 - `infrastructure/` is the only layer allowed to touch concrete adapters.
 - `presentation/` may import `application` + `libs/{auth,contracts,messaging,observability}`.
 - `<m>.module.ts` and the module-root `index.ts` are the `nest-module` element: they see every
@@ -395,7 +399,9 @@ The layering plus cross-service and cross-module isolation are enforced by
 
 Each rule has a fixture in [`spec/architecture-lint.spec.ts`](spec/architecture-lint.spec.ts)
 that intentionally violates it and asserts the expected `boundaries/*` ruleId fires — so
-silently weakening a rule fails the unit suite.
+silently weakening a rule fails the unit suite. How the plugin types a file and decides an import,
+and the lint rules that live outside it:
+[`docs/reference/architecture-lint.md`](docs/reference/architecture-lint.md).
 
 ### Recurring patterns
 
@@ -428,7 +434,9 @@ priced, and sold.
 `Category` is a hierarchy on a **materialized `path`** (`/electronics/phones`):
 a subtree read is one indexed `path LIKE`, an ancestry test a string-prefix check.
 Reparenting recomputes the moved node and rebases every descendant's path in one bulk
-`UPDATE`; a cycle is rejected in the domain. An archived intermediate hides its branch.
+`UPDATE`; a cycle is rejected in the domain. An archived intermediate hides its branch from the
+tree read, though not from the category product list
+([`docs/reference/catalog-and-pricing.md`](docs/reference/catalog-and-pricing.md#categories)).
 
 `MediaAsset` is **polymorphic** over `(owner_type, owner_id)` — one table, images/videos/
 documents on a product _or_ a variant, **no FK** on the polymorphic owner (the attach use
@@ -475,8 +483,8 @@ Three aggregates plus one append-only ledger record, all keyed on the opaque cat
 | `Reservation`   | TTL-bounded, cart-scoped hold. App-generated `CHAR(36)` UUID. `active → committed / released / expired`, plus a `reactivate` row-reuse path so the all-statuses UNIQUE `(cartId, variantId, stockLocationId)` triple survives a remove-then-re-add. |
 | `StockMovement` | Immutable, `Object.freeze`d ledger record — no mutators, no events. Six types with a **fixed sign**: `+` receipt/return, `−` sale/allocation/release, `±` non-zero adjustment. Polymorphic FK-less `referenceType`/`referenceId`.                   |
 
-Every counter-changing operation appends a `StockMovement` **in the same transaction** and
-routes through `stockCache.withInvalidation(...)` (post-commit invalidation,
+Every counter-changing operation except Reserve appends a `StockMovement` **in the same transaction**
+(a hold is not a movement), and every one routes through `stockCache.withInvalidation(...)` (post-commit invalidation,
 [ADR-023](docs/adr/023-cache-invalidate-post-commit-by-type.md)) and the shared bounded-OCC
 `runWithStockWriteRetry`.
 
@@ -550,11 +558,16 @@ The **immutable** side. Five sibling aggregates live here.
 **An `Order` carries three orthogonal status axes**, not one combined enum, because a
 `captured` payment legitimately coexists with `unfulfilled` fulfillment:
 
-| Axis                | Values                                                          |
-| ------------------- | --------------------------------------------------------------- |
-| `status`            | `pending` → `confirmed` / `cancelled` / `shipped` / `delivered` |
-| `paymentStatus`     | `none` → `authorized` → `captured` → `refunded` (or `failed`)   |
-| `fulfillmentStatus` | `unfulfilled` → `partially-shipped` → `shipped` → `delivered`   |
+| Axis                | Values                                                        |
+| ------------------- | ------------------------------------------------------------- |
+| `status`            | `pending` → `cancelled` / `delivered`                         |
+| `paymentStatus`     | `none` → `authorized` → `captured`, or `none` → `failed`      |
+| `fulfillmentStatus` | `unfulfilled` → `partially-shipped` → `shipped` → `delivered` |
+
+The enums also carry `confirmed` and `shipped` (`status`) and `refunded` (`paymentStatus`), and
+nothing sets them: shipment progress lives on `fulfillmentStatus`, and a refund changes the
+`Payment` row, not the order. `failed` is a declined authorize at place. Which enum values are
+produced, and by what: [`docs/reference/wire-contracts.md`](docs/reference/wire-contracts.md#status-values-nothing-produces).
 
 `Fulfillment.status` (`pending → shipped → delivered`, or `cancelled`) is a **fourth axis**,
 evolving per shipment; the order's `fulfillmentStatus` is the roll-up. Partial and split
@@ -571,7 +584,10 @@ and `order.customer_id` is **nullable** so an erased customer leaves a tombstone
 whole place back (`409 INVENTORY_OUT_OF_STOCK`, no order row, cart stays `active`), and a
 rare post-allocate commit failure fires a best-effort `inventory.allocation.cancel`
 compensation. Payment is authorized inline afterwards, in a short follow-up transaction —
-so money is never authorized for unallocatable stock.
+so money is never authorized for unallocatable stock. A failed authorization releases the
+allocation and leaves the order `cancelled` with `paymentStatus: failed`, while the cart stays
+`converted`, so re-placing it is refused
+([`docs/reference/retail-orders.md`](docs/reference/retail-orders.md#place-order)).
 
 **Ship Fulfillment** is the pivot that moves stock and money together:
 
@@ -616,15 +632,17 @@ calls the gateway **outside** the transaction, then runs `Payment.refund` +
 
 #### Payment gateway
 
-Authorize, capture, void, and refund all run behind `IPaymentGatewayPort`
+Authorize, capture, and refund run behind `IPaymentGatewayPort`
 (DI symbol `PAYMENT_GATEWAY`) — declared in `application/ports/`, importing no transport
 package, the same shape as `NotifierPort`. The default binding is
-`FakePaymentGatewayAdapter`: an in-process stand-in that **always approves** and mints
-deterministic `fake_<uuid>` / `fake_refund_<uuid>` references.
+`FakePaymentGatewayAdapter`: an in-process stand-in that **always approves** and mints a
+random `fake_<uuid>` / `fake_refund_<uuid>` reference per call. **Void is not on the port**:
+Cancel Order's void only rewrites the `payment` row, and no processor call is made.
 
 Swapping in Stripe/Adyen is a **single provider rebind** in `orders.module.ts` plus a new
 HTTP-doing sibling adapter under `infrastructure/payment-gateway/`. No use case, controller,
-domain model, or contract changes.
+domain model, or contract changes for authorize, capture, and refund. Releasing an
+authorization at the processor on cancel would need a new port method, called from Cancel Order.
 
 #### Concurrency guards, side by side
 
@@ -654,13 +672,13 @@ requested ──► authorized ──► received ──► inspected ──► 
 `condition` / `disposition` / `lineRefundAmountMinor` are null until inspection, then
 `inspect`-once.
 
-| Operation                  | Auth                                    | Behaviour                                                                                                                                                                                                                                      |
-| -------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Open                       | owner-or-staff `order:return-authorize` | resolves the order via the raw-SQL `RETURN_ORDER_READER`; enforces the `RETURN_WINDOW_DAYS` window (a `delivered` order is always returnable; a `shipped` one only inside the window) and `requested ≤ ordered − cancelled − already-returned` |
-| Authorize / Reject / Close | staff `order:return-authorize`          | status walk; Reject appends its reason to `notes`                                                                                                                                                                                              |
-| Receive                    | warehouse `inventory:receive-return`    | status walk                                                                                                                                                                                                                                    |
-| Inspect                    | warehouse `inventory:receive-return`    | the inspection set must cover **every** line; after commit, each `restock`-disposition line calls `inventory.stock.restock-from-return` (retry-then-log, idempotent on `returnRequestId`). Records refund amounts but **issues no refund**.    |
-| Get / List                 | owner-or-staff `order:read`             | non-staff filtered to own                                                                                                                                                                                                                      |
+| Operation                  | Auth                                    | Behaviour                                                                                                                                                                                                                                               |
+| -------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Open                       | owner-or-staff `order:return-authorize` | resolves the order via the raw-SQL `RETURN_ORDER_READER`; enforces the `RETURN_WINDOW_DAYS` window (a `delivered` order is always returnable; a `shipped` one only inside the window) and `requested ≤ ordered − cancelled − already-returned`          |
+| Authorize / Reject / Close | staff `order:return-authorize`          | status walk; Reject appends its reason to `notes`                                                                                                                                                                                                       |
+| Receive                    | warehouse `inventory:receive-return`    | status walk                                                                                                                                                                                                                                             |
+| Inspect                    | warehouse `inventory:receive-return`    | the inspection set must cover **every** line; after commit, one `inventory.stock.restock-from-return` call carries every `restock`-disposition line (retry-then-log, idempotent on `returnRequestId`). Records refund amounts but **issues no refund**. |
+| Get / List                 | owner-or-staff `order:read`             | a non-staff caller who is not the buyer gets `403 RETURN_ACCESS_FORBIDDEN`, never an empty list; List checks the order's buyer, Get the RMA's                                                                                                           |
 
 ### Notifications (`notification-microservice`)
 
@@ -679,16 +697,20 @@ RMQ-only, no HTTP surface of its own. Two aggregates in the shared `retail_db`
 **`RenderAndDispatchUseCase` is the single persist-then-send pipeline every consumer calls.**
 Given a channel-agnostic input it resolves the latest active template, renders it, runs the
 consent gate, **persists a `queued` row _before_ the `NOTIFIER` call**, then flips it to
-`sent` or `failed`. A failure is recorded on the row and **never rethrown** — rethrowing
-inside an `@EventPattern` would make the broker blind-redeliver. A missing template
-warn-logs and persists nothing.
+`sent` or `failed`. A failure is recorded on the row and **never rethrown**. A missing template
+warn-logs and persists nothing. What `notification_events` does with a handled message — it
+never acknowledges one — is in
+[`docs/reference/notifications.md`](docs/reference/notifications.md#what-the-queue-does-with-a-message).
 
-Double-dispatch is deduped twice: an explicit `findByDedupeKey` pre-check (customer-facing
-rows only) plus a STORED generated-column UNIQUE (`delivery_dedupe_key`) that collapses a
-concurrent race.
+Double-dispatch is deduped twice: an explicit `findByDedupeKey` pre-check (rows with a
+`recipientCustomerId` only) plus a STORED generated-column UNIQUE (`delivery_dedupe_key`) that
+collapses a concurrent race.
 
 **The consent gate** ([ADR-037](docs/adr/037-consent-record-and-tombstone-erasure.md)) runs
-before the transport call, for customer-facing rows only (a null-recipient ops row skips it):
+before the transport call, only for rows with a `recipientCustomerId`. The ops alert and the four
+customer-facing events whose contracts carry no `customerId` — `retail.order.cancelled`,
+`retail.fulfillment.shipped` / `.delivered`, `retail.refund.issued` — skip it
+([`docs/reference/notifications.md`](docs/reference/notifications.md#renderanddispatchusecase)):
 
 | Channel + event type                           | Gated on                                                                                             |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -702,7 +724,7 @@ An unconsented channel persists a terminal `skipped-no-consent` row — an audit
 cache-aside at `ris:notifications:consent:v1:<customerId>`, kept fresh by the
 `customer.consent.updated` / `customer.erased` events rather than by TTL. The cache
 **fails safe**: a Redis or reader error resolves to defaults (transactional allowed,
-marketing suppressed), so a dispatch never blind-redelivers.
+marketing suppressed), so a consent read never fails a dispatch.
 
 **Seven consumers.** Six route their wire event through `RenderAndDispatchUseCase`
 (`inventory-events`, `order-events`, `order-cancelled-events`, `fulfillment-events`,
@@ -713,11 +735,12 @@ customer-contact reader; `customerLocale` currently ships `null`). A row whose
 `customerEmail` is null — a tombstoned or guest buyer — is warn-logged and skipped.
 
 **Retry.** `RetryFailedDeliveriesUseCase` sweeps `failed` deliveries under
-`MAX_DELIVERY_ATTEMPTS` on exponential backoff (`baseMs · 2^(attemptCount-1)`), driven by
+`MAX_DELIVERY_ATTEMPTS`, plus `queued` rows orphaned for more than 5 minutes, on exponential backoff (`baseMs · 2^(attemptCount-1)`), driven by
 `DeliveryRetryScheduler` (`@Interval`). An operator can force one now via
 `POST /api/notifications/deliveries/:id/retry` — it re-dispatches the row's **already-rendered**
 subject/body (no template re-lookup; the row is a self-contained snapshot) and ignores the
-backoff gate. At the cap the service emits `notifications.delivery.failed` exactly once.
+backoff gate. The sweeper emits `notifications.delivery.failed` once, when a row reaches the cap;
+each failed manual retry of a capped row emits it again.
 
 Rendering is Handlebars (`HandlebarsTemplateRendererAdapter`, the only `handlebars` import).
 `{{ }}` HTML-escapes the render context by default — the right posture for trusted,
@@ -749,19 +772,21 @@ it can only be an internal caller bug, because the ingest validates first.
 One `FirehoseConsumer` reads the concrete routing key off
 `context.getMessage().fields.routingKey` and dispatches: `audit.staff.action` →
 `IngestAuditLogUseCase`, everything else → `IngestDomainEventUseCase`. It **warn-swallows**
-and never rethrows. It sits beside the aggregator module rather than inside either sibling
-module because it injects use cases from **both**, and `eslint-plugin-boundaries` only lets a
-module's `infrastructure/` inject its own.
+and never rethrows. It is an ordinary `presentation/` member of the one `audit-and-events`
+module, which owns both ingest use cases
+([ADR-042](docs/adr/042-one-bounded-context-one-module.md)).
 
 `producer` / `aggregateType` / `aggregateId` are heuristically resolved by
 `firehose-extractors.ts` (producer ← first routing-key token; aggregateType ← second;
-aggregateId ← first present of a documented payload-key precedence). A missing or `NaN`
-`occurredAt` is warn-and-dropped.
+aggregateId ← first present of a fixed payload-key precedence, in which `orderId` wins over the
+payment, fulfillment, refund and return ids). A missing or `NaN` `occurredAt` is warn-and-dropped
+([`docs/reference/event-store.md`](docs/reference/event-store.md#ingest-into-domain_event)).
 
 **The logs can be read back over RPC** ([ADR-039](docs/adr/039-audit-and-event-store-query-surface.md)).
 `QueryDomainEventsUseCase` and `QueryAuditLogEntriesUseCase` are filtered, paginated and
-newest-first, over **indexed columns only** (the JSON `payload` / `before` / `after` are
-returned but never searched); `TraceByCorrelationUseCase` is an unpaginated ascending timeline
+newest-first, over plain column predicates (the JSON `payload` / `before` / `after` are
+returned but never searched; not every filter leads an index —
+[`docs/reference/event-store.md`](docs/reference/event-store.md#reads)); `TraceByCorrelationUseCase` is an unpaginated ascending timeline
 of everything one correlation id touched, across both logs. Page size is capped at 100 in the
 use case, so every caller inherits the cap. An unknown id or an inverted `from`/`to` range
 yields an empty result, never an error: the event store has no domain-exception type, and
@@ -827,17 +852,22 @@ The store is **live-ephemeral**: `find` never filters by expiry, so a 10-minute
 
 ### Optimistic concurrency (OCC)
 
-Every operational aggregate write is a read-version → mutate →
+Every version-checked aggregate write (the table below) is a read-version → mutate →
 `UPDATE … SET version = version + 1 WHERE id = ? AND version = ?` compare-and-swap. Zero rows
 affected means a concurrent writer won: the attempt re-reads under a **fresh transaction**
 and retries up to `OCC_RETRY_ATTEMPTS` (default 5, injected as a per-module value-provider
 token — never `process.env`). On exhaustion the write surfaces a uniform
 `409 { code: 'VERSION_MISMATCH', details: { currentVersion } }`.
 
-| Aggregate                                       | Exhaustion code                                                                      |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `StockLevel`, `Reservation`                     | `409 STOCK_WRITE_CONFLICT`                                                           |
-| `Cart`, `Order`, `Fulfillment`, `ReturnRequest` | `409 VERSION_MISMATCH` (member name is module-prefixed; the _wire_ value is uniform) |
+| Aggregate                        | Exhaustion code                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `StockLevel`, `Reservation`      | `409 STOCK_WRITE_CONFLICT`                                                           |
+| `Cart`, `Order`, `ReturnRequest` | `409 VERSION_MISMATCH` (member name is module-prefixed; the _wire_ value is uniform) |
+
+`Fulfillment` has a `version` column that every save increments and nothing compares: its
+transitions are serialised by a `SELECT … FOR UPDATE` re-read instead (§4, "Concurrency guards,
+side by side"). `Payment` and `Refund` have no version column
+([`docs/reference/retail-orders.md`](docs/reference/retail-orders.md#reads-locks-and-versions)).
 
 The three cart line writes additionally honour an optional **`If-Match: <version>`**
 precondition (the `@IfMatch()` gateway decorator): a stale pin is an immediate `409` with
@@ -854,7 +884,9 @@ after serialization gets its terminal domain `409` (`ORDER_NOT_CANCELLABLE`,
 
 ### Inventory invariants
 
-**No-oversell.** `available` never goes negative. Reserve and the direct-allocate fallback
+**No-oversell.** Reserve and allocation never drive `available` below zero. (An on-hand decrease can:
+Adjust and Transfer guard on-hand, not `available` —
+[`docs/reference/inventory.md`](docs/reference/inventory.md#stocklevel).) Reserve and the direct-allocate fallback
 check `quantity ≤ available` _before_ moving a counter and reject the overflow with
 `409 INVENTORY_OUT_OF_STOCK` carrying `details.available`; Adjust and Transfer reject an
 on-hand result below zero with `409 INVENTORY_STOCK_RESULT_NEGATIVE`. Check and write run in
@@ -895,11 +927,13 @@ operationally required); `marketingEmail` / `marketingSms` default **false** (op
 `PUT` is an upsert-merge that changes only the fields it carries.
 
 **Erasure is a tombstone, never a hard delete.** `POST /api/admin/customers/:id/erase`
-(body `{ confirmEmail }`) nulls PII across `customer`, `address` (`owner_type='customer'`
-rows only), and `cart` in **one transaction** via a gateway-owned raw-SQL
-`CUSTOMER_ERASURE_WRITER`; flips `status='deleted'` + stamps `deleted_at`; and clears the
-refresh-token hash (a session revoke). It **preserves the customer id**, so every
-`order.customer_id` FK and the immutable `owner_type='order'` address snapshots stay intact.
+(body `{ confirmEmail }`) nulls PII in `customer` and `address` (`owner_type='customer'`
+rows only), abandons the customer's active carts and deletes its `consent_record`, in **one
+transaction** via the gateway-owned `CUSTOMER_ERASURE_WRITER` (raw SQL for the retail tables);
+flips `status='deleted'` + stamps `deleted_at`; and clears the refresh-token hash (a session
+revoke). The carts' stock holds are not released; they expire with their TTL
+([`docs/reference/api-gateway.md`](docs/reference/api-gateway.md#erasure)). It **preserves the
+customer id**, so every `order.customer_id` FK and the immutable `owner_type='order'` address snapshots stay intact.
 A `confirmEmail` mismatch is a `400` with nothing written; an already-erased customer is an
 idempotent no-op.
 
@@ -993,14 +1027,14 @@ one dead service costs one timeout, not five.
 
 ### Pricing and tax categories
 
-| Method  | Route                                       | Auth                                             |
-| ------- | ------------------------------------------- | ------------------------------------------------ |
-| `POST`  | `/catalog/variants/:variantId/prices`       | `pricing:write` — set or schedule                |
-| `GET`   | `/catalog/variants/:variantId/prices`       | public — `?currency=USD`, `?asOf`                |
-| `GET`   | `/catalog/variants/:variantId/price`        | public — single applicable price, or a null body |
-| `POST`  | `/catalog/tax-categories`                   | `pricing:write`                                  |
-| `GET`   | `/catalog/tax-categories`                   | public                                           |
-| `PATCH` | `/catalog/variants/:variantId/tax-category` | `pricing:write` — attach by code                 |
+| Method  | Route                                       | Auth                                                          |
+| ------- | ------------------------------------------- | ------------------------------------------------------------- |
+| `POST`  | `/catalog/variants/:variantId/prices`       | `pricing:write` — set or schedule                             |
+| `GET`   | `/catalog/variants/:variantId/prices`       | public — `?currency=USD`, `?asOf`                             |
+| `GET`   | `/catalog/variants/:variantId/price`        | public — single applicable price, or `200` with an empty body |
+| `POST`  | `/catalog/tax-categories`                   | `pricing:write`                                               |
+| `GET`   | `/catalog/tax-categories`                   | public                                                        |
+| `PATCH` | `/catalog/variants/:variantId/tax-category` | `pricing:write` — attach by code                              |
 
 ### Categories and media
 
@@ -1119,8 +1153,10 @@ input, not a cross-module lookup.
 
 Three questions: _what did the system do_ (`domain_event`), _what did a person do_
 (`audit_log_entry`), _what did this one request cause_ (both, joined by correlation id). Every
-filter is optional and names an **indexed** column — the JSON bodies (`payload`, `before`,
-`after`) are returned but never searched.
+filter is optional and is a plain column predicate — the JSON bodies (`payload`, `before`,
+`after`) are returned but never searched. `aggregateId` without `aggregateType`, `entityId` without
+`entityType`, and a bare `from`/`to` window use no index
+([`docs/reference/event-store.md`](docs/reference/event-store.md#reads)).
 
 `pageSize` defaults to 20 and is **capped at 100 by the event store's use case**, not by the
 gateway DTO, so a direct RPC caller inherits the same ceiling. The DTO owns shape instead: an
@@ -1142,9 +1178,12 @@ GET /api/audit/trace/9f1c0e2a-7b4d-4c8e-9a11-6d3f5b2c0e77
 
 `aggregateType` and `aggregateId` are the routing key's **second token** and the payload id it
 names, resolved per event — so `?aggregateType=order` matches `retail.order.placed` and
-`retail.order.cancelled`, and _not_ that order's payment, fulfillment or refund events, which are
-extracted under their own type and their own id. Reassembling one order's whole story is what
-`?correlationId=` and the trace route are for.
+`retail.order.cancelled`, and _not_ that order's payment, fulfillment, refund or return events,
+which are extracted under their own type — but keyed by the **order id**, because the extractor
+prefers `orderId` over the per-aggregate id. `?aggregateType=payment&aggregateId=<orderId>` finds an
+order's payment events; a `paymentId` finds nothing
+([`docs/reference/event-store.md`](docs/reference/event-store.md#ingest-into-domain_event)).
+Reassembling one order's whole story is what `?correlationId=` and the trace route are for.
 
 ### Admin
 
@@ -1182,6 +1221,10 @@ on a stable code rather than a message:
   }
 }
 ```
+
+A rejection the gateway raises itself (`auth`, `iam`, the admin shells, request validation) carries
+no `code`, and an upstream rejection without one keeps its status only for `400`/`403`/`404`/`409`
+([`docs/reference/api-gateway.md`](docs/reference/api-gateway.md#error-forwarding)).
 
 ---
 
@@ -1222,6 +1265,7 @@ Two subject kinds share the pipeline:
 
 3. POST /api/auth/logout (bearer)
    ↳ clear the refresh hash; subsequent /auth/refresh fails 401
+   ↳ the access JWT is not revoked: it keeps working until it expires
 ```
 
 Refresh tokens **rotate on every refresh**; reuse of a stale token trips a circuit-breaker
@@ -1274,7 +1318,8 @@ seeded bundles live in `scripts/test-db-seed.ts`.
 
 A new code auto-seeds to `admin` only when it is also added to the `PERMISSION_SEEDS` array
 in `scripts/test-db-seed.ts` — the `admin` role binds `Object.values(PermissionCodeEnum)`,
-but the seeder resolves each code's row id from that array.
+but the seeder resolves each code's row id from that array. A code missing from it makes
+`yarn test:seed` fail, naming the code.
 
 Guard a controller method on a precise code:
 
@@ -1315,41 +1360,59 @@ Validated by a single Joi schema in [`libs/config`](libs/config/config-module.co
 | `REDIS_URL`                   | `redis://…`                                                                                                                                                   |
 | `JWT_ACCESS_SECRET`           | ≥ 32 chars                                                                                                                                                    |
 | `JWT_REFRESH_SECRET`          | ≥ 32 chars; **must differ** from the access secret so it can be rotated independently                                                                         |
-| `OTEL_SERVICE_NAME`           | distinct per service — Jaeger's "Service" filter                                                                                                              |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | e.g. `http://otel-collector:4318/v1/traces`                                                                                                                   |
+| `OTEL_SERVICE_NAME`           | distinct per service — Jaeger's "Service" filter. The tracer reads it from the process environment only ([below](#values-read-before-envlocal-loads))         |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | e.g. `http://otel-collector:4318/v1/traces`. Read by the tracer from the process environment only                                                             |
 
 ### Defaulted
 
-| Variable                                  | Default                     | Role                                                                                                                                                  |
-| ----------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `API_GATEWAY_PREFIX`                      | —                           | global route prefix (`api` in compose)                                                                                                                |
-| `API_GATEWAY_USE_API_REFERENCE`           | `NODE_ENV !== 'production'` | serve `/api/reference`                                                                                                                                |
-| `HEALTH_PROBE_TIMEOUT_MS`                 | `2000`                      | bounds **one** liveness probe, not the fan-out — the five run concurrently ([§6](#6-http-api))                                                        |
-| `DATABASE_LOGGING`                        | `NODE_ENV !== 'production'` | TypeORM query log                                                                                                                                     |
-| `DEFAULT_CURRENCY`                        | `USD`                       | ISO-4217 currency the catalog publish price gate resolves against                                                                                     |
-| `LOG_LEVEL`                               | `debug` dev / `info` prod   | `trace` … `fatal`                                                                                                                                     |
-| `CACHE_TTL_MS_DEFAULT`                    | `60000`                     | global default for an unscoped `set()`                                                                                                                |
-| `CACHE_TTL_MS_PRODUCT_STOCK`              | `60000`                     | TTL for a cached availability read (the name predates the running-totals rewrite)                                                                     |
-| `RESERVATION_TTL_MINUTES`                 | `15`                        | hold lifetime — `expiresAt = now + this` on every Reserve                                                                                             |
-| `RESERVATION_SWEEP_BATCH_SIZE`            | `200`                       | rows one expired-reservation sweep scans and expires; a ceiling a caller cannot raise                                                                 |
-| `RESERVATION_SWEEP_TRANSACTION_SIZE`      | `25`                        | rows one sweep transaction expires — bounds how long it holds row locks                                                                               |
-| `RESERVATION_SWEEP_INTERVAL_SECONDS`      | `60`                        | seconds between sweep invocations; decides how promptly an already-expired hold is reclaimed                                                          |
-| `RETURN_WINDOW_DAYS`                      | `30`                        | a `shipped` order is returnable only within this window; a `delivered` one always is                                                                  |
-| `OCC_RETRY_ATTEMPTS`                      | `5`                         | bounded retry budget for version-checked writes                                                                                                       |
-| `IDEMPOTENCY_KEY_TTL_HOURS`               | `24`                        | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows                                                               |
-| `CAPTURE_CLAIM_STALE_MINUTES`             | `15`                        | how long a payment may sit `capturing` before the report names it; the report resolves nothing ([§13](#13-background-jobs))                           |
-| `OPS_NOTIFICATIONS_EMAIL`                 | `ops@example.com`           | mailbox for system-only notifications with no customer recipient                                                                                      |
-| `MAX_DELIVERY_ATTEMPTS`                   | `3`                         | attempts before a delivery is abandoned and `notifications.delivery.failed` is emitted                                                                |
-| `RETENTION_DELIVERY_DAYS`                 | `90`                        | delivery-row retention horizon; the nightly purge hard-deletes rows older than this ([§13](#13-background-jobs))                                      |
-| `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300`                       | staleness safety net; the consent cache is kept fresh by events, not TTL                                                                              |
-| `NOTIFIER_TEST_FLAKY`                     | `false`                     | **test-only** — swaps in a flaky notifier that fails the first dispatch of any `__FAIL_ONCE__`-marked body. Never set it outside the retry e2e suite. |
-| `AUTH_ARGON2_MEMORY_COST`                 | `19456` KiB                 | OWASP 2024 minimum for argon2id                                                                                                                       |
-| `AUTH_ARGON2_TIME_COST`                   | `2`                         | iterations                                                                                                                                            |
-| `AUTH_ARGON2_PARALLELISM`                 | `1`                         | threads                                                                                                                                               |
-| `JWT_ACCESS_EXPIRES_IN`                   | `15m`                       | `ms`-style string                                                                                                                                     |
-| `JWT_REFRESH_EXPIRES_IN`                  | `7d`                        |                                                                                                                                                       |
-| `OTEL_RESOURCE_ATTRIBUTES`                | —                           | merged into the OTel `Resource`                                                                                                                       |
-| `OTEL_SDK_DISABLED`                       | `false`                     | short-circuit the SDK at boot                                                                                                                         |
+| Variable                                  | Default                     | Role                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `API_GATEWAY_PREFIX`                      | —                           | global route prefix (`api` in `.env.example`); unset, the routes carry no prefix. The reference stays at `/api/reference`, a fixed path in `main.ts`                                                                                                                                                                       |
+| `API_GATEWAY_USE_API_REFERENCE`           | `NODE_ENV !== 'production'` | serve `/api/reference`                                                                                                                                                                                                                                                                                                     |
+| `HEALTH_PROBE_TIMEOUT_MS`                 | `2000`                      | bounds **one** liveness probe, not the fan-out — the five run concurrently ([§6](#6-http-api))                                                                                                                                                                                                                             |
+| `DATABASE_LOGGING`                        | `NODE_ENV !== 'production'` | TypeORM query log                                                                                                                                                                                                                                                                                                          |
+| `DEFAULT_CURRENCY`                        | `USD`                       | ISO-4217 currency the catalog publish price gate resolves against, a new cart opens in, and a gateway price read defaults to. Three letters, upper-cased on load (`eur` → `EUR`). Give `api-gateway`, `catalog-microservice` and `retail-microservice` the same value: a service without it boots on `USD` with no warning |
+| `LOG_LEVEL`                               | `debug` dev / `info` prod   | `trace` … `fatal`                                                                                                                                                                                                                                                                                                          |
+| `CACHE_TTL_MS_DEFAULT`                    | `60000`                     | global default for an unscoped `set()`                                                                                                                                                                                                                                                                                     |
+| `CACHE_TTL_MS_PRODUCT_STOCK`              | `60000`                     | TTL for a cached availability read (the name predates the running-totals rewrite)                                                                                                                                                                                                                                          |
+| `RESERVATION_TTL_MINUTES`                 | `15`                        | hold lifetime — `expiresAt = now + this` on every Reserve                                                                                                                                                                                                                                                                  |
+| `RESERVATION_SWEEP_BATCH_SIZE`            | `200`                       | rows one expired-reservation sweep scans and expires; a ceiling a caller cannot raise                                                                                                                                                                                                                                      |
+| `RESERVATION_SWEEP_TRANSACTION_SIZE`      | `25`                        | rows one sweep transaction expires — bounds how long it holds row locks                                                                                                                                                                                                                                                    |
+| `RESERVATION_SWEEP_INTERVAL_SECONDS`      | `60`                        | seconds between sweep invocations; decides how promptly an already-expired hold is reclaimed                                                                                                                                                                                                                               |
+| `RETURN_WINDOW_DAYS`                      | `30`                        | a `shipped` order is returnable only within this window; a `delivered` one always is                                                                                                                                                                                                                                       |
+| `OCC_RETRY_ATTEMPTS`                      | `5`                         | bounded retry budget for version-checked writes                                                                                                                                                                                                                                                                            |
+| `IDEMPOTENCY_KEY_TTL_HOURS`               | `24`                        | idempotency-record retention; the 10-minute purge sweep reclaims past-`expires_at` rows                                                                                                                                                                                                                                    |
+| `CAPTURE_CLAIM_STALE_MINUTES`             | `15`                        | how long a payment may sit `capturing` before the report names it; the report resolves nothing ([§13](#13-background-jobs))                                                                                                                                                                                                |
+| `OPS_NOTIFICATIONS_EMAIL`                 | `ops@example.com`           | mailbox for system-only notifications with no customer recipient                                                                                                                                                                                                                                                           |
+| `MAX_DELIVERY_ATTEMPTS`                   | `3`                         | attempts before a delivery is abandoned and `notifications.delivery.failed` is emitted                                                                                                                                                                                                                                     |
+| `RETENTION_DELIVERY_DAYS`                 | `90`                        | delivery-row retention horizon; the nightly purge hard-deletes rows older than this ([§13](#13-background-jobs)). A purged row no longer dedupes its event, so a redelivery that arrives after the horizon is dispatched again                                                                                             |
+| `NOTIFICATIONS_CONSENT_CACHE_TTL_SECONDS` | `300`                       | staleness safety net; the consent cache is kept fresh by events, not TTL                                                                                                                                                                                                                                                   |
+| `NOTIFIER_TEST_FLAKY`                     | `false`                     | **test-only** — swaps in a flaky notifier that fails the first dispatch of any `__FAIL_ONCE__`-marked body. Never set it outside the retry e2e suite.                                                                                                                                                                      |
+| `AUTH_ARGON2_MEMORY_COST`                 | `19456` KiB                 | OWASP 2024 minimum for argon2id                                                                                                                                                                                                                                                                                            |
+| `AUTH_ARGON2_TIME_COST`                   | `2`                         | iterations                                                                                                                                                                                                                                                                                                                 |
+| `AUTH_ARGON2_PARALLELISM`                 | `1`                         | threads                                                                                                                                                                                                                                                                                                                    |
+| `JWT_ACCESS_EXPIRES_IN`                   | `15m`                       | `ms`-style string                                                                                                                                                                                                                                                                                                          |
+| `JWT_REFRESH_EXPIRES_IN`                  | `7d`                        |                                                                                                                                                                                                                                                                                                                            |
+| `OTEL_RESOURCE_ATTRIBUTES`                | —                           | merged into the OTel `Resource` (e.g. `team=platform`); read from the process environment only                                                                                                                                                                                                                             |
+| `OTEL_SDK_DISABLED`                       | `false`                     | short-circuit the SDK at boot. Only the exact string `true` disables it, and only from the process environment: the tracer compares the raw value, so `TRUE` passes the schema and leaves the SDK on                                                                                                                       |
+
+#### Values read before `.env.local` loads
+
+`ConfigModule` loads `.env.local` and `.env` when an app's `AppModule` is imported. Two things run
+earlier and see only the process environment:
+
+- the tracer, the first import of every `main.ts`, which reads `OTEL_SDK_DISABLED`,
+  `OTEL_SERVICE_NAME`, `NODE_ENV` and the exporter's `OTEL_EXPORTER_OTLP_*` variables
+  (`libs/observability/tracer.ts`);
+- the schema's `API_GATEWAY_USE_API_REFERENCE` and `DATABASE_LOGGING` defaults, which are computed
+  from `NODE_ENV` when `libs/config` is loaded.
+
+For a host-side `yarn start:dev`, the `OTEL_*` values in `.env.local` pass validation and never reach
+the tracer. Every service reports `service.name` as `unknown-service` unless the shell exports
+`OTEL_SERVICE_NAME`. Spans still reach the collector, because the exporter's own default,
+`http://localhost:4318/v1/traces`, is where it listens. In the same way, a `NODE_ENV=production`
+that only `.env.local` sets still leaves the API reference and the query log on. Compose and CI set
+these variables in the process environment.
 
 ---
 
@@ -1361,20 +1424,21 @@ Six service names are valid everywhere a `<service>` appears: `api-gateway`,
 `inventory-microservice`, `retail-microservice`, `notification-microservice`,
 `catalog-microservice`, `event-store-microservice`.
 
-| Script                              | Description                                                                      |
-| ----------------------------------- | -------------------------------------------------------------------------------- |
-| `yarn start:dev`                    | Start all six services concurrently, watch reload (`scripts/bash/start-dev.sh`). |
-| `yarn start:dev:<service>`          | Start one service with watch reload.                                             |
-| `yarn start:prod:<service>`         | Run a built service from `dist/`.                                                |
-| `yarn build`                        | `nest build --all`.                                                              |
-| `yarn build:<service>`              | Build one app.                                                                   |
-| `yarn lint`                         | Full ESLint pass incl. `boundaries/*`, `--max-warnings 0` (CI gate).             |
-| `yarn lint:fix`                     | Auto-fix what can be auto-fixed.                                                 |
-| `yarn format` / `yarn format:check` | Prettier write / check-only (CI gate).                                           |
+| Script                              | Description                                                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `yarn start:dev`                    | Start all six services concurrently, watch reload (`scripts/bash/start-dev.sh`).                                                           |
+| `yarn start:dev:<service>`          | Start one service with watch reload.                                                                                                       |
+| `yarn start:prod:<service>`         | Run a built service from `dist/`.                                                                                                          |
+| `yarn build`                        | `nest build --all`.                                                                                                                        |
+| `yarn build:<service>`              | Build one app.                                                                                                                             |
+| `yarn lint`                         | Full ESLint pass incl. `boundaries/*`, `--max-warnings 0` (CI gate).                                                                       |
+| `yarn lint:fix`                     | Auto-fix what can be auto-fixed.                                                                                                           |
+| `yarn format` / `yarn format:check` | Prettier write / check over `apps/` and `libs/`. CI does not run it: `yarn lint` enforces the same formatting through `prettier/prettier`. |
 
 ### Migrations
 
-Two pipelines, two `migrations` ledgers.
+Two pipelines, two `migrations` ledgers. How they are wired, and the schema facts the DDL does not
+state: [`docs/reference/persistence.md`](docs/reference/persistence.md).
 
 | Script                                                                      | Target                                                 |
 | --------------------------------------------------------------------------- | ------------------------------------------------------ |
@@ -1404,7 +1468,12 @@ the driver would default to the Node host's local timezone.
 
 **E2E suites drive gateway HTTP and assert through public state** — order/refund reads, the
 public stock read, the uncached movements ledger, the delivery audit reads, and (as the
-"exactly one event" oracle) direct SQL against `ris_eventstore`. Never an event spy.
+"exactly one event" oracle) direct SQL against `ris_eventstore`. One suite spies on an event
+publisher (`cart-to-order-walking-skeleton`). Three spy on a port instead, to count or fail calls
+that no state records: the payment gateway in `concurrent-capture-double-charge` and
+`declined-authorization`, and the notifier in `notification`. How a suite boots the services,
+where it reads configuration and how it waits for asynchronous work:
+[`docs/reference/testing.md`](docs/reference/testing.md).
 
 | Capability                  | Suites                                                                                                                                                                         |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1432,15 +1501,23 @@ direct SQL even though `GET /api/audit/*` could answer the same questions: a sui
 
 Every endpoint is authored in **both** libraries, in lockstep: Kulala `*.http` files under
 [`http/kulala/`](http/kulala/) and the [posting.sh](https://posting.sh) collection under
-[`http/posting/`](http/posting/). See [`http.md`](http.md).
+[`http/posting/`](http/posting/). How to run the Posting collection:
+[`http/posting/README.md`](http/posting/README.md). What a run needs, which files can run twice, and
+what `kulala-core` 0.37 does with them:
+[`docs/reference/http-api.md`](docs/reference/http-api.md).
 
 ---
 
 ## 10. Seed data
 
-`yarn test:seed` is **idempotent** — every row uses a fixed id and `INSERT IGNORE` (or a
-`WHERE NOT EXISTS` guard where there is no surrogate id), so re-running it never duplicates
-or errors. SQL files apply in FK-safe order (`scripts/utils/test-db-seed.util.ts`).
+`yarn test:seed` is **idempotent**: re-running it never duplicates a row or errors. It is not a
+reset. The seeded users are upserted, so a re-run restores their passwords and status and clears
+their refresh-token hash, which makes an earlier refresh token fail. Every other row is `INSERT IGNORE`d against a fixed
+id or natural key, or guarded by `WHERE NOT EXISTS` where the id is auto-increment. A fixture row
+that a test changed therefore keeps its changes. SQL files apply in FK-safe order
+(`scripts/utils/test-db-seed.util.ts`). The parser behind them splits on every `;` and drops
+everything after `--`, even inside a string
+([`docs/reference/persistence.md`](docs/reference/persistence.md#the-test-seed-yarn-testseed)).
 
 The migration auto-provisions exactly one `StockLocation` — `default-warehouse` — before any
 seed runs, so there is always a location to read from and write to.
@@ -1705,7 +1782,8 @@ Two read paths use Redis today, both **cache-aside**:
 3. loader → STOCK_REPOSITORY.findStockLevelsByVariant(variantId, locationIds?)
      → point lookup of the variant's stock_level rows (no SUM/GROUP BY)
      → project to StockLevelView, sort by stockLocationId, sum totals
-4. STOCK_CACHE.set(key, view, jittered TTL)
+4. the single-flight leader writes the view back with a jittered TTL
+   (skipped when the cache read failed; StockCache's own set is private)
 ```
 
 A variant with no rows in scope is a valid, cached **zero-availability** answer, not a 404.
@@ -1742,9 +1820,10 @@ import `@nestjs/cache-manager` / `@keyv/redis` directly (depend on `ICachePort`)
   `IStockCachePort` has **no public `invalidate(...)`**; writes route through
   `withInvalidation(work, resolveItems, opts)`, which awaits `work()` — so the commit is
   durable — and only then fans out the prefix deletes. A future contributor cannot call it
-  from inside the transaction body. Five `delByPrefix` calls run per affected `variantId`
-  during the version-transition window (current `v3` plus four legacy prefixes). Each does
-  `SCAN MATCH <prefix>*` then `UNLINK` — asynchronous free, no blocking O(N) delete on
+  from inside the transaction body. One `delByPrefix` runs per affected `variantId`, over the
+  live `v3` prefix only — the four retired stock key shapes are no longer swept
+  ([`docs/reference/shared-libraries.md`](docs/reference/shared-libraries.md#cache_keys--live-reserved-and-retired-builders)).
+  It does `SCAN MATCH <prefix>*` then `UNLINK` — asynchronous free, no blocking O(N) delete on
   Redis's main thread.
 
 ### Graceful degradation
@@ -1891,14 +1970,20 @@ carries the admission question that routes a sentence to one or the other, and
 
 ## 16. Documentation map
 
-| Where                                          | What it holds                                                                                                                                                                                                                                                          |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`docs/adr/`](docs/adr/)                       | The durable rationale — one decision per file, Nygard hybrid (Status, Context, Decision, Alternatives, Consequences). Start at [`index.md`](docs/adr/index.md). Numbering and slug rules are themselves an ADR ([003](docs/adr/003-record-architecture-decisions.md)). |
-| [`docs/implementation/`](docs/implementation/) | Per-capability walkthroughs, numbered by delivery order — the "how and why this specific thing works" notes an ADR is too coarse for.                                                                                                                                  |
-| [`docs/extensions/`](docs/extensions/)         | One sketch per capability the system deliberately does not have, grouped into nine clusters — how each would attach if it were ever wanted. See [§15](#15-extensions-and-future-expansion).                                                                            |
-| [`docs/audits/`](docs/audits/)                 | Point-in-time review findings.                                                                                                                                                                                                                                         |
-| `eslint.config.mjs`                            | The authoritative answer to "where does this file belong".                                                                                                                                                                                                             |
-| The `*RpcExceptionFilter` of each module       | The authoritative error-code → HTTP-status tables.                                                                                                                                                                                                                     |
+| Where                                          | What it holds                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/adr/`](docs/adr/)                       | The durable rationale — one decision per file, Nygard hybrid (Status, Context, Decision, Alternatives, Consequences). Start at [`index.md`](docs/adr/index.md). Numbering and slug rules are themselves an ADR ([003](docs/adr/003-record-architecture-decisions.md)).                   |
+| [`docs/reference/`](docs/reference/)           | The living reference of current behaviour the code does not make plain — invariants, ordering, failure modes, units, cross-service contracts — each claim anchored to a path and symbol and kept current in the change that alters it. Start at [`README.md`](docs/reference/README.md). |
+| [`docs/implementation/`](docs/implementation/) | Per-capability walkthroughs, numbered by delivery order — the "how and why this specific thing works" notes an ADR is too coarse for.                                                                                                                                                    |
+| [`docs/extensions/`](docs/extensions/)         | One sketch per capability the system deliberately does not have, grouped into nine clusters — how each would attach if it were ever wanted. See [§15](#15-extensions-and-future-expansion).                                                                                              |
+| [`docs/audits/`](docs/audits/)                 | Point-in-time review findings.                                                                                                                                                                                                                                                           |
+| `eslint.config.mjs`                            | The authoritative answer to "where does this file belong".                                                                                                                                                                                                                               |
+| The `*RpcExceptionFilter` of each module       | The authoritative error-code → HTTP-status tables.                                                                                                                                                                                                                                       |
+
+**The code carries no comments** ([ADR-064](docs/adr/064-code-carries-no-comments.md)): what a
+comment would have said belongs in one of the places above, and
+[`spec/no-code-comments.spec.ts`](spec/no-code-comments.spec.ts) fails on any comment that is not a
+functional directive (`eslint-disable…`, `@ts-…`, `prettier-ignore`, …).
 
 When you make an architectural decision, **write an ADR** — next free 3-digit number,
 allocated at first commit. If a decision is later reversed, write a new ADR that

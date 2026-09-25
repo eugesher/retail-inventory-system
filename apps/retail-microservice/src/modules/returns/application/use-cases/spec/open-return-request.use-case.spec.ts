@@ -67,7 +67,6 @@ const openPayload = (
   ...overrides,
 });
 
-// Days ago, as a Date — for building shipped/delivered timestamps relative to now.
 const daysAgo = (days: number): Date => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
 describe('OpenReturnRequestUseCase', () => {
@@ -83,8 +82,6 @@ describe('OpenReturnRequestUseCase', () => {
       expect(view.customerId).toBe(OWNER_ID);
       expect(view.lines).toEqual([expect.objectContaining({ orderLineId: 10, quantity: 2 })]);
       expect(publisher.requested).toHaveLength(1);
-      // The buyer's email was resolved from the RMA's customerId and stamped on the event
-      // (ADR-033); locale ships null.
       expect(publisher.requested[0]).toMatchObject({
         customerEmail: FAKE_CUSTOMER_EMAIL,
         customerLocale: null,
@@ -120,7 +117,6 @@ describe('OpenReturnRequestUseCase', () => {
       await expect(useCase.execute(openPayload())).rejects.toMatchObject({
         code: ReturnErrorCodeEnum.RETURN_WINDOW_EXPIRED,
       });
-      // Nothing was persisted.
       expect(repository.saved).toHaveLength(0);
     });
 
@@ -142,7 +138,6 @@ describe('OpenReturnRequestUseCase', () => {
 
   describe('the returnable-quantity invariant', () => {
     it('rejects an over-quantity request with RETURN_QUANTITY_EXCEEDS_RETURNABLE (409)', async () => {
-      // Line 10 ordered 3, none cancelled, none returned → 3 returnable; request 4.
       const { useCase } = makeHarness();
 
       await expect(
@@ -151,7 +146,6 @@ describe('OpenReturnRequestUseCase', () => {
     });
 
     it('subtracts a cancelled quantity from the returnable remainder', async () => {
-      // Ordered 3, 2 cancelled → only 1 returnable; request 2 is rejected.
       const { useCase } = makeHarness(
         buildOrderSnapshot({
           lines: [{ orderLineId: 10, variantId: 100, quantity: 3, cancelledQuantity: 2 }],
@@ -166,7 +160,6 @@ describe('OpenReturnRequestUseCase', () => {
     it('subtracts an already-returned quantity, but a rejected prior RMA frees it back', async () => {
       const { useCase, repository } = makeHarness();
 
-      // A prior NON-rejected RMA returned 2 of line 10's 3 → only 1 returnable now.
       repository.seed(
         ReturnRequest.reconstitute({
           id: 50,
@@ -194,7 +187,6 @@ describe('OpenReturnRequestUseCase', () => {
         useCase.execute(openPayload({ lines: [{ orderLineId: 10, quantity: 2 }] })),
       ).rejects.toMatchObject({ code: ReturnErrorCodeEnum.RETURN_QUANTITY_EXCEEDS_RETURNABLE });
 
-      // A REJECTED prior RMA does NOT consume the quantity — 3 returnable again.
       repository.seed(
         ReturnRequest.reconstitute({
           id: 51,
@@ -217,7 +209,6 @@ describe('OpenReturnRequestUseCase', () => {
           version: 1,
         }),
       );
-      // (RMA 51 is on a different order anyway; the key assertion is the non-rejected one.)
     });
 
     it('rejects an unknown order line with RETURN_ORDER_LINE_NOT_FOUND (404)', async () => {
@@ -243,7 +234,6 @@ describe('OpenReturnRequestUseCase', () => {
 
       const view = await useCase.execute(openPayload({ customerId: STAFF_ID, isStaff: true }));
 
-      // The RMA's buyer is the ORDER's customer, not the staff actor.
       expect(view.customerId).toBe(OWNER_ID);
       expect(view.status).toBe(ReturnStatusEnum.REQUESTED);
     });

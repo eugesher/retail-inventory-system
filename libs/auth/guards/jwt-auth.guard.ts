@@ -5,9 +5,6 @@ import type { Observable } from 'rxjs';
 
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
-// Wraps Passport's `AuthGuard('jwt')` and short-circuits routes/controllers
-// marked with `@Public()`. Registered globally via `APP_GUARD` so every
-// route is protected unless explicitly opted out.
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
   constructor(private readonly reflector: Reflector) {

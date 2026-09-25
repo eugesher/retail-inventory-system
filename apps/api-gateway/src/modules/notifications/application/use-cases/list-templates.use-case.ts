@@ -10,10 +10,6 @@ import {
   NOTIFICATIONS_GATEWAY_PORT,
 } from '../ports';
 
-// Thin gateway-side orchestrator over the `notification.template.list` RPC — the
-// filtered registry browse (every version, active or not). The filtering + ordering
-// are the notification microservice's responsibility; the gateway threads the
-// correlation id and maps any downstream rejection onto the right HTTP status.
 @Injectable()
 export class ListTemplatesUseCase {
   constructor(

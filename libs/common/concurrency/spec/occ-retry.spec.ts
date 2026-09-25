@@ -1,12 +1,5 @@
 import { IOccRetryLogger, IOccRetryPolicy, runWithOccRetry } from '../occ-retry';
 
-// The bounded OCC retry protocol (ADR-036), tested in isolation for the first time (ADR-045).
-//
-// This is the point of lifting the loop out of the four modules. Before, the protocol existed
-// as four hand-copied loops, and every rule it encodes — the levels, the message texts, "only a
-// lost CAS retries", the budget bound, "exhaustion must throw" — was only ever exercised
-// incidentally, through whichever use-case spec happened to drive a conflict. None of them
-// asserted the rules themselves.
 class TestConflict extends Error {
   constructor(public readonly currentVersion: number) {
     super('conflict');
@@ -58,8 +51,6 @@ describe('runWithOccRetry (ADR-036 protocol)', () => {
     await expect(runWithOccRetry(attempt, makePolicy(logger, 5))).resolves.toBe('ok');
 
     expect(attempt).toHaveBeenCalledTimes(1);
-    // A write that wins its race is not an event. Logging here would put a line on every
-    // successful mutation in the system.
     expect(lines).toEqual([]);
   });
 
@@ -81,9 +72,6 @@ describe('runWithOccRetry (ADR-036 protocol)', () => {
     const { logger, lines } = makeLogger();
     const attempt = jest.fn().mockRejectedValue(new TerminalError('OUT_OF_STOCK'));
 
-    // The single most important rule in the protocol. Retrying a state the request genuinely
-    // forbids would burn the budget to return the same refusal — or worse, resolve to a
-    // different outcome than the caller asked for.
     await expect(runWithOccRetry(attempt, makePolicy(logger, 5))).rejects.toThrow('OUT_OF_STOCK');
 
     expect(attempt).toHaveBeenCalledTimes(1);
@@ -98,8 +86,6 @@ describe('runWithOccRetry (ADR-036 protocol)', () => {
       'exhausted after 3 @ v9',
     );
 
-    // Exactly the budget — not budget+1 (an off-by-one here would double the load a hot row
-    // sees under contention).
     expect(attempt).toHaveBeenCalledTimes(3);
   });
 
@@ -110,8 +96,6 @@ describe('runWithOccRetry (ADR-036 protocol)', () => {
     await expect(runWithOccRetry(attempt, makePolicy(logger, 1))).rejects.toThrow(TerminalError);
 
     expect(attempt).toHaveBeenCalledTimes(1);
-    // Straight to exhaustion: a client that pinned a version must be told its view is stale,
-    // not silently retried into a different outcome.
     expect(lines.map((line) => line.level)).toEqual(['warn']);
   });
 
@@ -121,9 +105,6 @@ describe('runWithOccRetry (ADR-036 protocol)', () => {
 
     await expect(runWithOccRetry(attempt, makePolicy(logger, 2))).rejects.toThrow(TerminalError);
 
-    // ADR-036 pins the levels: a lost CAS is a NORMAL outcome under contention, so it is `info`
-    // — not `warn` (which would cry wolf on every contended write) and not `debug` (which would
-    // hide it in production). Exhaustion is the abnormal one.
     expect(lines).toEqual([
       {
         level: 'info',
@@ -141,9 +122,6 @@ describe('runWithOccRetry (ADR-036 protocol)', () => {
   it('surfaces a policy that forgets to throw, rather than returning undefined as success', async () => {
     const { logger } = makeLogger();
     const attempt = jest.fn().mockRejectedValue(new TestConflict(2));
-    // TypeScript's `never` return type makes this un-writable in real code; the cast proves the
-    // runtime guard behind it. A silent fall-through would report a LOST write as a successful
-    // one — the worst possible failure for this loop.
     const policy = makePolicy(logger, 2, {
       onExhausted: (() => undefined) as unknown as IOccRetryPolicy<TestConflict>['onExhausted'],
     });

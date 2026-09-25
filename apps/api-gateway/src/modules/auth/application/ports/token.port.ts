@@ -13,6 +13,5 @@ export interface ITokenPort {
   issueAccessToken(payload: Omit<IJwtAccessPayload, 'iat' | 'exp'>): Promise<string>;
   issueRefreshToken(payload: Omit<IJwtRefreshPayload, 'iat' | 'exp'>): Promise<string>;
   verifyRefresh(token: string): Promise<IJwtRefreshPayload>;
-  // Sourced from JWT_ACCESS_EXPIRES_IN.
   accessTokenExpiresInSeconds(): number;
 }

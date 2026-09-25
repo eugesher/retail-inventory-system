@@ -35,8 +35,6 @@ describe('ListCategoriesUseCase', () => {
     logger = makePinoLoggerMock();
     useCase = new ListCategoriesUseCase(repository, logger as unknown as PinoLogger);
 
-    // Two roots (Books sorts before Electronics: sortOrder 0 vs 1), one child, one
-    // archived root that must never surface in a public browse.
     repository.seed(
       seedCategory({
         id: 1,
@@ -72,19 +70,13 @@ describe('ListCategoriesUseCase', () => {
   it('lists every active category, ordered sortOrder ASC then name ASC, hiding archived', async () => {
     const views = await useCase.execute({ correlationId: 'corr-1' });
 
-    // Books (sortOrder 0), then Electronics (sortOrder 1), then Phones (sortOrder 0
-    // but a deeper path) — the flat list is purely sortOrder/name ordered. The
-    // archived Clearance is absent.
     expect(views.map((view) => view.slug)).toEqual(['books', 'phones', 'electronics']);
-    // The archived Clearance never surfaces in a public browse.
     expect(views.map((view) => view.slug)).not.toContain('clearance');
   });
 
   it('narrows to top-level categories with rootOnly', async () => {
     const views = await useCase.execute({ rootOnly: true, correlationId: 'corr-2' });
 
-    // Only the active roots (Books, Electronics) — Phones is a child, Clearance is
-    // archived.
     expect(views.map((view) => view.slug)).toEqual(['books', 'electronics']);
     expect(views.every((view) => view.parentId === null)).toBe(true);
   });

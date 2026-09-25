@@ -19,7 +19,6 @@ describe('Payment', () => {
       expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
       expect(payment.capturedAt).toBeNull();
       expect(payment.flaggedForRefund).toBe(false);
-      // A freshly authorized payment has refunded nothing; the writer ships later.
       expect(payment.refundedAmountMinor).toBe(0);
       expect(payment.authorizedAt).toEqual(new Date('2026-06-10T00:00:00Z'));
       expect(payment.id).toBeNull();
@@ -61,10 +60,6 @@ describe('Payment', () => {
     });
   });
 
-  // The capture is a THREE-step claim now, not one mutator (ADR-052): `beginCapture` (the durable
-  // claim, taken under a row lock and committed BEFORE the gateway is called), then either
-  // `completeCapture` (the gateway said yes) or `releaseCapture` (it said no, so we KNOW no money
-  // moved). Money can only move while a claim is held, and only one caller can hold it.
   const captured = (): Payment => {
     const payment = Payment.authorized(authorizedInput());
     payment.beginCapture();
@@ -79,7 +74,6 @@ describe('Payment', () => {
       payment.beginCapture();
 
       expect(payment.status).toBe(PaymentStatusEnum.CAPTURING);
-      // Nothing was charged yet — a capturedAt here would be a lie the ledger keeps.
       expect(payment.capturedAt).toBeNull();
     });
 
@@ -92,7 +86,6 @@ describe('Payment', () => {
 
       expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
       expect(payment.capturedAt).toEqual(at);
-      // The authorize stamp is untouched by capture.
       expect(payment.authorizedAt).toEqual(new Date('2026-06-10T00:00:00Z'));
     });
 
@@ -104,12 +97,9 @@ describe('Payment', () => {
 
       expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
       expect(payment.capturedAt).toBeNull();
-      // And it can be claimed again — a declined capture does not burn the authorization.
       expect(() => payment.beginCapture()).not.toThrow();
     });
 
-    // **The mutual exclusion, at the domain.** The second claimant is rejected here; in production it
-    // is rejected while still holding the row lock, which is why it never reaches the gateway.
     it('rejects a SECOND claim on an already-claimed payment (the double-charge guard)', () => {
       const payment = Payment.authorized(authorizedInput());
       payment.beginCapture();
@@ -122,8 +112,6 @@ describe('Payment', () => {
       expect(() => captured().beginCapture()).toThrow(OrderDomainException);
     });
 
-    // A path that reaches CAPTURED without passing through CAPTURING is a path that charged the
-    // gateway without holding the lock — the exact defect the claim exists to make unexpressible.
     it('rejects completing a capture nobody claimed', () => {
       const payment = Payment.authorized(authorizedInput());
 
@@ -152,9 +140,6 @@ describe('Payment', () => {
       expect(() => failed.beginCapture()).toThrow(OrderDomainException);
     });
 
-    // Cancel Order must not be able to void money that may already be gone. It refuses a `CAPTURING`
-    // order outright, and the domain refuses too — belt and braces on the one transition where being
-    // wrong means the customer is charged for a cancelled order.
     it('rejects voiding a payment whose capture is in flight', () => {
       const payment = Payment.authorized(authorizedInput());
       payment.beginCapture();
@@ -170,7 +155,6 @@ describe('Payment', () => {
       payment.void();
 
       expect(payment.status).toBe(PaymentStatusEnum.VOIDED);
-      // Voiding does not stamp capturedAt (no money was ever taken).
       expect(payment.capturedAt).toBeNull();
     });
 
@@ -199,7 +183,6 @@ describe('Payment', () => {
       payment.flagForRefund();
 
       expect(payment.flaggedForRefund).toBe(true);
-      // The flag is orthogonal to status — a flagged payment stays captured.
       expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
     });
 
@@ -216,8 +199,6 @@ describe('Payment', () => {
   });
 
   describe('refund', () => {
-    // A captured payment is the only refundable start; `capture()` first so the
-    // mutator's precondition is met.
     const capturedPayment = (amountMinor = 5997): Payment => {
       const payment = Payment.authorized({ ...authorizedInput(), amountMinor });
       payment.beginCapture();
@@ -253,7 +234,6 @@ describe('Payment', () => {
 
       expect(payment.status).toBe(PaymentStatusEnum.REFUNDED);
       expect(payment.refundedAmountMinor).toBe(5997);
-      // A full refund settles the flag Cancel Order set.
       expect(payment.flaggedForRefund).toBe(false);
     });
 
@@ -276,9 +256,7 @@ describe('Payment', () => {
       const payment = capturedPayment(5997);
       payment.refund(5000);
 
-      // Only 997 remains — a 1000 refund overshoots.
       expect(() => payment.refund(1000)).toThrow(Error);
-      // The rejected refund left the counter and status untouched.
       expect(payment.refundedAmountMinor).toBe(5000);
       expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
     });
@@ -311,9 +289,7 @@ describe('Payment', () => {
       expect(payment.id).toBe(9);
       expect(payment.status).toBe(PaymentStatusEnum.CAPTURED);
       expect(payment.capturedAt).toEqual(new Date('2026-06-11T09:30:00Z'));
-      // Omitting the flag on the load path defaults it false.
       expect(payment.flaggedForRefund).toBe(false);
-      // Omitting the refunded total on the load path defaults it 0.
       expect(payment.refundedAmountMinor).toBe(0);
     });
 

@@ -9,11 +9,6 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-// One address bundle on the Place Order body. Required fields are non-empty;
-// `country` is exactly 2 chars (the ISO-3166 alpha-2 code the retail domain
-// upper-cases + re-validates). `line2` / `phone` are optional. At place-time the
-// retail side snapshots each bundle as an immutable `ownerType=order` `Address`
-// (ADR-028 §5).
 export class AddressInputDto {
   @ApiProperty({ example: 'Jane Buyer' })
   @IsString()
@@ -56,16 +51,7 @@ export class AddressInputDto {
   public phone?: string;
 }
 
-// Request body for `POST /api/cart/:cartId/place`. The `Idempotency-Key` is read from the header,
-// not the body — and it is **required and enforced** (ADR-036): same key + same body replays the
-// stored order, a different body is 422, a missing key is 400. The
-// `customerId` is never sent by the caller — the controller folds in
-// `@CurrentUser().id` and the retail use case re-asserts ownership. `@ValidateNested`
-// + `@Type` make class-validator recurse into the two address bundles.
 export class PlaceOrderRequestDto {
-  // `@IsDefined` is load-bearing: `@ValidateNested` is silently skipped on an
-  // undefined value, so without it a `{}` body sails past the edge and is only
-  // rejected by the domain inside the place transaction.
   @ApiProperty({ type: AddressInputDto })
   @IsDefined()
   @ValidateNested()

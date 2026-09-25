@@ -3,14 +3,6 @@ import { IsInt, IsISO8601, IsOptional, Matches, Min } from 'class-validator';
 
 import { CURRENCY_CODE_PATTERN, CURRENCY_CODE_REGEX } from './validation.constants';
 
-// Request body for `POST /api/catalog/variants/:variantId/prices`. The owning
-// variant is taken from the route param, not the body. One body backs both Set
-// and Schedule — omit `validFrom` (or pass one `<= now`) for an immediate price,
-// pass a future `validFrom` to schedule one. The pricing domain has the final
-// say on every invariant (a `validFrom` strictly before now is rejected with
-// `PRICE_VALID_FROM_IN_PAST`, `validFrom < validTo`, integer amount/priority);
-// these decorators are the gateway's edge guard so a malformed request fails
-// fast with a 400 before an RPC is dispatched.
 export class SetPriceRequestDto {
   @ApiProperty({
     example: 'USD',

@@ -3,11 +3,6 @@ import * as Joi from 'joi';
 import * as path from 'path';
 import { DataSource } from 'typeorm';
 
-// The second migration data-source — the isolated `ris_eventstore` schema (ADR-034),
-// separate from the operational `retail_db` `data-source.ts` drives. It reads
-// `EVENTSTORE_DATABASE_URL` and globs `migrations/eventstore/*` (NON-recursive, and
-// disjoint from the main `migrations/*` glob), so each database keeps its own
-// migration history table and the two `migration:run` families never interleave.
 for (const relative of ['../../.env.local', '../../.env']) {
   const result = dotenv.config({ path: path.join(__dirname, relative) });
 

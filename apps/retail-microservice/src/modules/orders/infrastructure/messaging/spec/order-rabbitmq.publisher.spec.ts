@@ -19,10 +19,6 @@ import { makePinoLoggerMock } from '@retail-inventory-system/observability/testi
 
 import { OrderRabbitmqPublisher } from '../order-rabbitmq.publisher';
 
-// Proves the orders publisher dual-publishes (ADR-035): every
-// order/payment/fulfillment/refund event keeps its primary emit AND mirrors the
-// same routing key + wire onto `ris.events`. The dual-emitted
-// `retail.order.cancelled` (two queue destinations) is mirrored exactly **once**.
 describe('OrderRabbitmqPublisher dual-publish', () => {
   let notificationEmit: jest.Mock;
   let retailEmit: jest.Mock;
@@ -139,10 +135,8 @@ describe('OrderRabbitmqPublisher dual-publish', () => {
 
     await publisher.publishOrderCancelled(cancelled);
 
-    // Two queue destinations for the one logical event...
     expect(retailEmit).toHaveBeenCalledWith(ROUTING_KEYS.RETAIL_ORDER_CANCELLED, cancelled);
     expect(notificationEmit).toHaveBeenCalledWith(ROUTING_KEYS.RETAIL_ORDER_CANCELLED, cancelled);
-    // ...but a single firehose mirror.
     expect(mirrorSpy).toHaveBeenCalledTimes(1);
     expect(mirrorSpy).toHaveBeenCalledWith(ROUTING_KEYS.RETAIL_ORDER_CANCELLED, cancelled);
   });

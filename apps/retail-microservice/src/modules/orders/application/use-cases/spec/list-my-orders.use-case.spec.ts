@@ -13,8 +13,6 @@ const makeUseCase = async (): Promise<ListMyOrdersUseCase> => {
   const logger = makePinoLoggerMock() as unknown as PinoLogger;
   const orderRepository = new FakeOrderRepository();
 
-  // Three orders for our customer (placed at increasing times) + one for someone
-  // else. Order 3 is the newest.
   await orderRepository.save(
     buildOrderFixture(1, CUSTOMER_ID, undefined, 1000, new Date('2026-06-01T00:00:00.000Z')),
   );
@@ -49,7 +47,6 @@ describe('ListMyOrdersUseCase', () => {
 
     expect(page.total).toBe(3);
     expect(page.items.map((order) => order.id)).toEqual([3, 2, 1]);
-    // None of the other customer's orders leak in.
     expect(page.items.every((order) => order.customerId === CUSTOMER_ID)).toBe(true);
   });
 

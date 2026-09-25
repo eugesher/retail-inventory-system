@@ -20,13 +20,6 @@ import { CorrelationId } from '@retail-inventory-system/observability';
 import { EraseCustomerUseCase, ReadConsentUseCase } from '../../auth';
 import { EraseCustomerRequestDto, EraseCustomerResponseDto } from './dto';
 
-// The admin surface over the `Customer` aggregate at `/api/admin/customers/*`. A
-// thin presentation-and-orchestration shell (no `domain/` of its own, the `iam`
-// precedent, ADR-024): it injects use cases that `auth.module.ts` exports and owns
-// the auth aggregate. Both routes are staff-gated with an explicit
-// `@RequiresPermission(...)` — these are admin-only staff overrides
-// (`customer:read-consent` / `customer:erase`), never customer-reachable (a
-// customer JWT carries no `permissions` claim, ADR-024/037 §7).
 @ApiTags('Admin — Customers')
 @ApiBearerAuth()
 @Controller('admin/customers')
@@ -42,8 +35,6 @@ export class CustomerAdminController {
   @ApiOkResponse({ type: ConsentRecordView })
   @ApiForbiddenResponse({ description: 'Missing the customer:read-consent permission' })
   public async getConsent(@Param('id') id: string): Promise<ConsentRecordView> {
-    // Reuse the owner-or-staff Read Consent use case with the staff override. An
-    // absent row resolves to the defaults (never a 404).
     return this.readConsent.execute({ customerId: id, requesterId: id, isStaff: true });
   }
 
@@ -61,11 +52,6 @@ export class CustomerAdminController {
     @CurrentUser() actor: ICurrentUser,
     @CorrelationId() correlationId: string,
   ): Promise<EraseCustomerResponseDto> {
-    // Fold the acting staff principal's id into the command — it is recorded on the
-    // audit row + the `customer.erased` event, never inferred downstream.
-    // `IEraseCustomerResult` and `EraseCustomerResponseDto` are the same shape
-    // (`{ status: 'deleted'; erasedAt: string | null }`), so the use-case result is
-    // the response as-is — the method's return type still drives the Swagger schema.
     return this.eraseCustomer.execute({
       customerId: id,
       confirmEmail: dto.confirmEmail,

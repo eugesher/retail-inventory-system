@@ -15,11 +15,6 @@ import { DomainEventEntity } from './domain-event.entity';
 import { DomainEventMapper } from './domain-event.mapper';
 import { parseInstant } from './parse-instant';
 
-// MySQL's "duplicate entry for key" error (ER_DUP_ENTRY / errno 1062). A captured
-// firehose event whose idempotency tuple collides with an already-stored row surfaces
-// this. Duck-typed (not `instanceof QueryFailedError`) because the driver may nest the
-// real error under `driverError` — check both levels (the inventory `isDuplicateEntryError`
-// precedent, kept local: cross-module isolation forbids importing the inventory util).
 const MYSQL_ER_DUP_ENTRY_ERRNO = 1062;
 const MYSQL_ER_DUP_ENTRY_CODE = 'ER_DUP_ENTRY';
 
@@ -36,13 +31,6 @@ function isDuplicateEntryError(error: unknown): boolean {
   return driver.errno === MYSQL_ER_DUP_ENTRY_ERRNO || driver.code === MYSQL_ER_DUP_ENTRY_CODE;
 }
 
-// The single `@InjectRepository(DomainEventEntity)` site. It implements
-// `IDomainEventRepositoryPort` DIRECTLY — deliberately NOT extending
-// `BaseTypeormRepository`, whose public `save` / `softDelete` would contradict the
-// append-only firehose log (ADR-035). The only mutating verb is `append`, which uses
-// `insert` (never `save`-with-id semantics), so an UPDATE or DELETE has no expression
-// at the persistence layer either. Returns domain types only — no TypeORM leak past
-// this file (ADR-017).
 @Injectable()
 export class DomainEventTypeormRepository implements IDomainEventRepositoryPort {
   constructor(
@@ -53,18 +41,7 @@ export class DomainEventTypeormRepository implements IDomainEventRepositoryPort 
   public async append(event: DomainEvent): Promise<IDomainEventAppendResult> {
     const partial = DomainEventMapper.toEntity(event);
 
-    // INSERT, not `save`: a captured event is born with a null id and is never updated,
-    // so there is no preload-by-id round trip. A collision on the composite-UNIQUE
-    // idempotency key `(producer, event_type, aggregate_id, occurred_at, correlation_id)`
-    // means a RabbitMQ redelivery of an event already stored — swallow it as an
-    // idempotent no-op (`{ inserted: false }`) rather than throwing (the
-    // `ReservationTypeormRepository` ER_DUP_ENTRY-translation precedent). Any other
-    // failure propagates.
     try {
-      // The cast bridges the mapper's `DeepPartial` to `insert`'s
-      // `QueryDeepPartialEntity` — they coincide for scalar columns but diverge on the
-      // JSON `payload` (which `QueryDeepPartialEntity` widens to allow a SQL expression);
-      // the mapper already produced a concrete, well-formed row.
       await this.domainEventRepository.insert(partial as QueryDeepPartialEntity<DomainEventEntity>);
       return { inserted: true };
     } catch (error) {
@@ -75,13 +52,6 @@ export class DomainEventTypeormRepository implements IDomainEventRepositoryPort 
     }
   }
 
-  // The paginated audit read (ADR-039). A READ — the append-only invariant is untouched;
-  // `findAndCount` issues the page SELECT plus the full-match `COUNT(*)` the envelope's
-  // `total` needs.
-  //
-  // Ordering is owned here, not by the caller: `occurred_at DESC, id DESC`. The `id`
-  // tiebreaker totalises the order when two events share a millisecond, so a page boundary
-  // never drops or repeats a row.
   public async query(
     filters: IDomainEventQueryFilters,
     page: IDomainEventPageRequest,
@@ -100,10 +70,6 @@ export class DomainEventTypeormRepository implements IDomainEventRepositoryPort 
       where.correlationId = filters.correlationId;
     }
 
-    // Inclusive `occurred_at` window: both bounds → BETWEEN, one bound → a single
-    // half-open comparison. An INVERTED range (`from > to`) yields `BETWEEN hi AND lo`,
-    // which MySQL evaluates to the empty set — the deliberate "empty page, not a rejection"
-    // answer (ADR-039), so the event store needs no domain-exception type.
     const from = parseInstant(filters.from);
     const to = parseInstant(filters.to);
     if (from !== undefined && to !== undefined) {
@@ -129,10 +95,6 @@ export class DomainEventTypeormRepository implements IDomainEventRepositoryPort 
     };
   }
 
-  // ASCENDING — a trace is a timeline and reads forward — with the `id` tiebreaker totalising
-  // the order for two events that share a millisecond. Served by
-  // `IDX_DOMAIN_EVENT_CORRELATION (correlation_id)`. An unknown id yields zero rows, which
-  // maps to `[]`, never an error.
   public async listByCorrelationId(correlationId: string): Promise<DomainEvent[]> {
     const entities = await this.domainEventRepository.find({
       where: { correlationId },

@@ -1,8 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-// The `POST /api/admin/customers/:id/erase` response — the resulting tombstone
-// state. No PII (the whole point of the erase); only the terminal status and the
-// erase instant.
 export class EraseCustomerResponseDto {
   @ApiProperty({ example: 'deleted', description: 'The terminal customer status after the erase' })
   public status: 'deleted';

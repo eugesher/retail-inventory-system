@@ -17,17 +17,6 @@ import {
   ReorderMediaUseCase,
 } from '../application/use-cases';
 
-// Thin RMQ entry points for the media operations, on `catalog_queue`. A SEPARATE
-// controller from `catalog.controller.ts` / `category.controller.ts` keeps each
-// file one-aggregate-shaped (Product vs. Category vs. MediaAsset); the
-// `APP_FILTER`-registered `CatalogRpcExceptionFilter` already covers every
-// controller in the module, so the `MEDIA_*` codes map to HTTP without extra
-// wiring. The handlers translate the wire payload into the use-case call;
-// `correlationId` is logged inline inside each use case (`PinoLogger.assign()`
-// throws outside request scope — ADR-001 / ADR-011), so the controller carries no
-// logging of its own.
-//
-// Like the category surface, the media capability emits NO events (ADR-029 §6).
 @Controller()
 export class MediaController {
   constructor(

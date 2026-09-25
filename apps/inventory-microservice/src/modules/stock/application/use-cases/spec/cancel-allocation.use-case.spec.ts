@@ -51,7 +51,7 @@ describe('CancelAllocationUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
   });
@@ -88,8 +88,6 @@ describe('CancelAllocationUseCase', () => {
       orderId: ORDER_ID,
       lines,
       correlationId: CORRELATION_ID,
-      // The identity retail mints per cancellation (ADR-057). Defaulted here so the
-      // existing cases read unchanged; the cases that care override or clear it.
       operationKey: OPERATION_KEY,
       ...overrides,
     });
@@ -101,12 +99,10 @@ describe('CancelAllocationUseCase', () => {
 
     expect(result).toEqual({ cancelled: 1 });
 
-    // Counter down; the units are back in available.
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(level?.quantityAllocated).toBe(0);
     expect(level?.available).toBe(10);
 
-    // Exactly one negative `release` movement referencing the order, default reason.
     expect(movements.appended).toHaveLength(1);
     const movement = movements.appended[0];
     expect(movement.type).toBe(StockMovementTypeEnum.RELEASE);
@@ -116,7 +112,6 @@ describe('CancelAllocationUseCase', () => {
     expect(movement.reasonCode).toBe('order-cancelled');
     expect(movement.actorId).toBeNull();
 
-    // released event with null cart/reservation legs + the fixed order-cancelled reason.
     expect(publisher.released).toHaveLength(1);
     expect(publisher.released[0].event.aggregateId).toBe(VARIANT_ID);
     expect(publisher.released[0].event.quantity).toBe(4);
@@ -142,7 +137,6 @@ describe('CancelAllocationUseCase', () => {
 
     expect(movements.appended[0].reasonCode).toBe('fraud-review');
     expect(movements.appended[0].actorId).toBe('staff-9');
-    // The typed event reason is fixed (the free-form reason only rides the ledger).
     expect(publisher.released[0].event.reason).toBe('order-cancelled');
   });
 
@@ -165,7 +159,6 @@ describe('CancelAllocationUseCase', () => {
 
   it('does not touch reservation rows (an order cancel never resurrects a cart hold)', async () => {
     seedLevel({ onHand: 10, allocated: 4 });
-    // A committed hold for the same triple — cancel must leave it untouched.
     const reservations = new InMemoryReservationRepository();
     const committed = Reservation.create({
       variantId: VARIANT_ID,
@@ -205,8 +198,8 @@ describe('CancelAllocationUseCase', () => {
   });
 
   it('an over-cancel on a later line rolls the whole cancel back (atomicity)', async () => {
-    seedLevel({ variantId: 1, onHand: 10, allocated: 3 }); // line A fits
-    seedLevel({ variantId: 2, onHand: 10, allocated: 1 }); // line B over-cancels
+    seedLevel({ variantId: 1, onHand: 10, allocated: 3 });
+    seedLevel({ variantId: 2, onHand: 10, allocated: 1 });
 
     const error = await cancel([
       { variantId: 1, quantity: 3 },
@@ -216,7 +209,6 @@ describe('CancelAllocationUseCase', () => {
     expect((error as InventoryDomainException).code).toBe(
       InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
     );
-    // The earlier line's would-be release never landed.
     expect((await repository.findStockLevel(1, LOCATION))?.quantityAllocated).toBe(3);
     expect(movements.appended).toHaveLength(0);
     expect(publisher.released).toHaveLength(0);
@@ -251,10 +243,6 @@ describe('CancelAllocationUseCase', () => {
     });
   });
 
-  // ADR-057. `releaseAllocated` guards by QUANTITY, and on a counter several orders share
-  // that cannot tell "already done" from "still enough to subtract" — a redelivered cancel
-  // arriving after another order allocated the same level would release THAT order's units.
-  // The operation key is what makes the second delivery recognisable.
   describe('the caller-minted operation key', () => {
     it('rides the release movement so the ledger can dedupe on it', async () => {
       seedLevel({ onHand: 10, allocated: 4 });
@@ -262,8 +250,6 @@ describe('CancelAllocationUseCase', () => {
       await cancel([{ variantId: VARIANT_ID, quantity: 4 }]);
 
       expect(movements.appended[0].operationKey).toBe(OPERATION_KEY);
-      // The order stays the ledger REFERENCE — an auditor still asks "what released
-      // order X?" — the key only carries identity.
       expect(movements.appended[0].referenceId).toBe(String(ORDER_ID));
     });
 
@@ -273,8 +259,6 @@ describe('CancelAllocationUseCase', () => {
 
       const result = await cancel([{ variantId: VARIANT_ID, quantity: 4 }]);
 
-      // A replay must NOT throw: an exception out of an `@MessagePattern` is blind-
-      // redelivered by the broker in a hot loop.
       expect(result).toEqual({ cancelled: 1 });
       expect(movements.appended).toHaveLength(0);
     });
@@ -285,8 +269,6 @@ describe('CancelAllocationUseCase', () => {
       await expect(
         cancel([{ variantId: VARIANT_ID, quantity: 4 }], { operationKey: key! }),
       ).rejects.toMatchObject({ code: InventoryErrorCodeEnum.RESERVATION_QUANTITY_INVALID });
-      // Refused BEFORE any write: an unkeyed release generates a NULL dedupe key, which
-      // silently falls out of the UNIQUE — accepting it would lose the only guard.
       expect(movements.appended).toHaveLength(0);
       expect(cache.invalidations).toHaveLength(0);
     });

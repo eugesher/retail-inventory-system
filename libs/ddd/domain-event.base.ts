@@ -1,7 +1,5 @@
 import { randomUUID } from 'crypto';
 
-// Transport-agnostic — serialization onto a routing key is a transport-layer
-// concern (libs/messaging); this base makes no assumptions about the broker.
 export abstract class DomainEvent<TAggregateId = number> {
   public readonly id: string;
   public readonly occurredAt: Date;

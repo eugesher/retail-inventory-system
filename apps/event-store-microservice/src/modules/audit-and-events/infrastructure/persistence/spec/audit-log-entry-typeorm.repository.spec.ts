@@ -4,23 +4,6 @@ import { AuditLogEntry } from '../../../domain';
 import { AuditLogEntryEntity } from '../audit-log-entry.entity';
 import { AuditLogEntryTypeormRepository } from '../audit-log-entry-typeorm.repository';
 
-// The mirror of `domain-event-typeorm.repository.spec.ts` — and it did not exist.
-//
-// ADR-042 calls the two logs *mirror surfaces*: one bounded context, two aggregates, one repository
-// port each, the same three verbs (`append` / `query` / `listByCorrelationId`). One of them was tested
-// and one was not, which is the only asymmetry between them that was never a decision.
-//
-// What is tested here is the **translation layer**, without a database: the wire filters → the
-// `FindManyOptions` the repository hands TypeORM. That is where this class can actually be wrong. A
-// filter that silently maps to nothing does not fail — it returns an empty page, which is exactly what
-// a correct query over an empty result set returns, and the operator reading it concludes the audit
-// trail is clean. **An audit query that lies by omission is worse than one that errors**, because the
-// whole point of the surface is to answer "did anything happen?" with authority.
-
-// A `Repository` double that CAPTURES the options the repository built and hands them back through a
-// typed accessor rather than through `mock.calls` (which is `any`-typed, and the no-unsafe-* rules
-// would reject the assertion). The `domain-event` spec's shape, deliberately — these two files should
-// stay readable side by side.
 interface IQueryDouble {
   repository: Repository<AuditLogEntryEntity>;
   options: () => FindManyOptions<AuditLogEntryEntity>;
@@ -48,8 +31,6 @@ const makeQueryDouble = (rows: AuditLogEntryEntity[] = [], total = 0): IQueryDou
   };
 };
 
-// The `append` double. Like the query one, it CAPTURES the argument through a closure rather than
-// reaching into `mock.calls` — which jest types as `any` and the no-unsafe-* rules reject.
 interface IAppendDouble {
   repository: Repository<AuditLogEntryEntity>;
   insert: jest.Mock;
@@ -93,8 +74,6 @@ const makeEntry = (): AuditLogEntry =>
 
 const makeEntity = (): AuditLogEntryEntity =>
   Object.assign(new AuditLogEntryEntity(), {
-    // The BIGINT PK arrives from mysql2 as a STRING. The mapper coerces it; if it stopped, an `id`
-    // would silently become `"7"` and every numeric comparison downstream would go quietly wrong.
     id: '7' as unknown as number,
     actorId: 'staff-1',
     actorType: 'staff-user' as const,
@@ -135,17 +114,6 @@ describe('AuditLogEntryTypeormRepository.append', () => {
     expect(partial()).not.toHaveProperty('receivedAt');
   });
 
-  // **The asymmetry with `DomainEventTypeormRepository`, and it is deliberate.**
-  //
-  // The domain-event log SWALLOWS `ER_DUP_ENTRY` as `{ inserted: false }` — it has a composite UNIQUE,
-  // and a RabbitMQ redelivery of an already-captured event is a duplicate, not an incident.
-  //
-  // **The audit log has no dedupe key, on purpose: two identical staff actions are two real events.**
-  // So there is nothing to collide on, and an `ER_DUP_ENTRY` reaching here would mean something is
-  // wrong with the schema — not that the row is already safely stored. Swallowing it (the obvious
-  // "consistency" edit, made by anyone reading the sibling first) would DISCARD an audit row and report
-  // success. Nothing else in the system would ever notice: the log is write-only until an operator
-  // reads it, months later, looking for the entry that is not there.
   it('does NOT swallow a duplicate — unlike the domain-event log, which has a dedupe key and does', async () => {
     const dupError = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY', errno: 1062 });
     const { repository: double } = makeAppendDouble(() => Promise.reject(dupError));
@@ -170,7 +138,6 @@ describe('AuditLogEntryTypeormRepository.query', () => {
 
     await new AuditLogEntryTypeormRepository(double).query({}, { page: 1, size: 20 });
 
-    // `id` totalises the order within a millisecond, so a page boundary never drops or repeats a row.
     expect(options().order).toEqual({ occurredAt: 'DESC', id: 'DESC' });
   });
 
@@ -183,8 +150,6 @@ describe('AuditLogEntryTypeormRepository.query', () => {
     expect(options().take).toBe(25);
   });
 
-  // All five scalar filters at once. `entityType` and `entityId` were the two nothing exercised — and
-  // they are the two an operator reaches for first ("what happened to staff user 42?").
   it('maps each scalar filter onto one equality predicate', async () => {
     const { repository: double, options } = makeQueryDouble();
 
@@ -244,16 +209,6 @@ describe('AuditLogEntryTypeormRepository.query', () => {
     });
   });
 
-  // **This is also the proof that both bounds route through `parseInstant` at all**, and it is the only
-  // assertion here that can be.
-  //
-  // The obvious test — "a zone-less bound is pinned to UTC" — is VACUOUS on a UTC host, because there
-  // `new Date('2026-06-01T00:00:00')` and its `Z`-suffixed twin are the same instant, so it passes
-  // whether or not `parseInstant` is called. CI pins no `TZ`. So the timezone trap is proved where it
-  // can be proved honestly — `parse-instant.spec.ts`, which FORCES a non-UTC zone — and what is checked
-  // here is the wiring: a raw `new Date('not-a-date')` yields `Invalid Date`, and a repository that
-  // skipped `parseInstant` would hand TypeORM `MoreThanOrEqual(Invalid Date)` instead of dropping the
-  // bound. That fails on any host.
   it('treats an unparseable ISO bound as absent rather than rejecting (and so routes through parseInstant)', async () => {
     const { repository: double, options } = makeQueryDouble();
 
@@ -276,15 +231,11 @@ describe('AuditLogEntryTypeormRepository.query', () => {
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toBeInstanceOf(AuditLogEntry);
     expect(page.items[0].action).toBe('StaffUserRolesAssigned');
-    // The BIGINT arrived as the string `'7'`; the mapper must have coerced it.
     expect(page.items[0].id).toBe(7);
   });
 });
 
 describe('AuditLogEntryTypeormRepository.listByCorrelationId', () => {
-  // ASCENDING, where `query` is descending — a timeline reads forward, a log reads newest-first. The
-  // two orders are a decision, and reversing this one turns a causal trace into a reverse-causal one:
-  // still plausible, still populated, and wrong in the one way nobody would question.
   it('reads the trace forward (occurredAt ASC, id ASC), unpaginated', async () => {
     const { repository: double, options } = makeQueryDouble([makeEntity()]);
 
@@ -292,8 +243,6 @@ describe('AuditLogEntryTypeormRepository.listByCorrelationId', () => {
 
     expect(options().where).toEqual({ correlationId: 'corr-1' });
     expect(options().order).toEqual({ occurredAt: 'ASC', id: 'ASC' });
-    // No `skip` / `take`: a correlation id scopes one request's causal chain, which is bounded and
-    // small. Paginating it would hide the middle of a trace behind a page boundary.
     expect(options().skip).toBeUndefined();
     expect(options().take).toBeUndefined();
 

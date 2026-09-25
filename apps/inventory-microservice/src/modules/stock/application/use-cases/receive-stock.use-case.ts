@@ -33,16 +33,6 @@ import { applyOnHandChange } from './stock-mutation';
 import { requireActiveLocation } from './stock-location.guard';
 import { toStockLevelView } from './stock-view.factory';
 
-// Raises a variant's on-hand at one location by a positive amount (ADR-027), and appends a positive
-// `receipt` movement **inside the same transaction** as the counter write (ADR-030 §2) — the
-// counter stays the balance authority; the ledger row is the immutable record of *why* it rose.
-//
-// **Receive never lowers on-hand, so there is no low-stock check here** — a depletion signal is a
-// signal about a *fall*, and nothing falls. Do not add one "for symmetry": it would fire on a
-// restock that merely left the level under the threshold, which is exactly the false alarm the
-// depletion rule exists to avoid.
-// Two reserved-surface events fire post-commit, best-effort and independent
-// (ADR-020): `inventory.stock.received` and `inventory.stock-movement.recorded`.
 @Injectable()
 export class ReceiveStockUseCase {
   constructor(
@@ -71,8 +61,6 @@ export class ReceiveStockUseCase {
       'Received RPC: receive stock',
     );
 
-    // Backstop for the directly-reachable RMQ path — the gateway DTO rejects a
-    // non-positive quantity first (a 400 at the edge before the RPC dispatches).
     if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new InventoryDomainException(
         InventoryErrorCodeEnum.STOCK_RECEIVE_QUANTITY_INVALID,
@@ -82,11 +70,6 @@ export class ReceiveStockUseCase {
 
     await requireActiveLocation(this.repository, stockLocationId);
 
-    // The shared mutator owns the write protocol (ADR-027): post-commit cache
-    // invalidation (ADR-023) around a bounded optimistic retry around the
-    // transactional find-or-init → changeOnHand → version-checked persist →
-    // ledger append. `buildMovement` records the positive `receipt` row in the
-    // same transaction, so the counter rise and its audit trail commit atomically.
     const { level: saved, movement } = await applyOnHandChange(
       {
         transactionPort: this.transactionPort,
@@ -106,7 +89,7 @@ export class ReceiveStockUseCase {
             variantId: persisted.variantId,
             stockLocationId: persisted.stockLocationId,
             type: StockMovementTypeEnum.RECEIPT,
-            quantity, // positive — the received amount (a `receipt` is +ve by sign rule)
+            quantity,
             reasonCode: null,
             referenceType: null,
             referenceId: null,
@@ -120,10 +103,6 @@ export class ReceiveStockUseCase {
       'Stock received — on-hand raised',
     );
 
-    // Post-commit, best-effort (ADR-020): a publish failure is warn-logged, not
-    // raised — the write already committed, so failing the RPC would mislead the
-    // caller into thinking the receive did not happen. The two emits are
-    // independent and each swallows its own failure, so they run concurrently.
     await Promise.all([
       this.emitReceived(saved, quantity, actorId, correlationId),
       emitMovementRecorded(this.publisher, this.logger, movement, correlationId),

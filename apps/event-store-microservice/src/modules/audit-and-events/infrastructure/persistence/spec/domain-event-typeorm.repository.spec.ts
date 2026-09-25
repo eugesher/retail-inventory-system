@@ -4,15 +4,6 @@ import { DomainEvent } from '../../../domain';
 import { DomainEventEntity } from '../domain-event.entity';
 import { DomainEventTypeormRepository } from '../domain-event-typeorm.repository';
 
-// A minimal TypeORM `Repository` double — only the methods the repository touches
-// (`insert` for append). The test proves the idempotency contract WITHOUT a database:
-// the composite-UNIQUE `ER_DUP_ENTRY` is swallowed as `{ inserted: false }`, a clean
-// insert reports `{ inserted: true }`, and an unrelated failure still propagates. The
-// full end-to-end idempotency proof is the firehose-ingestion suite + e2e (later
-// capabilities); this locks the repository's swallow in isolation.
-// Returns the repository double alongside the `insert` mock, so assertions hold a
-// reference to the jest function rather than reaching back through the repository
-// object (which the unbound-method lint rule forbids).
 const makeRepositoryDouble = (
   insertImpl: () => Promise<unknown>,
 ): { repository: Repository<DomainEventEntity>; insert: jest.Mock } => {
@@ -47,8 +38,6 @@ describe('DomainEventTypeormRepository.append', () => {
   });
 
   it('swallows the composite-UNIQUE ER_DUP_ENTRY as { inserted: false } without throwing', async () => {
-    // The shape the mysql2 driver surfaces on a UNIQUE collision (a RabbitMQ redelivery
-    // of an already-captured event).
     const dupError = Object.assign(new Error('duplicate'), {
       code: 'ER_DUP_ENTRY',
       errno: 1062,
@@ -78,11 +67,6 @@ describe('DomainEventTypeormRepository.append', () => {
   });
 });
 
-// A `findAndCount` double that CAPTURES the `FindManyOptions` the repository built, and hands
-// it back through a typed accessor rather than through `mock.calls` (which is `any`-typed and
-// would need an assertion the no-unsafe-* rules forbid). The tests assert the WHERE / ORDER BY
-// / SKIP / TAKE the repository derives from the wire filters, without a database — that
-// translation layer is the whole risk here, not MySQL's ability to execute the query.
 interface IQueryDouble {
   repository: Repository<DomainEventEntity>;
   options: () => FindManyOptions<DomainEventEntity>;

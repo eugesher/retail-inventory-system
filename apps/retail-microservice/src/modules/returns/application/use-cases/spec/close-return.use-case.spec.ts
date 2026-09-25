@@ -23,14 +23,7 @@ const makeHarness = (): {
   const repository = new FakeReturnRequestRepository();
   const returnsUow = new FakeReturnsUnitOfWorkRunner(repository);
   const publisher = new SpyReturnEventsPublisher();
-  const useCase = new CloseReturnUseCase(
-    repository,
-    returnsUow,
-    publisher,
-    // OCC_RETRY_ATTEMPTS budget (ADR-036).
-    5,
-    logger,
-  );
+  const useCase = new CloseReturnUseCase(repository, returnsUow, publisher, 5, logger);
   return { useCase, repository, publisher };
 };
 
@@ -71,8 +64,6 @@ describe('CloseReturnUseCase', () => {
     expect(publisher.closed).toHaveLength(0);
   });
 
-  // `close` is legal only from `inspected` — every other start is a terminal domain 409,
-  // never retried. `received` is the one that precedes it, so it is the sharpest probe.
   it('rejects closing a not-yet-inspected RMA with RETURN_INVALID_STATUS_TRANSITION (409)', async () => {
     const { useCase, repository, publisher } = makeHarness();
     const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.RECEIVED));
@@ -92,9 +83,6 @@ describe('CloseReturnUseCase', () => {
     });
   });
 
-  // The `retail.return.closed` emit is best-effort and ordered AFTER the commit (ADR-020):
-  // a broker outage must never surface as a failed close, or the caller would retry a
-  // transition that already happened and get a spurious 409.
   it('still closes when publishing retail.return.closed fails', async () => {
     const { useCase, repository, publisher } = makeHarness();
     const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.INSPECTED));
@@ -103,20 +91,15 @@ describe('CloseReturnUseCase', () => {
     const view = await useCase.execute(payload(seeded.id!));
 
     expect(view.status).toBe(ReturnStatusEnum.CLOSED);
-    // The commit stuck: a re-read sees the closed RMA, not the pre-transition one.
     const persisted = await repository.findById(seeded.id!);
     expect(persisted!.status).toBe(ReturnStatusEnum.CLOSED);
   });
 
-  // Optimistic concurrency (ADR-036): the transition is a version-checked CAS; a
-  // concurrent writer that advanced the version makes it lose. A lost race within budget
-  // retries (re-read → re-transition → save); exhausting the budget surfaces the uniform
-  // `409 VERSION_MISMATCH`.
   describe('optimistic concurrency', () => {
     it('retries a lost version CAS then closes successfully', async () => {
       const { useCase, repository, publisher } = makeHarness();
       const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.INSPECTED));
-      repository.conflictsBeforeSuccess = 2; // < budget → converges
+      repository.conflictsBeforeSuccess = 2;
 
       const view = await useCase.execute(payload(seeded.id!));
 
@@ -127,14 +110,12 @@ describe('CloseReturnUseCase', () => {
     it('surfaces 409 VERSION_MISMATCH with details.currentVersion when the budget is exhausted', async () => {
       const { useCase, repository, publisher } = makeHarness();
       const seeded = repository.seed(buildPersistedReturn(ReturnStatusEnum.INSPECTED));
-      repository.conflictsBeforeSuccess = 99; // > budget → exhausted
+      repository.conflictsBeforeSuccess = 99;
 
       await expect(useCase.execute(payload(seeded.id!))).rejects.toMatchObject({
         code: ReturnErrorCodeEnum.RETURN_VERSION_MISMATCH,
-        // The RMA's current committed version (the seed, never advanced — every CAS lost).
         details: { currentVersion: 1 },
       });
-      // No event fired — the transition never committed.
       expect(publisher.closed).toHaveLength(0);
     });
   });

@@ -3,11 +3,6 @@ import { IsInt, IsOptional, IsString, Matches, MaxLength, Min, MinLength } from 
 
 import { SLUG_PATTERN, SLUG_REGEX } from './validation.constants';
 
-// Request body for `POST /api/catalog/categories`. The catalog domain has the
-// final say on every invariant and the repository owns slug uniqueness; these
-// decorators are the gateway's edge guard so a malformed request fails fast with a
-// 400 before an RPC is dispatched. `parentSlug` is optional — omit it to create a
-// root category; supply a parent slug to nest the new category under it.
 export class CreateCategoryRequestDto {
   @ApiProperty({ example: 'Menswear', minLength: 1, maxLength: 255 })
   @IsString()

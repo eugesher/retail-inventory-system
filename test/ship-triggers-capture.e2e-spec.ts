@@ -11,22 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Ship-triggered automatic capture (Q5 / ADR-031). Place authorizes the payment but
-// does NOT take the money — the order leaves placement with `paymentStatus =
-// authorized` and a `payment` row whose `capturedAt` is null. The FIRST ship of the
-// order captures that authorized payment INLINE (the `block-ship-until-payment`
-// posture: a decline would abort the ship), so after the ship the order's payment axis
-// reads `captured` and the payment row's `capturedAt` is stamped — with no separate
-// capture call.
-//
-// The `retail.payment.captured` emission is OBSERVED through the order's captured
-// payment (the project convention: assert public state via the order GET, never an
-// event spy). A second ship of a different fulfillment on the same order does NOT
-// re-capture (the payment is already captured — the gateway is skipped), proving the
-// capture is once-per-order, not once-per-ship.
-//
-// Self-provisioned, disjoint fixture (`e2e-ship-capture-*`): its own variant, so the
-// shared seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -276,26 +260,20 @@ describe('Ship triggers automatic payment capture (e2e)', () => {
     expect(order.paymentStatus).toBe('authorized');
     expect(order.payment?.status).toBe('authorized');
     expect(order.payment?.authorizedAt).not.toBeNull();
-    // The money is NOT yet taken — capture happens at ship time.
     expect(order.payment?.capturedAt).toBeNull();
   });
 
   it('shipping the first (partial) fulfillment captures the payment automatically', async () => {
-    // A partial fulfillment (1 of 2 ordered) so a second ship can prove no re-capture.
     fulfillmentOneId = await createFulfillment(1);
 
-    // Still authorized right before the ship.
     expect((await getOrder(order.id)).paymentStatus).toBe('authorized');
 
     await shipFulfillment(fulfillmentOneId, '1Z999AA10123456101');
 
-    // The ship-triggered capture flipped the payment axis to `captured` — observed via
-    // the order's payment, not an event spy.
     const fresh = await getOrder(order.id);
     expect(fresh.paymentStatus).toBe('captured');
     expect(fresh.payment?.status).toBe('captured');
     expect(fresh.payment?.capturedAt).not.toBeNull();
-    // Lifecycle stays `pending`; the order is only partially shipped.
     expect(fresh.status).toBe('pending');
     expect(fresh.fulfillmentStatus).toBe('partially-shipped');
   });
@@ -310,8 +288,6 @@ describe('Ship triggers automatic payment capture (e2e)', () => {
     const fresh = await getOrder(order.id);
     expect(fresh.paymentStatus).toBe('captured');
     expect(fresh.fulfillmentStatus).toBe('shipped');
-    // The capture timestamp is unchanged — the second ship skipped the gateway because
-    // the payment was already captured (once-per-order, not once-per-ship).
     expect(fresh.payment?.capturedAt).toBe(capturedAtAfterFirstShip);
   });
 });

@@ -4,12 +4,8 @@ import { QueryFailedError } from 'typeorm';
 
 import { DuplicateKeyExceptionFilter } from '../duplicate-key-exception.filter';
 
-// The filter delegates the actual response rendering to `BaseExceptionFilter`.
-// We spy on the parent `catch` so the test asserts *what* gets delegated (a
-// remapped ConflictException vs. the untouched original) without standing up an
-// HTTP adapter.
 describe('DuplicateKeyExceptionFilter', () => {
-  const host = {} as ArgumentsHost; // unused once super.catch is stubbed
+  const host = {} as ArgumentsHost;
 
   const queryFailedWith = (driverError: unknown): QueryFailedError => {
     const error = new QueryFailedError('INSERT ...', [], new Error('db error'));

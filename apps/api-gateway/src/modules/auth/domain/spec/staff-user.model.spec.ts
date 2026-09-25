@@ -113,17 +113,7 @@ describe('StaffUser', () => {
     });
   });
 
-  // These live here, on the aggregate, and NOT on an IAM use case's `save()` return. Nothing in
-  // production drains this queue — `docs/implementation/01-…/05-iam-admin-endpoints.md` calls it
-  // latent scaffolding and names `AUDIT_LOG_PUBLISHER` as the effective audit surface — and a
-  // repository's `save` returns a reconstituted aggregate, which carries no events at all. Three
-  // use-case specs used to assert them off that return; they passed only because an in-memory
-  // double handed back its own argument.
-  //
-  // The diff itself is the use case's to compute (see `recordRolesAssigned`'s note in the model);
-  // what the aggregate owes is recording exactly what it was handed.
   describe('recordRolesAssigned / recordRoleRevoked', () => {
-    // `register` records a `StaffUserRegisteredEvent`, so every case drains first.
     const freshStaff = (): StaffUser => {
       const user = makeStaff();
       user.pullDomainEvents();

@@ -11,25 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { ReturnsRefundsE2ESpecDataSource } from './data-source/returns-refunds.e2e-spec.data-source';
 
-// Manual (goodwill) refunds without a return (ADR-032), plus the double-issue idempotency
-// case. A customer places a one-unit order; an operator captures the payment, then issues
-// staff-initiated refunds directly against it (no RMA involved — the chargeback / goodwill /
-// price-adjustment path). Asserted through PUBLIC state (the RefundView response, the order
-// GET, the DB payment/refund rows):
-//   - a PARTIAL refund leaves the payment `captured` and accumulates `refunded_amount_minor`;
-//   - the FINAL refund that exhausts the captured total flips the payment to `refunded`;
-//   - DOUBLE-ISSUE IDEMPOTENCY: re-issuing the SAME `(paymentId, amountMinor, reason)` with
-//     the same `Idempotency-Key` replays the stored refund (HTTP 200 + `Idempotent-Replay:
-//     true`, ADR-036 — no second gateway call, no second audit row, no second row), so only
-//     ONE effective refund takes hold and the cumulative `refunded_amount_minor` never
-//     doubles. The `Idempotency-Key` is required + deduped by the store; the already-issued
-//     `(payment, amount, reason)` match plus the refundable ceiling remain the backstop.
-//   - the refundable CEILING rejects an over-refund: a request beyond the remaining
-//     refundable amount is `409 REFUND_EXCEEDS_REFUNDABLE`, so the cumulative refund can never
-//     exceed the captured `amount_minor`.
-//
-// Self-provisioned, disjoint fixture (`e2e-manual-refund-*`): its own variant + stock, so
-// the shared seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -99,8 +80,6 @@ describe('Manual refunds: partial, full, over-refund ceiling + double-issue idem
   let firstRefundId: number;
 
   const RECEIVED_QTY = 5;
-  // A round captured total makes the partial/remainder arithmetic obvious: 1000 partial,
-  // 4000 remainder, 5000 captured.
   const GRAND_TOTAL_MINOR = 5000;
   const PARTIAL_MINOR = 1000;
   const REMAINDER_MINOR = GRAND_TOTAL_MINOR - PARTIAL_MINOR;
@@ -309,8 +288,6 @@ describe('Manual refunds: partial, full, over-refund ceiling + double-issue idem
     expect(issued.gatewayReference).not.toBeNull();
     firstRefundId = issued.id;
 
-    // Partial refund: the payment row stays `captured`, the cumulative total is the partial
-    // amount.
     const payment = await dataSource.getPaymentByOrderId(order.id);
     expect(payment?.status).toBe('captured');
     expect(payment?.refundedAmountMinor).toBe(PARTIAL_MINOR);
@@ -322,17 +299,12 @@ describe('Manual refunds: partial, full, over-refund ceiling + double-issue idem
       { paymentId, amountMinor: PARTIAL_MINOR, reason: PARTIAL_REASON },
       IDEMPOTENCY_KEY,
     );
-    // Request-level idempotency (ADR-036): the same Idempotency-Key + body replays the
-    // stored refund from the idempotency store — HTTP 200 + `Idempotent-Replay: true`, before
-    // the gateway call and before a second audit row (the fresh issue was 201). Same id, no
-    // second gateway charge. The natural already-issued short-circuit remains the backstop.
     expect(replay.status).toBe(HttpStatus.OK);
     expect(replay.headers['idempotent-replay']).toBe('true');
     const replayed = replay.body as IRefundBody;
     expect(replayed.id).toBe(firstRefundId);
     expect(replayed.status).toBe('issued');
 
-    // Only ONE effective refund took hold — the cumulative refund did not double.
     const payment = await dataSource.getPaymentByOrderId(order.id);
     expect(payment?.refundedAmountMinor).toBe(PARTIAL_MINOR);
     const refunds = await dataSource.getRefundsByOrderId(order.id);
@@ -341,7 +313,6 @@ describe('Manual refunds: partial, full, over-refund ceiling + double-issue idem
   });
 
   it('rejects an over-refund beyond the refundable remainder → 409 REFUND_EXCEEDS_REFUNDABLE', async () => {
-    // The remaining refundable amount is 4000; asking for the full 5000 exceeds it.
     const over = await issueRefund(
       { paymentId, amountMinor: GRAND_TOTAL_MINOR, reason: 'Over the ceiling' },
       `manual-refund-${stamp}-over`,
@@ -349,8 +320,6 @@ describe('Manual refunds: partial, full, over-refund ceiling + double-issue idem
     expect(over.status).toBe(HttpStatus.CONFLICT);
     expect((over.body as IErrorBody).code).toBe('REFUND_EXCEEDS_REFUNDABLE');
 
-    // The rejected over-refund moved nothing — the cumulative refund still equals the single
-    // partial, never exceeding the captured amount.
     const payment = await dataSource.getPaymentByOrderId(order.id);
     expect(payment?.status).toBe('captured');
     expect(payment?.refundedAmountMinor).toBe(PARTIAL_MINOR);
@@ -364,15 +333,11 @@ describe('Manual refunds: partial, full, over-refund ceiling + double-issue idem
     expect(refund.status).toBe(HttpStatus.CREATED);
     expect((refund.body as IRefundBody).status).toBe('issued');
 
-    // The cumulative refund now exhausts the captured total, so the payment row flips to
-    // `refunded` and the cumulative equals the captured amount exactly (never more).
     const payment = await dataSource.getPaymentByOrderId(order.id);
     expect(payment?.status).toBe('refunded');
     expect(payment?.refundedAmountMinor).toBe(GRAND_TOTAL_MINOR);
     expect((await getOrder(order.id)).payment?.status).toBe('refunded');
 
-    // Two issued refunds total (the partial + the remainder); the idempotent replay added
-    // none.
     const refunds = await dataSource.getRefundsByOrderId(order.id);
     expect(refunds).toHaveLength(2);
     expect(refunds.every((r) => r.status === 'issued')).toBe(true);

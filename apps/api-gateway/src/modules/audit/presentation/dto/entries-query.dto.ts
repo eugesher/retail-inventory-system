@@ -4,29 +4,6 @@ import { IsInt, IsISO8601, IsNotEmpty, IsOptional, IsString, Min } from 'class-v
 
 import { IsOnOrAfter } from './is-on-or-after.validator';
 
-// Query string for `GET /api/audit/entries` — the operator read of the event store's
-// append-only `audit_log_entry` staff trail. Every filter is optional and NARROWS the
-// scan; an absent filter contributes no predicate, so a bare call lists the whole trail.
-//
-// `action` takes the stable EVENT-NAME string an audit row carries — `RefundIssued`,
-// `StaffUserRolesAssigned` — never a permission code such as `iam:assign`. The ingest
-// maps `action ← IAuditLogEvent.name` (ADR-035); a permission code matches nothing.
-//
-// `actorId` names a staff principal. Rows written with a null actor (a pre-auth failure,
-// an unattributed background mutation) are matched by no value a caller can pass, since
-// `audit_log_entry.actor_id` is nullable and `WHERE actor_id = ?` never matches a NULL.
-// The same holds for `correlationId`, which is nullable here — unlike its `domain_event`
-// sibling, this table has no dedupe key, so nothing forced the column non-null.
-//
-// The string filters are `@IsNotEmpty()`: an empty-string filter is a client bug.
-// `from` / `to` bound `occurredAt` inclusively and are rejected here when transposed
-// (`from > to` → 400) — the event store answers an inverted window with an empty page.
-//
-// `page` / `pageSize` are coerced via `@Type(() => Number)` and are neither defaulted nor
-// capped here. The event store's use case clamps them (`page`→1, `pageSize`→20, ceiling
-// 100) in one place, so every caller inherits the same bound (ADR-039).
-//
-// The response is `IPage<AuditLogEntryView>` — `{ items, total, page, size }`.
 export class EntriesQueryDto {
   @ApiPropertyOptional({
     example: '00000000-0000-4000-a000-000000000001',

@@ -27,11 +27,6 @@ import {
   ICartRemoveLineCommand,
 } from '../../application/ports';
 
-// The single `ClientProxy` holder for the gateway cart module (ADR-009 /
-// ADR-020). Each method materializes the RPC with `firstValueFrom` and stitches
-// the transport-level `correlationId` onto the wire payload; everything else in
-// the module depends on `ICartGatewayPort`, never on `@nestjs/microservices`. All
-// six RPCs target `retail_queue` via the `RETAIL_MICROSERVICE` client.
 @Injectable()
 export class CartRabbitmqAdapter implements ICartGatewayPort {
   constructor(

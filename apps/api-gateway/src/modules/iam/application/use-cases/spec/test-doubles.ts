@@ -14,11 +14,6 @@ import {
   StaffUser,
 } from '../../../../auth';
 
-// Recording fake for IAuditLogPublisher — collects published events so specs
-// can assert event-name + payload shape per audit point. Kept here (not
-// re-exported from auth's test-doubles) because IAM specs live in a sibling
-// module and the eslint boundaries rules forbid spec-to-sibling-module deep
-// imports.
 export class FakeAuditLogPublisher implements IAuditLogPublisher {
   public readonly published: IAuditLogEvent[] = [];
 
@@ -124,8 +119,6 @@ export class InMemoryStaffUserRepository implements IStaffUserRepositoryPort {
     return Promise.resolve(asReconstituted(user));
   }
 
-  // Arrangement only — NOT on the port (ADR-049). Drops the row so a spec can assert
-  // that a token minted for a staff user who no longer exists is rejected.
   public remove(id: string): void {
     this.byId.delete(id);
   }

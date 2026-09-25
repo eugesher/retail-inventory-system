@@ -1,68 +1,8 @@
-# Fulfillment endpoints — the happy create -> ship -> deliver flow
-#
-# These routes live on apps/api-gateway/src/modules/orders/presentation/
-# orders.controller.ts (@Controller('orders')) and front the retail microservice's
-# fulfillment RPCs over RabbitMQ (ADR-009 / ADR-031):
-#   - POST /api/orders/:orderId/fulfillments                     (Bearer — order:fulfill)
-#       Plan a shipment. Body { stockLocationId?, lines:[{ orderLineId, quantity }] }.
-#       Returns the created (pending) FulfillmentView (201).
-#   - GET  /api/orders/:orderId/fulfillments                     (Bearer — owner OR order:read)
-#       List the order's fulfillments newest-first. Returns FulfillmentView[].
-#   - POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship (Bearer — order:fulfill)
-#       Ship a pending fulfillment. Captures the order's authorized payment INLINE
-#       (block-ship-until-payment-succeeds on a decline), advances the order +
-#       line statuses, then commits the sale to inventory. `trackingNumber` is
-#       required to mark it shipped. Returns the shipped FulfillmentView (200).
-#   - POST /api/orders/:orderId/fulfillments/:fulfillmentId/deliver (Bearer — order:fulfill)
-#       Mark a shipped fulfillment delivered. Once every non-cancelled fulfillment
-#       is delivered the order rolls up to `delivered`. Returns FulfillmentView (200).
-#
-# AUTHORIZATION. Create / Ship / Deliver are staff-only — gated with order:fulfill (a
-# customer cannot fulfill a shipment). List fulfillments is owner-or-staff (the owning
-# customer, OR staff with order:read). A staff token resolves the staff override at the
-# gateway; the retail service is the single enforcement point. A non-owner non-staff
-# caller gets 403; an unauthenticated caller 401.
-#
-# The `Idempotency-Key` header on Ship is REQUIRED and DEDUPLICATED (ADR-036): the same
-# key + same body replays the stored ship (200 + `Idempotent-Replay: true`, no re-capture,
-# no re-issued commit-sale), a different body is 422, a missing key is 400. A non-pending
-# re-ship under a NEW key is still a 409 (the natural backstop). Typed upstream codes
-# (FULFILLMENT_* / ORDER_*) surface as 400/404/409/422.
-#
-# Ship captures its key ONCE into @shipKey so `shipFulfillment` and `shipFulfillmentReplay`
-# share it (the shared-key idiom — a bare {{$guid}} regenerates per request and would never
-# demonstrate a replay). Re-run `shipFulfillment` for a fresh key + a fresh ship.
-#
-# All routes sit behind the global "api" prefix (main.ts app.setGlobalPrefix). With the
-# default dev environment that resolves to http://localhost:3000/api.
-#
-# Prereqs:
-#   1. Start the backing services and the gateway, then migrate + seed:
-#        docker compose up -d
-#        yarn migration:run
-#        yarn test:seed
-#        yarn start:dev
-#   2. Run `loginStaff` FIRST — it captures the seeded admin's bearer token into
-#      @accessToken (admin@example.com / admin1234). Admin holds order:fulfill AND
-#      order:read, so the same operator token can create/ship/deliver AND list/read.
-#      (warehouse@example.com / warehouse1234 also holds order:fulfill but lacks
-#      order:read, so it could not run the list/read steps below.)
-#   3. Run `loginCustomer` — it captures the seeded customer's token into
-#      @customerToken (customer@example.com / customer1234), used to place the order.
-#   4. Run `createCart` -> `addLineOne` -> `addLineTwo` -> `placeOrder` to obtain an
-#      @orderId plus the two order line ids. Then `createFulfillment` (captures
-#      @fulfillmentId), `listFulfillments`, `shipFulfillment`, then `shipFulfillmentReplay`
-#      (200 + `Idempotent-Replay: true`, SAME @shipKey + body) and `shipFulfillmentDifferentBody`
-#      (422, SAME @shipKey + a changed body), `markDelivered`, and finally `getOrder` to
-#      observe all three advanced statuses.
-
 @baseUrl = {{ENV_BASE_URL}}
 
 ###
 
 # @name loginStaff
-# POST /api/auth/staff/login
-# Seeded admin login (order:fulfill + order:read + order:cancel + order:capture).
 POST {{baseUrl}}/auth/staff/login
 Content-Type: application/json
 
@@ -77,8 +17,6 @@ Content-Type: application/json
 ###
 
 # @name loginCustomer
-# POST /api/auth/customer/login
-# Seeded customer login — the order owner.
 POST {{baseUrl}}/auth/customer/login
 Content-Type: application/json
 
@@ -93,8 +31,6 @@ Content-Type: application/json
 ###
 
 # @name createCart
-# POST /api/cart  (Bearer — owner is the authenticated customer)
-# Opens a new active cart. Response is CartView; capture @cartId.
 POST {{baseUrl}}/cart
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
@@ -109,8 +45,6 @@ Content-Type: application/json
 ###
 
 # @name addLineOne
-# POST /api/cart/:cartId/lines  (Bearer + owner-check)
-# Adds seeded variant 1 (USD 4999), quantity 2.
 POST {{baseUrl}}/cart/{{cartId}}/lines
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
@@ -123,8 +57,6 @@ Content-Type: application/json
 ###
 
 # @name addLineTwo
-# POST /api/cart/:cartId/lines  (Bearer + owner-check)
-# Adds seeded variant 3 (USD 19999), quantity 1.
 POST {{baseUrl}}/cart/{{cartId}}/lines
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
@@ -137,11 +69,6 @@ Content-Type: application/json
 ###
 
 # @name placeOrder
-# POST /api/cart/:cartId/place  (Bearer + owner-check)
-# Converts the cart into an Order, allocates the stock holds, and authorizes payment
-# inline. Response (201) is OrderView with status='pending', paymentStatus='authorized',
-# fulfillmentStatus='unfulfilled', and a lines[] array. Capture @orderId plus each
-# line's id + ordered quantity so the fulfillment can reference them.
 POST {{baseUrl}}/cart/{{cartId}}/place
 Authorization: Bearer {{customerToken}}
 Idempotency-Key: {{$guid}}
@@ -179,11 +106,6 @@ Content-Type: application/json
 ###
 
 # @name createFulfillment
-# POST /api/orders/:orderId/fulfillments  (Bearer — order:fulfill)
-# Plans ONE shipment covering both order lines in full, so a single ship + deliver
-# rolls the whole order to `delivered`. stockLocationId is optional (defaults to
-# default-warehouse). Response (201) is the pending FulfillmentView; capture
-# @fulfillmentId.
 POST {{baseUrl}}/orders/{{orderId}}/fulfillments
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -202,28 +124,14 @@ Content-Type: application/json
 ###
 
 # @name listFulfillments
-# GET /api/orders/:orderId/fulfillments  (Bearer — owner OR order:read)
-# Lists the order's fulfillments newest-first. The admin token uses the order:read
-# staff override; the owning customer could list its own with @customerToken. Response
-# (200) is FulfillmentView[] — the just-created pending fulfillment.
 GET {{baseUrl}}/orders/{{orderId}}/fulfillments
 Authorization: Bearer {{accessToken}}
 
 ###
 
-# Capture the ship key ONCE so `shipFulfillment` and `shipFulfillmentReplay` share it.
 @shipKey = {{$guid}}
 
 # @name shipFulfillment
-# POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
-# Ships the pending fulfillment. trackingNumber is required to mark it shipped; carrier
-# is free-text metadata. This CAPTURES the order's authorized payment inline (so the
-# inventory + retail services must be running), advances the order's fulfillment axis to
-# `shipped` and each line's status, then commits the sale to inventory. The
-# `Idempotency-Key` header is REQUIRED and DEDUPLICATED (ADR-036): re-sending this exact
-# request with the SAME @shipKey + body replays the stored ship (200 + `Idempotent-Replay: true`,
-# no re-capture / no re-committed sale); a missing key is 400. Response (200) is the shipped
-# FulfillmentView (status='shipped', trackingNumber + shippedAt stamped).
 POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{shipKey}}
@@ -237,12 +145,6 @@ Content-Type: application/json
 ###
 
 # @name shipFulfillmentReplay
-# POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
-# The REPLAY: the SAME @shipKey + the SAME body. The store returns the stored
-# FulfillmentView WITHOUT a second payment capture and WITHOUT a second inventory
-# commit-sale — 200 + the header `Idempotent-Replay: true`. Contrast with re-shipping under
-# a NEW key, which would hit the natural backstop and 409 (the fulfillment is no longer
-# pending).
 POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{shipKey}}
@@ -256,11 +158,6 @@ Content-Type: application/json
 ###
 
 # @name shipFulfillmentDifferentBody
-# POST /api/orders/:orderId/fulfillments/:fulfillmentId/ship  (Bearer — order:fulfill)
-# The REUSE-WITH-A-DIFFERENT-BODY error: the SAME @shipKey but a CHANGED body (a different
-# trackingNumber + carrier). The stored fingerprint no longer matches, so the request is
-# rejected WITHOUT executing:
-#   422 { statusCode: 422, code: "ORDER_IDEMPOTENCY_KEY_REUSED" }
 POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/ship
 Authorization: Bearer {{accessToken}}
 Idempotency-Key: {{shipKey}}
@@ -274,20 +171,11 @@ Content-Type: application/json
 ###
 
 # @name markDelivered
-# POST /api/orders/:orderId/fulfillments/:fulfillmentId/deliver  (Bearer — order:fulfill)
-# Marks the shipped fulfillment delivered. Because it is the order's only fulfillment
-# and it covers every line, the order rolls up to lifecycle='delivered' +
-# fulfillmentStatus='delivered'. Response (200) is the delivered FulfillmentView
-# (status='delivered', deliveredAt stamped).
 POST {{baseUrl}}/orders/{{orderId}}/fulfillments/{{fulfillmentId}}/deliver
 Authorization: Bearer {{accessToken}}
 
 ###
 
 # @name getOrder
-# GET /api/orders/:orderId  (Bearer; owner OR order:read)
-# Reads the order back to observe all three advanced status axes after the flow:
-# status='delivered', paymentStatus='captured' (captured at ship time),
-# fulfillmentStatus='delivered'. Response (200) is OrderView.
 GET {{baseUrl}}/orders/{{orderId}}
 Authorization: Bearer {{accessToken}}

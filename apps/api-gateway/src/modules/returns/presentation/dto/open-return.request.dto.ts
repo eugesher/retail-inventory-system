@@ -14,11 +14,6 @@ import {
 
 import { ReturnReasonCategoryEnum } from '@retail-inventory-system/contracts';
 
-// One line on the Open Return body — which `OrderLine` quantity is coming back.
-// `orderLineId` points back at the placed order's line; `quantity` is a positive integer
-// count of units. The retail use case enforces the returnable-quantity invariant
-// (requested ≤ ordered − cancelled − already-returned) — the gateway only validates the
-// shape here.
 export class OpenReturnLineInputDto {
   @ApiProperty({ example: 1, minimum: 1, description: 'The placed order line id' })
   @IsInt()
@@ -31,13 +26,6 @@ export class OpenReturnLineInputDto {
   public quantity: number;
 }
 
-// Request body for `POST /api/orders/:orderId/returns`. `reasonCategory` is the coarse
-// return reason fixed at Open time; `notes` is an optional free-text buyer note. `lines`
-// must be a non-empty array of `OpenReturnLineInputDto`; `@ValidateNested({ each: true })`
-// + `@Type` make class-validator recurse into each entry, and `@ArrayNotEmpty` rejects an
-// empty return at the edge (the domain `ReturnRequest.open` is the backstop). The
-// `customerId` / staff-override flag are never sent by the caller — the controller folds
-// in `@CurrentUser()` and resolves the override from its permissions.
 export class OpenReturnRequestDto {
   @ApiProperty({
     enum: ReturnReasonCategoryEnum,

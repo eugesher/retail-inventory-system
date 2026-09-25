@@ -30,7 +30,6 @@ const makeHarness = async (seedRefunds = true): Promise<IHarness> => {
 
   await orderRepository.save(buildOrderFixture(ORDER_ID, OWNER_ID));
   if (seedRefunds) {
-    // Two issued refunds for the order — assert the newest-first ordering survives.
     await refundRepository.save(
       buildRefundFixture(1, ORDER_ID, PAYMENT_ID, RefundStatusEnum.ISSUED, 400),
     );
@@ -60,7 +59,6 @@ describe('ListRefundsForOrderUseCase', () => {
     const views = await h.useCase.execute(listPayload());
 
     expect(views).toHaveLength(2);
-    // Newest-first by issued_at then id — both share the fixture timestamp, so id 2 leads.
     expect(views[0].id).toBe(2);
     expect(views[1].id).toBe(1);
     expect(views[0].status).toBe(RefundStatusEnum.ISSUED);

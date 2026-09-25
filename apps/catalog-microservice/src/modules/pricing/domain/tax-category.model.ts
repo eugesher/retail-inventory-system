@@ -2,8 +2,6 @@ import { Entity } from '@retail-inventory-system/ddd';
 
 import { PricingDomainException, PricingErrorCodeEnum } from './pricing.exception';
 
-// UPPER_SNAKE_CASE: a leading uppercase letter, then uppercase letters, digits,
-// or underscores (e.g. `STANDARD`, `REDUCED_RATE`, `ZERO_RATED`).
 const CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 
 export interface ITaxCategoryProps {
@@ -13,16 +11,6 @@ export interface ITaxCategoryProps {
   description?: string | null;
 }
 
-// A `TaxCategory` is a classification label only — a stable code plus a human
-// name. **It carries no rate and no jurisdiction, and the system computes no tax anywhere**
-// (ADR-026): the label is the whole feature, so do not read a `TaxCategory` as something that
-// prices anything. A variant points at one through the nullable
-// `product_variant.tax_category_id` FK (`AttachTaxCategoryToVariantUseCase`); the link is
-// opaque from here.
-//
-// Global `code` uniqueness is a REPOSITORY-level invariant (a UNIQUE constraint
-// + a use-case pre-check), not enforced in the model — the model cannot see
-// other rows. This mirrors the catalog `slug`/`sku` convention (ADR-025).
 export class TaxCategory extends Entity<number | null> {
   private readonly _code: string;
   private readonly _name: string;
@@ -48,8 +36,6 @@ export class TaxCategory extends Entity<number | null> {
     this._description = props.description ?? null;
   }
 
-  // The write path: a brand-new category with no id yet. Uniqueness of `code` is
-  // checked by the use case against the repository before this is persisted.
   public static create(props: {
     code: string;
     name: string;
@@ -58,7 +44,6 @@ export class TaxCategory extends Entity<number | null> {
     return new TaxCategory({ id: null, ...props });
   }
 
-  // Rebuilds a persisted row from storage. Records nothing.
   public static reconstitute(props: ITaxCategoryProps): TaxCategory {
     return new TaxCategory(props);
   }

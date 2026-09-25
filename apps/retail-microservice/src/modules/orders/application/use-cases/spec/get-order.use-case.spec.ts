@@ -25,7 +25,6 @@ const makeHarness = async (): Promise<IHarness> => {
   const orderRepository = new FakeOrderRepository();
   const paymentRepository = new FakePaymentRepository();
 
-  // Seed a placed-and-authorized order owned by OWNER_ID, with its payment.
   await orderRepository.save(buildOrderFixture(ORDER_ID, OWNER_ID));
   await paymentRepository.save(buildPaymentFixture(ORDER_ID, ORDER_ID));
 

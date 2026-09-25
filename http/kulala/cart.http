@@ -1,50 +1,8 @@
-# Cart endpoints
-# (apps/api-gateway/src/modules/cart/presentation/cart.controller.ts)
-#
-# The API gateway fronts the retail microservice's six cart RPCs over HTTP at
-# /api/cart. Every route is bearer-protected (a registered OR guest customer
-# token passes). There is NO permission code on these routes — a customer carries
-# no permissions; authorization is an OWNER-CHECK enforced retail-side
-# (cart.customerId === the authenticated subject), so a customer can only touch
-# its own cart. A non-owner gets 403; an unauthenticated caller 401.
-#
-# All routes sit behind the global "api" prefix configured in main.ts via
-# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
-# resolves to http://localhost:3000/api.
-#
-# Prereqs:
-#   1. Start the backing services and the gateway, then migrate + seed:
-#        docker compose up -d
-#        yarn migration:run
-#        yarn test:seed
-#        yarn start:dev
-#   2. Run the `login` block FIRST. It captures the seeded customer's bearer
-#      token into @accessToken, which every cart request below substitutes into
-#      its Authorization header.
-#   3. Then run `createCart` — it captures @cartId from the response. The
-#      add/change/remove blocks target that captured cart, so the file runs
-#      straight through. Add-to-Cart snapshots the seeded USD price of variant 1.
-#
-# The guest flow (bottom of the file) is independent: `guestSession` mints a
-# guest token + @guestCustomerId, and `claimCart` documents promoting a guest
-# cart to a registered customer with the fromCustomerId ownership proof.
-#
-# Optimistic concurrency (ADR-036): the three line routes (add/change/remove)
-# accept an OPTIONAL `If-Match: <version>` header carrying the cart `version` the
-# client last read (CartView.version). When present and stale, the write is
-# rejected 409 { code: "VERSION_MISMATCH", details: { currentVersion } } with NO
-# retry. When absent, a lost race is retried up to the OCC budget before the same
-# 409. The `changeLineQuantityStaleIfMatch` block at the end demonstrates the
-# stale-precondition rejection.
-
 @baseUrl = {{ENV_BASE_URL}}
 
 ###
 
 # @name login
-# POST /api/auth/customer/login
-# Seeded customer login (customer@example.com / customer1234). Response is
-# TokenResponseDto { accessToken, refreshToken, expiresIn }.
 POST {{baseUrl}}/auth/customer/login
 Content-Type: application/json
 
@@ -59,12 +17,6 @@ Content-Type: application/json
 ###
 
 # @name createCart
-# POST /api/cart  (Bearer — owner is the authenticated customer)
-# Opens a new active cart for the caller. Body (CreateCartRequestDto):
-#   currency?: 3-letter code. Omit it and the cart opens in the deployment's
-#              configured DEFAULT_CURRENCY, resolved retail-side — NOT
-#              necessarily USD, which is only the shipped default.
-# Response is CartView { id, customerId, currency, status, lines: [], subtotalMinor }.
 POST {{baseUrl}}/cart
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -79,27 +31,12 @@ Content-Type: application/json
 ###
 
 # @name getCart
-# GET /api/cart/:cartId  (Bearer + owner-check)
-# Reads the cart by id. A non-owner gets 403; an unknown cart 404. Response is
-# CartView.
 GET {{baseUrl}}/cart/{{cartId}}
 Authorization: Bearer {{accessToken}}
 
 ###
 
 # @name addLine
-# POST /api/cart/:cartId/lines  (Bearer + owner-check)
-# Adds a variant line. The price is NEVER sent — it is snapshotted retail-side
-# from catalog.price.select in the cart's currency. An unknown/unpriced variant
-# is rejected 409. The retail use case then RESERVES the line's absolute target
-# quantity against inventory (inventory.reservation.reserve) BEFORE saving — an
-# out-of-stock target is rejected 409 with the body
-# { statusCode: 409, code: "INVENTORY_OUT_OF_STOCK", details: { available } }
-# and the cart is left untouched (so the inventory microservice must be running;
-# `yarn start:dev` starts it). Body (AddLineRequestDto):
-#   variantId: positive int (the catalog variant id; seeded variant 1 has a USD price + 100 on hand)
-#   quantity:  positive int
-# Response is the updated CartView; the new line carries unitPriceSnapshotMinor.
 POST {{baseUrl}}/cart/{{cartId}}/lines
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -116,16 +53,6 @@ Content-Type: application/json
 ###
 
 # @name changeLineQuantity
-# PATCH /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
-# Sets a line's quantity to a new positive value (a 0 is rejected — removal is
-# the explicit DELETE). The retail use case RE-RESERVES the absolute new quantity
-# (inventory.reservation.reserve, idempotent-by-absolute-quantity) before saving —
-# raising it past available stock is a 409 INVENTORY_OUT_OF_STOCK. Body
-# (ChangeLineQuantityRequestDto):
-#   quantity: positive int
-# The OPTIONAL `If-Match` header pins the cart version read from addLine
-# (@cartVersion). Matching → the write proceeds; stale → 409 VERSION_MISMATCH.
-# Response is the updated CartView (version bumped).
 PATCH {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -138,24 +65,12 @@ If-Match: {{cartVersion}}
 ###
 
 # @name removeLine
-# DELETE /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
-# Drops the line from the cart. An unknown line id is 404. After the cart write
-# the retail use case RELEASES the line's stock hold (inventory.reservation.release)
-# best-effort — a release failure is logged and swallowed, never fails the remove.
-# `If-Match` is also honored here (optional). Response is the updated CartView
-# (now with an empty lines array).
 DELETE {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
 Authorization: Bearer {{accessToken}}
 
 ###
 
 # @name changeLineQuantityStaleIfMatch
-# PATCH /api/cart/:cartId/lines/:lineId  (Bearer + owner-check)
-# Demonstrates the optimistic-concurrency precondition (ADR-036). `If-Match: 0`
-# is a deliberately stale version (the cart has moved past 0 after the add), so
-# the write is rejected WITHOUT retrying:
-#   409 { statusCode: 409, code: "VERSION_MISMATCH", details: { currentVersion } }
-# The client should refetch the cart (GET), read the new `version`, and retry.
 PATCH {{baseUrl}}/cart/{{cartId}}/lines/{{lineId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -168,12 +83,6 @@ If-Match: 0
 ###
 
 # @name guestSession
-# POST /api/auth/customer/guest-session  (@Public — no token)
-# Mints a guest-tier session: a real, logged-in-able guest Customer row
-# (status='guest', null password). The guest-tier token replaces a session
-# cookie — a guest builds a cart through the SAME bearer-protected cart routes.
-# Response is GuestSessionResponseDto { accessToken, refreshToken, expiresIn,
-# customerId }. Keep `customerId` — it is the fromCustomerId proof for claim.
 POST {{baseUrl}}/auth/customer/guest-session
 
 ###
@@ -183,9 +92,6 @@ POST {{baseUrl}}/auth/customer/guest-session
 ###
 
 # @name guestCreateCart
-# POST /api/cart  (Bearer — the guest token)
-# The guest opens its own cart through the normal route; the cart's customerId
-# is the guest id.
 POST {{baseUrl}}/cart
 Authorization: Bearer {{guestAccessToken}}
 Content-Type: application/json
@@ -200,13 +106,6 @@ Content-Type: application/json
 ###
 
 # @name claimCart
-# POST /api/cart/:cartId/claim  (Bearer — the REGISTERED customer's token)
-# Promotes the guest cart to the registered customer. Body (ClaimCartRequestDto):
-#   fromCustomerId: the guest id from the guest-session response (the ownership
-#                   proof — knowing it proves the caller owned the guest session)
-# The new owner (newCustomerId) is taken from @CurrentUser().id, never sent. The
-# re-point succeeds only if the cart currently belongs to fromCustomerId, else
-# 403. Response is the reassigned CartView (customerId is now the registered id).
 POST {{baseUrl}}/cart/{{guestCartId}}/claim
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json

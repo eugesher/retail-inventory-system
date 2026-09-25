@@ -19,17 +19,6 @@ export interface ICreateGuestSessionResult {
   customerId: string;
 }
 
-// Mints a guest-tier session (Q1/Q7). The system's auth primitive is the bearer
-// token, so a guest-tier token replaces the conventional session cookie: a guest
-// is a real, logged-in-able `Customer` row (`status='guest'`, `password_hash` NULL —
-// every cart/order has a Customer row, guest included). The issued access+refresh
-// pair carries the customer-tier claims (`roles:[] / permissions:[]`,
-// `sub = guestCustomerId`), so the guest then hits the protected cart routes
-// uniformly. The returned `customerId` is the proof the client later presents as
-// `fromCustomerId` when claiming the cart into a registered account.
-//
-// `ValidateJwtSubjectUseCase` accepts `status IN ('active','guest')`, so this
-// token validates; only suspended/deleted are barred.
 @Injectable()
 export class CreateGuestSessionUseCase {
   constructor(
@@ -41,9 +30,6 @@ export class CreateGuestSessionUseCase {
 
   public async execute(correlationId?: string): Promise<ICreateGuestSessionResult> {
     const id = randomUUID();
-    // A synthetic, per-guest-unique email satisfies the `Customer` email
-    // invariant + the table's UNIQUE(email) without colliding across guests; it
-    // is never a deliverable address (the `.local` TLD signals that).
     const email = `guest-${id}@guest.local`;
 
     const guest = Customer.register(id, {
@@ -68,8 +54,6 @@ export class CreateGuestSessionUseCase {
     });
     const refreshToken = await this.tokens.issueRefreshToken({ sub: id, jti: refreshJti });
 
-    // Rotate the live refresh-token hash onto the row, exactly like
-    // `LoginCustomerUseCase`, so the guest can refresh and logout uniformly.
     guest.rotateRefreshTokenHash(await this.hasher.hash(refreshToken));
     await this.customers.save(guest);
 

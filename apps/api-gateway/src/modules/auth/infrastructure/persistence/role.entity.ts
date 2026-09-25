@@ -21,9 +21,6 @@ export class RoleEntity {
   @Column('varchar', { length: 255, nullable: true })
   public description: string | null;
 
-  // The `role_permissions` join is owned on this side; eager loading
-  // stays off — repository adapters request `relations: ['permissions']`
-  // when they actually need the bound codes.
   @ManyToMany(() => PermissionEntity, { eager: false, cascade: false })
   @JoinTable({
     name: 'role_permissions',

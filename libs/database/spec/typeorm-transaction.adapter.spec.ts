@@ -39,9 +39,6 @@ describe('TypeormTransactionAdapter', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
   });
 
-  // The two halves of the downcast are one contract: what `runInTransaction` mints,
-  // `entityManagerOf` must hand back unchanged — the very manager the transaction is running on,
-  // or a repository that joins the scope would silently write outside it.
   it('entityManagerOf un-opaques a scope back to the manager it was minted from', async () => {
     const innerEm = { kind: 'inner-em' } as unknown as EntityManager;
     const transaction = jest.fn((callback: (em: EntityManager) => unknown) =>

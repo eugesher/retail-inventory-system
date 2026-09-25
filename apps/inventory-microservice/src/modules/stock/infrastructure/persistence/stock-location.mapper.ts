@@ -19,7 +19,6 @@ export class StockLocationMapper {
   }
 
   public static toEntity(domain: StockLocation): DeepPartial<StockLocationEntity> {
-    // `id` is caller-assigned (no auto-increment), so it is always written.
     return {
       id: domain.id,
       name: domain.name,

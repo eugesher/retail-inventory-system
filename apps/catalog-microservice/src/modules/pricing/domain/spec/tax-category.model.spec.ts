@@ -1,7 +1,5 @@
 import { PricingDomainException, PricingErrorCodeEnum, TaxCategory } from '..';
 
-// The typed `code` lives on a property, not in the message — assert on it
-// directly rather than matching the human message string.
 const expectCode = (fn: () => unknown, code: PricingErrorCodeEnum): void => {
   expect(fn).toThrow(PricingDomainException);
   try {
@@ -53,10 +51,6 @@ describe('TaxCategory invariants', () => {
   });
 });
 
-// `code` uniqueness is a REPOSITORY-level invariant, not a model one (ADR-025
-// convention) — the model cannot see other rows. This is what a future
-// `CreateTaxCategoryUseCase` will do: pre-check the repository, then persist.
-// A minimal in-memory test double stands in for `PricingTypeormRepository`.
 describe('TaxCategory code uniqueness (enforced at the repository, not the model)', () => {
   class FakeTaxCategoryStore {
     private readonly rows: TaxCategory[] = [];
@@ -81,8 +75,6 @@ describe('TaxCategory code uniqueness (enforced at the repository, not the model
     const store = new FakeTaxCategoryStore();
     store.add(TaxCategory.create({ code: 'STANDARD', name: 'Standard rate' }));
 
-    // The pre-check a use case runs before persisting: a non-null hit means the
-    // code is taken and the use case raises TAX_CATEGORY_CODE_TAKEN.
     expect(store.findByCode('STANDARD')).not.toBeNull();
     expect(store.findByCode('REDUCED_RATE')).toBeNull();
   });

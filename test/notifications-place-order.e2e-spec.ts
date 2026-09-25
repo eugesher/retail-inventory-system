@@ -15,30 +15,10 @@ import {
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Placing an order yields exactly one customer email notification (ADR-033). A customer
-// places a real order through the gateway; the retail microservice emits
-// `retail.order.placed` (carrying the buyer's resolved `customerEmail`) onto
-// `notification_events`; the notification microservice's `OrderEventsConsumer` routes it
-// through `RenderAndDispatchUseCase`, which resolves the seeded `retail.order.placed`
-// template, renders it against the event, persists a `queued` delivery, then dispatches and
-// flips it to `sent`.
-//
-// Everything is asserted through PUBLIC STATE — the gateway delivery audit query
-// (`GET /api/notifications/deliveries`, staff `notifications:read`) — never an event spy.
-// The query is filtered to this order's reference so the assertion is robust against the
-// other suites' deliveries sharing the same trail. Exactly one `sent` row appears (the
-// dedupe guard collapses any redelivery on the customer-id-anchored key), its recipient is
-// the seeded customer's email, and its `renderedBody` carries the order number — proving the
-// template was resolved and rendered, not a hard-coded string.
-//
-// Self-provisioned, disjoint fixture (`e2e-notif-place-*`): its own variant, so the shared
-// seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
 const CUSTOMER_PASSWORD = 'customer1234';
-// The seeded customer's id (the JS identity seed pass) — the delivery's
-// `recipient_customer_id` and the dedupe anchor.
 const CUSTOMER_ID = '00000000-0000-4000-a000-000000000002';
 
 const ADDRESS = {
@@ -310,18 +290,13 @@ describe('Notifications — place order yields one sent delivery (e2e)', () => {
     expect(delivery.channel).toBe('email');
     expect(delivery.eventReferenceType).toBe('order');
     expect(delivery.eventReferenceId).toBe(String(order.id));
-    // Recipient is the buyer's resolved email; the customer id is the dedupe anchor.
     expect(delivery.recipientAddress).toBe(CUSTOMER_EMAIL);
     expect(delivery.recipientCustomerId).toBe(CUSTOMER_ID);
-    // The body was rendered from the `retail.order.placed` template against the event —
-    // it carries the order number.
     expect(delivery.renderedBody).toContain(order.orderNumber);
     expect(delivery.renderedSubject).toContain(order.orderNumber);
   });
 
   it('does not write a second sent row for the same order (dedupe)', async () => {
-    // Exactly one row exists for this order reference across ALL statuses — the
-    // customer-id-anchored dedupe key collapses any at-least-once redelivery to a no-op.
     const all = await listOrderDeliveries(order.id);
     expect(all).toHaveLength(1);
     expect(all[0].status).toBe('sent');

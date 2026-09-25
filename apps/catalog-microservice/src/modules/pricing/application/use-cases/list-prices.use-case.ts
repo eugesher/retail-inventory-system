@@ -6,12 +6,6 @@ import { IPriceQuery, PriceView } from '@retail-inventory-system/contracts';
 import { IPricingRepositoryPort, PRICING_REPOSITORY } from '../ports';
 import { toPriceView } from './price-view.factory';
 
-// List Prices — every Price row in effect for `(variantId, currency)` at `asOf`,
-// mapped to `PriceView[]`. Unlike Select Applicable, it does not collapse the set
-// to a single answer: it surfaces the whole in-effect candidate list (overlapping
-// priorities included) so an operator can see what resolution is choosing
-// between. `currency`/`asOf` defaulting is a gateway-DTO concern; here `asOf`
-// falls back to now.
 @Injectable()
 export class ListPricesUseCase {
   constructor(

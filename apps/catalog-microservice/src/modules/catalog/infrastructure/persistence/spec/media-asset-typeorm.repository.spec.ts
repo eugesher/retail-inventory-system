@@ -56,7 +56,6 @@ describe('MediaAssetMapper', () => {
     const back = MediaAssetMapper.toDomain({
       id: 10,
       ownerType: MediaOwnerTypeEnum.PRODUCT,
-      // mysql2 surfaces a non-PK BIGINT as a string.
       ownerId: '42' as unknown as number,
       uri: 'https://x',
       type: MediaAssetTypeEnum.IMAGE,
@@ -92,8 +91,6 @@ describe('MediaAssetTypeormRepository', () => {
     findMock = jest.fn();
     queryMock = jest.fn();
     createQueryBuilderMock = jest.fn();
-    // `manager.transaction(cb)` invokes the callback with a manager exposing a
-    // `query` mock, so the spec drives every slot UPDATE through one stub.
     transactionMock = jest.fn(async (cb: (manager: EntityManager) => Promise<void>) =>
       cb({ query: txQueryMock } as unknown as EntityManager),
     );
@@ -110,8 +107,6 @@ describe('MediaAssetTypeormRepository', () => {
 
   describe('reorder', () => {
     it('issues one parameterized slot UPDATE per id inside a SINGLE transaction, then re-reads the active list', async () => {
-      // After commit, the refreshed active list is returned (sorted by the repo's
-      // `find` order). The two ids become slots 0 and 1.
       findMock.mockResolvedValue([
         {
           id: 3,
@@ -130,11 +125,8 @@ describe('MediaAssetTypeormRepository', () => {
 
       await repository.reorder(MediaOwnerTypeEnum.PRODUCT, 42, [3, 7]);
 
-      // Exactly one transaction wraps every UPDATE — the all-or-nothing guarantee.
       expect(transactionMock).toHaveBeenCalledTimes(1);
 
-      // Slot = array index, owner-scoped, fully parameterized (ids bound, never
-      // interpolated).
       expect(txQueryMock).toHaveBeenNthCalledWith(
         1,
         'UPDATE media_asset SET sort_order = ? WHERE id = ? AND owner_type = ? AND owner_id = ?',
@@ -146,7 +138,6 @@ describe('MediaAssetTypeormRepository', () => {
         [1, 7, MediaOwnerTypeEnum.PRODUCT, 42],
       );
 
-      // The post-commit re-read is the owner's ACTIVE list.
       expect(findMock).toHaveBeenCalledWith({
         where: {
           ownerType: MediaOwnerTypeEnum.PRODUCT,
@@ -188,8 +179,6 @@ describe('MediaAssetTypeormRepository', () => {
     });
 
     it('issues ONE parameterized owner-pair IN-list probe (LIMIT 1, status active)', async () => {
-      // A non-empty result set means at least one owner has active media (the probe
-      // reads only `rows.length`, never a column, so the row body is irrelevant).
       queryMock.mockResolvedValue([{}]);
 
       const result = await repository.hasActiveForOwners([
@@ -199,8 +188,6 @@ describe('MediaAssetTypeormRepository', () => {
 
       expect(result).toBe(true);
       expect(queryMock).toHaveBeenCalledTimes(1);
-      // One `(?, ?)` placeholder per owner pair; values bound positionally, the
-      // status appended last — nothing interpolated.
       expect(queryMock).toHaveBeenCalledWith(
         'SELECT 1 FROM media_asset WHERE (owner_type, owner_id) IN ((?, ?), (?, ?)) AND status = ? LIMIT 1',
         [

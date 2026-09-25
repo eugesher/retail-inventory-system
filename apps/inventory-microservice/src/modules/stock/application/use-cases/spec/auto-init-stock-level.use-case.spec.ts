@@ -71,8 +71,6 @@ describe('AutoInitStockLevelUseCase', () => {
   });
 
   it('swallows a unique-violation from saveStockLevel as the already-exists no-op', async () => {
-    // The find returns null (so the use case proceeds to save), but the INSERT
-    // loses a race and the UNIQUE backstop fires — a duplicate-key driver error.
     const duplicateError = Object.assign(new Error('Duplicate entry'), {
       driverError: { code: 'ER_DUP_ENTRY', errno: 1062 },
     });

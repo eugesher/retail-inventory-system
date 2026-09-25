@@ -40,7 +40,6 @@ describe('ReorderMediaUseCase', () => {
     logger = makePinoLoggerMock();
     useCase = new ReorderMediaUseCase(repository, logger as unknown as PinoLogger);
 
-    // Active assets 1,2,3 at slots 0,1,2 plus an ARCHIVED asset 9 at slot 3.
     repository.seed(seedMedia(1, 0));
     repository.seed(seedMedia(2, 1));
     repository.seed(seedMedia(3, 2));
@@ -58,7 +57,6 @@ describe('ReorderMediaUseCase', () => {
   it('applies a valid permutation exactly once and returns the new order', async () => {
     const views = await reorder([3, 1, 2]);
 
-    // `reorder` was called exactly once with the requested order.
     expect(repository.reorderCalls).toHaveLength(1);
     expect(repository.reorderCalls[0]).toMatchObject({
       ownerType: OWNER_TYPE,
@@ -66,8 +64,6 @@ describe('ReorderMediaUseCase', () => {
       orderedIds: [3, 1, 2],
     });
 
-    // The refreshed ACTIVE list reflects the new slots (3→0, 1→1, 2→2); the
-    // archived asset 9 is absent.
     expect(views.map((view) => view.id)).toEqual([3, 1, 2]);
     expect(views.map((view) => view.sortOrder)).toEqual([0, 1, 2]);
   });

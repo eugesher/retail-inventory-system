@@ -20,9 +20,6 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  // Passport-jwt has already verified the signature and expiry by the time
-  // this runs. The validator port lets the host app reject revoked or
-  // soft-deleted accounts without leaking persistence into libs/auth.
   public async validate(payload: IJwtAccessPayload): Promise<ICurrentUser> {
     return this.userValidator.validate(payload);
   }

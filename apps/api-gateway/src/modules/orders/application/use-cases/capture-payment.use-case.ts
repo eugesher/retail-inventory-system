@@ -11,16 +11,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IOrdersGatewayPort, ORDERS_GATEWAY_PORT } from '../ports';
 
-// Captures the order's authorized payment. The route carries **no
-// `@RequiresPermission`** (that would block the owning customer — ADR-024). This use
-// case computes the staff override from `@CurrentUser().permissions` — `isStaffCapture`
-// is true iff the caller holds `order:capture` — and folds `@CurrentUser().id` into
-// `actorId`. The retail use case is the single enforcement point: it allows the
-// capture if `isStaffCapture` OR the caller owns the order, else answers 403. The
-// **required** `Idempotency-Key` (ADR-036) is forwarded and deduped retail-side; the use
-// case resolves the `IIdempotentResult<OrderView>` envelope so the controller can set the
-// `Idempotent-Replay: true` header on a served replay (natural payment-state idempotency
-// remains the backstop).
 @Injectable()
 export class CapturePaymentUseCase {
   constructor(

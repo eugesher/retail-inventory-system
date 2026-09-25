@@ -45,17 +45,6 @@ import {
   PlaceOrderRequestDto,
 } from './dto';
 
-// HTTP surface over the retail microservice's six cart RPCs (ADR-009). Every
-// route is bearer-protected by default (the global `JwtAuthGuard`); a customer- or
-// guest-tier token passes the guard, and with no `@RequiresPermission` /`@Roles`
-// the permission/role guards allow it (customers carry no permissions — ADR-024).
-// The owner-check is NOT a permission code — it is the retail-side assertion
-// `cart.customerId === @CurrentUser().id`: the controller folds the verified
-// subject into every command, so a customer can only ever touch its own cart
-// (ADR-028 §7). A non-owner gets a 403; an unauthenticated caller a 401.
-//
-// `cartId` is the CHAR(36) UUID (a string param, no `ParseIntPipe`); `lineId` is
-// the BIGINT `cart_line.id` (a numeric param).
 @ApiTags('Cart')
 @ApiBearerAuth()
 @Controller('cart')
@@ -218,11 +207,6 @@ export class CartController {
     type: OrderView,
   })
   @ApiProduces('application/json')
-  // A fresh place is `201 Created`; a replay returns the stored order with `200 OK` +
-  // the `Idempotent-Replay: true` marker header. Because the status is dynamic, this
-  // route owns its response via `@Res` (the passthrough path would let Nest overwrite
-  // the status back to the route default `201`) — errors thrown before `res.json` still
-  // flow through the gateway's exception filters (ADR-036).
   public async placeOrder(
     @Param('cartId') cartId: string,
     @Body() dto: PlaceOrderRequestDto,

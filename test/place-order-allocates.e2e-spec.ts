@@ -11,21 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Place Order allocates the cart's holds end-to-end (ADR-030). Inside the place
-// transaction, after the cart-conversion CAS, each line's active reservation is
-// committed and its counter moves reserved → allocated — on-hand never changes (an
-// allocation is a within-warehouse reclassification, not a shipment). Each line
-// leaves exactly one negative `allocation` `StockMovement` referencing the order,
-// and a repeat-place on the already-converted cart returns the same order WITHOUT
-// appending any further movement (allocation is one-shot, cart-state-driven).
-//
-// Two variants (one order line each) make the "one allocation row per order line"
-// invariant observable per-variant; the audit read is per-variant, so a two-line
-// cart is asserted as two single-row ledgers, not one summed figure.
-//
-// Self-provisioned, disjoint fixtures (`e2e-place-alloc-*`): each variant gets its
-// own product, price, and `receive`d stock — the shared seeded variants are never
-// touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -344,11 +329,9 @@ describe('Place Order allocates the cart holds (e2e)', () => {
     expect(repeatOrder.id).toBe(placed.id);
     expect(repeatOrder.orderNumber).toBe(placed.orderNumber);
 
-    // Allocation is one-shot: the ledger still shows exactly one row per variant.
     expect(await listAllocations(variantA)).toHaveLength(1);
     expect(await listAllocations(variantB)).toHaveLength(1);
 
-    // And the counters did not move again.
     const levelA = await warehouseLevel(variantA);
     expect(levelA.quantityAllocated).toBe(2);
     expect(levelA.quantityReserved).toBe(0);

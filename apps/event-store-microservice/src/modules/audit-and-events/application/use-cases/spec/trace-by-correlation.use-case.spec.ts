@@ -19,11 +19,6 @@ import { TraceByCorrelationUseCase } from '../trace-by-correlation.use-case';
 const TARGET = 'traced-correlation-id';
 const REQUEST = 'request-trace-id';
 
-// Both doubles HONOUR their port's ordering contract — `occurred_at ASC, id ASC` — exactly as
-// the real seams do (the `InMemoryReservationRepository.listExpiredActive` precedent). Rows
-// are stored in arbitrary insertion order; the read sorts them. That makes the ascending
-// assertions below a real test of the contract rather than a tautology, and it proves the use
-// case projects the two timelines in place instead of re-sorting or merging them.
 const byOccurredAtThenId = <T extends { occurredAt: Date; id: number | null }>(
   a: T,
   b: T,
@@ -186,10 +181,6 @@ describe('TraceByCorrelationUseCase', () => {
     eventRepository.seed(eventRow({ correlationId: '' }));
     repository.seed(auditEntry({ correlationId: 'some-request' }));
 
-    // The gateway rejects these, but this RPC is directly reachable. `undefined` would be
-    // DROPPED from a TypeORM `where`, turning the trace into an unbounded scan of the whole
-    // audit trail; `''` is the stored sentinel for "ingested without a correlation id", so it
-    // would return that entire bucket. Both must reach neither seam.
     for (const targetCorrelationId of [undefined, '', '   '] as unknown as string[]) {
       const result = await useCase.execute(payload({ targetCorrelationId }));
 

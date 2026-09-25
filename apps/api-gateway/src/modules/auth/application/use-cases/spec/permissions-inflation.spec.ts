@@ -45,7 +45,6 @@ describe('Permissions inflation on the access JWT', () => {
     });
     const catalogManagerRole = RoleAggregate.create('00000000-0000-4000-c000-000000000002', {
       name: RoleEnum.CATALOG_MANAGER,
-      // Deliberate overlap with admin: CATALOG_READ + CATALOG_WRITE.
       permissions: [
         PermissionCodeEnum.CATALOG_READ,
         PermissionCodeEnum.CATALOG_WRITE,

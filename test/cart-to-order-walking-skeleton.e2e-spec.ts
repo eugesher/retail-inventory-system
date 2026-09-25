@@ -9,20 +9,14 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
-// The retail orders event publisher (the `ORDER_EVENTS_PUBLISHER` binding via
-// `useExisting`, so spying the class instance observes the use case's emits). Tests
-// may reach into app internals — the boundaries lint is off for `test/**`.
 import { OrderRabbitmqPublisher } from '../apps/retail-microservice/src/modules/orders/infrastructure/messaging';
 
-// Seeded fixtures (scripts/test-db-seed.ts + scripts/seeds/*.sql).
 const CUSTOMER_EMAIL = 'customer@example.com';
 const CUSTOMER_PASSWORD = 'customer1234';
 
-// Variant 1 — "Aurora Desk Lamp", SKU AURORA-WARM, USD 4999. Variant 3 — "Nimbus
-// Office Chair", SKU NIMBUS-BLACK, USD 19999.
 const VARIANT_ONE = { id: 1, sku: 'AURORA-WARM', name: 'Aurora Desk Lamp', priceMinor: 4999 };
 const VARIANT_TWO = { id: 3, sku: 'NIMBUS-BLACK', name: 'Nimbus Office Chair', priceMinor: 19999 };
-const GRAND_TOTAL = VARIANT_ONE.priceMinor * 2 + VARIANT_TWO.priceMinor; // 29997
+const GRAND_TOTAL = VARIANT_ONE.priceMinor * 2 + VARIANT_TWO.priceMinor;
 
 const ADDRESS = {
   recipientName: 'Jane Buyer',
@@ -75,8 +69,6 @@ describe('Cart → Order walking skeleton (e2e)', () => {
   let apiGatewayApp: INestApplication;
   let retailMicroservice: INestMicroservice;
   let catalogMicroservice: INestMicroservice;
-  // Add-to-Cart reserves and Place Order allocates, so the inventory microservice
-  // must be up to serve `inventory.reservation.*` on inventory_queue.
   let inventoryMicroservice: INestMicroservice;
 
   let orderPlacedSpy: jest.SpyInstance;
@@ -154,8 +146,6 @@ describe('Cart → Order walking skeleton (e2e)', () => {
     );
     await apiGatewayApp.init();
 
-    // Spy on the retail-side event publisher (calls through to the real broker emit)
-    // so the test can assert both wire events fired on a successful place.
     const publisher = retailMicroservice.get(OrderRabbitmqPublisher, { strict: false });
     orderPlacedSpy = jest.spyOn(publisher, 'publishOrderPlaced');
     paymentAuthorizedSpy = jest.spyOn(publisher, 'publishPaymentAuthorized');
@@ -241,8 +231,6 @@ describe('Cart → Order walking skeleton (e2e)', () => {
       expect(paymentAuthorizedSpy).toHaveBeenCalled();
     });
 
-    // Step 6 — read the placed order back through the gateway orders module and assert
-    // the populated place-time snapshots survive the round trip.
     it('GET /api/orders/:orderId returns the populated line snapshots (owner read)', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .get(`/api/orders/${placed.id}`)
@@ -261,8 +249,6 @@ describe('Cart → Order walking skeleton (e2e)', () => {
       expect(fetched.payment?.status).toBe('authorized');
     });
 
-    // Step 7 — the owning customer captures its own payment. Payment + order payment
-    // axis both advance to `captured`, and `retail.payment.captured` is published.
     it('POST /api/orders/:orderId/payments/capture captures (owner) and publishes the event', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .post(`/api/orders/${placed.id}/payments/capture`)
@@ -278,14 +264,7 @@ describe('Cart → Order walking skeleton (e2e)', () => {
       expect(paymentCapturedSpy).toHaveBeenCalled();
     });
 
-    // Step 8 — re-placing the now-converted cart returns the SAME order + payment.
-    //
-    // **This pins the cart-state guard, NOT the idempotency store.** Key-based dedupe is live
-    // (ADR-036), so the test deliberately sends a **brand-new** `Idempotency-Key`: that misses the
-    // store entirely, and the place still resolves to the existing order — because the cart is
-    // already `converted`. The two mechanisms are independent, and this assertion goes red only if
-    // the cart-state guard breaks. A reused key would prove the other one.
-    it('is repeat-safe: re-placing the now-converted cart returns the same order + payment', async () => {
+    it('is repeat-safe: re-placing the now-converted cart under a new Idempotency-Key returns the same order + payment (the cart-state guard, not the store)', async () => {
       const { status, body } = await supertest(apiGatewayApp.getHttpServer())
         .post(`/api/cart/${cartId}/place`)
         .set('Authorization', `Bearer ${accessToken}`)

@@ -11,14 +11,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IReturnsGatewayPort, RETURNS_GATEWAY_PORT } from '../ports';
 
-// Walks a `received` RMA → `inspected`, recording each line's condition/disposition/
-// refund amount. The route is `@RequiresPermission('inventory:receive-return')`-gated —
-// a **warehouse-staff** operation. This use case folds `@CurrentUser().id` into `actorId`
-// (which rides the cross-service restock RPC's audit row) and forwards the per-line
-// inspection outcomes verbatim. The retail use case requires the set to cover every RMA
-// line (an unknown line is 404, an incomplete set 400), walks the status in one
-// transaction, and — for `restock`-disposition lines — calls the inventory restock RPC
-// after the commit. Returns the inspected `ReturnRequestView` (200).
 @Injectable()
 export class InspectReturnUseCase {
   constructor(

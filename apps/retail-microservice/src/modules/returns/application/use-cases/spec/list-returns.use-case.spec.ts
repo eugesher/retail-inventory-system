@@ -49,8 +49,6 @@ describe('ListReturnsForOrderUseCase', () => {
     await expect(list(useCase, STAFF_ID, true)).resolves.toEqual([]);
   });
 
-  // The repository orders by `requested_at DESC, id DESC`; the fixtures share a
-  // `requestedAt`, so the id tiebreak is what orders them — newest RMA first.
   it('lists the order’s RMAs newest-first for a staff caller', async () => {
     const { useCase, repository } = makeHarness();
     const first = repository.seed(buildPersistedReturn(ReturnStatusEnum.CLOSED, { id: 7 }));
@@ -71,10 +69,6 @@ describe('ListReturnsForOrderUseCase', () => {
     expect(views.map((view) => view.id)).toEqual([owned.id]);
   });
 
-  // **ADR-051.** This test used to assert the opposite — *"resolves an empty array (not a 403)"* —
-  // and that is the point of inverting it rather than deleting it: a removal without a pinned
-  // absence is unguarded, and the `.filter()` would come back the next time someone copied this
-  // file. Every other ownership check in the system refuses with a 403; this was the one dissenter.
   it('REFUSES a customer who does not own the order (403), rather than filtering to []', async () => {
     const { useCase, repository } = makeHarness();
     repository.seed(buildPersistedReturn(ReturnStatusEnum.REQUESTED, { id: 7 }));
@@ -84,10 +78,6 @@ describe('ListReturnsForOrderUseCase', () => {
     });
   });
 
-  // The subtlety the old shape hid: the owner check runs against the ORDER, not against the RMA
-  // rows. Filtering the rows meant an order with **no** RMAs answered `[]` to a non-owner while an
-  // order **with** RMAs also answered `[]` — so the endpoint still told a stranger whether the order
-  // had returns. Refusing on the order closes that; refusing on the rows would not.
   it('REFUSES a non-owner even when the order has NO RMAs to filter', async () => {
     const { useCase } = makeHarness();
 
@@ -105,8 +95,6 @@ describe('ListReturnsForOrderUseCase', () => {
     });
   });
 
-  // A tombstoned buyer leaves `order.customerId` null (ADR-037) — which no `actorId` matches, so an
-  // erased order's RMAs become staff-only. That is the intended end state, not an accident.
   it('refuses a customer on an order whose buyer has been erased, but still serves staff', async () => {
     const { useCase, repository } = makeHarness({ customerId: null });
     const rma = repository.seed(buildPersistedReturn(ReturnStatusEnum.REQUESTED, { id: 7 }));

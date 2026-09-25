@@ -6,12 +6,6 @@ import { IMediaListQuery, MediaAssetView } from '@retail-inventory-system/contra
 import { IMediaAssetRepositoryPort, MEDIA_ASSET_REPOSITORY } from '../ports';
 import { toMediaAssetView } from './media-asset-view.factory';
 
-// List Media returns an owner's ACTIVE media, `sortOrder ASC`. One query serves
-// both the product- and variant-scoped reads (the `ownerType` discriminator
-// selects which). There is NO owner-existence probe: an unknown owner yields `[]`
-// — the public-browse zero-answer convention the inventory per-variant stock read
-// set, because a 404 here would force every storefront render into error handling
-// (ADR-029 §4).
 @Injectable()
 export class ListMediaUseCase {
   constructor(

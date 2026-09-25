@@ -19,28 +19,6 @@ import {
 } from '../apps/inventory-microservice/src/modules/stock/application/use-cases';
 import { CommitSaleDedupeE2ESpecDataSource } from './data-source/commit-sale-dedupe.e2e-spec.data-source';
 
-// THE concurrent-redelivery proof for the two ledger writes retail drives AFTER its
-// own transaction has committed (`inventory.stock.commit-sale`, ADR-031;
-// `inventory.stock.restock-from-return`, ADR-032). Redelivery is the EXPECTED
-// behaviour of both seams — retail calls them post-commit precisely so a broker
-// failure can re-send — and RabbitMQ never promises the redelivery waits for the
-// original to finish.
-//
-// Neither use case has a gateway HTTP route (retail is the only caller), so the spec
-// resolves them straight out of the booted inventory container and fires two calls
-// with one `Promise.all`. That is the only way to put two deliveries genuinely in
-// flight at once; a sequential replay proves nothing, because the pre-transaction
-// `existsByReference` probe already handles that case correctly and always did.
-//
-// The two regression scenarios are not padding. They are the reason the constraint is
-// a scoped generated column rather than a UNIQUE over `(reference_type, reference_id,
-// type)`: a normal multi-line shipment writes one `sale` row PER LINE under one
-// `fulfillmentId`, and a transfer writes TWO `adjustment` rows under one `transfer`
-// reference. A constraint that fails to admit both is too wide, and it would break
-// the common path while fixing the rare one.
-//
-// Every assertion reads the database (`CommitSaleDedupeE2ESpecDataSource`): the bug is
-// that both writers thought the ledger was empty, so only the row count settles it.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const DEFAULT_WAREHOUSE = 'default-warehouse';
@@ -66,8 +44,6 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
 
   const stamp = Date.now();
   let adminAuth: string;
-  // Every scenario mints its own reference ids off one counter, so no two scenarios
-  // can collide on the very constraint under test.
   let nextReference = 0;
   const reference = (): string => `e2e-dedupe-${stamp}-${++nextReference}`;
 
@@ -78,14 +54,9 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
     return `Bearer ${(body as { accessToken: string }).accessToken}`;
   };
 
-  // The pricing publish probe compares `price.valid_from` against `UTC_TIMESTAMP()`,
-  // which is second-granular — publish immediately after the price lands and the probe
-  // can miss it (the `concurrent-oversell` precedent).
   const settleTimestampRounding = (): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, 1_500));
 
-  // `stock_level` is created ASYNCHRONOUSLY by the catalog-variant-created consumer, so
-  // poll the row in rather than sleeping on a guess.
   const waitForStockRow = async (variantId: number, deadlineMs = 20_000): Promise<void> => {
     const start = Date.now();
     while ((await dataSource.getStockLevelRow(variantId, DEFAULT_WAREHOUSE)) === undefined) {
@@ -96,8 +67,6 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
     }
   };
 
-  // A self-provisioned variant with `onHand` units at the default warehouse. Disjoint
-  // per scenario, so the shared seeded variants are never touched.
   const provisionVariant = async (label: string, onHand: number): Promise<number> => {
     const productRes = await server()
       .post('/api/catalog/products')
@@ -139,13 +108,9 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
     return variantId;
   };
 
-  // Commit Sale ships ALLOCATED units — `StockLevel.commitSale` treats a quantity above
-  // `quantity_allocated` as internal drift and throws. So every commit scenario must
-  // first walk the real reserve → allocate path, exactly as a checkout would.
   const allocate = async (
     lines: { variantId: number; quantity: number }[],
   ): Promise<{ cartId: string; orderId: number }> => {
-    // `reservation.cart_id` is a CHAR(36) FK onto `cart` — a synthetic id fails it.
     const cartId = randomUUID();
     await dataSource.createGuestCart(cartId);
     const orderId = Math.floor(Math.random() * 1_000_000_000);
@@ -199,7 +164,6 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
     );
     await apiGatewayApp.init();
 
-    // The RPCs under test have no HTTP route — reach the use cases directly.
     reserveStock = inventoryMicroservice.get(ReserveStockUseCase, { strict: false });
     allocateStock = inventoryMicroservice.get(AllocateStockUseCase, { strict: false });
     commitSale = inventoryMicroservice.get(CommitSaleUseCase, { strict: false });
@@ -240,9 +204,6 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
           correlationId: fulfillmentId,
         };
 
-        // Both in flight at once. Neither may throw: an `@MessagePattern` that rethrows
-        // is blind-redelivered by the broker in a hot loop, so the loser of the race must
-        // come back as the same successful no-op a sequential replay returns.
         const outcomes = await Promise.all([
           commitSale.execute({ ...payload }),
           commitSale.execute({ ...payload }),
@@ -251,7 +212,6 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
           expect(outcome.committed).toHaveLength(1);
         }
 
-        // The units left the warehouse ONCE, for a shipment that happened once.
         const after = await dataSource.getStockLevelRow(variantId, DEFAULT_WAREHOUSE);
         expect(after).toMatchObject({ quantity_on_hand: 7, quantity_allocated: 0 });
 
@@ -291,8 +251,6 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
           expect(outcome.restocked).toHaveLength(1);
         }
 
-        // Phantom inventory is the inverted twin of the commit-sale bug: stock that never
-        // came back, invented by a redelivery, which then oversells.
         const after = await dataSource.getStockLevelRow(variantId, DEFAULT_WAREHOUSE);
         expect(after).toMatchObject({ quantity_on_hand: 6 });
 
@@ -331,16 +289,12 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
         });
         expect(outcome.committed).toHaveLength(2);
 
-        // A dedupe key of `(type, reference_type, reference_id)` collapses these two rows
-        // into one and MySQL rejects the second line — breaking every shipment of more
-        // than one item. The key must reach the level the movement touched.
         const movements = await dataSource.getMovementRows(
           FULFILLMENT_REFERENCE_TYPE,
           fulfillmentId,
           'sale',
         );
         expect(movements).toHaveLength(2);
-        // `variant_id` is a BIGINT — the driver hands it back as a string.
         expect(movements.map((row) => Number(row.variant_id)).sort()).toEqual(
           [first, second].sort(),
         );
@@ -366,8 +320,6 @@ describe('Concurrent ledger writes — one redelivered request must move stock o
         expect(source).toMatchObject({ quantity_on_hand: 4 });
         expect(destination).toMatchObject({ quantity_on_hand: 2 });
 
-        // The two legs share one `transfer` reference id and one `adjustment` type — the
-        // exact shape a naive UNIQUE over `(reference_type, reference_id, type)` forbids.
         const rows = await dataSource.query(
           `SELECT reference_id, quantity FROM stock_movement
            WHERE variant_id = ? AND reference_type = ? AND type = 'adjustment' ORDER BY id;`,

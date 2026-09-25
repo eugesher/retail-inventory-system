@@ -15,21 +15,6 @@ import {
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Shipping a fulfillment yields a shipment-confirmation email (ADR-033). A customer places
-// an order; staff create + ship a fulfillment; the retail microservice emits
-// `retail.fulfillment.shipped` (carrying the carrier metadata + the buyer's resolved
-// `customerEmail`) onto `notification_events`; the notification microservice's
-// `FulfillmentEventsConsumer` routes it through `RenderAndDispatchUseCase`, which resolves
-// the seeded `retail.fulfillment.shipped` template and renders the tracking number into the
-// body.
-//
-// Asserted through PUBLIC STATE — the gateway delivery audit query filtered to this
-// shipment's reference (`fulfillment` / `fulfillmentId`) — never an event spy. The shipped
-// wire event carries no `customerId`, so `recipientCustomerId` is null (not deduped, ADR-033);
-// the recipient is the buyer's email and the `renderedBody` carries the tracking number,
-// proving the template resolved and rendered against the event.
-//
-// Self-provisioned, disjoint fixture (`e2e-notif-ship-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -317,9 +302,7 @@ describe('Notifications — ship fulfillment yields a shipment email (e2e)', () 
     expect(delivery.eventReferenceType).toBe('fulfillment');
     expect(delivery.eventReferenceId).toBe(String(fulfillmentId));
     expect(delivery.recipientAddress).toBe(CUSTOMER_EMAIL);
-    // The shipped event carries no customer id, so the row is a non-deduped system-keyed row.
     expect(delivery.recipientCustomerId).toBeNull();
-    // Rendered from the `retail.fulfillment.shipped` template against the event.
     expect(delivery.renderedBody).toContain(TRACKING_NUMBER);
     expect(delivery.renderedBody).toContain(CARRIER);
   });

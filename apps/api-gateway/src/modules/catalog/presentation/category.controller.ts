@@ -52,17 +52,6 @@ import {
   ReparentCategoryRequestDto,
 } from './dto';
 
-// HTTP surface over the catalog microservice's category RPCs (ADR-009/ADR-029).
-// One-aggregate-shaped controller, separate from the product `CatalogController`
-// (the auth module's multi-controller-per-prefix precedent). Write routes are
-// permission-gated with `catalog:write` per ADR-024 — the SAME code that gates
-// product authoring, no new permission is minted for the category surface;
-// customer tokens carry no `permissions` claim, so writes are staff-only by
-// construction. Read routes are `@Public()` so an unauthenticated shopper can
-// browse the navigation tree. `catalog.product.reclassify` is a `product.*` RPC
-// whose SUBJECT is the membership, so its two HTTP routes live here, not on
-// `CatalogController`. Each method is a thin port→adapter pass to `catalog_queue`;
-// the microservice's typed `CATEGORY_*` codes surface as 400/404/409 unchanged.
 @ApiTags('Catalog')
 @Controller('catalog')
 export class CategoryController {
@@ -148,9 +137,6 @@ export class CategoryController {
   @ApiExtraModels(ProductWithVariantsView)
   @ApiOkResponse({
     description: 'Active products with their active variants, paginated',
-    // The handler returns the `IPage` envelope ({ items, total, page, size }),
-    // not a bare array — describe the real shape so generated clients read
-    // `body.items` rather than indexing the response as an array.
     schema: {
       type: 'object',
       properties: {
@@ -173,8 +159,6 @@ export class CategoryController {
   @Post('products/:productId/categories')
   @RequiresPermission(PermissionCodeEnum.CATALOG_WRITE)
   @ApiBearerAuth()
-  // A membership UPDATE, not a creation, so it returns 200 (not 201) — the
-  // product/category rows already exist; the publish/archive precedent.
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Attach a product to one or more categories' })
   @ApiParam({ name: 'productId', type: Number, example: 1 })

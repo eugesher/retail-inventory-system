@@ -11,45 +11,16 @@ import {
 import { staleQueuedHorizon } from './queued-staleness';
 import { RetryDeliveryUseCase } from './retry-delivery.use-case';
 
-// Exponential backoff base (milliseconds). The gate the sweeper applies is
-// `lastAttemptAt + baseMs * 2^(attemptCount - 1) > now` ⇒ skip. So after the 1st failure
-// (`attemptCount === 1`) a row waits `baseMs`, after the 2nd `2 * baseMs`, etc. A small
-// base keeps the retry loop (and the e2e that exercises it) fast while still spacing
-// attempts. **It is a hardcoded constant, not config** — unlike every other tunable in the repo,
-// which arrives through a DI token. Changing the backoff means changing this line.
 const RETRY_BACKOFF_BASE_MS = 1_000;
 
-// One sweep processes at most this many retryable rows. `listRetryable` orders
-// oldest-attempt-first, so a backlog larger than a page drains across successive sweeps
-// (the longest-waiting deliveries always retry first). Bounding the batch keeps a single
-// sweep's NOTIFIER fan-out predictable.
 const SWEEP_BATCH_SIZE = 50;
 
-// A small summary of one sweep — returned for observability + unit assertions (the
-// scheduler ignores it). `scanned` is the retryable rows the scan returned, `skipped`
-// those still inside their backoff window, `retried` those re-dispatched this sweep.
 export interface IRetrySweepResult {
   scanned: number;
   skipped: number;
   retried: number;
 }
 
-// Retry Failed Deliveries — the scheduled sweeper (ADR-033) driven by
-// `@nestjs/schedule`'s `DeliveryRetryScheduler`. It scans `failed` deliveries that have
-// not yet exhausted their `MAX_DELIVERY_ATTEMPTS` budget **and `queued` deliveries orphaned
-// between the persist and the dispatch** (`listRetryable`, two arms — see
-// `queued-staleness.ts`), applies the exponential backoff gate, and re-dispatches each due
-// row through
-// `RetryDeliveryUseCase.reattempt` — the same single re-dispatch + cap-emit path the
-// manual retry uses. A row that reaches the cap stays `failed`, emits
-// `notifications.delivery.failed` once (inside `reattempt`), and is excluded from every
-// subsequent scan.
-//
-// Unlike the manual retry, the sweeper **honors the backoff gate**: a row whose
-// `lastAttemptAt + backoff(attemptCount)` is still in the future is skipped this sweep and
-// retried on a later one (once enough time has elapsed). A per-sweep `correlationId`
-// threads the sweep's own logs; each delivery is retried under its own persisted
-// `correlationId` so the retry stays joined to the original dispatch's trace.
 @Injectable()
 export class RetryFailedDeliveriesUseCase {
   constructor(
@@ -80,10 +51,6 @@ export class RetryFailedDeliveriesUseCase {
         skipped += 1;
         continue;
       }
-      // Re-dispatch under the delivery's own correlationId (trace continuity). A
-      // per-row failure must not abort the sweep — `reattempt` records a failed retry on
-      // the row rather than throwing, but a repository/transport fault could still
-      // surface here, so each row is isolated.
       try {
         await this.retryDelivery.reattempt(delivery, delivery.correlationId);
         retried += 1;
@@ -104,14 +71,6 @@ export class RetryFailedDeliveriesUseCase {
     return { scanned: items.length, skipped, retried };
   }
 
-  // The backoff gate: a row is due when its last attempt is at least `backoff(attemptCount)`
-  // in the past.
-  //
-  // A row with no recorded attempt is treated as immediately due, and that branch is no
-  // longer merely defensive — it is the ORPHANED `queued` row's path. Such a row has
-  // `lastAttemptAt === null` and `attemptCount === 0` because no attempt was ever recorded
-  // against it, and it needs no backoff here: the scan's `created_at < queuedStaleBefore`
-  // bound already made it wait out the staleness horizon before it could be selected at all.
   private isDue(lastAttemptAt: Date | null, attemptCount: number, now: Date): boolean {
     if (lastAttemptAt === null) {
       return true;

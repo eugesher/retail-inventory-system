@@ -12,13 +12,6 @@ import {
 } from '../ports';
 import { toProductVariantView } from './catalog-view.factory';
 
-// Add Variant appends a variant to an existing product through the aggregate
-// root (`Product.addVariant`), which records an in-process `VariantCreatedEvent`.
-// After save, the use case re-reads the concrete id from the persisted aggregate,
-// maps the drained event to the versioned wire event (stamping that concrete id),
-// and emits `catalog.variant.created`. The publish is best-effort post-commit — a
-// failure is warn-logged and swallowed, the variant is persisted regardless
-// (ADR-020 / ADR-025).
 @Injectable()
 export class AddVariantUseCase {
   constructor(
@@ -43,8 +36,6 @@ export class AddVariantUseCase {
       );
     }
 
-    // Repository-level uniqueness pre-check (the hard guard is the UNIQUE
-    // constraint on `product_variant.sku`); a duplicate raises a typed code.
     if (await this.repository.existsBySku(sku)) {
       throw new CatalogDomainException(
         CatalogErrorCodeEnum.VARIANT_SKU_TAKEN,
@@ -52,16 +43,10 @@ export class AddVariantUseCase {
       );
     }
 
-    // Records `VariantCreatedEvent` on the aggregate (the concrete id is read
-    // back from the persisted graph below, after `save`).
     product.addVariant({ sku, gtin, optionValues, weightG, dimensionsMm });
 
-    // `save` re-reads the persisted graph, so the returned variants carry
-    // concrete ids (ADR-025; the repository's post-save findById).
     const saved = await this.repository.save(product);
 
-    // `sku` is globally unique, so it identifies the just-added variant in the
-    // persisted aggregate.
     const persistedVariant = saved.variants.find((variant) => variant.sku === sku);
     if (persistedVariant?.id == null) {
       throw new Error('AddVariantUseCase: persisted variant id missing after save');
@@ -72,9 +57,6 @@ export class AddVariantUseCase {
       'Variant created',
     );
 
-    // Drain the in-process events and map the variant-created to its versioned
-    // wire event, built with the concrete persisted id. `addVariant` records
-    // exactly one `VariantCreatedEvent`.
     const events = product.pullDomainEvents();
     const createdEvent = events.find(
       (event): event is VariantCreatedEvent => event instanceof VariantCreatedEvent,
@@ -96,7 +78,6 @@ export class AddVariantUseCase {
         correlationId,
       );
     } catch (err) {
-      // Publish failures never raise — the variant is already persisted.
       this.logger.warn(
         { err: err as Error, correlationId, productId, variantId: persistedVariant.id },
         'Failed to publish catalog.variant.created event',

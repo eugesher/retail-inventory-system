@@ -2,16 +2,6 @@ import { FulfillmentLineView, FulfillmentView } from '@retail-inventory-system/c
 
 import { Fulfillment, FulfillmentLine } from '../../domain';
 
-// The one mapping from the fulfillment domain onto its wire view — every use case that returns a
-// `FulfillmentView` comes through here, so the projection cannot drift between the operation that
-// creates a shipment and the one that ships it. Framework-free.
-//
-// A persisted fulfillment (saved or reconstituted) carries a concrete id, and a line
-// re-read from the repository carries its generated BIGINT id, so the `!` assertions
-// are safe here (the same non-null assertion the order factory makes). The two `Date`
-// columns are serialized to ISO-8601 strings (null until the ship / deliver operations
-// stamp them).
-
 export const toFulfillmentLineView = (line: FulfillmentLine): FulfillmentLineView => ({
   id: line.id!,
   orderLineId: line.orderLineId,

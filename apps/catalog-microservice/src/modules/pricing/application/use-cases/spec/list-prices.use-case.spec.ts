@@ -9,8 +9,6 @@ import { InMemoryPricingRepository } from './test-doubles';
 const VARIANT_ID = 100;
 const CURRENCY = 'EUR';
 
-// Every bound is pinned to UTC (`Z`): a zone-less ISO string resolves in the Node host's
-// local zone, which would make the interval-containment assertions machine-dependent.
 const seedPrice = (
   repository: InMemoryPricingRepository,
   input: {
@@ -80,8 +78,6 @@ describe('ListPricesUseCase', () => {
     ]);
   });
 
-  // The whole point of List (vs Select): it surfaces the entire candidate set, overlapping
-  // priorities included, so an operator can see what resolution is choosing between.
   it('surfaces the whole overlapping candidate set rather than collapsing to one answer', async () => {
     seedPrice(repository, { id: 1, amountMinor: 1999, validFrom: '2026-01-01T00:00:00Z' });
     seedPrice(repository, {
@@ -109,14 +105,12 @@ describe('ListPricesUseCase', () => {
       amountMinor: 1999,
       validFrom: '2026-01-01T00:00:00Z',
     });
-    // Closed before asOf — validTo is exclusive.
     seedPrice(repository, {
       id: 2,
       amountMinor: 900,
       validFrom: '2025-01-01T00:00:00Z',
       validTo: '2026-06-01T00:00:00Z',
     });
-    // Scheduled after asOf.
     seedPrice(repository, { id: 3, amountMinor: 2500, validFrom: '2026-09-01T00:00:00Z' });
 
     const views = await useCase.execute({
@@ -158,8 +152,6 @@ describe('ListPricesUseCase', () => {
     expect(views.map((view) => view.id)).toEqual([wanted.id]);
   });
 
-  // `asOf` defaulting is a gateway-DTO concern; here an absent `asOf` falls back to now,
-  // so a currently-open row is in effect and a future-dated one is not.
   it('falls back to now when asOf is absent', async () => {
     const open = seedPrice(repository, {
       id: 1,

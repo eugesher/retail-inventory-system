@@ -10,28 +10,12 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Proves the optimistic lost-update fix (ADR-027 §concurrency) end-to-end: many
-// Receive/Adjust requests hit the SAME (variantId, default-warehouse) row at once,
-// so their read-modify-writes race. Under the pre-fix decorative transaction each
-// writer read-then-overwrote the absolute on-hand, silently losing concurrent
-// updates (final < sum). With the version-checked compare-and-swap + bounded
-// retry, every applied delta is preserved, so the final on-hand is exact.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const DEFAULT_WAREHOUSE = 'default-warehouse';
 
-// Concurrency level. High enough to force real contention on one row; the
-// gateway client retries the 409 a writer gets when it loses the optimistic race
-// (the internal retry budget reduces but does not eliminate those under load).
 const CONCURRENCY = 20;
 
-// The high-fan-out scenario (ADR-036): 50 parallel Receive `+1` against one row that
-// starts at a known non-zero seed, proving the final on-hand is EXACTLY seed + 50 — no
-// lost updates at scale. The exactness is the observable proof that the version-checked
-// compare-and-swap + bounded retry preserved every increment: without it, concurrent
-// writers would overwrite each other and the final would fall short. The server-side OCC
-// budget (`OCC_RETRY_ATTEMPTS`, default 5) absorbs most conflicts; the client
-// `writeWithRetry` re-fires any residual 409, so every one of the 50 increments lands.
 const BULK_CONCURRENCY = 50;
 const BULK_SEED = 7;
 
@@ -66,12 +50,6 @@ describe('Inventory write concurrency — optimistic lost-update protection (e2e
     return `Bearer ${(body as ITokenResponse).accessToken}`;
   };
 
-  // Fire one write, retrying on a 409 — the status a writer gets when it loses
-  // the optimistic race after exhausting the server-side retry budget — and on a
-  // transient socket reset (the in-process HTTP server occasionally drops a
-  // connection under the simultaneous burst). A real client retries both; doing
-  // so keeps the test deterministic under contention while still proving every
-  // delta lands exactly once.
   const TRANSIENT_NET_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ECONNABORTED']);
   const writeWithRetry = async (
     path: string,
@@ -121,8 +99,6 @@ describe('Inventory write concurrency — optimistic lost-update protection (e2e
     }
   };
 
-  // Variant-parametrized readers for the bulk scenario (which uses its own fresh row so it
-  // never contends with the 20-way tests above).
   const onHandOf = async (variant: number): Promise<number> => {
     const rows = (await dataSource.getStockLevelRows(variant)) as IStockLevelRow[];
     const row = rows.find((r) => r.stock_location_id === DEFAULT_WAREHOUSE);
@@ -140,15 +116,12 @@ describe('Inventory write concurrency — optimistic lost-update protection (e2e
   };
 
   const countReceiptMovements = async (variant: number): Promise<number> => {
-    // `type=receipt` narrows server-side; `pageSize=100` (the DTO ceiling) covers the seed
-    // receipt + the 50-request burst in one page.
     const { body } = await supertest(apiGatewayApp.getHttpServer())
       .get(`/api/inventory/variants/${variant}/movements?type=receipt&pageSize=100`)
       .set('Authorization', adminAuth);
     return (body as { items: { type: string }[] }).items.length;
   };
 
-  // Provision a fresh variant (product → variant → wait for auto-init), returning its id.
   const provisionFreshVariant = async (label: string): Promise<number> => {
     const productResponse = await supertest(apiGatewayApp.getHttpServer())
       .post('/api/catalog/products')
@@ -252,8 +225,6 @@ describe('Inventory write concurrency — optimistic lost-update protection (e2e
         Array.from({ length: CONCURRENCY }, () => writeWithRetry(receivePath, { quantity: 1 })),
       );
 
-      // Exact: CONCURRENCY independent +1 writes all land. The pre-fix code would
-      // report fewer here (concurrent writers overwrote each other).
       expect(await onHand()).toBe(CONCURRENCY);
     },
     timeout,
@@ -276,16 +247,12 @@ describe('Inventory write concurrency — optimistic lost-update protection (e2e
     timeout,
   );
 
-  // The high-fan-out convergence proof. A fresh row is seeded to BULK_SEED, then hit with
-  // BULK_CONCURRENCY simultaneous Receive `+1`. The final on-hand must equal BULK_SEED + 50
-  // exactly — the signature of a lost-update-free write path at scale.
   describe(`${BULK_CONCURRENCY} parallel receives converge with no lost updates`, () => {
     let bulkVariantId: number;
 
     beforeAll(async () => {
       bulkVariantId = await provisionFreshVariant('bulk');
 
-      // Seed the row to a known non-zero baseline so the assertion is "seed + 50", not "= 50".
       await writeWithRetry(`/api/inventory/variants/${bulkVariantId}/stock/receive`, {
         quantity: BULK_SEED,
       });
@@ -304,13 +271,8 @@ describe('Inventory write concurrency — optimistic lost-update protection (e2e
           ),
         );
 
-        // No lost updates: all 50 increments landed on top of the seed. The version-checked
-        // CAS + bounded retry is what makes this exact under 50-way contention.
         expect(await onHandOf(bulkVariantId)).toBe(BULK_SEED + BULK_CONCURRENCY);
 
-        // Corroborating ledger proof: each committed write appends exactly one `receipt`
-        // movement in the same transaction, so the burst added exactly 50 receipt rows — a
-        // lost update would have committed fewer.
         const receiptsAfter = await countReceiptMovements(bulkVariantId);
         expect(receiptsAfter - receiptsBefore).toBe(BULK_CONCURRENCY);
       },

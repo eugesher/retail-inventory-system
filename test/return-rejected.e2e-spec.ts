@@ -11,23 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { ReturnsRefundsE2ESpecDataSource } from './data-source/returns-refunds.e2e-spec.data-source';
 
-// The returns policy-rejection paths (ADR-032) — both the Open-time guards and the
-// explicit staff Reject. A return is not an unconditional right: the retail service
-// enforces a return window + a returnable-quantity invariant when an RMA is opened, and
-// even a validly-opened RMA can be rejected by order support before it is authorized.
-// None of these paths moves stock or money. Asserted through PUBLIC state (the HTTP
-// status + typed `code`, the RMA read, the public stock read, the uncached movements
-// ledger) — never an event spy:
-//   - Open-time RETURN_ORDER_NOT_RETURNABLE: an order that has not shipped (its
-//     fulfillment axis is `unfulfilled`) has nothing to return — opening an RMA is 409.
-//   - Open-time RETURN_QUANTITY_EXCEEDS_RETURNABLE: a delivered one-unit order can return
-//     at most one unit — asking for two is 409.
-//   - Explicit Reject: a validly-opened `requested` RMA, rejected by staff, walks to
-//     `rejected` (terminal) with `closedAt` stamped and the reason folded into the notes;
-//     it never reaches inspection, so no `restock` ever fires and NO stock moves.
-//
-// Self-provisioned, disjoint fixture (`e2e-return-rejected-*`): its own variant + stock,
-// so the shared seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -225,7 +208,6 @@ describe('Returns rejection: open-time guards + explicit staff reject (e2e)', ()
     return (body as IPageBody<IMovementBody>).items;
   };
 
-  // Places a one-unit order and returns the OrderView; does not ship it.
   const placeOneUnitOrder = async (idemSuffix: string): Promise<IOrderBody> => {
     const create = await server()
       .post('/api/cart')
@@ -334,7 +316,6 @@ describe('Returns rejection: open-time guards + explicit staff reject (e2e)', ()
     expect(open.status).toBe(HttpStatus.CONFLICT);
     expect((open.body as IErrorBody).code).toBe('RETURN_ORDER_NOT_RETURNABLE');
 
-    // The failed open created no RMA and moved no stock.
     const list = await server()
       .get(`/api/orders/${unshippedOrder.id}/returns`)
       .set('Authorization', adminAuth);
@@ -383,7 +364,6 @@ describe('Returns rejection: open-time guards + explicit staff reject (e2e)', ()
     expect(open.status).toBe(HttpStatus.CONFLICT);
     expect((open.body as IErrorBody).code).toBe('RETURN_QUANTITY_EXCEEDS_RETURNABLE');
 
-    // No RMA was opened for the delivered order yet.
     const list = await server()
       .get(`/api/orders/${deliveredOrder.id}/returns`)
       .set('Authorization', adminAuth);
@@ -411,17 +391,12 @@ describe('Returns rejection: open-time guards + explicit staff reject (e2e)', ()
 
     const rejected = reject.body as IReturnBody;
     expect(rejected.status).toBe('rejected');
-    // Rejection is terminal — it stamps `closedAt` (the RMA reuses the close timestamp).
     expect(rejected.closedAt).not.toBeNull();
-    // The reject reason is folded into the RMA notes (no dedicated column).
     expect(rejected.notes).toContain('Goods show signs of use beyond the policy');
 
-    // A rejected RMA never reaches inspection, so no `restock` ever fires: on-hand is
-    // exactly the post-delivery baseline and the `return` ledger stays empty.
     expect((await warehouseLevel(variantId)).quantityOnHand).toBe(onHandAfterDelivery);
     expect(await listReturnMovements(variantId)).toHaveLength(0);
 
-    // Re-rejecting the terminal RMA is a 409 invalid transition (idempotency guard).
     const reReject = await server()
       .post(`/api/returns/${rejectRmaId}/reject`)
       .set('Authorization', adminAuth)
@@ -430,11 +405,6 @@ describe('Returns rejection: open-time guards + explicit staff reject (e2e)', ()
     expect((reReject.body as IErrorBody).code).toBe('RETURN_INVALID_STATUS_TRANSITION');
   });
 
-  // `GET /api/returns/:rmaId` carries **no `@RequiresPermission`** — that would lock out
-  // the owning customer (ADR-024). The gateway resolves the staff override from
-  // `@CurrentUser().permissions` (`order:read`) and folds the caller into `actorId`; retail
-  // is the single enforcement point (ADR-028 §7 / ADR-032). Exercised against the RMA the
-  // reject test above left behind, so the read covers a terminal RMA too.
   describe('GET /api/returns/:rmaId — owner-or-staff read', () => {
     it('lets the owning customer read its own RMA', async () => {
       const read = await server()
@@ -472,8 +442,6 @@ describe('Returns rejection: open-time guards + explicit staff reject (e2e)', ()
       expect((read.body as IErrorBody).code).toBe('RETURN_ACCESS_FORBIDDEN');
     });
 
-    // Not-found precedes the owner-check, so probing someone else's RMA id cannot
-    // distinguish "missing" from "not yours" by status code alone.
     it('resolves a missing RMA to 404 RETURN_NOT_FOUND', async () => {
       const read = await server().get('/api/returns/99999999').set('Authorization', adminAuth);
 

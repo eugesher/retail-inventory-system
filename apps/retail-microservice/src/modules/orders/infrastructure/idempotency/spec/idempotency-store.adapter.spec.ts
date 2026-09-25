@@ -7,9 +7,6 @@ import { IdempotencyStoreTypeormRepository } from '../idempotency-store.typeorm.
 
 const TTL_HOURS = 24;
 
-// A persisted idempotency row, used as the `find` re-read. `response_body` is the JSON
-// column TypeORM serializes/deserializes — the round-trip test asserts it survives
-// verbatim.
 const keyEntity = (overrides: Partial<IdempotencyKeyEntity> = {}): IdempotencyKeyEntity =>
   ({
     scope: 'place-order',
@@ -33,8 +30,6 @@ const recordInput = (
   ...overrides,
 });
 
-// MySQL ER_DUP_ENTRY shaped two ways the duck-typed guard must catch — the flat driver
-// error and the TypeORM-nested `driverError`.
 const dupErrorFlat = (): unknown => ({ code: 'ER_DUP_ENTRY', errno: 1062 });
 const dupErrorNested = (): unknown => ({ driverError: { code: 'ER_DUP_ENTRY', errno: 1062 } });
 
@@ -111,7 +106,6 @@ describe('IdempotencyStoreTypeormRepository', () => {
 
       const result = await repository.find('place-order', 'client-key-abc');
 
-      // No expiry predicate in the where-clause; the row comes back regardless.
       expect(keyRepo.findOne).toHaveBeenCalledWith({
         where: { scope: 'place-order', key: 'client-key-abc' },
       });
@@ -149,7 +143,6 @@ describe('IdempotencyStoreTypeormRepository', () => {
       expect(inserted.scope).toBe('place-order');
       expect(inserted.key).toBe('client-key-abc');
       expect(inserted.responseStatus).toBe(201);
-      // The horizon is `now + 24h`, within a tolerance band around the call.
       const expiresMs = inserted.expiresAt!.getTime();
       expect(expiresMs).toBeGreaterThanOrEqual(before + TTL_HOURS * 3600_000);
       expect(expiresMs).toBeLessThanOrEqual(Date.now() + TTL_HOURS * 3600_000);
@@ -182,7 +175,6 @@ describe('IdempotencyStoreTypeormRepository', () => {
 
       expect(getRepository).toHaveBeenCalledWith(IdempotencyKeyEntity);
       expect(scopedRepo.insert).toHaveBeenCalledTimes(1);
-      // The default-manager repo was bypassed.
       expect(keyRepo.insert).not.toHaveBeenCalled();
     });
   });
@@ -195,7 +187,6 @@ describe('IdempotencyStoreTypeormRepository', () => {
       const removed = await repository.deleteExpired(now);
 
       expect(removed).toBe(3);
-      // The bounded range predicate — a strict `expires_at < now`, scanning the index.
       expect(keyRepo.delete).toHaveBeenCalledWith({ expiresAt: LessThan(now) });
     });
 
@@ -206,7 +197,6 @@ describe('IdempotencyStoreTypeormRepository', () => {
     });
   });
 
-  // Reserve-first (ADR-036 concurrency hardening) — the refund flow's atomic front door.
   describe('reserve', () => {
     it('inserts a pending row (null response) and returns "reserved" on a fresh key', async () => {
       keyRepo.insert.mockResolvedValue({} as never);
@@ -223,7 +213,6 @@ describe('IdempotencyStoreTypeormRepository', () => {
       expect(inserted.responseBody).toBeNull();
       expect(inserted.requestFingerprint).toBe('a'.repeat(64));
       expect(inserted.expiresAt).toBeInstanceOf(Date);
-      // The winning INSERT path takes no re-read.
       expect(keyRepo.findOne).not.toHaveBeenCalled();
     });
 
@@ -320,8 +309,6 @@ describe('IdempotencyStoreTypeormRepository', () => {
 
       await repository.release('issue-refund', 'client-key-abc');
 
-      // The `response_body IS NULL` guard means a finalize that already committed (a
-      // completed row) is never removed by a spurious release.
       expect(keyRepo.delete).toHaveBeenCalledWith({
         scope: 'issue-refund',
         key: 'client-key-abc',

@@ -14,10 +14,6 @@ describe('CreateCartUseCase', () => {
   let logger: PinoLoggerMock;
   let useCase: CreateCartUseCase;
 
-  // The default currency is now INJECTED (`RETAIL_DEFAULT_CURRENCY` ← `DEFAULT_CURRENCY`),
-  // so the spec can bind it. It used to be a file-local literal, which is why the
-  // "opens in EUR when the server is configured for EUR" test below could not even be
-  // written — there was nothing to bind.
   const withDefaultCurrency = (defaultCurrency: string): CreateCartUseCase =>
     new CreateCartUseCase(repository, publisher, defaultCurrency, logger as unknown as PinoLogger);
 
@@ -57,11 +53,6 @@ describe('CreateCartUseCase', () => {
     expect(view.currency).toBe('USD');
   });
 
-  // THE defect this token exists to close. Catalog resolves the same concept from
-  // `DEFAULT_CURRENCY`; the cart used to resolve it from a file-local `'USD'`. An operator
-  // who set `DEFAULT_CURRENCY=EUR` therefore got a catalog quoting EUR and carts still
-  // opening in USD — and `Cart.currency` is immutable (ADR-028 §1), so the wrong unit was
-  // snapshotted into the order and the payment with nothing downstream able to tell.
   it('opens the cart in the CONFIGURED currency when the caller names none', async () => {
     const view = await withDefaultCurrency('EUR').execute({
       customerId: CUSTOMER_ID,
@@ -69,7 +60,6 @@ describe('CreateCartUseCase', () => {
     });
 
     expect(view.currency).toBe('EUR');
-    // The emitted event carries it too — a consumer must not be told 'USD' either.
     expect(publisher.created).toHaveLength(1);
     expect(publisher.created[0].event.currency).toBe('EUR');
   });

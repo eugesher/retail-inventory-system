@@ -18,10 +18,6 @@ const makeLine = (
 ): CartLine =>
   new CartLine({ id, variantId, quantity, unitPriceSnapshotMinor, currencySnapshot: 'USD' });
 
-// Reconstitutes an active cart with concrete-id lines so the line-targeting
-// mutators (`changeLineQuantity` / `removeLine`, which key on the BIGINT line id)
-// have something to find — a freshly added line carries a null id until it is
-// persisted and reloaded.
 const makeActiveCartWithLines = (lines: CartLine[]): Cart =>
   Cart.reconstitute({
     id: '11111111-1111-1111-1111-111111111111',
@@ -76,8 +72,6 @@ describe('Cart', () => {
     it('keeps currency fixed after create (getter-only, no setter)', () => {
       const cart = Cart.create({ customerId: null, currency: 'USD' });
 
-      // The currency accessor has no setter, so assigning through it throws in
-      // strict mode — and the value stays put regardless.
       expect(() => {
         (cart as unknown as { currency: string }).currency = 'EUR';
       }).toThrow();
@@ -88,7 +82,7 @@ describe('Cart', () => {
   describe('addLine', () => {
     it('appends a new line, bumps the version, and records CartLineAddedEvent', () => {
       const cart = Cart.create({ customerId: 'cust-1', currency: 'USD' });
-      cart.pullDomainEvents(); // drain the create event
+      cart.pullDomainEvents();
 
       cart.addLine({
         variantId: 7,
@@ -121,7 +115,7 @@ describe('Cart', () => {
       cart.addLine({
         variantId: 7,
         quantity: 3,
-        unitPriceSnapshotMinor: 9999, // ignored — the original snapshot is preserved
+        unitPriceSnapshotMinor: 9999,
         currencySnapshot: 'USD',
       });
 
@@ -220,10 +214,7 @@ describe('Cart', () => {
 
   describe('total', () => {
     it('sums unitPriceSnapshotMinor times quantity across lines, carrying the cart currency', () => {
-      const cart = makeActiveCartWithLines([
-        makeLine(100, 7, 1500, 2), // 3000
-        makeLine(101, 8, 999, 3), // 2997
-      ]);
+      const cart = makeActiveCartWithLines([makeLine(100, 7, 1500, 2), makeLine(101, 8, 999, 3)]);
 
       expect(cart.total).toEqual({ subtotalMinor: 5997, currency: 'USD' });
     });

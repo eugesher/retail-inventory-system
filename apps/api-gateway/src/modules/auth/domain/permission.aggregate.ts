@@ -6,10 +6,6 @@ interface IPermissionProps {
   description?: string | null;
 }
 
-// `<resource>:<action>` lowercase-kebab — matches every value of
-// `PermissionCodeEnum`. The regex stays in the domain (not the entity)
-// so the invariant is enforced even when the aggregate is constructed
-// from a non-enum string (e.g. seed data, future admin tooling).
 const PERMISSION_CODE_REGEX = /^[a-z][a-z-]*:[a-z][a-z-]*$/;
 
 export class PermissionAggregate extends AggregateRoot<string> {

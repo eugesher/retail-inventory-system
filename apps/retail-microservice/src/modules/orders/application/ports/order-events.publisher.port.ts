@@ -12,27 +12,6 @@ import {
 
 export const ORDER_EVENTS_PUBLISHER = Symbol('ORDER_EVENTS_PUBLISHER');
 
-// The orders context's event-publishing seam. The use case has already built the
-// versioned wire event; the adapter just emits it and waits for the broker ack.
-// Domain/contract types only — no `@nestjs/microservices` here (ADR-009); the
-// concrete `OrderRabbitmqPublisher` holds the two `ClientProxy`s.
-//
-// Destinations, by the producer-targets-consumer-queue pattern (ADR-008/020):
-// `publishOrderPlaced` / `publishFulfillmentShipped` / `publishFulfillmentDelivered`
-// emit `retail.order.placed` / `retail.fulfillment.shipped` /
-// `retail.fulfillment.delivered` onto `notification_events` (the notification service's
-// own queue — it consumes all three for its order/shipment fan-out);
-// `publishPaymentAuthorized` / `publishPaymentCaptured` / `publishFulfillmentCreated` /
-// `publishRefundFailed` emit `retail.payment.authorized` / `retail.payment.captured` /
-// `retail.fulfillment.created` / `retail.refund.failed` onto `retail_queue` (the producer's
-// own queue — reserved surfaces today, no consumer). `publishRefundIssued` emits
-// `retail.refund.issued` onto `notification_events` (the buyer-facing refund-confirmation
-// surface, joining the order/shipment events). `publishOrderCancelled` is **dual-emitted**
-// (ADR-033) — `retail.order.cancelled` goes onto BOTH `retail_queue` (where retail's own
-// auto-refund `OrderCancelledConsumer` reads it) and `notification_events` (where the
-// cancellation-confirmation consumer reads the `customerEmail` it now carries). Each is a
-// best-effort post-commit emit — the write has already committed, so a publish failure is
-// warn-logged and swallowed by the caller (ADR-020).
 export interface IOrderEventsPublisherPort {
   publishOrderPlaced(event: IRetailOrderPlacedEvent): Promise<void>;
   publishPaymentAuthorized(event: IRetailPaymentAuthorizedEvent): Promise<void>;

@@ -15,24 +15,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 import { EventStoreE2ESpecDataSource } from './data-source/event-store.e2e-spec.data-source';
 import { IdempotencyE2ESpecDataSource } from './data-source/idempotency.e2e-spec.data-source';
 
-// The headline Place Order idempotency guarantee (ADR-036). One customer fires the SAME
-// `POST /cart/:id/place` twice under one `Idempotency-Key`. The store's find-first replay
-// (ADR-036) makes the second call a pure replay: BOTH responses carry the same `orderId`,
-// exactly ONE order exists in `retail_db`, and — the "one logical place = one event"
-// oracle — exactly ONE `retail.order.placed` row lands in the isolated
-// `ris_eventstore.domain_event` firehose log (ADR-035). The replay short-circuits BEFORE
-// the event publisher, so it emits nothing; the second HTTP response carries
-// `Idempotent-Replay: true` and downgrades to `200` (a fresh place is `201`).
-//
-// The event-store oracle is asserted by direct SQL, keyed on `(event_type, aggregate_id)` so
-// it is independent of the correlation id. The subject here is what the replay DID NOT
-// publish, and a count read through `GET /api/audit/events` would make that assertion depend
-// on the read path — as well as forcing this suite to boot the event store's query transport.
-// Ingestion is asynchronous (publish → broker → consume → insert), so the suite polls the log
-// until the placed event appears before asserting the count.
-//
-// Self-provisioned, disjoint fixture (`e2e-idem-place-*`): its own product/price/published/
-// received stock, so the shared seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -95,7 +77,6 @@ describe('Idempotent Place Order: replay returns one order + one event (e2e)', (
     }
   };
 
-  // Poll `domain_event` until the placed event for THIS order has been ingested off the bus.
   const waitForPlacedEvent = async (orderId: number, deadlineMs = 30_000): Promise<void> => {
     const start = Date.now();
     for (;;) {
@@ -150,9 +131,6 @@ describe('Idempotent Place Order: replay returns one order + one event (e2e)', (
       MicroserviceQueueEnum.INVENTORY_QUEUE,
     );
 
-    // The event store binds the firehose queue to the `ris.events` TOPIC exchange with the
-    // `#` catch-all — the same shape as its `main.ts`, so the in-process `FirehoseConsumer`
-    // receives the entire firehose and ingests it into `domain_event`.
     eventStoreMicroservice = await NestFactory.createMicroservice<MicroserviceOptions>(
       EventStoreMicroserviceAppModule,
       {
@@ -282,8 +260,6 @@ describe('Idempotent Place Order: replay returns one order + one event (e2e)', (
   it('the second place with the same key + body replays the same order (200 + Idempotent-Replay)', async () => {
     const res = await place(idempotencyKey);
 
-    // The replay: HTTP 200 (a fresh place was 201) + the replay header, same order id, no
-    // second side effect.
     expect(res.status).toBe(HttpStatus.OK);
     expect(res.headers['idempotent-replay']).toBe('true');
     expect((res.body as IOrderBody).id).toBe(firstOrder.id);
@@ -294,7 +270,6 @@ describe('Idempotent Place Order: replay returns one order + one event (e2e)', (
   });
 
   it('exactly one retail.order.placed domain_event row is captured (the replay emitted nothing)', async () => {
-    // Settle so any (erroneous) second emission would have been ingested before the count.
     await settleTimestampRounding();
     const placedEvents = await eventStore.countDomainEventsByTypeAndAggregateId(
       KEY_ORDER_PLACED,

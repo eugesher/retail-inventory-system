@@ -6,16 +6,6 @@ import { IVariantStockGetPayload, VariantStockView } from '@retail-inventory-sys
 import { IStockCachePort, IStockRepositoryPort, STOCK_CACHE, STOCK_REPOSITORY } from '../ports';
 import { toStockLevelView } from './stock-view.factory';
 
-// Query Availability is the read path on the new model (ADR-027): given a
-// `variantId` (optionally scoped to a stock-location subset), return the
-// per-location `StockLevel` projection plus the cross-location totals.
-//
-// Cache-aside through `stockCache.getOrLoad` (ADR-002 / ADR-006 / ADR-021): on a
-// hit the cached `VariantStockView` is returned without touching the DB; on a
-// miss the loader runs the point lookup, projects each row, and the helper writes
-// the value back with a jittered TTL behind a single-flight. There is no
-// transactional / skip-cache branch on this read path (no caller-owned scope), so
-// the use case stays a one-liner over `getOrLoad`.
 @Injectable()
 export class QueryAvailabilityUseCase {
   constructor(
@@ -42,16 +32,9 @@ export class QueryAvailabilityUseCase {
     }
   }
 
-  // The cache-miss loader: one point lookup of the variant's stock-level rows,
-  // projected onto the wire view and aggregated. An empty result is a valid
-  // value (`locations: []`, totals `0`) — a variant with no stock rows for the
-  // requested scope is "zero available everywhere", not an error.
   private async load(variantId: number, stockLocationIds?: string[]): Promise<VariantStockView> {
     const levels = await this.repository.findStockLevelsByVariant(variantId, stockLocationIds);
 
-    // Stable, documented order so the cached value is deterministic for a given
-    // DB state (the repository `find` does not order). Matches the cache-facet
-    // `localeCompare` convention (ADR-016).
     const locations = levels
       .map((level) => toStockLevelView(level))
       .sort((a, b) => a.stockLocationId.localeCompare(b.stockLocationId));

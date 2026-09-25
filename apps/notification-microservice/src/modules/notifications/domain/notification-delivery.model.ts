@@ -10,18 +10,12 @@ import { NotificationErrorCodeEnum } from './notification-error-code.enum';
 export interface INotificationDeliveryProps {
   id: number | null;
   templateId: number;
-  // Null for system/ops notifications (e.g. a low-stock alert to the ops mailbox); the
-  // gateway customer UUID for customer-facing ones. A null recipient is NOT deduped (see
-  // ADR-033) — the dedupe generated column is null when this is null.
   recipientCustomerId: string | null;
   recipientAddress: string;
   channel: NotificationChannelEnum;
-  // The business event that triggered this delivery —
-  // `order`/`return-request`/`stock-low`/`fulfillment`/`refund`/`marketing` + its id.
   eventReferenceType: string;
   eventReferenceId: string;
   status: NotificationDeliveryStatusEnum;
-  // Monotonic — climbs on each send/fail attempt, never decreases.
   attemptCount: number;
   lastAttemptAt: Date | null;
   failureReason: string | null;
@@ -32,12 +26,6 @@ export interface INotificationDeliveryProps {
   updatedAt?: Date | null;
 }
 
-// Input to the `open` factory — everything known the moment a notification is about to
-// be dispatched. The renderer has already produced `renderedSubject` / `renderedBody`
-// from the resolved template; the dispatch use case persists the delivery row in
-// `queued` BEFORE the NOTIFIER call so a crash mid-send still leaves an auditable row
-// (ADR-033). `status` / `attemptCount` / `lastAttemptAt` are set by the factory, never
-// supplied.
 export interface IOpenNotificationDeliveryInput {
   templateId: number;
   recipientCustomerId: string | null;
@@ -50,32 +38,6 @@ export interface IOpenNotificationDeliveryInput {
   correlationId: string;
 }
 
-// `NotificationDelivery` is the queryable audit trail of one outgoing notification — the
-// source of truth for "did we already send this, and how did it go?" (ADR-033). Its
-// `status` walks `QUEUED → SENT → DELIVERED | BOUNCED`, with `QUEUED|FAILED → FAILED`
-// (and `FAILED → SENT` once a retry succeeds) — the retry sweeper re-attempts `failed`
-// rows. A row created via the `skipped` factory is born in the terminal
-// `SKIPPED_NO_CONSENT` status (the consent-gate short-circuit, ADR-037) and never
-// enters that walk.
-//
-// **A delivery row is never SOFT-deleted — `deletedAt` is inert, and deliberately so**: the row is the
-// source of truth for *"did we already send this?"*, and a hidden-but-present row that the dedupe
-// query no longer sees means the same notification is sent twice.
-//
-// **It is HARD-deleted, once it ages out** (`PurgeAgedDeliveriesUseCase`, nightly, bounded). The
-// horizon is `RETENTION_DELIVERY_DAYS` (Joi default 90) — a key that **existed and was read by
-// nothing** until ISSUE-08, while this table, on the hot path of every order, fulfillment, return and
-// refund, grew for the life of the deployment. Retiring the row retires its dedupe anchor with it;
-// that coupling is stated on `INotificationDeliveryRepositoryPort.deleteOlderThan` and is accepted.
-//
-// `attemptCount` is **monotonic** — only `markSent` / `markFailed` (the two
-// attempt-consuming transitions) increment it; `markDelivered` / `markBounced` record a
-// downstream receipt and leave it. It therefore never decreases, which is what lets the
-// retry sweeper cap re-attempts at `MAX_DELIVERY_ATTEMPTS`.
-//
-// Records **no** domain events here — the Render & Dispatch use case (a later
-// capability) emits the `notifications.delivery.*` wire events after it persists the
-// row (the `Order.place` / ADR-011 precedent).
 export class NotificationDelivery extends AggregateRoot<number | null> {
   private readonly _templateId: number;
   private readonly _recipientCustomerId: string | null;
@@ -112,34 +74,14 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
     this.updatedAt = props.updatedAt ?? null;
   }
 
-  // Opens a delivery in `QUEUED` with `attemptCount = 0` / `lastAttemptAt = null`. The
-  // recipient address is the one externally-meaningful invariant (a customer with no
-  // email reaches here) → a typed `DELIVERY_RECIPIENT_REQUIRED`. `renderedBody` /
-  // `correlationId` / `templateId` are plumbing the dispatch use case always supplies —
-  // an empty one is an internal-caller bug, so it throws a plain `Error` (the
-  // `Reservation.create` non-future-expiry precedent), never a wire-mappable code.
   public static open(input: IOpenNotificationDeliveryInput): NotificationDelivery {
     return NotificationDelivery.create(input, NotificationDeliveryStatusEnum.QUEUED);
   }
 
-  // Creates a delivery **directly in the terminal `SKIPPED_NO_CONSENT` status** — the
-  // consent-gate short-circuit (ADR-037). It takes the SAME input as `open` (the row
-  // still records the rendered subject/body that WOULD have been sent, for the audit
-  // trail), but the row is born terminal: `attemptCount = 0`, `lastAttemptAt = null`,
-  // and no `markSent`/`markFailed` transition is ever run (the `NOTIFIER` is skipped).
-  // The four attempt/receipt mutators can never touch it — `assertAttemptable` accepts
-  // only `QUEUED`/`FAILED`, and the receipt transitions require `SENT` — so the status
-  // is terminal by construction. It shares `open`'s invariants: a customer-facing
-  // suppressed send still has a real recipient + rendered body.
   public static skipped(input: IOpenNotificationDeliveryInput): NotificationDelivery {
     return NotificationDelivery.create(input, NotificationDeliveryStatusEnum.SKIPPED_NO_CONSENT);
   }
 
-  // Shared construction for `open` / `skipped` — same creation-time invariants and the
-  // same 13-field props, differing only in the born status (`open` → QUEUED, `skipped`
-  // → the terminal SKIPPED_NO_CONSENT). Both are born with `id: null` / `attemptCount:
-  // 0` / no prior attempt or failure; the two public factories stay as the readable,
-  // intention-revealing entry points.
   private static create(
     input: IOpenNotificationDeliveryInput,
     status: NotificationDeliveryStatusEnum,
@@ -164,10 +106,6 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
     });
   }
 
-  // Shared creation-time invariants for `open` / `skipped`. The recipient address is
-  // the one externally-meaningful invariant → a typed `DELIVERY_RECIPIENT_REQUIRED`;
-  // the rest are plumbing the dispatch use case always supplies, so an empty one is an
-  // internal-caller bug → a plain `Error` (never a wire-mappable code).
   private static assertCreatable(input: IOpenNotificationDeliveryInput): void {
     if (!input.recipientAddress || input.recipientAddress.trim().length === 0) {
       throw new NotificationDomainException(
@@ -188,7 +126,6 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
     }
   }
 
-  // Rebuilds a persisted delivery from storage (any status). Records no events.
   public static reconstitute(props: INotificationDeliveryProps): NotificationDelivery {
     return new NotificationDelivery(props);
   }
@@ -245,9 +182,6 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
     return this._correlationId;
   }
 
-  // `QUEUED|FAILED → SENT` — the NOTIFIER accepted the message. Counts as an attempt:
-  // increments `attemptCount`, stamps `lastAttemptAt`, and clears any prior
-  // `failureReason` (this attempt succeeded).
   public markSent(at: Date): void {
     this.assertAttemptable('markSent');
     this._status = NotificationDeliveryStatusEnum.SENT;
@@ -256,9 +190,6 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
     this._failureReason = null;
   }
 
-  // `QUEUED|FAILED → FAILED` — the NOTIFIER rejected the message. Counts as an attempt:
-  // increments `attemptCount`, stamps `lastAttemptAt`, and records the reason for the
-  // retry sweeper + the audit trail.
   public markFailed(at: Date, reason: string): void {
     this.assertAttemptable('markFailed');
     this._status = NotificationDeliveryStatusEnum.FAILED;
@@ -267,24 +198,17 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
     this._failureReason = reason;
   }
 
-  // `SENT → DELIVERED` — a downstream delivery receipt confirmed it landed. Terminal,
-  // records no attempt (the wire transport already accepted it).
   public markDelivered(): void {
     this.assertStatus(NotificationDeliveryStatusEnum.SENT, 'markDelivered');
     this._status = NotificationDeliveryStatusEnum.DELIVERED;
   }
 
-  // `SENT → BOUNCED` — a downstream bounce notice. Terminal, records the bounce reason,
-  // no attempt.
   public markBounced(reason: string): void {
     this.assertStatus(NotificationDeliveryStatusEnum.SENT, 'markBounced');
     this._status = NotificationDeliveryStatusEnum.BOUNCED;
     this._failureReason = reason;
   }
 
-  // The two attempt-consuming transitions (`markSent` / `markFailed`) are legal only
-  // from a non-terminal, attemptable state: `QUEUED` (first try) or `FAILED` (retry).
-  // From `SENT` / `DELIVERED` / `BOUNCED` they are illegal.
   private assertAttemptable(op: string): void {
     const attemptable =
       this._status === NotificationDeliveryStatusEnum.QUEUED ||
@@ -297,8 +221,6 @@ export class NotificationDelivery extends AggregateRoot<number | null> {
     }
   }
 
-  // Shared single-source transition guard for the receipt transitions
-  // (`markDelivered` / `markBounced`), which require an exact prior `SENT`.
   private assertStatus(expected: NotificationDeliveryStatusEnum, op: string): void {
     if (this._status !== expected) {
       throw new NotificationDomainException(

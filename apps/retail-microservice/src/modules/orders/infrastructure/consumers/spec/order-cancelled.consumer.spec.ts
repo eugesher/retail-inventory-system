@@ -19,8 +19,6 @@ const PAYMENT_ID = 70;
 const CAPTURED_AMOUNT = 2500;
 const CORRELATION = 'corr-cancel-1';
 
-// A captured payment with tunable refund accounting — the idempotency case needs a
-// fully-refunded payment (`refundedAmountMinor === amountMinor`, status `refunded`).
 const capturedPayment = (
   opts: { status?: PaymentStatusEnum; refundedAmountMinor?: number } = {},
 ): Payment =>
@@ -64,10 +62,6 @@ const makeHarness = async (payment: Payment | null = capturedPayment()): Promise
     await paymentRepository.save(payment);
   }
 
-  // The `IssueRefundUseCase` double — a jest spy whose resolved value the consumer ignores
-  // (it only awaits the call). The use case now resolves the `IIdempotentResult` envelope
-  // (ADR-036). Cast through `unknown` so the spy satisfies the concrete constructor parameter
-  // type without re-implementing the whole class.
   const execute = jest
     .fn<Promise<IIdempotentResult<RefundView>>, [IRetailRefundIssuePayload]>()
     .mockResolvedValue({ view: {} as RefundView, replayed: false });
@@ -90,8 +84,6 @@ describe('OrderCancelledConsumer', () => {
       amountMinor: CAPTURED_AMOUNT,
       reason: 'order-cancelled',
       actorId: null,
-      // The system path synthesizes a deterministic Idempotency-Key so a redelivered cancel
-      // collapses to a store replay (ADR-036).
       idempotencyKey: `order-cancelled:${ORDER_ID}:${PAYMENT_ID}`,
       correlationId: CORRELATION,
     });
@@ -117,9 +109,6 @@ describe('OrderCancelledConsumer', () => {
   });
 
   it('is a no-op on redelivery after a full refund (refundable === 0, idempotent)', async () => {
-    // The payment is already `refunded` with the whole capture accounted for, so the
-    // refundable remainder is 0 — exactly the at-least-once redelivery the flag + accounting
-    // make idempotent without a processed-message store.
     const h = await makeHarness(
       capturedPayment({
         status: PaymentStatusEnum.REFUNDED,
@@ -143,8 +132,6 @@ describe('OrderCancelledConsumer', () => {
     const h = await makeHarness();
     h.execute.mockRejectedValueOnce(new Error('gateway unreachable'));
 
-    // The cancel already committed and the payment stays flagged for a manual retry, so the
-    // consumer must not throw (a throw would NACK/redeliver pointlessly).
     await expect(h.consumer.onOrderCancelled(cancelledEvent())).resolves.toBeUndefined();
     expect(h.execute).toHaveBeenCalledTimes(1);
   });

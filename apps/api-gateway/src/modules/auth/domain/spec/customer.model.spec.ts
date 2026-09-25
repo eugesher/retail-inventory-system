@@ -6,9 +6,6 @@ const CUSTOMER_ID = 'cccccccc-cccc-4ccc-accc-cccccccccccc';
 const makeCustomer = (overrides: Partial<Parameters<typeof Customer.register>[1]> = {}): Customer =>
   Customer.register(CUSTOMER_ID, {
     email: overrides.email ?? 'CUSTOMER@Example.com',
-    // Use `in` so a caller-supplied `null` survives — distinguishing
-    // "not specified, want the default" from "explicitly null, exercising
-    // the guest/deleted branch."
     passwordHash:
       'passwordHash' in overrides ? (overrides.passwordHash as string | null) : 'argon2-hash',
     status: overrides.status,
@@ -164,7 +161,6 @@ describe('Customer', () => {
 
     it('records no domain event (the aggregate stays event-light)', () => {
       const customer = makeLive();
-      // Drain the CustomerRegisteredEvent from construction first.
       customer.pullDomainEvents();
 
       customer.erase(eraseAt);

@@ -9,12 +9,6 @@ import {
   NOTIFICATIONS_GATEWAY_PORT,
 } from '../ports';
 
-// Thin gateway-side orchestrator over the `notification.marketing.send` RPC (ADR-037).
-// The eventType-default and the per-request `campaignId` are resolved at the controller
-// edge (the presentation layer may import `ROUTING_KEYS` for the marketing default; the
-// application layer may not), so this use case only threads the correlation id and maps
-// a downstream error onto the right HTTP status. The consent decision (send vs
-// `skipped-no-consent`) is entirely the notification service's responsibility.
 @Injectable()
 export class SendMarketingUseCase {
   constructor(

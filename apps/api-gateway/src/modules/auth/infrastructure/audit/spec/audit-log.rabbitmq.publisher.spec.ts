@@ -20,14 +20,11 @@ describe('AuditLogRabbitmqPublisher (api-gateway auth)', () => {
   let publisher: AuditLogRabbitmqPublisher;
 
   beforeEach(() => {
-    // The shared mirror publisher owns the emit + best-effort swallow (covered by its own
-    // spec); here we only assert this adapter maps + delegates to it.
     mirror = jest.fn().mockResolvedValue(undefined);
     risEvents = { mirror } as unknown as RisEventsMirrorPublisher;
     publisher = new AuditLogRabbitmqPublisher(risEvents);
   });
 
-  // Reads the first `mirror` call as a typed [routingKey, wirePayload] tuple.
   const firstMirror = (): [string, IAuditStaffActionEvent] =>
     mirror.mock.calls[0] as [string, IAuditStaffActionEvent];
   const mirroredWire = (): IAuditStaffActionEvent => firstMirror()[1];

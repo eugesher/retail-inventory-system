@@ -57,22 +57,6 @@ import {
   VariantStockQueryDto,
 } from './dto';
 
-// HTTP surface over the inventory microservice's read + write RPCs (ADR-009). The
-// gateway holds no inventory state of its own — each method is a thin port→adapter
-// pass to `inventory_queue`.
-//
-// The routes are gated by intent (ADR-024): the per-variant availability read is
-// `@Public()`, because an unauthenticated shopper needs to see whether an item is
-// in stock before checking out; the stock-location list and the per-variant
-// movements audit read are operational data, so they require `inventory:read`; the
-// receive/adjust/transfer writes require `inventory:adjust` / `inventory:transfer`;
-// the manual reservation release and the on-demand reservation sweep are operator
-// actions over the holds — both return held units to `available` — so both reuse
-// `inventory:adjust` (no new permission code was minted — the existing
-// read/adjust codes cover the audit + ops surface, ADR-024). Every permission code
-// is staff-only — customer tokens carry no `permissions` claim — so the location
-// list, the audit read, the writes, the manual release, and the sweep are staff-only
-// by construction.
 @ApiTags('Inventory')
 @Controller('inventory')
 export class InventoryController {
@@ -110,9 +94,6 @@ export class InventoryController {
   @Public()
   @ApiOperation({ summary: 'Read a variant’s availability across stock locations (public)' })
   @ApiParam({ name: 'variantId', type: Number, example: 1 })
-  // No stock-level rows for the variant is a valid answer — a `200` with
-  // `totalOnHand: 0`, `totalAvailable: 0`, `locations: []` (not a 404). Omitting
-  // `?locationIds` aggregates across every location.
   @ApiOkResponse({
     description: 'Per-location availability plus cross-location totals',
     type: VariantStockView,
@@ -136,9 +117,6 @@ export class InventoryController {
     summary: 'List a variant’s stock-movement audit trail (staff, inventory:read)',
   })
   @ApiParam({ name: 'variantId', type: Number, example: 1 })
-  // A variant with no movements (or an unknown variant) is a `200` empty page —
-  // the public-read zero-answer convention; there is no existence probe. The
-  // timeline is newest-first (`occurredAt DESC`); `total` is the full match count.
   @ApiExtraModels(StockMovementView)
   @ApiOkResponse({
     description: 'A paginated, newest-first page of the variant’s stock-movement ledger rows',
@@ -158,8 +136,6 @@ export class InventoryController {
     @Query() query: MovementsQueryDto,
     @CorrelationId() correlationId: string,
   ): Promise<IPage<StockMovementView>> {
-    // Defaults applied at the edge (`page`→1, `pageSize`→20); `pageSize` maps onto
-    // the RPC payload's `size`. The DTO already enforced the `1..100` bounds.
     return this.listVariantMovementsUseCase.execute({
       variantId,
       page: query.page ?? 1,
@@ -200,8 +176,6 @@ export class InventoryController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Adjust stock — signed delta with a reason (staff, inventory:adjust)' })
   @ApiParam({ name: 'variantId', type: Number, example: 1 })
-  // A signed adjustment that would drive on-hand below zero is a 409 (surfaced
-  // from the inventory domain via its RPC exception filter).
   @ApiOkResponse({
     description: 'Updated stock level for the affected location',
     type: StockLevelView,
@@ -224,8 +198,6 @@ export class InventoryController {
     summary: 'Transfer stock between two locations (staff, inventory:transfer)',
   })
   @ApiParam({ name: 'variantId', type: Number, example: 1 })
-  // A transfer of more than the source's on-hand is a 409 (the domain below-zero
-  // invariant); a bad quantity or identical source/destination is a 400.
   @ApiExtraModels(StockLevelView)
   @ApiOkResponse({
     description: 'Both post-transfer levels: from (debited source) and to (credited destination)',
@@ -250,10 +222,6 @@ export class InventoryController {
     );
   }
 
-  // Declared BEFORE the by-id release below. The two cannot collide today —
-  // `reservations/sweep` is two segments and the release route is three — but a
-  // literal segment ahead of its `:param` sibling is the ordering a future reader
-  // should never have to re-derive.
   @Post('reservations/sweep')
   @RequiresPermission(PermissionCodeEnum.INVENTORY_ADJUST)
   @ApiBearerAuth()
@@ -261,14 +229,6 @@ export class InventoryController {
   @ApiOperation({
     summary: 'Sweep expired reservation holds on demand (staff, inventory:adjust)',
   })
-  // Runs the SAME sweep the inventory service ticks on a timer — one implementation,
-  // two callers. Use it after a broker outage, after a bulk cart abandonment, or to
-  // watch the reclaim happen instead of waiting for the next tick. Optional body
-  // `{ batchSize? }`; the service clamps the value to its configured ceiling.
-  //
-  // No `Idempotency-Key` (ADR-036): the sweep is idempotent by construction — a second
-  // invocation finds the holds already `expired` and skips them, so a replay moves no
-  // counter. Do not add one.
   @ApiOkResponse({
     description:
       'Sweep counters. `scanned = expired + skipped` always holds: a skipped candidate is one a concurrent writer had already settled or refreshed.',
@@ -288,8 +248,6 @@ export class InventoryController {
     @CurrentUser() actor: ICurrentUser,
     @CorrelationId() correlationId: string,
   ): Promise<IReservationSweepResult> {
-    // The staff principal is the ONLY difference between this and a scheduled tick:
-    // it lands on every `release` ledger row the invocation writes (ADR-028).
     return this.sweepReservationsUseCase.execute({
       batchSize: dto.batchSize,
       actorId: actor.id,
@@ -311,11 +269,6 @@ export class InventoryController {
     description:
       'The reservation (hold) UUID — sourced from logs, the inventory.stock.reserved event, or the DB',
   })
-  // Targets ONE hold by id: an unknown id is a 404 (`INVENTORY_RESERVATION_NOT_FOUND`),
-  // an already-released/committed row a 409 (`INVENTORY_RESERVATION_INVALID_STATE`),
-  // both surfaced from the inventory domain via its RPC exception filter. Frees the
-  // hold, returns the units to `available`, and writes a `manual`-reason `release`
-  // ledger row attributed to the staff actor. No request body.
   @ApiExtraModels(ReservationView)
   @ApiOkResponse({
     description: 'The released hold(s) — exactly one element for a by-id release',
@@ -332,8 +285,6 @@ export class InventoryController {
     @CurrentUser() actor: ICurrentUser,
     @CorrelationId() correlationId: string,
   ): Promise<IReservationReleaseResult> {
-    // The ops/manual release: a by-id selector, the fixed `manual` reason, and the
-    // staff actor folded in for the ledger attribution (ADR-030 §4).
     return this.releaseReservationUseCase.execute({
       reservationId,
       reason: 'manual',

@@ -48,14 +48,12 @@ const makeHarness = async (order: Order): Promise<IHarness> => {
     fulfillmentRepository,
     publisher,
     customerContactReader,
-    // OCC_RETRY_ATTEMPTS budget (ADR-036).
     5,
     logger,
   );
   return { useCase, orderRepository, fulfillmentRepository, publisher, customerContactReader };
 };
 
-// Persists a SHIPPED fulfillment for the order (the only state Deliver accepts).
 const addShippedFulfillment = async (
   repo: FakeFulfillmentRepository,
   orderId: number,
@@ -101,13 +99,10 @@ describe('MarkDeliveredUseCase', () => {
       expect(view.status).toBe(FulfillmentStatusEnum.DELIVERED);
       expect(view.deliveredAt).not.toBeNull();
 
-      // The only fulfillment is now delivered → the order rolls up to delivered on both axes.
       const reread = await h.orderRepository.findById(ORDER_ID);
       expect(reread?.status).toBe(OrderStatusEnum.DELIVERED);
       expect(reread?.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.DELIVERED);
       expect(h.publisher.fulfillmentDelivered).toHaveLength(1);
-      // The buyer's email was resolved from the order's customerId and stamped on the
-      // delivery event (ADR-033); locale ships null.
       expect(h.publisher.fulfillmentDelivered[0]).toMatchObject({
         customerEmail: FAKE_CUSTOMER_EMAIL,
         customerLocale: null,
@@ -133,13 +128,11 @@ describe('MarkDeliveredUseCase', () => {
         { orderLineId: 10, quantity: 2 },
       ]);
 
-      // Deliver only the first — a shipped sibling remains, so the order stays put.
       await h.useCase.execute(deliverPayload(first));
       let reread = await h.orderRepository.findById(ORDER_ID);
       expect(reread?.status).toBe(OrderStatusEnum.PENDING);
       expect(reread?.fulfillmentStatus).toBe(OrderFulfillmentStatusEnum.SHIPPED);
 
-      // Deliver the second — now every fulfillment is delivered → the order rolls up.
       await h.useCase.execute(deliverPayload(second));
       reread = await h.orderRepository.findById(ORDER_ID);
       expect(reread?.status).toBe(OrderStatusEnum.DELIVERED);

@@ -1,10 +1,6 @@
 import { IPaymentGatewayPort } from '../../../application/ports';
 import { FakePaymentGatewayAdapter } from '../fake-payment-gateway.adapter';
 
-// Adapter **contract conformance**: these assertions pin the `IPaymentGatewayPort`
-// shape the fake must satisfy, so a real adapter later can be held to the same bar. The
-// adapter is held through the port type so the calls exercise the contract signatures
-// (e.g. `refund(req)`) rather than the fake's narrowed implementation arity.
 describe('FakePaymentGatewayAdapter', () => {
   let adapter: IPaymentGatewayPort;
 
@@ -82,7 +78,6 @@ describe('FakePaymentGatewayAdapter', () => {
 
       expect(result.refunded).toBe(true);
       expect(typeof result.gatewayReference).toBe('string');
-      // The refund reference is fresh — distinct from the charge reference it reverses.
       expect(result.gatewayReference.startsWith('fake_refund_')).toBe(true);
       expect(result.gatewayReference).not.toBe(gatewayReference);
       expect(result.refundedAt).toBeInstanceOf(Date);

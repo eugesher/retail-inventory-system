@@ -7,8 +7,6 @@ import { PaymentEntity } from '../payment.entity';
 import { PaymentMapper } from '../payment.mapper';
 import { PaymentTypeormRepository } from '../payment-typeorm.repository';
 
-// A persisted-payment entity (mysql2 returns BIGINT scalars as strings — the mapper
-// coerces them), used as the post-commit re-read.
 const paymentEntity = (overrides: Partial<PaymentEntity> = {}): PaymentEntity =>
   ({
     id: 9,
@@ -37,13 +35,10 @@ describe('PaymentMapper', () => {
     expect(payment.amountMinor).toBe(5997);
     expect(payment.status).toBe(PaymentStatusEnum.AUTHORIZED);
     expect(payment.flaggedForRefund).toBe(false);
-    // The BIGINT `refunded_amount_minor` string coerces to a number, like amount_minor.
     expect(payment.refundedAmountMinor).toBe(0);
   });
 
   it('coerces a non-zero BIGINT refunded_amount_minor string from storage', () => {
-    // mysql2 returns the BIGINT column as a string; the cast mirrors the order_id /
-    // amount_minor string fixtures above (the order-line repository spec precedent).
     const payment = PaymentMapper.toDomain(
       paymentEntity({ refundedAmountMinor: '1000' as unknown as number }),
     );

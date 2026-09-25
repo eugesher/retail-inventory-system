@@ -16,11 +16,6 @@ import {
 import { InventoryRabbitmqAdapter } from './infrastructure/messaging';
 import { InventoryController } from './presentation';
 
-// Gateway-side port→adapter module fronting the inventory microservice's read +
-// write path over HTTP at `/api/inventory` (ADR-009). Named after the downstream
-// service, not the URL prefix. `InventoryRabbitmqAdapter` (the sole `ClientProxy`
-// holder) backs `INVENTORY_GATEWAY_PORT`; the read + write use cases and the
-// controller depend on the port symbol only.
 @Module({
   imports: [MicroserviceClientInventoryModule],
   controllers: [InventoryController],

@@ -17,17 +17,6 @@ import { loadReturnById } from './return-access';
 import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
-// Reject Return walks a `requested` RMA → `rejected` (staff `order:return-authorize`,
-// gated at the gateway). Rejection is terminal and stamps `closedAt`. The optional
-// `reason` is recorded by appending it to the RMA's `notes` (the domain `reject(at,
-// reason)` does the append) — keeping it in `notes` avoids a schema change (ADR-032); the
-// reason also rides the `retail.return.rejected` event. The domain enforces the legal
-// transition (`RETURN_INVALID_STATUS_TRANSITION` from any non-`requested` start). Emits
-// `retail.return.rejected` onto `retail_queue` (reserved) best-effort post-commit
-// (ADR-020).
-//
-// **The read and the write are not in the same unit of work** (ADR-063) — see
-// `AuthorizeReturnUseCase`'s note; the shape is identical for every simple transition.
 @Injectable()
 export class RejectReturnUseCase {
   constructor(
@@ -48,10 +37,6 @@ export class RejectReturnUseCase {
 
     this.logger.info({ correlationId, rmaId, actorId }, 'Rejecting return request');
 
-    // Version-checked CAS under the bounded OCC retry (ADR-036): re-read the RMA afresh
-    // each attempt, walk `requested → rejected` (appending the reason to notes), and save
-    // with the version pinned. A lost CAS retries; a non-`requested` start is a terminal
-    // domain 409, never retried.
     const saved = await runWithReturnWriteRetry(
       { logger: this.logger, maxAttempts: this.maxAttempts },
       async () => {

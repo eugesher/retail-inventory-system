@@ -9,8 +9,6 @@ import { IConsentCachePort, IConsentSnapshot } from '../../../application/ports'
 import { ConsentEventsConsumer } from '../consent-events.consumer';
 import { FakeLogger } from './test-doubles';
 
-// Records the write-through / eviction calls the consumer makes, and can be told to
-// throw so a spec can prove the consumer swallows (never rethrows from an @EventPattern).
 class RecordingConsentCache implements IConsentCachePort {
   public readonly sets: { customerId: string; consent: IConsentSnapshot }[] = [];
   public readonly dels: string[] = [];

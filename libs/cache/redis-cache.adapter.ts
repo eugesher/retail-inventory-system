@@ -7,12 +7,6 @@ import { ICachePort } from './cache.port';
 
 const TRACER_NAME = '@retail-inventory-system/cache';
 
-// Narrow structural type for the subset of the @redis/client v5 client we
-// actually need. KeyvRedis exposes the client as a wide union
-// (RedisClientType | RedisClusterType | RedisSentinelType) with empty
-// module/function/script generics, which doesn't structurally match the
-// generic signatures of scanIterator/unlink. Declaring just what we use
-// sidesteps the generic mismatch without resorting to `any`.
 interface IRedisScanClient {
   scanIterator(options: { MATCH: string; COUNT?: number }): AsyncIterable<string[]>;
   unlink(keys: string[]): Promise<number>;
@@ -20,12 +14,6 @@ interface IRedisScanClient {
 
 @Injectable()
 export class RedisCacheAdapter implements ICachePort, OnApplicationShutdown {
-  // In-process map of in-flight loads for `singleFlight`. Single-replica
-  // deployments get full dedupe; multi-replica deployments dedupe per
-  // process — one replica's stampede no longer fans out to
-  // `concurrency × loader-cost`. A store-side advisory lock would push
-  // dedupe across replicas at the cost of two extra Redis round-trips
-  // per miss; rejected for the current scale (ADR-021).
   private readonly inFlight = new Map<string, Promise<unknown>>();
 
   constructor(
@@ -33,11 +21,6 @@ export class RedisCacheAdapter implements ICachePort, OnApplicationShutdown {
     private readonly cache: Cache,
   ) {}
 
-  // Close the underlying Redis connection on shutdown. `app.close()` fans the
-  // shutdown hooks out to every provider, so this fires in tests (which call
-  // `app.close()` in `afterAll`) and on SIGTERM in prod once shutdown hooks
-  // are enabled. Without it the @keyv/redis socket lingers as an open handle —
-  // the reason the e2e run needed `--forceExit` to terminate.
   public async onApplicationShutdown(): Promise<void> {
     await this.getRedisAdapter()?.disconnect();
   }
@@ -115,10 +98,6 @@ export class RedisCacheAdapter implements ICachePort, OnApplicationShutdown {
         return existing;
       }
       span.setAttribute('cache.singleflight.joined', false);
-      // Eagerly invoke `fn` so the returned promise reflects whatever the
-      // loader does (including a synchronous throw). The `finally` clears
-      // the in-flight slot whether the leader resolves or rejects — a
-      // rejected leader must not poison the key for the next caller.
       const promise = (async (): Promise<T> => fn())().finally(() => {
         this.inFlight.delete(key);
       });
@@ -142,22 +121,12 @@ export class RedisCacheAdapter implements ICachePort, OnApplicationShutdown {
 
         const rawClient = adapter.client;
         if (!('scanIterator' in rawClient) || !('unlink' in rawClient)) {
-          // Cluster / Sentinel clients don't expose scanIterator on the
-          // top-level client (you'd have to fan out per shard). The project
-          // uses a single Redis instance, so this branch should never hit
-          // in practice — but we treat it as a no-op rather than a throw.
           span.setAttribute('cache.backend', 'redis-no-scan');
           span.setAttribute('cache.keys_unlinked', 0);
           return 0;
         }
 
         const client = rawClient as unknown as IRedisScanClient;
-        // KeyvRedis prefixes stored keys with `${namespace}${keyPrefixSeparator}`
-        // when a namespace is configured. With no namespace (the project
-        // default — see libs/cache/cache-module.config.ts) the prefix is empty
-        // and stored keys match cache.set() input verbatim. Computing the
-        // prefix at runtime keeps this code correct if a namespace is added
-        // later.
         const keyPrefix = adapter.namespace
           ? `${adapter.namespace}${adapter.keyPrefixSeparator}`
           : '';
@@ -174,9 +143,6 @@ export class RedisCacheAdapter implements ICachePort, OnApplicationShutdown {
           return 0;
         }
 
-        // UNLINK frees memory asynchronously on the Redis side — preferred
-        // over DEL when invalidating potentially-large key sets, since DEL
-        // is O(N) synchronous from Redis's main thread.
         await client.unlink([...matchedKeys]);
         span.setAttribute('cache.backend', 'redis');
         span.setAttribute('cache.keys_unlinked', matchedKeys.size);
@@ -188,9 +154,6 @@ export class RedisCacheAdapter implements ICachePort, OnApplicationShutdown {
   }
 
   private getRedisAdapter(): KeyvRedis<unknown> | undefined {
-    // `cache-manager.createCache()` returns an object whose `stores` array
-    // holds Keyv instances. Each Keyv exposes its underlying adapter via
-    // the `store` getter — for our config that adapter is `KeyvRedis`.
     const cache = this.cache as unknown as {
       stores?: readonly { store?: unknown }[];
     };

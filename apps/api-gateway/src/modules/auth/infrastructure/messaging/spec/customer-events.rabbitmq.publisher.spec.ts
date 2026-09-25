@@ -59,7 +59,6 @@ describe('CustomerEventsRabbitmqPublisher', () => {
       });
       expect(typeof primaryEvent.occurredAt).toBe('string');
 
-      // The mirror fires with the SAME routing key + payload, ordered after the primary.
       expect(risEvents.mirror).toHaveBeenCalledTimes(1);
       expect(risEvents.mirror).toHaveBeenCalledWith(
         ROUTING_KEYS.CUSTOMER_CONSENT_UPDATED,
@@ -74,9 +73,7 @@ describe('CustomerEventsRabbitmqPublisher', () => {
         publisher.publishConsentUpdated({ record, correlationId: 'corr-1' }),
       ).resolves.toBeUndefined();
 
-      // The committed write is never blocked: the failure is warn-logged, not rethrown.
       expect(logger.warn).toHaveBeenCalledTimes(1);
-      // The mirror still fires — a primary hiccup does not skip the firehose.
       expect(risEvents.mirror).toHaveBeenCalledTimes(1);
     });
   });
@@ -105,7 +102,6 @@ describe('CustomerEventsRabbitmqPublisher', () => {
         eventVersion: 'v1',
       });
       expect(typeof primaryEvent.occurredAt).toBe('string');
-      // Guard the no-PII rule explicitly: no email/name/phone keys on the wire.
       expect(Object.keys(primaryEvent).sort()).toEqual(
         [
           'actorStaffUserId',

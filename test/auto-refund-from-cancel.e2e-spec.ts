@@ -14,28 +14,6 @@ import {
   ReturnsRefundsE2ESpecDataSource,
 } from './data-source/returns-refunds.e2e-spec.data-source';
 
-// Auto-refund-from-cancel (ADR-032) — the one cancellation path that returns money. A
-// customer places a one-unit order; an operator captures the payment explicitly WITHOUT
-// shipping; then the order is cancelled. Cancelling a captured-but-unshipped order flags
-// the payment for refund and emits `retail.order.cancelled` with
-// `paymentFlaggedForRefund=true`; the retail `OrderCancelledConsumer` consumes that event
-// off the retail queue and issues a FULL refund INLINE — no HTTP call, no gateway endpoint.
-//
-// Because the refund rides an ASYNCHRONOUS event consumer (unlike Issue Refund's synchronous
-// gateway call), the proof must wait for eventual consistency: the suite polls the `payment`
-// row with a bounded retry until the auto-refund lands, then asserts through PUBLIC state
-// (the DB payment/refund rows + the order GET):
-//   - the payment ends `refunded` with `refunded_amount_minor === amount_minor` (a full
-//     refund of the captured total) and `flagged_for_refund` cleared back to 0;
-//   - exactly ONE issued refund row exists, with `reason='order-cancelled'` — the
-//     refundable-remainder guard makes a redelivery idempotent (a second delivery computes
-//     remainder 0 and issues nothing), so the cumulative refund never exceeds the captured
-//     amount.
-//
-// `flagged_for_refund` and `refunded_amount_minor` are not on the `PaymentView`, so they are
-// read straight from the `payment` row. Self-provisioned, disjoint fixture
-// (`e2e-auto-refund-*`): its own variant + stock, so the shared seeded variants are never
-// touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -117,8 +95,6 @@ describe('Auto-refund from cancel: capture (no ship) → cancel → consumer ref
     }
   };
 
-  // Polls the payment row until the asynchronous auto-refund consumer has flipped it to
-  // `refunded` (the eventual-consistency convention). Returns the settled row.
   const waitForAutoRefund = async (
     orderId: number,
     deadlineMs = 25_000,
@@ -278,8 +254,6 @@ describe('Auto-refund from cancel: capture (no ship) → cancel → consumer ref
     order = place.body as IOrderBody;
     expect(order.paymentStatus).toBe('authorized');
 
-    // Explicit capture (no ship) — the only state where a later cancel flags the payment
-    // for refund (a never-captured cancel just voids the authorization).
     const capture = await server()
       .post(`/api/orders/${order.id}/payments/capture`)
       .set('Authorization', adminAuth)
@@ -292,7 +266,6 @@ describe('Auto-refund from cancel: capture (no ship) → cancel → consumer ref
     expect(captured.payment?.status).toBe('captured');
     paymentId = captured.payment!.id;
 
-    // The captured payment carries no refund yet, and is not flagged.
     const payment = await dataSource.getPaymentByOrderId(order.id);
     expect(payment?.status).toBe('captured');
     expect(payment?.amountMinor).toBe(UNIT_PRICE_MINOR);
@@ -309,20 +282,13 @@ describe('Auto-refund from cancel: capture (no ship) → cancel → consumer ref
     expect(cancel.status).toBe(HttpStatus.OK);
     expect((cancel.body as IOrderBody).status).toBe('cancelled');
 
-    // The auto-refund rides the asynchronous `retail.order.cancelled` consumer, so wait for
-    // it to settle the payment to `refunded`.
     const payment = await waitForAutoRefund(order.id);
 
-    // The full captured amount was refunded, and the cancel flag was cleared by the full
-    // refund (a partial refund would have left it set as the manual-retry anchor).
     expect(payment.status).toBe('refunded');
     expect(payment.refundedAmountMinor).toBe(UNIT_PRICE_MINOR);
     expect(payment.refundedAmountMinor).toBe(payment.amountMinor);
     expect(payment.flaggedForRefund).toBe(0);
 
-    // Exactly one issued refund row, system-attributed with the `order-cancelled` reason —
-    // the refundable-remainder guard makes any event redelivery idempotent, so the
-    // cumulative refund never exceeds the captured amount.
     const refunds = await dataSource.getRefundsByOrderId(order.id);
     expect(refunds).toHaveLength(1);
     expect(refunds[0].status).toBe('issued');
@@ -332,12 +298,10 @@ describe('Auto-refund from cancel: capture (no ship) → cancel → consumer ref
   });
 
   it('the order/refund reads reflect the auto-issued refund', async () => {
-    // The order's embedded payment view shows the refunded payment row.
     const fresh = await getOrder(order.id);
     expect(fresh.status).toBe('cancelled');
     expect(fresh.payment?.status).toBe('refunded');
 
-    // List Refunds surfaces the single auto-issued refund over HTTP.
     const list = await server()
       .get(`/api/orders/${order.id}/refunds`)
       .set('Authorization', adminAuth);

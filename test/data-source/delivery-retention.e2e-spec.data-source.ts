@@ -1,16 +1,6 @@
 import { DataSource } from 'typeorm';
 
-// E2E helper for the delivery-retention sweep (ISSUE-08). Rows are seeded straight into
-// `notification_delivery` with a chosen `created_at`, because the sweep's only question is *how old
-// is this row* and the domain has no way to backdate one — `NotificationDelivery.open()` stamps the
-// present, and the mapper stamps the DB default.
-//
-// The assertions read the table directly. **They have to**: a purge's whole observable effect is the
-// row's absence, and no read path in the application can distinguish "purged" from "never existed".
 export class DeliveryRetentionE2ESpecDataSource extends DataSource {
-  // A `sent` delivery for a template that exists, aged to `createdAt`. `recipient_customer_id` is
-  // NULL on purpose: a customer-facing row would generate a `delivery_dedupe_key` and collide with
-  // its siblings under the UNIQUE — and this spec is about age, not dedupe.
   public async seedDelivery(
     templateId: number,
     eventReferenceId: string,
@@ -43,7 +33,6 @@ export class DeliveryRetentionE2ESpecDataSource extends DataSource {
     return rows.length > 0;
   }
 
-  // Any template row will do — the sweep never reads one, but `template_id` carries an FK.
   public async anyTemplateId(): Promise<number> {
     const rows = (await this.query(
       'SELECT id FROM notification_template ORDER BY id LIMIT 1;',

@@ -57,7 +57,7 @@ describe('AllocateStockUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       TTL_MINUTES,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
@@ -116,17 +116,14 @@ describe('AllocateStockUseCase', () => {
       { variantId: VARIANT_ID, stockLocationId: LOCATION, quantity: 4, reservationId: hold.id },
     ]);
 
-    // Counter moved reserved → allocated; available unchanged (both subtract).
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(level?.quantityReserved).toBe(0);
     expect(level?.quantityAllocated).toBe(4);
     expect(level?.available).toBe(6);
 
-    // The hold is now committed.
     const saved = await reservations.findById(hold.id!);
     expect(saved?.status).toBe(ReservationStatusEnum.COMMITTED);
 
-    // Exactly one negative `allocation` movement referencing the order.
     expect(movements.appended).toHaveLength(1);
     const movement = movements.appended[0];
     expect(movement.type).toBe(StockMovementTypeEnum.ALLOCATION);
@@ -136,7 +133,6 @@ describe('AllocateStockUseCase', () => {
     expect(movement.reasonCode).toBeNull();
     expect(movement.actorId).toBeNull();
 
-    // The allocated event carries the reservationId + orderId; movement-recorded too.
     expect(publisher.allocated).toHaveLength(1);
     expect(publisher.allocated[0].event.aggregateId).toBe(VARIANT_ID);
     expect(publisher.allocated[0].event.quantity).toBe(4);
@@ -145,7 +141,6 @@ describe('AllocateStockUseCase', () => {
     expect(publisher.allocated[0].correlationId).toBe(CORRELATION_ID);
     expect(publisher.movementsRecorded).toHaveLength(1);
 
-    // Invalidation fired post-commit with the mutated (variantId, stockLocationId).
     expect(cache.invalidations).toHaveLength(1);
     expect(cache.invalidations[0].items).toEqual([
       { variantId: VARIANT_ID, stockLocationId: LOCATION },
@@ -172,7 +167,6 @@ describe('AllocateStockUseCase', () => {
 
     const saved = await reservations.findById('res-expired-1');
     expect(saved?.status).toBe(ReservationStatusEnum.COMMITTED);
-    // The TTL was pushed forward (refresh-then-commit) — no longer in the past.
     expect(saved!.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
@@ -181,7 +175,7 @@ describe('AllocateStockUseCase', () => {
   });
 
   it('drift (hold 2, line 3): releases the held units then allocates the order quantity through available', async () => {
-    seedLevel({ onHand: 10, reserved: 2 }); // available 8
+    seedLevel({ onHand: 10, reserved: 2 });
     seedActiveHold(2);
 
     await allocate([{ variantId: VARIANT_ID, quantity: 3 }]);
@@ -193,7 +187,7 @@ describe('AllocateStockUseCase', () => {
   });
 
   it('drift (hold 3, line 2): the symmetric case returns the surplus held unit to available', async () => {
-    seedLevel({ onHand: 10, reserved: 3 }); // available 7
+    seedLevel({ onHand: 10, reserved: 3 });
     seedActiveHold(3);
 
     await allocate([{ variantId: VARIANT_ID, quantity: 2 }]);
@@ -205,7 +199,6 @@ describe('AllocateStockUseCase', () => {
   });
 
   it('drift where the larger ask no longer fits → OUT_OF_STOCK with details.available', async () => {
-    // onHand 5, reserved 2 → available 3; after releasing the held 2, available 5.
     seedLevel({ onHand: 5, reserved: 2 });
     seedActiveHold(2);
 
@@ -216,7 +209,6 @@ describe('AllocateStockUseCase', () => {
     expect(error).toBeInstanceOf(InventoryDomainException);
     expect((error as InventoryDomainException).code).toBe(InventoryErrorCodeEnum.OUT_OF_STOCK);
     expect((error as InventoryDomainException).details).toEqual({ available: 5 });
-    // Nothing committed.
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
     expect(level?.quantityAllocated).toBe(0);
     expect(level?.quantityReserved).toBe(2);
@@ -240,8 +232,8 @@ describe('AllocateStockUseCase', () => {
   });
 
   it('fallback insufficient on a later line rolls the WHOLE allocate back — nothing persisted for any line (atomicity)', async () => {
-    seedLevel({ variantId: VARIANT_ID, onHand: 10 }); // line A fits
-    seedLevel({ variantId: 99, onHand: 1 }); // line B does not
+    seedLevel({ variantId: VARIANT_ID, onHand: 10 });
+    seedLevel({ variantId: 99, onHand: 1 });
 
     const error = await allocate([
       { variantId: VARIANT_ID, quantity: 2 },
@@ -252,8 +244,6 @@ describe('AllocateStockUseCase', () => {
     expect((error as InventoryDomainException).code).toBe(InventoryErrorCodeEnum.OUT_OF_STOCK);
     expect((error as InventoryDomainException).details).toEqual({ available: 1 });
 
-    // The earlier line's would-be writes never landed (the compute-then-write
-    // attempt threw before any persist — the same guarantee a rolled-back tx gives).
     expect((await repository.findStockLevel(VARIANT_ID, LOCATION))?.quantityAllocated).toBe(0);
     expect((await repository.findStockLevel(99, LOCATION))?.quantityAllocated).toBe(0);
     expect(movements.appended).toHaveLength(0);
@@ -289,19 +279,13 @@ describe('AllocateStockUseCase', () => {
       { variantId: VARIANT_ID, quantity: 3 },
     ]);
 
-    // Two fallback lines on one level: loaded exactly once, persisted once (the
-    // counter reflects both), but a movement + event per line.
     expect(loadSpy).toHaveBeenCalledTimes(1);
     expect(result.allocated).toHaveLength(2);
     const level = await repository.findStockLevel(VARIANT_ID, LOCATION);
-    // 5 allocated (2 + 3); +1 read call here doesn't affect the assertion above.
     expect(level?.quantityAllocated).toBe(5);
     expect(movements.appended).toHaveLength(2);
     expect(publisher.allocated).toHaveLength(2);
     expect(publisher.movementsRecorded).toHaveLength(2);
-    // `resolveItems` yields one item per line (the shared pair, twice); the real
-    // `StockCache` dedupes by variantId and wipes a per-variant prefix, so the
-    // duplication is collapsed downstream and the cache effect is one wipe.
     expect(cache.invalidations[0].items).toEqual([
       { variantId: VARIANT_ID, stockLocationId: LOCATION },
       { variantId: VARIANT_ID, stockLocationId: LOCATION },

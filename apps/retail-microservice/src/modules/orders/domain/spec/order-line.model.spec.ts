@@ -16,7 +16,6 @@ describe('OrderLine', () => {
     it('builds a line and derives lineTotalMinor from unitPriceMinor × quantity', () => {
       const line = new OrderLine({ ...baseProps });
 
-      // 1500 × 3 = 4500 (tax/discount default 0)
       expect(line.lineTotalMinor).toBe(4500);
       expect(line.taxAmountMinor).toBe(0);
       expect(line.discountAmountMinor).toBe(0);
@@ -35,7 +34,6 @@ describe('OrderLine', () => {
         taxAmountMinor: 150,
         discountAmountMinor: 50,
       });
-      // 1000 × 2 + 150 − 50 = 2100
       expect(line.lineTotalMinor).toBe(2100);
     });
 
@@ -51,10 +49,6 @@ describe('OrderLine', () => {
     it('keeps the money/identity snapshot intact across a status mutation', () => {
       const line = new OrderLine({ ...baseProps });
 
-      // `status` is the only mutable field — advancing it must not disturb the
-      // place-time price/identity snapshot (the buyer's contract, decoupled from any
-      // later catalog change). The snapshot fields are `readonly` (compile-time
-      // immutable, no setter); only `markFulfillment` can move `status`.
       line.markFulfillment(OrderLineStatusEnum.SHIPPED);
 
       expect(line.status).toBe(OrderLineStatusEnum.SHIPPED);
@@ -92,8 +86,6 @@ describe('OrderLine', () => {
     it('rejects a strictly-backward move (shipped → partially-shipped)', () => {
       const line = new OrderLine({ ...baseProps });
       line.markFulfillment(OrderLineStatusEnum.SHIPPED);
-      // A backward move is an internal-invariant breach the use case never produces —
-      // a plain Error (500), not a typed domain rejection.
       expect(() => line.markFulfillment(OrderLineStatusEnum.PARTIALLY_SHIPPED)).toThrow();
     });
 
@@ -140,8 +132,6 @@ describe('OrderLine', () => {
       expect(line.activeQuantity).toBe(1);
     });
 
-    // The same bound the `cancelled_quantity` CHECK holds in storage, so a corrupted
-    // stored count is rejected on read rather than reconstituting silently.
     it('rejects a cancelledQuantity outside [0, quantity]', () => {
       expect(() => new OrderLine({ ...baseProps, cancelledQuantity: -1 })).toThrow(
         OrderDomainException,
@@ -155,10 +145,6 @@ describe('OrderLine', () => {
     });
   });
 
-  // The line's own bound on Cancel Line (ADR-031): the running cancelled total may never
-  // exceed the ordered quantity. The use case additionally subtracts the fulfilled units
-  // (which a child entity cannot see), so this is the last line of defence against the
-  // over-release an unrecorded cancellation produced.
   describe('cancelQuantity', () => {
     it('accumulates the cancelled units and shrinks activeQuantity', () => {
       const line = new OrderLine({ ...baseProps });
@@ -202,7 +188,6 @@ describe('OrderLine', () => {
       const line = new OrderLine({ ...baseProps, cancelledQuantity: 1 });
 
       expect(() => line.cancelQuantity(3)).toThrow(OrderDomainException);
-      // The rejected call left nothing behind.
       expect(line.cancelledQuantity).toBe(1);
     });
 

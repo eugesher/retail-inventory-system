@@ -22,8 +22,6 @@ describe('HandlebarsTemplateRendererAdapter', () => {
   });
 
   it('HTML-escapes a context value through {{ }} (the security default)', () => {
-    // The template source is trusted, but the *context* is data: a name carrying
-    // markup must be escaped, never emitted raw. `{{ }}` escapes &, <, >, ", ', `, =.
     const output = renderer.render('Hi {{name}}', {
       name: '<script>alert(1)</script>',
     });

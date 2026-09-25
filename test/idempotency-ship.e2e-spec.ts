@@ -11,16 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Idempotent Ship Fulfillment (ADR-036). A ship with an `Idempotency-Key`, replayed with the
-// same key + body, returns the stored `FulfillmentView` (HTTP 200 + `Idempotent-Replay: true`)
-// BEFORE the ship's side effects — no second shipment, no second capture, and no second
-// `commit-sale`. The observable oracle is the inventory ledger: shipping commits the sale
-// asynchronously as exactly ONE strictly-negative `sale` `StockMovement` keyed on
-// `(reference_type='fulfillment', reference_id=fulfillmentId)`; a replay must leave that at
-// one. Two layers guarantee it — the store replay short-circuits before `commit-sale`, and
-// `commit-sale` is itself `fulfillmentId`-idempotent (`existsByReference`) as the backstop.
-//
-// Self-provisioned, disjoint fixture (`e2e-idem-ship-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -163,8 +153,6 @@ describe('Idempotent Ship Fulfillment: replay does not re-ship or re-commit-sale
   const saleMovements = async (variant: number): Promise<IMovementBody[]> =>
     (await listMovements(variant)).filter((m) => m.type === 'sale');
 
-  // commit-sale runs AFTER the ship commits (post-commit, retry-then-log), so the sale
-  // movement lands asynchronously — poll for it.
   const waitForSaleMovement = async (variant: number, deadlineMs = 20_000): Promise<void> => {
     const start = Date.now();
     while ((await saleMovements(variant)).length === 0) {
@@ -287,7 +275,6 @@ describe('Idempotent Ship Fulfillment: replay does not re-ship or re-commit-sale
     expect(res.headers['idempotent-replay']).toBeUndefined();
     expect((res.body as IFulfillmentBody).status).toBe('shipped');
 
-    // Ship-triggered capture flipped the payment axis.
     const fresh = (await server().get(`/api/orders/${order.id}`).set('Authorization', adminAuth))
       .body as IOrderBody;
     expect(fresh.paymentStatus).toBe('captured');
@@ -310,7 +297,6 @@ describe('Idempotent Ship Fulfillment: replay does not re-ship or re-commit-sale
   });
 
   it('no second sale movement and no re-capture after the replay', async () => {
-    // Settle so a (wrong) second commit-sale would have landed before the count.
     await settleTimestampRounding();
     const sales = await saleMovements(variantId);
     expect(sales).toHaveLength(1);
@@ -318,7 +304,6 @@ describe('Idempotent Ship Fulfillment: replay does not re-ship or re-commit-sale
     const fresh = (await server().get(`/api/orders/${order.id}`).set('Authorization', adminAuth))
       .body as IOrderBody;
     expect(fresh.fulfillmentStatus).toBe('shipped');
-    // The capture timestamp is unchanged — the replay took no money a second time.
     expect(fresh.payment?.capturedAt).toBe(capturedAtAfterShip);
   });
 });

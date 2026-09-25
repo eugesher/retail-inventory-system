@@ -16,14 +16,6 @@ import { loadOwnedCart } from './cart-access';
 import { toCartView } from './cart-view.factory';
 import { assertCartVersion, runWithCartWriteRetry } from './cart-write';
 
-// Drops a line from the cart. An unknown line id is a 404
-// (`CART_LINE_NOT_FOUND`). The repository reconciles the removed row away inside
-// the save transaction. After a successful save the use case releases the line's
-// stock hold against the inventory reservation surface (ADR-030) — **best-effort**
-// (try/warn/swallow): the cart write is the primary outcome, so a failed release
-// (which merely over-holds stock until the reservation's TTL lapses and the inventory sweeper
-// releases it — ADR-038) never fails the remove. After save the use case also emits the
-// reserved `retail.cart.line-removed` wire event (best-effort post-commit).
 @Injectable()
 export class RemoveFromCartUseCase {
   constructor(
@@ -44,19 +36,12 @@ export class RemoveFromCartUseCase {
 
     this.logger.info({ correlationId, cartId, lineId }, 'Removing line from cart');
 
-    // OCC (ADR-036): read-version → mutate → version-checked persist, inside the
-    // bounded retry (single attempt when the client pinned `If-Match`). The
-    // best-effort release runs AFTER the confirmed removal, outside the loop, so a
-    // retried attempt never double-releases.
     const { saved, occurredAt, variantId } = await runWithCartWriteRetry(
       { logger: this.logger, maxAttempts: expectedVersion !== undefined ? 1 : this.maxAttempts },
       async () => {
         const cart = await loadOwnedCart(this.repository, cartId, customerId);
         assertCartVersion(cart, expectedVersion);
 
-        // Capture the line's `variantId` BEFORE `removeLine` drops it (the release
-        // selector needs it). `removeLine` throws `CART_LINE_NOT_FOUND` when the
-        // line is missing, so a failed lookup never reaches the release below.
         const removedVariantId = cart.lines.find((line) => line.id === lineId)?.variantId;
         const versionAtLoad = cart.version;
         cart.removeLine(lineId);
@@ -70,9 +55,6 @@ export class RemoveFromCartUseCase {
       { cartId, correlationId },
     );
 
-    // Best-effort release: the line is gone, so return its held units to
-    // `available`. A failure here is warn-logged and swallowed — never fails the
-    // remove (the over-hold is reclaimable via release/TTL).
     if (variantId !== undefined) {
       try {
         await this.inventory.releaseStock({

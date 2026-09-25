@@ -11,18 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// The same-key / different-body rejection (ADR-036). An `Idempotency-Key` is a promise that
-// the request is a retry of ONE logical operation — reusing it with a DIFFERENT body is a
-// client bug, not a replay. The store fingerprints the canonical body (canonical-JSON +
-// SHA-256) and, on a key hit whose stored fingerprint differs, rejects with `422
-// ORDER_IDEMPOTENCY_KEY_REUSED` BEFORE any side effect — no second order, no allocate, no
-// emit. The check runs on the fingerprint first, so it fires even though the first place
-// already converted the cart.
-//
-// Also pins the missing-key backstop: a place with NO `Idempotency-Key` is `400
-// IDEMPOTENCY_KEY_REQUIRED` at the gateway edge (the `@IdempotencyKey()` decorator).
-//
-// Self-provisioned, disjoint fixture (`e2e-idem-diff-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -245,8 +233,6 @@ describe('Idempotency: same key + different body → 422 (e2e)', () => {
   });
 
   it('reusing the key with a DIFFERENT body is rejected 422 ORDER_IDEMPOTENCY_KEY_REUSED', async () => {
-    // Same key, but `paymentMethod` differs — part of the canonical body, so the fingerprint
-    // no longer matches. The store rejects before any side effect.
     const res = await server()
       .post(`/api/cart/${cartId}/place`)
       .set('Authorization', `Bearer ${customerToken}`)
@@ -258,7 +244,6 @@ describe('Idempotency: same key + different body → 422 (e2e)', () => {
   });
 
   it('the same key with the SAME body still replays the original order (200 + Idempotent-Replay)', async () => {
-    // The rejection above did not poison the key — an honest retry (same body) still replays.
     const res = await server()
       .post(`/api/cart/${cartId}/place`)
       .set('Authorization', `Bearer ${customerToken}`)

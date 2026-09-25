@@ -1,9 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-// Destructive on the `user` table by design — the identity split separates
-// StaffUser (admin/catalog-manager/warehouse-staff/order-support) from
-// Customer. Dropping `user` is permitted because
-// nothing in the application depends on its preserved rows.
 export class RenameUserToStaffUserAndDropRolesArray1779901877394 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query('DROP TABLE user;');

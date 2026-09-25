@@ -26,7 +26,6 @@ export class LogoutUseCase {
   ) {}
 
   public async execute(command: ILogoutCommand): Promise<void> {
-    // Both subject kinds share `/auth/logout`, so resolve staff-then-customer.
     const resolved = await resolveAuthSubject(this.staff, this.customers, command.userId);
     if (!resolved) {
       throw new NotFoundException('User not found');

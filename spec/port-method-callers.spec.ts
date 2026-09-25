@@ -1,44 +1,3 @@
-// Every method on an `application/ports/` interface has a PRODUCTION caller — the result ADR-049
-// reached by hand, turned into a check that goes red.
-//
-// **ADR-049 left this open in as many words:** *"Nothing enforces this. A port method with no caller
-// is not a lint error and cannot easily become one — `boundaries` reasons about imports, not about
-// call graphs. The check is a script, run when someone thinks to run it, which is precisely how the
-// eight accumulated."* The script was never committed. This file is that script, with the one
-// property a script lacks: it runs on every `yarn test:unit` whether anyone thinks of it or not.
-//
-// **Why it is not an ESLint rule.** ESLint's unit of work is one file: a rule sees one AST, results
-// are cached per file, and an editor relints only the file that changed. "Nothing calls this method"
-// is a property of the WHOLE program — deleting the last call in file B changes the verdict for the
-// port in file A, and file A is never relinted. `boundaries` can police an import because an import
-// is visible in the importing file; the absence of a caller is visible in no file at all. The
-// dead-export tools (`ts-prune`, `knip`) answer a different question — an unused *export* — and a
-// port interface is always exported and always used; it is its *members* that go dead.
-//
-// **What counts as a caller**, and each rule is a way the eight looked alive while being dead:
-//
-//   * a property access `x.method` on anything but a bare `this` — so a use case's
-//     `this.repository.save(...)` counts, and an adapter calling ITS OWN implementation
-//     (`this.get(...)` inside `StockCache`, `getOrLoad`'s caller of `get`/`set`) does not;
-//   * in a file under `apps/`, outside `spec/`, `*.spec.ts` and `*.e2e-spec.ts` — a test that
-//     drives a port method directly is arrangement, not a contract (ADR-049 §1 — the nine cache
-//     tests that called `get`/`set` were what made the hole comfortable);
-//   * the implementing class's declaration and an object-literal double are definitions, not calls,
-//     and are ignored by construction (their parent is not a property access).
-//
-// TypeScript's own find-references does the resolution, so a call through an implementing class's
-// type (`stockCache.getOrLoad` on a `StockCache`) is attributed to the port member exactly as a call
-// through the interface is.
-//
-// **Blind spots, stated so nobody trusts it further than it earns.** An element access
-// (`repo['save']()`) and a destructured method (`const { save } = repo`) are not recognised — both
-// surface as a false RED, which is the safe direction; write the call plainly. A call from dead code
-// still counts: this proves a caller exists, not that the caller is reachable.
-//
-// **A red build has two honest answers:** delete the method from the port, its adapter and its spec
-// (ADR-049 §2), or — when the adapter genuinely needs it internally — make it private on the adapter
-// (ADR-049 §1). Adding an allowlist to make it green is the ADR-053 failure in a new shape.
-
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
@@ -48,12 +7,6 @@ const ROOT = path.resolve(__dirname, '..');
 const PORT_FILE = /^apps\/([^/]+)\/src\/modules\/[^/]+\/application\/ports\//;
 const TEST_FILE = /(^|\/)spec\/|\.spec\.ts$|\.e2e-spec\.ts$/;
 
-// **The detector proves it can fail before its verdict on the real tree is believed.** A scan that
-// resolved no references would report every method uncalled (loudly red — fine); a scan that
-// mistook a definition for a call would report nothing, and a suite of green `[]`s would guard
-// nothing. So the same program also holds an in-memory module — never written to disk, never seen by
-// Jest or the linter — with one member for each rule above, and the first test pins exactly which of
-// them the scan reports.
 const FIXTURE_APP = '__port-callers-fixture__';
 const FIXTURE_MODULE = `apps/${FIXTURE_APP}/src/modules/fixture`;
 const FIXTURE_FILES = new Map<string, string>([
@@ -100,9 +53,7 @@ const FIXTURE_FILES = new Map<string, string>([
 
 interface IUncalledMember {
   app: string;
-  // `IStockCachePort.get`
   member: string;
-  // `apps/…/stock-cache.port.ts:73` — where to go to delete it.
   location: string;
 }
 
@@ -115,9 +66,6 @@ interface IScanResult {
 const toRelative = (fileName: string): string =>
   path.relative(ROOT, fileName).split(path.sep).join('/');
 
-// A language service over the SAME `tsconfig.json` the build uses — its `paths` resolve the
-// `@retail-inventory-system/*` aliases, and with no `include` it takes every `.ts` under the root —
-// plus the in-memory fixture files layered on top.
 function createLanguageService(virtualFiles: ReadonlyMap<string, string>): ts.LanguageService {
   const { config, error } = ts.readConfigFile(path.join(ROOT, 'tsconfig.json'), (file) =>
     ts.sys.readFile(file),
@@ -131,10 +79,6 @@ function createLanguageService(virtualFiles: ReadonlyMap<string, string>): ts.La
   const readFile = (fileName: string): string | undefined =>
     virtual.get(fileName) ?? ts.sys.readFile(fileName);
 
-  // **Module resolution skips every candidate whose directory does not exist**, so the fixture's
-  // directories have to exist as well. Without this its relative imports resolve to nothing, the
-  // use case's `repository` is an error type, and every call in it is invisible — which is exactly how
-  // this suite's own first test caught it.
   const virtualDirectories = new Set<string>();
   for (const file of virtual.keys()) {
     for (let dir = path.dirname(file); dir.length > ROOT.length; dir = path.dirname(dir)) {
@@ -145,7 +89,6 @@ function createLanguageService(virtualFiles: ReadonlyMap<string, string>): ts.La
   const host: ts.LanguageServiceHost = {
     getCompilationSettings: () => parsed.options,
     getScriptFileNames: () => [...parsed.fileNames, ...virtual.keys()],
-    // Nothing is edited during the run, so every file is at one version for its whole life.
     getScriptVersion: () => '1',
     getScriptSnapshot: (fileName) => {
       const text = readFile(fileName);
@@ -164,8 +107,6 @@ function createLanguageService(virtualFiles: ReadonlyMap<string, string>): ts.La
   return ts.createLanguageService(host, ts.createDocumentRegistry());
 }
 
-// A method signature, or a property whose declared type is a function — the two ways a port member
-// can be something you call.
 function isCallableMember(
   member: ts.TypeElement,
 ): member is ts.MethodSignature | ts.PropertySignature {
@@ -177,8 +118,6 @@ function isCallableMember(
   );
 }
 
-// The chain of nodes from the file down to the token at `position`. Walked with `forEachChild`
-// rather than read back through `node.parent`, so it does not depend on the binder having set parents.
 function nodeChainAt(sourceFile: ts.SourceFile, position: number): ts.Node[] {
   const chain: ts.Node[] = [];
   let current: ts.Node | undefined = sourceFile;
@@ -234,7 +173,6 @@ function scanPorts(service: ts.LanguageService): IScanResult {
         continue;
       }
 
-      // Overloads share a name, and one find-references covers them all.
       const seen = new Set<string>();
       for (const member of statement.members) {
         if (
@@ -271,8 +209,6 @@ function scanPorts(service: ts.LanguageService): IScanResult {
 describe('port methods have a production caller (ADR-049)', () => {
   let scan: IScanResult;
 
-  // One program over the whole repository, built once. It is the expensive part — every test below
-  // only reads its result.
   beforeAll(() => {
     scan = scanPorts(createLanguageService(FIXTURE_FILES));
   }, 300_000);
@@ -291,8 +227,6 @@ describe('port methods have a production caller (ADR-049)', () => {
     ]);
   });
 
-  // A `PORT_FILE` pattern that silently stopped matching one service would leave that service's ports
-  // unguarded while the last test stayed green. The app list comes from the disk, not from a copy.
   it('scans the ports of every app under apps/', () => {
     const apps = fs
       .readdirSync(path.join(ROOT, 'apps'), { withFileTypes: true })

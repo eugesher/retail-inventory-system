@@ -20,23 +20,10 @@ import {
   IProductPage,
 } from '../../ports';
 
-// Jest-free so the production build (which `tsconfig.app.json` excludes
-// `*.spec.ts` but not `test-doubles.ts`) stays clean.
-
-// In-memory catalog repository. `save` mimics the TypeORM repository's
-// post-commit re-read: it assigns concrete ids to the product and every variant
-// and returns a reconstituted aggregate, so the use case can read the concrete
-// `variantId` back (ADR-025). `slugTaken` / `skuTaken` flip the uniqueness
-// pre-checks the write use cases run.
 export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
   public readonly saved: Product[] = [];
   public slugTaken = false;
   public skuTaken = false;
-  // Stands in for the shared `product_categories` table the real adapter reads
-  // via the membership subselect — `categoryId → product ids`. The browse spec
-  // seeds it with `attachProductToCategory`. `listByCategoryCalls` records each
-  // resolved id set the use case asked for (so a spec can assert
-  // `includeDescendants` expanded the scope to the subtree ids).
   public readonly categoryMembership = new Map<number, Set<number>>();
   public readonly listByCategoryCalls: number[][] = [];
 
@@ -126,7 +113,6 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
           product.slug.toLowerCase().includes(needle),
       );
     }
-    // Newest first — mirror the real adapter's `ORDER BY Product.id DESC`.
     matched.sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
 
     const total = matched.length;
@@ -135,8 +121,6 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
     return Promise.resolve({ items, total, page, size });
   }
 
-  // Test seam: associate a (seeded) product with a category id, mirroring a
-  // `product_categories` row.
   public attachProductToCategory(productId: number, categoryId: number): void {
     const members = this.categoryMembership.get(categoryId) ?? new Set<number>();
     members.add(productId);
@@ -147,9 +131,6 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
     const { categoryIds, page, size } = query;
     this.listByCategoryCalls.push([...categoryIds]);
 
-    // Union the members of every requested category, dedup (a product in two of
-    // the ids appears once — the real adapter's implicit DISTINCT), keep only
-    // active products, newest-first by id.
     const productIds = new Set<number>();
     for (const categoryId of categoryIds) {
       for (const productId of this.categoryMembership.get(categoryId) ?? []) {
@@ -170,12 +151,6 @@ export class InMemoryCatalogRepository implements ICatalogRepositoryPort {
   }
 }
 
-// In-memory active-price probe. By default every variant is treated as priced
-// (empty `unpriced` set), so the happy publish path proceeds. Add a variant id to
-// `unpriced` to simulate a variant with no in-effect price; the probe then
-// reports it as missing — mirroring the real adapter's "diff requested ids
-// against the priced set" semantics. `calls` records each invocation so a spec
-// can assert the probe received the default currency and the right variant ids.
 export class InMemoryActivePriceProbe implements IActivePriceProbePort {
   public readonly unpriced = new Set<number>();
   public readonly calls: { variantIds: number[]; currency: string }[] = [];
@@ -222,25 +197,11 @@ export class InMemoryCatalogEventsPublisher implements ICatalogEventsPublisherPo
   }
 }
 
-// In-memory Category repository. `save` mimics the TypeORM repository's
-// post-commit re-read: it assigns a concrete id and returns a reconstituted
-// aggregate, so the create use case reads the concrete `categoryId` back. `seed`
-// preloads a persisted category (e.g. a parent or a reparent target). `existsBySlug`
-// honours an explicit `slugTaken` override (so a spec can force the duplicate-slug
-// path) on top of the seeded rows. `reparentSubtree` RECORDS its arguments in
-// `reparentCalls` (the use-case spec asserts it received the recomputed aggregate +
-// the captured `oldPath`) and returns the configurable `reparentReturnCount` — the
-// single-transaction rebase itself is the real repository's concern, locked by its
-// own spec, so the double only needs to surface the count.
 export class InMemoryCategoryRepository implements ICategoryRepositoryPort {
   public slugTaken = false;
   public reparentReturnCount = 0;
   public readonly saved: Category[] = [];
   public readonly reparentCalls: { category: Category; oldPath: string }[] = [];
-  // Stands in for the `product_categories` join table — `productId → category
-  // ids`. The Set makes `attach` naturally idempotent (re-adding a member is a
-  // no-op, the `INSERT IGNORE` semantics) and `detach` of an absent member a
-  // silent no-op (the `DELETE` semantics).
   public readonly productCategories = new Map<number, Set<number>>();
 
   private readonly store = new Map<number, Category>();
@@ -296,8 +257,6 @@ export class InMemoryCategoryRepository implements ICategoryRepositoryPort {
     if (opts.activeOnly) {
       matched = matched.filter((category) => category.isActive());
     }
-    // `sortOrder ASC, name ASC` — mirrors the real adapter's ORDER BY for the flat
-    // list read (the store-front navigation order).
     matched.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
     return Promise.resolve(matched);
   }
@@ -350,17 +309,6 @@ export class InMemoryCategoryRepository implements ICategoryRepositoryPort {
   }
 }
 
-// In-memory MediaAsset repository. `save` mimics the TypeORM repository's
-// post-commit re-read: it assigns a concrete id and returns a reconstituted
-// aggregate, so the attach use case reads the concrete `mediaId` back. `seed`
-// preloads a persisted asset. `maxSortOrder` mirrors the real adapter's
-// `MAX(sort_order)` across ALL rows (archived included), so the attach defaulting
-// spec can assert a detached row's slot is still counted into the max.
-// `reorder` RECORDS its arguments in `reorderCalls` (the reorder spec asserts it
-// is called exactly once on a valid permutation and never on a mismatch) and
-// re-slots the affected rows by array index before returning the refreshed active
-// list — the single-transaction mechanics are the real repository's concern,
-// locked by its own spec.
 export class InMemoryMediaAssetRepository implements IMediaAssetRepositoryPort {
   public readonly saved: MediaAsset[] = [];
   public readonly reorderCalls: {
@@ -413,7 +361,6 @@ export class InMemoryMediaAssetRepository implements IMediaAssetRepositoryPort {
     if (opts?.activeOnly) {
       matched = matched.filter((media) => media.isActive());
     }
-    // `sortOrder ASC, id ASC` — mirrors the real adapter's ORDER BY.
     matched.sort((a, b) => a.sortOrder - b.sortOrder || (a.id ?? 0) - (b.id ?? 0));
     return Promise.resolve(matched);
   }
@@ -431,10 +378,6 @@ export class InMemoryMediaAssetRepository implements IMediaAssetRepositoryPort {
     orderedIds: number[],
   ): Promise<MediaAsset[]> {
     this.reorderCalls.push({ ownerType, ownerId, orderedIds: [...orderedIds] });
-    // Re-slot each affected row by reconstituting it at its array index — the same
-    // "the row's column changed" simulation `save` uses, so the fake never depends
-    // on a domain mutator the production SQL reorder path doesn't (the real adapter
-    // UPDATEs the `sort_order` column directly).
     orderedIds.forEach((id, index) => {
       const existing = this.store.get(id);
       if (existing) {
@@ -456,10 +399,6 @@ export class InMemoryMediaAssetRepository implements IMediaAssetRepositoryPort {
     return this.listByOwner(ownerType, ownerId, { activeOnly: true });
   }
 
-  // Mirrors the real adapter's owner-pair tuple IN-list existence probe: true
-  // when ANY of the pairs has an active asset. Used by the publish soft-warning
-  // spec — empty store / archived-only owners report `false`, an active asset on
-  // the product OR any variant reports `true`.
   public hasActiveForOwners(
     owners: { ownerType: MediaOwnerTypeEnum; ownerId: number }[],
   ): Promise<boolean> {

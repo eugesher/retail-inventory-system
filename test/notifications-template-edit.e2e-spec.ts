@@ -16,18 +16,6 @@ import {
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Authoring a new template version takes effect on the next event (ADR-033 — newest active
-// version wins). Staff author a v2 of the `retail.order.placed` template over the gateway
-// (`POST /api/notifications/templates`, `notifications:write`) with a body carrying a unique
-// marker; then a customer places an order; the resulting delivery's `renderedBody` reflects
-// the v2 body, not the seeded v1 — proving the version-bump-and-resolve path end to end.
-//
-// The v2 body deliberately KEEPS `{{orderNumber}}` (a superset of the seeded body), so the
-// place-order suite's "body contains the order number" assertion still holds regardless of
-// which suite runs first (e2e runs in-band/serial, but the body stays compatible either way).
-//
-// Asserted through PUBLIC STATE — the gateway delivery audit query filtered to this order's
-// reference — never an event spy. Self-provisioned, disjoint fixture (`e2e-notif-edit-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -73,7 +61,6 @@ describe('Notifications — template edit takes effect on the next order (e2e)',
   let dataSource: InventoryAutoInitE2ESpecDataSource;
 
   const stamp = Date.now();
-  // A per-run marker that only the v2 body carries — proof the new version rendered.
   const V2_MARKER = `V2-EDIT-${stamp}`;
   let adminAuth: string;
   let customerToken: string;
@@ -272,7 +259,6 @@ describe('Notifications — template edit takes effect on the next order (e2e)',
       });
     expect(res.status).toBe(HttpStatus.CREATED);
     const template = res.body as NotificationTemplateView;
-    // A fresh version appended on top of the seeded v1 (newest active wins).
     expect(template.version).toBeGreaterThanOrEqual(2);
     expect(template.active).toBe(true);
   });
@@ -300,15 +286,11 @@ describe('Notifications — template edit takes effect on the next order (e2e)',
 
     const delivery = await waitForSentOrderDelivery(order.id);
 
-    // The body reflects the v2 marker — not the seeded v1 body — and still carries the
-    // order number (the superset that keeps the place-order suite robust).
     expect(delivery.renderedBody).toContain(V2_MARKER);
     expect(delivery.renderedBody).toContain(order.orderNumber);
     expect(delivery.renderedSubject).toContain('(v2)');
   });
 
-  // `GET /api/notifications/deliveries/:id` — the single-row read beside the paginated
-  // trail. It is the only route that surfaces `renderedBody` for one delivery by id.
   describe('GET /api/notifications/deliveries/:id — single delivery read', () => {
     it('reads back the delivery the placed order produced, rendered body included', async () => {
       const listed = await waitForSentOrderDelivery(order.id);
@@ -334,12 +316,6 @@ describe('Notifications — template edit takes effect on the next order (e2e)',
     });
   });
 
-  // The staff registry browse + the rollback lever. Both are `notifications:write`.
-  //
-  // The fixture is pinned to an **unused locale** (`en-GB`): rendering resolves a template
-  // by `(eventType, channel, locale)` and every consumer passes the `en-US` default, so
-  // authoring — and later deactivating — this version cannot perturb any other suite's
-  // rendered output, even though all e2e suites share one database.
   describe('GET /api/notifications/templates + PATCH templates/:id/active', () => {
     const ISOLATED_LOCALE = 'en-GB';
     let isolatedTemplateId: number;
@@ -383,8 +359,6 @@ describe('Notifications — template edit takes effect on the next order (e2e)',
       expect(off.status).toBe(HttpStatus.OK);
       expect((off.body as NotificationTemplateView).active).toBe(false);
 
-      // The registry browse returns every version, active or not — the deactivated row
-      // is still listed, which is what makes it recoverable.
       const listed = await server()
         .get('/api/notifications/templates')
         .query({ eventType: 'retail.order.placed', channel: 'email', locale: ISOLATED_LOCALE })

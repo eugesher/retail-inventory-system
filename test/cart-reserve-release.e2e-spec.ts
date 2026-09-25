@@ -11,26 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// The cart reserve/release path end-to-end (ADR-030). Add-to-Cart and
-// Change-Quantity reserve the line's ABSOLUTE target quantity against
-// `inventory.reservation.reserve` BEFORE the cart is saved; Remove-from-Cart
-// releases the hold AFTER save, best-effort. There is deliberately no reservation
-// read API, so every hold is observed indirectly through the public stock read:
-// while a hold is active `totalAvailable` drops but `totalOnHand` is untouched
-// (a reservation never moves on-hand — only allocation/receive/adjust do).
-//
-// Self-provisioned, disjoint fixtures: this suite registers its OWN priced +
-// published variants and `receive`s exactly the stock each scenario needs, so it
-// never burns the shared seeded variants 1-4 the other suites read. The slug/SKU
-// family is `e2e-cart-rr-*` and each variant gets its own product.
-//
-// Out of scope, and the reason is worth stating precisely, because it is not the obvious one.
-// A cart-*abandonment* release-all scenario is not testable end-to-end — **not because nothing
-// abandons a cart** (a customer erasure does, ADR-037) but because **abandoning a cart releases
-// nothing**. The erasure flips `status = 'abandoned'` in raw SQL and makes no inventory call at
-// all, so the holds simply stay until their TTL lapses and the reservation sweeper reclaims them
-// (ADR-038). There is no abandonment→release codepath for an e2e to drive. The release-all-by-cart
-// codepath is unit-locked inventory-side instead (`release-reservation.use-case.spec.ts`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -87,7 +67,6 @@ describe('Cart reserve / release through the public stock read (e2e)', () => {
   let adminAuth: string;
   let customerToken: string;
 
-  // Provisioned in beforeAll: variant A (on-hand 10) and variant B (on-hand 10).
   let variantA: number;
   let variantB: number;
 
@@ -103,17 +82,9 @@ describe('Cart reserve / release through the public stock read (e2e)', () => {
     return (body as ITokenResponse).accessToken;
   };
 
-  // TIMESTAMP(0) rounding on `price.valid_from`: a freshly-set immediate price can
-  // round *up* one second into the future, which both the publish precondition and
-  // the Add-to-Cart price snapshot (`asOf = now`) would read as "no active price".
-  // Waiting just over a second lets that rounded second elapse.
   const settleTimestampRounding = (): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, 1_500));
 
-  // Poll the DB until the catalog.variant.created consumer has created the zeroed
-  // stock_level row. Receiving before the consumer runs could race a duplicate
-  // INSERT on the UNIQUE (variant_id, stock_location_id) — the established
-  // auto-init convention (inventory-receive-and-adjust.e2e-spec.ts).
   const waitForStockRow = async (variantId: number, deadlineMs = 20_000): Promise<void> => {
     const start = Date.now();
     while ((await dataSource.getStockLevelRows(variantId)).length === 0) {
@@ -124,8 +95,6 @@ describe('Cart reserve / release through the public stock read (e2e)', () => {
     }
   };
 
-  // Register a fresh product + variant + USD price, publish it, wait for auto-init,
-  // then receive `onHand` at default-warehouse. Returns the new variant id.
   const provisionVariant = async (label: string, onHand: number): Promise<number> => {
     const productRes = await server()
       .post('/api/catalog/products')
@@ -172,8 +141,6 @@ describe('Cart reserve / release through the public stock read (e2e)', () => {
     return body as IVariantStockBody;
   };
 
-  // The default-warehouse slice of a variant's availability (the only location
-  // this suite stocks). Falls back to a zeroed level if the row is absent.
   const warehouseLevel = async (variantId: number): Promise<IStockLevelBody> => {
     const stock = await readStock(variantId);
     return (
@@ -286,7 +253,6 @@ describe('Cart reserve / release through the public stock read (e2e)', () => {
         .set('Authorization', `Bearer ${customerToken}`)
         .send({ variantId: variantA, quantity: 2 });
 
-      // Add-to-Cart returns 200 (the gateway route is @HttpCode(OK)), not 201.
       expect(add.status).toBe(HttpStatus.OK);
       lineId = (add.body as ICartBody).lines[0].id;
 
@@ -366,8 +332,6 @@ describe('Cart reserve / release through the public stock read (e2e)', () => {
         .set('Authorization', `Bearer ${customerToken}`);
       expect(remove.status).toBe(HttpStatus.OK);
 
-      // A returns to full; B's hold is untouched (per-line release keys on the
-      // line's variant, not the whole cart).
       expect((await warehouseLevel(variantA)).available).toBe(10);
       const levelB = await warehouseLevel(variantB);
       expect(levelB.quantityReserved).toBe(3);
@@ -398,13 +362,11 @@ describe('Cart reserve / release through the public stock read (e2e)', () => {
       expect(body.code).toBe('INVENTORY_OUT_OF_STOCK');
       expect(body.details?.available).toBe(10);
 
-      // Reserve-before-save: a rejected reserve never mutates the cart.
       const cart = await server()
         .get(`/api/cart/${cartId}`)
         .set('Authorization', `Bearer ${customerToken}`);
       expect((cart.body as ICartBody).lines).toEqual([]);
 
-      // And the rejected add held nothing — available is unchanged.
       expect((await warehouseLevel(variantA)).available).toBe(10);
     });
   });

@@ -9,8 +9,6 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
-// Seeded customer (scripts/test-db-seed.ts). The seeded USD price of variant 1 is
-// 4999 minor units (price.sql), which Add-to-Cart snapshots onto the line.
 const CUSTOMER_EMAIL = 'customer@example.com';
 const CUSTOMER_PASSWORD = 'customer1234';
 const SEEDED_VARIANT_ID = 1;
@@ -40,8 +38,6 @@ interface ICartBody {
   subtotalMinor: number;
 }
 
-// A fresh second customer per run so the cross-owner 403 assertion never collides
-// with a prior run's rows.
 const secondCustomerEmail = (): string =>
   `cart-buyer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
 
@@ -51,8 +47,6 @@ describe('Cart operations (e2e)', () => {
   let apiGatewayApp: INestApplication;
   let retailMicroservice: INestMicroservice;
   let catalogMicroservice: INestMicroservice;
-  // The cart write path now reserves stock on add/change, so the inventory
-  // microservice must be up to serve `inventory.reservation.*` on inventory_queue.
   let inventoryMicroservice: INestMicroservice;
 
   const login = async (email: string, password: string): Promise<string> => {

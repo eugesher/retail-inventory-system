@@ -13,23 +13,6 @@ import { PAYMENT_GATEWAY } from '../apps/retail-microservice/src/modules/orders/
 import type { IPaymentGatewayPort } from '../apps/retail-microservice/src/modules/orders/application/ports';
 import { CaptureClaimE2ESpecDataSource } from './data-source/capture-claim.e2e-spec.data-source';
 
-// THE proof for ISSUE-05 + ISSUE-07 (ADR-052): **one authorization is charged at most once, even when
-// two callers race to charge it.**
-//
-// Two code paths call `paymentGateway.capture(payment.gatewayReference)` — the explicit
-// `POST /payments/capture` and the ship-triggered capture inside `POST /fulfillments/:id/ship`. Both
-// used to check `payment.status === AUTHORIZED` on an **unlocked** read and then charge. Two of them
-// could pass that check at the same instant, both charge the processor, and the loser would throw
-// `PAYMENT_INVALID_STATUS_TRANSITION` and roll its transaction back — reporting correct STATE while
-// the money had moved twice. **A rollback cannot un-call a payment gateway.**
-//
-// **The bound `FakePaymentGatewayAdapter` always approves and never moves money, so NO ASSERTION ON
-// AN OUTCOME CAN SEE AN OVERCHARGE.** The database would look perfect either way: one `captured`
-// payment, one clean 409. That is precisely why this defect survived a green test suite. So the spec
-// spies on the port and **counts the calls** — the only observable that distinguishes "charged once"
-// from "charged twice and tidied up afterwards".
-//
-// Against the parent commit the first scenario records **two** calls. That is the whole finding.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -135,7 +118,6 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
     return variant;
   };
 
-  // A placed order, authorized-on-place: `payment.status = 'authorized'`, nothing captured yet.
   const placeOrder = async (label: string): Promise<number> => {
     const cartRes = await server()
       .post('/api/cart')
@@ -174,8 +156,6 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
     return (res.body as { id: number }).id;
   };
 
-  // Fire a request and capture its outcome WITHOUT throwing on a non-2xx — the loser's 409 is an
-  // expected result here, not an error.
   const fire = async (label: string, request: supertest.Test): Promise<IOutcome> => {
     const res = await request;
     return { label, status: res.status, body: res.body as Record<string, unknown> };
@@ -233,8 +213,6 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
     );
     await apiGatewayApp.init();
 
-    // **The instrument.** The bound gateway never moves money, so the call COUNT is the only thing
-    // that can tell a single charge from a double one. Spy, do not stub: the real adapter still runs.
     const gateway = retailMicroservice.get<IPaymentGatewayPort>(PAYMENT_GATEWAY, { strict: false });
     captureSpy = jest.spyOn(gateway, 'capture');
 
@@ -260,14 +238,12 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
 
   beforeEach(() => captureSpy.mockClear());
 
-  // ═══ THE TEST THE WHOLE TASK EXISTS FOR ═══
   it(
     'a ship and an explicit capture, in flight at once, charge the gateway EXACTLY ONCE',
     async () => {
       const orderId = await placeOrder('race');
       const fulfillmentId = await createFulfillment(orderId);
 
-      // Both in flight. Both used to pass an unlocked `AUTHORIZED` check and reach the processor.
       const outcomes = await Promise.all([
         fire(
           'capture',
@@ -287,27 +263,20 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
         ),
       ]);
 
-      // **The assertion.** One authorization, one charge. On the parent commit this is 2.
       expect(captureSpy).toHaveBeenCalledTimes(1);
 
-      // Winner-agnostic: exactly one may fail, and if one did it must be a clean 409 — a refusal
-      // raised BEFORE the gateway, not a 500 and not a rollback after the money moved.
       const failures = outcomes.filter((o) => o.status >= 400);
       expect(failures.length).toBeLessThanOrEqual(1);
       for (const failure of failures) {
         expect(failure.status).toBe(HttpStatus.CONFLICT as number);
       }
 
-      // The money is recorded exactly once, and the claim is resolved — no row left `capturing`.
       const payment = await dataSource.getPayment(orderId);
       expect(payment?.status).toBe(PaymentStatusEnum.CAPTURED);
     },
     timeout,
   );
 
-  // ISSUE-05's second victim: a cancel that lands mid-capture used to void an authorization whose
-  // money was already gone — customer charged, order cancelled, row reading `voided`, and nothing in
-  // the system aware there was anything to reconcile.
   it(
     'a cancel racing a ship never leaves money captured against a cancelled order',
     async () => {
@@ -335,28 +304,23 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
       const shipped = outcomes.find((o) => o.label === 'ship')!.status < 400;
       const cancelled = outcomes.find((o) => o.label === 'cancel')!.status < 400;
 
-      // They cannot both win: one of the two must be refused.
       expect(shipped && cancelled).toBe(false);
 
       const payment = await dataSource.getPayment(orderId);
       if (shipped) {
-        // The ship won: the money moved exactly once and the cancel was refused.
         expect(captureSpy).toHaveBeenCalledTimes(1);
         expect(payment?.status).toBe(PaymentStatusEnum.CAPTURED);
       } else {
-        // The cancel won — then the gateway must NEVER have been called. **This is the impossible state
-        // made impossible:** money captured against an order that is cancelled and unshipped.
         expect(captureSpy).not.toHaveBeenCalled();
         expect(payment?.status).toBe(PaymentStatusEnum.VOIDED);
       }
-      // Either way, no claim is left dangling.
       expect(payment?.status).not.toBe(PaymentStatusEnum.CAPTURING);
     },
     timeout,
   );
 
   it(
-    'a sequential second capture is idempotent and does not re-charge',
+    'a sequential second capture under a fresh Idempotency-Key is idempotent by payment state and does not re-charge',
     async () => {
       const orderId = await placeOrder('idem');
 
@@ -368,8 +332,6 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
       expect(first.status).toBe(HttpStatus.OK);
       expect(captureSpy).toHaveBeenCalledTimes(1);
 
-      // A FRESH idempotency key, so the request-level replay guard does not fire — this is the natural
-      // payment-state idempotency, and it must not reach the gateway either.
       const second = await server()
         .post(`/api/orders/${orderId}/payments/capture`)
         .set('Authorization', adminAuth)
@@ -381,8 +343,6 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
     timeout,
   );
 
-  // ISSUE-09, on the same route: `amountMinor` used to be accepted and silently ignored — a client
-  // asking to capture 10.00 was charged the full total and got a 200 that contradicted nothing.
   it(
     'rejects a capture amount that is not the grand total, and does NOT charge',
     async () => {
@@ -396,7 +356,6 @@ describe('Concurrent capture — one authorization is charged at most once (e2e)
 
       expect(res.status).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
       expect((res.body as { code: string }).code).toBe('PARTIAL_CAPTURE_UNSUPPORTED');
-      // The rejection happens before any money moves — that is the point of it.
       expect(captureSpy).not.toHaveBeenCalled();
 
       const payment = await dataSource.getPayment(orderId);

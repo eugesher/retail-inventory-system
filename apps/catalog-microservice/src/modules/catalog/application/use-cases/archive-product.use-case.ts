@@ -12,14 +12,6 @@ import {
 } from '../ports';
 import { toProductView } from './catalog-view.factory';
 
-// Archive Product flips a product `active → archived` — the catalog's terminal
-// soft-delete. The domain (`Product.archive`) rejects archiving a non-active
-// product. An archived product is hidden from the browse list (the read path
-// filters on `status = active`) but stays resolvable by id/slug, so the use case
-// emits `catalog.product.archived` for any consumer that needs to react (e.g.
-// delist). The publish is best-effort post-commit — a broker failure is
-// warn-logged and swallowed, the product stays archived regardless
-// (ADR-020 / ADR-025).
 @Injectable()
 export class ArchiveProductUseCase {
   constructor(
@@ -44,16 +36,12 @@ export class ArchiveProductUseCase {
       );
     }
 
-    // Domain transition: rejects a non-active product, and records a
-    // `ProductArchivedEvent` on success.
     product.archive();
 
     const saved = await this.repository.save(product);
 
     this.logger.info({ correlationId, productId }, 'Product archived');
 
-    // Drain the in-process events and map the archive to its versioned wire
-    // event. `archive()` records exactly one `ProductArchivedEvent`.
     const events = product.pullDomainEvents();
     const archivedEvent = events.find(
       (event): event is ProductArchivedEvent => event instanceof ProductArchivedEvent,
@@ -76,7 +64,6 @@ export class ArchiveProductUseCase {
         correlationId,
       );
     } catch (err) {
-      // Publish failures never raise — the product is already archived.
       this.logger.warn(
         { err: err as Error, correlationId, productId },
         'Failed to publish catalog.product.archived event',

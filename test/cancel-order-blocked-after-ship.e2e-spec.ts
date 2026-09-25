@@ -11,20 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { InventoryAutoInitE2ESpecDataSource } from './data-source/inventory-auto-init.e2e-spec.data-source';
 
-// Cancel Order is BLOCKED once stock has physically shipped (ADR-031). After a
-// fulfillment ships, the order's lifecycle axis still reads `pending` (Ship advances
-// only the fulfillment axis), so the real guard is NOT the `Order.cancel()` lifecycle
-// check — it is the use case's fulfillment-presence check: an order with a
-// `shipped`/`delivered` fulfillment cannot be cancelled, because cancelling would
-// strand physically-shipped stock. The rejection is about ORDER STATE, not
-// authorization, so even a staff `order:cancel` token gets `409 ORDER_NOT_CANCELLABLE`.
-//
-// Asserted through PUBLIC state (the order GET + the public stock read): the rejected
-// cancel changes NOTHING — the order keeps its shipped/captured state and the shipped
-// stock stays decremented, with no `release` row appended.
-//
-// Self-provisioned, disjoint fixture (`e2e-cancel-ship-*`): its own variant, so the
-// shared seeded variants are never touched.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const CUSTOMER_EMAIL = 'customer@example.com';
@@ -342,8 +328,6 @@ describe('Cancel Order blocked after ship: 409 ORDER_NOT_CANCELLABLE (e2e)', () 
     expect(fresh.paymentStatus).toBe('captured');
     expect(fresh.lines[0].status).toBe('shipped');
 
-    // The shipped sale decremented on-hand + allocated; the blocked cancel released
-    // nothing, so the counters stand and the ledger holds no `release` row.
     const level = await warehouseLevel(variantId);
     expect(level.quantityOnHand).toBe(RECEIVED_QTY - ORDERED_QTY);
     expect(level.quantityAllocated).toBe(0);

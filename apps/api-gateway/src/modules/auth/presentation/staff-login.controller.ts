@@ -7,10 +7,6 @@ import { CorrelationId } from '@retail-inventory-system/observability';
 import { LoginUseCase } from '../application/use-cases';
 import { LoginRequestDto, TokenResponseDto } from './dto';
 
-// One route, one prefix (ADR-050). This class used to be `@Controller(['auth', 'auth/staff'])`
-// — a second URL, `/auth/login`, described as "the old route kept as a deprecated alias".
-// It was never old: both URLs shipped in the same commit, so the alias was back-compat with a
-// past that did not exist, and no client ever had to migrate off anything.
 @ApiTags('Auth — Staff')
 @Controller('auth/staff')
 export class StaffLoginController {

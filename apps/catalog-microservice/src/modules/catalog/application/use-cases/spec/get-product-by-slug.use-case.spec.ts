@@ -60,7 +60,7 @@ describe('GetProductBySlugUseCase', () => {
     expect(view.id).toBe(100);
     expect(view.slug).toBe('aeron-chair');
     expect(view.status).toBe(ProductStatusEnum.ACTIVE);
-    expect(view.variants).toHaveLength(1); // archived variant filtered out
+    expect(view.variants).toHaveLength(1);
     expect(view.variants[0].id).toBe(5001);
   });
 

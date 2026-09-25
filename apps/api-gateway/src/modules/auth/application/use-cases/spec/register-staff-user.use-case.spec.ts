@@ -42,9 +42,6 @@ class InMemoryRoleRepository implements IRoleRepositoryPort {
     return Promise.resolve(Array.from(this.byName.values()));
   }
 
-  // Reconstituted, like the real adapter — see `asReconstituted` (ADR-060). `RoleAggregate`
-  // records no domain events today, so this changes nothing observable; the rule is applied
-  // anyway, because "records none today" is the state that quietly stops being true.
   public save(role: RoleAggregate): Promise<RoleAggregate> {
     this.register(role);
     return Promise.resolve(asReconstituted(role));
@@ -123,9 +120,6 @@ describe('RegisterStaffUserUseCase', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  // A partially-resolvable request is rejected whole, and the message names only the
-  // *missing* roles. This is the only path that builds the `missing` diff — an all-unknown
-  // request resolves to an empty set and never computes one.
   it('names only the unresolved roles when the request is partially resolvable', async () => {
     const error = await useCase
       .execute({
@@ -139,7 +133,6 @@ describe('RegisterStaffUserUseCase', () => {
     expect((error as Error).message).toContain('nonexistent-role');
     expect((error as Error).message).not.toContain(RoleEnum.ADMIN);
 
-    // Rejected whole — no staff user was persisted.
     expect(await users.findByEmail('half-known@example.com')).toBeNull();
   });
 

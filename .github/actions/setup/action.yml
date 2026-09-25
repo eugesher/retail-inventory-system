@@ -3,18 +3,6 @@ description: >-
   Node from .nvmrc, Yarn through corepack, and an immutable workspace install. Shared by every job
   so the toolchain cannot differ between them.
 
-# Why this exists: the four jobs in `ci-cd.yml` each began with the same four steps, and
-# `node-version` was written out four times. Nothing compares those copies — a bump applied to
-# three of four leaves one job on a different Node and all four still green, so the list is one
-# whose incompleteness has no symptom (ADR-058 §3).
-#
-# `node-version-file` rather than a literal: `.nvmrc` is the ONE declaration of the Node version,
-# and it serves `nvm use` on a developer's machine at the same time. Do not reintroduce
-# `node-version:` here — the point is that this file reads the version rather than stating it.
-#
-# `actions/checkout` is deliberately NOT part of this action, and cannot be: a local composite
-# action is loaded from the working directory, so the repository must already be on disk before
-# `uses: ./.github/actions/setup` resolves at all. Each job keeps its own checkout line.
 runs:
   using: composite
   steps:

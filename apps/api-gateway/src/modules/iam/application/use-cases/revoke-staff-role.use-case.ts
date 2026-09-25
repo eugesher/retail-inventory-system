@@ -26,9 +26,6 @@ export class RevokeStaffRoleUseCase {
     try {
       staffUser.revokeRole(bound);
     } catch (err) {
-      // The aggregate refuses to remove the last role — surface as 409 so the
-      // caller can disambiguate "you typed a wrong name" (404) from "this
-      // operation would leave the user permission-less" (409).
       if (err instanceof Error && err.message.includes('cannot revoke the last remaining role')) {
         throw new ConflictException('Cannot revoke the last remaining role');
       }

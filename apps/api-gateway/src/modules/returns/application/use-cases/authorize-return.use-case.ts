@@ -6,13 +6,6 @@ import { ICurrentUser, ReturnRequestView } from '@retail-inventory-system/contra
 import { throwRpcError } from '../../../../common/utils';
 import { IReturnsGatewayPort, RETURNS_GATEWAY_PORT } from '../ports';
 
-// Walks a `requested` RMA → `authorized`. The route is
-// `@RequiresPermission('order:return-authorize')`-gated — authorizing a return is a
-// **staff-only** operation (a customer cannot authorize its own return), so the
-// permission gate is the right shape (ADR-024). This use case folds `@CurrentUser().id`
-// into `actorId` (the resolved caller, for audit/logging); the retail use case walks the
-// status (`RETURN_NOT_FOUND` 404 / `RETURN_INVALID_STATUS_TRANSITION` 409) and emits
-// `retail.return.authorized`. Returns the updated `ReturnRequestView` (200).
 @Injectable()
 export class AuthorizeReturnUseCase {
   constructor(

@@ -124,9 +124,4 @@ describe('Product lifecycle', () => {
       expect(product.status).toBe(ProductStatusEnum.ARCHIVED);
     });
   });
-
-  // NOTE: `slug` global uniqueness is a repository-level guarantee — the domain
-  // cannot see other aggregates. That invariant is asserted in the
-  // register-product use-case spec (later work) against a repository test
-  // double, not here.
 });

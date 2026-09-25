@@ -7,7 +7,6 @@ import { AuditLogEntry } from '../../../domain';
 import { IAuditLogRepositoryPort } from '../../ports';
 import { IngestAuditLogUseCase } from '../ingest-audit-log.use-case';
 
-// A fake audit repository recording every appended entry; programmable to throw.
 class FakeAuditLogRepository implements IAuditLogRepositoryPort {
   public readonly appended: AuditLogEntry[] = [];
   private throwOnAppend: Error | null = null;
@@ -24,9 +23,6 @@ class FakeAuditLogRepository implements IAuditLogRepositoryPort {
     return Promise.resolve();
   }
 
-  // The two reads are present only to satisfy the port; the ingest path never reads. They are
-  // exercised by `query-audit-log-entries.use-case.spec.ts` and
-  // `trace-by-correlation.use-case.spec.ts`.
   public query(): Promise<IPage<AuditLogEntry>> {
     return Promise.resolve({ items: [], total: 0, page: 1, size: 20 });
   }

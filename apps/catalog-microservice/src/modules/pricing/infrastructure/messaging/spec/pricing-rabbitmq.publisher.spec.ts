@@ -12,9 +12,6 @@ import { makePinoLoggerMock } from '@retail-inventory-system/observability/testi
 
 import { PricingRabbitmqPublisher } from '../pricing-rabbitmq.publisher';
 
-// Proves the pricing publisher dual-publishes (ADR-035): both reserved
-// `catalog.price.*` events keep their primary `catalog_queue` emit AND mirror the
-// same routing key + wire onto `ris.events`.
 describe('PricingRabbitmqPublisher dual-publish', () => {
   let catalogEmit: jest.Mock;
   let mirror: RisEventsMirrorPublisher;

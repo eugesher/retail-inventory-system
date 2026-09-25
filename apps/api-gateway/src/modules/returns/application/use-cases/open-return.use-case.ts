@@ -11,15 +11,6 @@ import {
 import { throwRpcError } from '../../../../common/utils';
 import { IReturnsGatewayPort, RETURNS_GATEWAY_PORT } from '../ports';
 
-// Opens a return request (RMA) for an order. The route carries **no
-// `@RequiresPermission`** (that would block the owning customer, who carries no
-// permissions — ADR-024). Instead this use case computes the staff override from
-// `@CurrentUser().permissions` — `isStaff` is true iff the caller holds
-// `order:return-authorize` — and folds `@CurrentUser().id` into `customerId` (the
-// authenticated principal). The retail use case is the single enforcement point: it
-// allows the open if `isStaff` OR the caller owns the order, else answers 403 (surfaced
-// as `ForbiddenException` via `throwRpcError`); it also enforces the return-window +
-// returnable-quantity invariants. Returns the created `ReturnRequestView` (201).
 @Injectable()
 export class OpenReturnUseCase {
   constructor(

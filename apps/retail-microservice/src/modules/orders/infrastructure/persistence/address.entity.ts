@@ -3,23 +3,8 @@ import { Column, Entity, PrimaryColumn } from 'typeorm';
 import { AddressOwnerTypeEnum } from '@retail-inventory-system/contracts';
 import { BaseEntity } from '@retail-inventory-system/database';
 
-// `address.id` is a caller-assigned CHAR(36) UUID string PK (generated in-app by
-// `Address.forOrder`), which diverges from `BaseEntity`'s auto-increment numeric
-// `id`. A plain `extends BaseEntity` with `id: string` is a TS2416 type clash;
-// re-typing the `BaseEntity` constructor to drop its `id` lets us declare a string
-// PK cleanly while still inheriting `createdAt` / `updatedAt` / `deletedAt` from the
-// prototype metadata. `deletedAt` stays INERT — an address is immutable, never
-// soft-deleted (ADR-028). The same string-PK override `CartEntity` /
-// `StockLocationEntity` use.
 const AddressBaseEntity: abstract new () => Omit<BaseEntity, 'id'> = BaseEntity;
 
-// The polymorphic address row (ADR-028 §5). `(owner_type, owner_id)` is the discriminator, and it
-// admits `customer` as well as `order` — but **nothing writes a `customer`-owned address.** There is
-// no address book in this system; every row you will find is an `order` snapshot, taken at
-// place-time and immutable thereafter.
-//
-// `owner_id` is VARCHAR(36) because it must hold either a customer's CHAR(36) UUID or an order's
-// stringified numeric id. **It carries no FK** — a polymorphic column cannot.
 @Entity('address')
 export class AddressEntity extends AddressBaseEntity {
   @PrimaryColumn({ type: 'char', length: 36 })

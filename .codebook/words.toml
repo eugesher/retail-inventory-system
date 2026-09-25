@@ -1,7 +1,15 @@
 words = [
     "ADR",
     "EVENTSTORE",
+    "Kulala",
+    "RIS",
     "Typeorm",
     "dto",
+    "fulfillments",
+    "iam",
     "nestjs",
+    "occ",
+    "pino",
+    "rabbitmq",
+    "reparent",
 ]

@@ -33,12 +33,10 @@ describe('CreateGuestSessionUseCase', () => {
     expect(result.refreshToken).toMatch(new RegExp(`^refresh:${result.customerId}:`));
     expect(result.expiresIn).toBe(900);
 
-    // The persisted row is a guest with no password.
     const persisted = await customers.findById(result.customerId);
     expect(persisted).not.toBeNull();
     expect(persisted?.status).toBe('guest');
     expect(persisted?.passwordHash).toBeNull();
-    // The live refresh-token hash is rotated onto the row (like a real login).
     expect(persisted?.refreshTokenHash).toBe(`hash:${result.refreshToken}`);
   });
 

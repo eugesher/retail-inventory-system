@@ -9,10 +9,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { CatalogE2ESpecDataSource } from './data-source/catalog.e2e-spec.data-source';
 
-// Seeded staff users (scripts/test-db-seed.ts). `admin` carries every
-// permission (incl. `catalog:write` / `catalog:publish`); `warehouse` carries
-// only `inventory:*` — no catalog codes — so it is the negative fixture for the
-// write/publish gates.
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 const WAREHOUSE_EMAIL = 'warehouse@example.com';
@@ -63,9 +59,6 @@ describe('Catalog gateway endpoints (e2e)', () => {
   let catalogMicroservice: INestMicroservice;
   let dataSource: CatalogE2ESpecDataSource;
 
-  // Stamped so the flow stays idempotent under `yarn test:e2e:run` against an
-  // already-seeded DB: a fresh slug/sku set every run, and `search=<stamp>`
-  // isolates this run's product in the shared browse list.
   const stamp = Date.now();
   const productName = `E2E Aeron Chair ${stamp}`;
   const productSlug = `e2e-aeron-chair-${stamp}`;
@@ -165,20 +158,6 @@ describe('Catalog gateway endpoints (e2e)', () => {
     });
 
     it('gives each variant an active USD price so the publish precondition is met', async () => {
-      // Publish hard-fails (409 `PRODUCT_PUBLISH_REQUIRES_PRICE`) unless every
-      // variant has an in-effect Price in the default currency. The prices are
-      // seeded directly via SQL — the open row (`valid_to NULL`) the catalog
-      // publish probe reads back.
-      //
-      // The gateway pricing routes exist now, and this spec still does NOT use
-      // them, deliberately. `insertActivePrice` writes `valid_from =
-      // UTC_TIMESTAMP()`, which is already whole-second and already in the past;
-      // going through `POST .../prices` would write the domain's sub-second
-      // instant into a `TIMESTAMP(0)` column, MySQL could round it UP, and the
-      // publish probe (`valid_from <= UTC_TIMESTAMP()`) would then read "no
-      // active price" for a variant that was just priced. `test/pricing.e2e-spec.ts`
-      // pays for the realistic path with a >1s wait; this spec is about catalog,
-      // so it takes the shortcut instead.
       for (const variantId of variantIds) {
         const result = (await dataSource.insertActivePrice(variantId, 'USD', 1999)) as {
           affectedRows: number;
@@ -274,8 +253,6 @@ describe('Catalog gateway endpoints (e2e)', () => {
     it('a staff user without catalog permissions gets 403 on publish', async () => {
       const auth = await bearer(WAREHOUSE_EMAIL, WAREHOUSE_PASSWORD);
 
-      // The permission gate fires in `PermissionsGuard`, before the route's
-      // `ParseIntPipe` or any RPC — so a fixed id is enough to assert the 403.
       const { status } = await supertest(apiGatewayApp.getHttpServer())
         .post('/api/catalog/products/1/publish')
         .set('Authorization', auth);
@@ -300,10 +277,6 @@ describe('Catalog gateway endpoints (e2e)', () => {
     });
   });
 
-  // The catalog microservice maps each typed CatalogDomainException onto an HTTP
-  // status via CatalogRpcExceptionFilter; the gateway's throwRpcError resolves it
-  // (ADR-025). These reuse the fixtures the happy-path flow left behind:
-  // `productSlug`/`skuA` are taken and `productId` is archived (a non-draft).
   describe('typed domain errors map to HTTP statuses', () => {
     it('get-by-slug for an unknown product returns 404 (not 500)', async () => {
       const { status } = await supertest(apiGatewayApp.getHttpServer()).get(

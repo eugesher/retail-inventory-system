@@ -6,10 +6,6 @@ import { ICurrentUser } from '@retail-inventory-system/contracts';
 import { PermissionsGuard } from '../guards/permissions.guard';
 import { RoleEnum } from '../role.enum';
 
-// Build a minimal ExecutionContext whose `switchToHttp().getRequest()` returns
-// the supplied request. The guard only ever calls `getHandler()`, `getClass()`,
-// and `switchToHttp()` — every other surface is stubbed to a no-op so an
-// accidental call would throw a TypeError rather than silently pass.
 const buildContext = (request: { user?: ICurrentUser | undefined }): ExecutionContext =>
   ({
     getHandler: () => () => undefined,
@@ -19,9 +15,6 @@ const buildContext = (request: { user?: ICurrentUser | undefined }): ExecutionCo
     }),
   }) as unknown as ExecutionContext;
 
-// Stub Reflector by hand: the guard only reads `getAllAndOverride`, so the
-// fixture supplies whatever metadata the case under test needs and asserts
-// nothing else.
 const buildReflector = (metadata: string[] | undefined): Reflector =>
   ({
     getAllAndOverride: <T>(): T => metadata as unknown as T,

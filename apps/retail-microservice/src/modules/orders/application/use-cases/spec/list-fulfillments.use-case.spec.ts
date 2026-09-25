@@ -59,8 +59,6 @@ describe('ListFulfillmentsUseCase', () => {
     const views = await useCase.execute(listPayload());
 
     expect(views).toHaveLength(2);
-    // Newest-first: with no `shippedAt` yet, the tiebreak is `id DESC`, so the
-    // most-recently-saved fulfillment (the higher id) comes first.
     expect(views[0].id).toBeGreaterThan(views[1].id);
     expect(views.every((view) => view.orderId === ORDER_ID)).toBe(true);
   });

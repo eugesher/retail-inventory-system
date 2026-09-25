@@ -68,7 +68,7 @@ describe('AdjustStockUseCase', () => {
       movements,
       cache,
       publisher,
-      5, // OCC_RETRY_ATTEMPTS budget
+      5,
       makePinoLoggerMock() as unknown as PinoLogger,
     );
   });
@@ -128,8 +128,6 @@ describe('AdjustStockUseCase', () => {
       useCase.execute({ variantId: VARIANT_ID, quantityDelta: -100, reasonCode: 'damaged' }),
     ).rejects.toMatchObject({ code: InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE });
 
-    // The seeded level is unchanged (the rejection happens before save), and no
-    // movement, event, or cache invalidation fired.
     const persisted = await repository.findStockLevel(VARIANT_ID, INVENTORY_DEFAULT_STOCK_LOCATION);
     expect(persisted?.quantityOnHand).toBe(3);
     expect(movements.appended).toHaveLength(0);
@@ -166,7 +164,6 @@ describe('AdjustStockUseCase', () => {
   });
 
   it('emits inventory.stock.low when the post-commit on-hand falls at/below the threshold', async () => {
-    // Threshold is 5; 10 − 6 = 4 ≤ 5 → the low-stock alert fires.
     seedLevel(repository, INVENTORY_DEFAULT_LOW_STOCK_THRESHOLD + 5);
 
     await useCase.execute({
@@ -185,7 +182,6 @@ describe('AdjustStockUseCase', () => {
   });
 
   it('does NOT emit inventory.stock.low when the post-commit on-hand stays above the threshold', async () => {
-    // Threshold is 5; 10 − 3 = 7 > 5 → no low-stock alert.
     seedLevel(repository, 10);
 
     await useCase.execute({ variantId: VARIANT_ID, quantityDelta: -3, reasonCode: 'damaged' });
@@ -205,7 +201,6 @@ describe('AdjustStockUseCase', () => {
       correlationId: CORRELATION_ID,
     });
 
-    // Exactly one `adjustment` ledger row carrying the SIGNED delta + the reason.
     expect(movements.appended).toHaveLength(1);
     const [movement] = movements.appended;
     expect(movement.type).toBe(StockMovementTypeEnum.ADJUSTMENT);
@@ -217,10 +212,8 @@ describe('AdjustStockUseCase', () => {
     expect(movement.referenceType).toBeNull();
     expect(movement.referenceId).toBeNull();
 
-    // It joined the counter's transaction (same scope).
     expect(movements.appendScopes[0]).toBe(transaction.lastScope);
 
-    // The recorded event fires post-commit alongside adjusted.
     expect(publisher.movementsRecorded).toHaveLength(1);
     expect(publisher.movementsRecorded[0].movement).toBe(movement);
     expect(publisher.movementsRecorded[0].correlationId).toBe(CORRELATION_ID);
@@ -238,8 +231,6 @@ describe('AdjustStockUseCase', () => {
 
   it('appends exactly ONE movement across an optimistic retry (not one per attempt)', async () => {
     seedLevel(repository, 10);
-    // The first two persists lose the CAS; the append sits after the persist, so a
-    // losing attempt never reaches it — only the third (winning) attempt appends.
     repository.conflictsBeforeSuccess = 2;
 
     await useCase.execute({ variantId: VARIANT_ID, quantityDelta: -3, reasonCode: 'damaged' });
@@ -261,7 +252,6 @@ describe('AdjustStockUseCase', () => {
       reasonCode: 'damaged',
     });
 
-    // The adjust still succeeds and the ledger row still landed in the tx.
     expect(view.quantityOnHand).toBe(7);
     expect(movements.appended).toHaveLength(1);
   });

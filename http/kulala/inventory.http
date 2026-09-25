@@ -1,98 +1,8 @@
-# Inventory endpoints
-# (apps/api-gateway/src/modules/inventory/presentation/inventory.controller.ts)
-#
-# The API gateway fronts the inventory microservice's read + write RPCs over HTTP
-# at /api/inventory:
-#   - GET  /inventory/locations                            (Bearer — inventory:read)
-#       Lists the stock locations. Protected: the location set is operational
-#       data, so it requires the inventory:read permission. Optional ?activeOnly
-#       drops deactivated locations.
-#   - GET  /inventory/variants/:variantId/stock            (public)
-#       A variant's availability across stock locations: per-location rows plus
-#       the cross-location totalOnHand / totalAvailable. @Public(), so an
-#       unauthenticated shopper can check stock before checkout.
-#   - POST /inventory/variants/:variantId/stock/receive    (Bearer — inventory:adjust)
-#       Receive stock — raises on-hand by a positive quantity. Body
-#       { stockLocationId?, quantity }. Omitting stockLocationId targets
-#       default-warehouse. Returns the updated StockLevelView.
-#   - POST /inventory/variants/:variantId/stock/adjust     (Bearer — inventory:adjust)
-#       Adjust stock — applies a signed delta with a mandatory reasonCode. Body
-#       { stockLocationId?, quantityDelta, reasonCode }. A result below zero is a
-#       409. Returns the updated StockLevelView.
-#   - POST /inventory/variants/:variantId/stock/transfer   (Bearer — inventory:transfer)
-#       Transfer stock — moves on-hand between two locations of one variant
-#       atomically. Body { fromLocationId, toLocationId, quantity }. Both
-#       locations are required. Transferring more than the source's on-hand is a
-#       409. Returns { from, to } — both post-transfer StockLevelViews.
-#   - GET  /inventory/variants/:variantId/movements        (Bearer — inventory:read)
-#       The variant's stock-movement audit trail (the append-only ledger). A
-#       paginated, NEWEST-FIRST timeline. Query { page?, pageSize?, type?, from?,
-#       to? } — page defaults 1, pageSize defaults 20 (max 100); type filters to
-#       one movement kind; from/to are inclusive ISO-8601 bounds on occurredAt.
-#       Returns IPage<StockMovementView> { items, total, page, size }. An unknown
-#       variant (or one with no rows) is a 200 empty page, not a 404.
-#   - POST /inventory/reservations/sweep                   (Bearer — inventory:adjust)
-#       Expire every `active` hold whose TTL has elapsed, on demand. Optional body
-#       { batchSize? } — the inventory service clamps it to its configured ceiling.
-#       Returns { scanned, expired, skipped, durationMs }, where
-#       scanned = expired + skipped. Runs the SAME sweep the inventory service
-#       already ticks on a timer; no Idempotency-Key (a second call finds the holds
-#       already expired and skips them).
-#   - POST /inventory/reservations/:reservationId/release  (Bearer — inventory:adjust)
-#       Manually release ONE reservation hold by its UUID. No body. Frees the hold,
-#       returns the units to `available`, and writes a `manual`-reason `release`
-#       ledger row attributed to the staff actor. Returns { released: [...] }. An
-#       unknown id is a 404; an already-released/committed row a 409.
-#
-# How a hold is freed
-#   Three ways, all live: an explicit release (by id here, or by cartId when a cart
-#   line is removed), cart conversion at order placement (Place allocates the hold,
-#   after which only a cancel-allocation frees it), and the TTL sweep — which the
-#   inventory service runs on a timer every RESERVATION_SWEEP_INTERVAL_SECONDS and
-#   which `sweepReservations` below triggers immediately.
-#
-# Stock locations
-#   The migration provisions one default location with id `default-warehouse`,
-#   and the seed gives every catalog variant (ids 1..4) 100 on hand there. The
-#   seed also adds a second active location `backup-store` (a transfer
-#   destination). So variant 1 reads 100 on hand / 100 available at
-#   default-warehouse, and 0 at backup-store until a transfer moves units there.
-#
-# ?locationIds encoding (variant stock route)
-#   Comma-separated stock-location ids, e.g. ?locationIds=default-warehouse,backup-store.
-#   Omit it to aggregate across ALL locations (the default). An empty value is
-#   treated as omitted. (default-warehouse is also the implicit target a stock
-#   write defaults to when its body names no location.)
-#
-# All routes sit behind the global "api" prefix configured in main.ts via
-# app.setGlobalPrefix(API_GATEWAY_PREFIX). With the default .env.local that
-# resolves to http://localhost:3000/api.
-#
-# Prereqs:
-#   1. Start the backing services and the gateway, then migrate + seed:
-#        docker compose up -d
-#        yarn migration:run
-#        yarn test:seed
-#        yarn start:dev
-#   2. Run the `login` block FIRST. It captures a seeded staff bearer token into
-#      @accessToken, which the protected requests substitute into their
-#      Authorization header. admin@example.com holds every permission (including
-#      inventory:read, inventory:adjust AND inventory:transfer); the seeded
-#      warehouse@example.com (warehouse-staff) carries all three and works here too.
-#   3. The two variant-stock GETs send no token — they prove the @Public() route
-#      works unauthenticated. The receive/adjust POSTs need inventory:adjust; the
-#      transfer POST needs inventory:transfer; the movements GET needs
-#      inventory:read; the manual reservation release and the reservation sweep
-#      need inventory:adjust.
-
 @baseUrl = {{ENV_BASE_URL}}
 
 ###
 
 # @name login
-# POST /api/auth/staff/login
-# Seeded admin login (admin@example.com / admin1234). Response is
-# TokenResponseDto { accessToken, refreshToken, expiresIn }.
 POST {{baseUrl}}/auth/staff/login
 Content-Type: application/json
 
@@ -107,40 +17,22 @@ Content-Type: application/json
 ###
 
 # @name listLocations
-# GET /api/inventory/locations  (Bearer — inventory:read)
-# Lists the stock locations. The seeded `default-warehouse` appears here.
-# Response is StockLocationView[] { id, name, code, type, gln, active }.
 GET {{baseUrl}}/inventory/locations
 Authorization: Bearer {{accessToken}}
 
 ###
 
 # @name getVariantStockAllLocations
-# GET /api/inventory/variants/:variantId/stock  (public)
-# Variant 1's availability aggregated across all locations (no ?locationIds, no
-# Authorization header). Response is VariantStockView
-# { variantId, totalOnHand, totalAvailable, locations: StockLevelView[] }.
-# With the seed: totalOnHand 100, totalAvailable 100, one default-warehouse entry.
 GET {{baseUrl}}/inventory/variants/1/stock
 
 ###
 
 # @name getVariantStockFiltered
-# GET /api/inventory/variants/:variantId/stock?locationIds=...  (public)
-# The same read scoped to a single location via the comma-separated ?locationIds
-# encoding. Scoped to default-warehouse it returns the same figures as the
-# all-locations read above (that is the only location holding stock for variant 1).
 GET {{baseUrl}}/inventory/variants/1/stock?locationIds=default-warehouse
 
 ###
 
 # @name receiveStock
-# POST /api/inventory/variants/:variantId/stock/receive  (Bearer — inventory:adjust)
-# Receive stock — raises on-hand by a positive quantity. Omitting stockLocationId
-# targets default-warehouse. Response is the updated StockLevelView
-# { stockLocationId, quantityOnHand, quantityAllocated, quantityReserved,
-# available, version, updatedAt }. With the seed, variant 1 starts at 100 on hand,
-# so this leaves it at 150.
 POST {{baseUrl}}/inventory/variants/1/stock/receive
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -152,11 +44,6 @@ Content-Type: application/json
 ###
 
 # @name adjustStock
-# POST /api/inventory/variants/:variantId/stock/adjust  (Bearer — inventory:adjust)
-# Adjust stock — applies a signed delta with a mandatory reasonCode (carried on
-# the inventory.stock.adjusted event + logs, and on a signed `adjustment` row
-# appended to the stock_movement ledger inside the counter transaction). Run after
-# `receiveStock`: 150 − 3 = 147 on hand. Response is the updated StockLevelView.
 POST {{baseUrl}}/inventory/variants/1/stock/adjust
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -169,10 +56,6 @@ Content-Type: application/json
 ###
 
 # @name adjustStockBelowZero
-# POST /api/inventory/variants/:variantId/stock/adjust  (Bearer — inventory:adjust)
-# A signed delta that would drive on-hand below zero is rejected with a 409
-# Conflict (the domain below-zero invariant, surfaced via the inventory RPC
-# exception filter → the gateway). No state change.
 POST {{baseUrl}}/inventory/variants/1/stock/adjust
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -185,19 +68,6 @@ Content-Type: application/json
 ###
 
 # @name transferStock
-# POST /api/inventory/variants/:variantId/stock/transfer  (Bearer — inventory:transfer)
-# Transfer stock — moves on-hand from one location to another atomically. Both
-# `fromLocationId` and `toLocationId` are required. The two ledger legs are a
-# PAIRED `adjustment` movement (the ledger has no `transfer` type): the source row
-# is a negative `adjustment` (reasonCode `transfer-out`) and the destination row a
-# positive `adjustment` (reasonCode `transfer-in`), sharing ONE referenceType
-# `transfer` + referenceId (the transfer's UUID) — querying that pair reconstructs
-# the transfer. Both StockLevel writes + both ledger appends commit in one
-# transaction, and the cached availability is invalidated for BOTH locations.
-# Reserved/allocated counters at the source are untouched (a transfer moves
-# on-hand only). Run after `receiveStock`: it debits 5 from default-warehouse and
-# credits 5 to backup-store. Response is { from, to } — both post-transfer
-# StockLevelViews.
 POST {{baseUrl}}/inventory/variants/1/stock/transfer
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -211,11 +81,6 @@ Content-Type: application/json
 ###
 
 # @name transferStockOverSource
-# POST /api/inventory/variants/:variantId/stock/transfer  (Bearer — inventory:transfer)
-# Transferring more than the source's on-hand is rejected with a 409 Conflict (the
-# same below-zero invariant Adjust surfaces — `INVENTORY_STOCK_RESULT_NEGATIVE`)
-# the moment the move would drive the source below zero, before any write. No state
-# change at either location.
 POST {{baseUrl}}/inventory/variants/1/stock/transfer
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -229,101 +94,40 @@ Content-Type: application/json
 ###
 
 # @name listVariantMovements
-# GET /api/inventory/variants/:variantId/movements  (Bearer — inventory:read)
-# The variant's stock-movement audit trail: a paginated, NEWEST-FIRST timeline of
-# the append-only `stock_movement` ledger. Every counter-changing operation leaves
-# a row here — receive (`receipt`), adjust (`adjustment`), reserve/release/cancel
-# (`release`), allocate (`allocation`), transfer (a paired `adjustment` per leg).
-# Response is IPage<StockMovementView> { items, total, page, size }; each item is
-# { id, variantId, stockLocationId, type, quantity (signed), reasonCode,
-# referenceType, referenceId, actorId, occurredAt (ISO) }. Run the receive/adjust/
-# transfer requests above first to populate variant 1's ledger, then read it here.
 GET {{baseUrl}}/inventory/variants/1/movements?page=1&pageSize=20
 Authorization: Bearer {{accessToken}}
 
 ###
 
 # @name listVariantMovementsFiltered
-# GET /api/inventory/variants/:variantId/movements?type=...&from=...&to=...  (Bearer — inventory:read)
-# The same audit read narrowed to one movement `type` and an INCLUSIVE occurredAt
-# window. Here: only `receipt` rows (the receiveStock request above) recorded in
-# June 2026. `from`/`to` are ISO-8601; an out-of-range or malformed bound is
-# ignored by the read path (the DTO's @IsISO8601() is the validation gate).
 GET {{baseUrl}}/inventory/variants/1/movements?type=receipt&from=2026-06-01T00:00:00.000Z&to=2026-06-30T23:59:59.999Z
 Authorization: Bearer {{accessToken}}
 
 ###
 
-# A reservation (hold) UUID. There is deliberately NO HTTP endpoint that returns a
-# reservation id (a reservation list/read surface is not part of this capability).
-# An operator obtains the id from one of:
-#   * the reserve-path LOGS — `reservationId` is logged when a cart line is reserved
-#     (add-to-cart / change-quantity over /api/cart),
-#   * the `inventory.stock.reserved` EVENT payload (on `inventory_queue`), or
-#   * the `reservation` TABLE directly:
-#       SELECT id, cart_id, variant_id, quantity, status, expires_at FROM reservation
-#       WHERE status = 'active' ORDER BY created_at DESC LIMIT 5;
-# Paste a real active hold's id here, then run `releaseReservation`.
 @reservationId = 00000000-0000-0000-0000-000000000000
 
 ###
 
 # @name releaseReservation
-# POST /api/inventory/reservations/:reservationId/release  (Bearer — inventory:adjust)
-# Manually release ONE hold by its UUID. No request body. Frees the hold, returns
-# the held units to `available`, flips the row to `released`, and appends a
-# `manual`-reason `release` row to the stock_movement ledger attributed to the staff
-# actor (visible afterwards via listVariantMovements). It is the precise, immediate
-# tool: a hold is also freed by cart conversion at order placement, and — once its
-# TTL has elapsed — by the reservation sweep (`sweepReservations` below, or the
-# service's own timer). Response is { released: [ ReservationView ] } (exactly one
-# element for a by-id release). With the placeholder id above this 404s; paste a
-# real active hold's id to see the success path.
 POST {{baseUrl}}/inventory/reservations/{{reservationId}}/release
 Authorization: Bearer {{accessToken}}
 
 ###
 
 # @name releaseReservationNotFound
-# POST /api/inventory/reservations/:reservationId/release  (Bearer — inventory:adjust)
-# A release targeting an unknown id is a 404 (`INVENTORY_RESERVATION_NOT_FOUND`),
-# surfaced from the inventory domain via its RPC exception filter → the gateway. A
-# random UUID that matches no row demonstrates it. (Re-releasing an already-released
-# or committed hold is instead a 409 `INVENTORY_RESERVATION_INVALID_STATE`.)
 POST {{baseUrl}}/inventory/reservations/3f1c9b6e-4d2a-4f8e-9c1b-2a7d6e5f0a11/release
 Authorization: Bearer {{accessToken}}
 
 ###
 
 # @name sweepReservations
-# POST /api/inventory/reservations/sweep  (Bearer — inventory:adjust)
-# Expire every `active` hold whose TTL has already elapsed, right now, instead of
-# waiting for the inventory service's next timer tick. No request body: the sweep
-# then scans up to its configured RESERVATION_SWEEP_BATCH_SIZE. Per expired hold it
-# returns the units to `available`, flips the row to `expired`, appends a negative
-# `release` row to the stock_movement ledger with reasonCode `expired` (attributed to
-# the staff actor who called this — a timer tick writes a null actor), and emits one
-# inventory.stock.released event. Response is
-# { scanned, expired, skipped, durationMs }, and scanned = expired + skipped always:
-# a `skipped` candidate is one a concurrent writer had already settled or whose TTL
-# was refreshed between the scan and the transaction. A clean table is
-# { scanned: 0, expired: 0, skipped: 0 }. To see it reclaim something, add a cart
-# line (which reserves), wait out RESERVATION_TTL_MINUTES, then run this.
 POST {{baseUrl}}/inventory/reservations/sweep
 Authorization: Bearer {{accessToken}}
 
 ###
 
 # @name sweepReservationsCustomBatch
-# POST /api/inventory/reservations/sweep  (Bearer — inventory:adjust)
-# The same sweep with an explicit { batchSize }. The value is an upper bound on rows
-# scanned in this invocation, and the inventory service CLAMPS it into
-# [1, RESERVATION_SWEEP_BATCH_SIZE] — the configured ceiling is an operational
-# property a caller may lower but never raise, so a 10000 here sweeps at most the
-# ceiling. A non-integer or a value below 1 is rejected at the gateway with a 400.
-# There is no Idempotency-Key: the sweep is idempotent by construction. Run this
-# straight after `sweepReservations` and it answers `expired: 0` — the first call
-# already settled those holds, so the second one finds nothing left to expire.
 POST {{baseUrl}}/inventory/reservations/sweep
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json

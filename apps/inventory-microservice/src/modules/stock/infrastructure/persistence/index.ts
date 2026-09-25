@@ -3,9 +3,6 @@ import { StockLevelEntity } from './stock-level.entity';
 import { StockLocationEntity } from './stock-location.entity';
 import { StockMovementEntity } from './stock-movement.entity';
 
-// The module's entity list: `DatabaseModule.forRoot(...)` in `app.module.ts`, and
-// `forFeature(...)` in the module file. UNANNOTATED on purpose — see the note on
-// `DatabaseModule.forRoot` for why the parameter type must not be used here.
 export const stockEntities = [
   StockLocationEntity,
   StockLevelEntity,

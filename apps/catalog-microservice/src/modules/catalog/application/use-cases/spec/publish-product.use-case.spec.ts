@@ -54,8 +54,6 @@ describe('PublishProductUseCase', () => {
     );
   });
 
-  // Builds an active media asset for an arbitrary owner. The publish soft-warning
-  // probe reports media present when ANY product/variant owner has one of these.
   const seedActiveMedia = (ownerType: MediaOwnerTypeEnum, ownerId: number): void => {
     mediaRepository.seed(
       MediaAsset.reconstitute({
@@ -96,8 +94,6 @@ describe('PublishProductUseCase', () => {
 
   it('publishes a draft product with ≥1 priced variant and emits catalog.product.published', async () => {
     seedDraft([draftVariant()]);
-    // The product carries an active media asset, so the soft-warning probe is
-    // satisfied and the clean publish carries NO warnings.
     seedActiveMedia(MediaOwnerTypeEnum.PRODUCT, SEEDED_PRODUCT_ID);
 
     const view = await useCase.execute(payload);
@@ -106,22 +102,17 @@ describe('PublishProductUseCase', () => {
     expect(view.status).toBe(ProductStatusEnum.ACTIVE);
     expect(typeof view.publishedAt).toBe('string');
 
-    // A clean publish — `warnings` is absent (`undefined`), never an empty array.
     expect(view.warnings).toBeUndefined();
 
     expect(repository.saved).toHaveLength(1);
     expect(repository.saved[0].isActive()).toBe(true);
 
-    // The probe was consulted with the product's concrete variant ids and the
-    // configured default currency before the transition ran.
     expect(priceProbe.calls).toHaveLength(1);
     expect(priceProbe.calls[0]).toEqual({
       variantIds: [SEEDED_VARIANT_ID],
       currency: DEFAULT_CURRENCY,
     });
 
-    // The wire event carries the concrete variant ids that are now part of the
-    // published product, the slug, and the version/correlation envelope.
     expect(publisher.productPublished).toHaveLength(1);
     const [{ event, correlationId }] = publisher.productPublished;
     expect(event.productId).toBe(SEEDED_PRODUCT_ID);
@@ -143,8 +134,6 @@ describe('PublishProductUseCase', () => {
     });
     await expect(useCase.execute(payload)).rejects.toBeInstanceOf(CatalogDomainException);
 
-    // Hard fail: nothing is persisted and no event is emitted — the probe ran
-    // before the transition, so the product never flips to active.
     expect(repository.saved).toHaveLength(0);
     expect(publisher.productPublished).toHaveLength(0);
   });
@@ -152,8 +141,6 @@ describe('PublishProductUseCase', () => {
   it('rejects publishing a product with no variants on the variant rule, not the price probe', async () => {
     seedDraft([]);
 
-    // A variant-less product: the probe is a no-op on the empty id list, so the
-    // domain's ≥1-variant rule is what fails — independent of price awareness.
     await expect(useCase.execute(payload)).rejects.toMatchObject({
       code: CatalogErrorCodeEnum.PRODUCT_PUBLISH_REQUIRES_VARIANT,
     });
@@ -171,13 +158,11 @@ describe('PublishProductUseCase', () => {
     });
     expect(repository.saved).toHaveLength(0);
     expect(publisher.productPublished).toHaveLength(0);
-    // The not-found check short-circuits before the price probe is reached.
     expect(priceProbe.calls).toHaveLength(0);
   });
 
   it('still returns the product view when the publish rejects (best-effort post-commit)', async () => {
     seedDraft([draftVariant()]);
-    // Active media present, so the only warn log is the event-emit failure below.
     seedActiveMedia(MediaOwnerTypeEnum.PRODUCT, SEEDED_PRODUCT_ID);
     publisher.publishProductPublished = (): Promise<void> => Promise.reject(new Error('rmq-down'));
 
@@ -195,24 +180,19 @@ describe('PublishProductUseCase', () => {
   describe('media soft warning (≥1 active media recommended, never a block)', () => {
     it('still publishes a media-less product but surfaces the no-active-media warning', async () => {
       seedDraft([draftVariant()]);
-      // No media seeded for the product or its variant.
 
       const view = await useCase.execute(payload);
 
-      // Publishing PROCEEDED — the recommendation informs, it does not block.
       expect(view.status).toBe(ProductStatusEnum.ACTIVE);
       expect(typeof view.publishedAt).toBe('string');
       expect(repository.saved[0].isActive()).toBe(true);
-      // The event still fired — a soft warning is orthogonal to the publish event.
       expect(publisher.productPublished).toHaveLength(1);
 
-      // Exactly one warning, carrying the greppable code.
       expect(view.warnings).toHaveLength(1);
       expect(view.warnings![0].code).toBe(CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA);
       expect(view.warnings![0].code).toBe('CATALOG_PRODUCT_PUBLISH_NO_ACTIVE_MEDIA');
       expect(view.warnings![0].message).toContain(`Product #${SEEDED_PRODUCT_ID}`);
 
-      // Logged at warn with the correlation + product context.
       expect(logger.warn).toHaveBeenCalledWith(
         expect.objectContaining({ correlationId: 'corr-1', productId: SEEDED_PRODUCT_ID }),
         'Published product has no active media asset (≥1 recommended)',
@@ -221,8 +201,6 @@ describe('PublishProductUseCase', () => {
 
     it('omits warnings when an active asset hangs off a VARIANT (not the product)', async () => {
       seedDraft([draftVariant()]);
-      // Media on the variant alone still satisfies the "product OR any variant"
-      // recommendation.
       seedActiveMedia(MediaOwnerTypeEnum.PRODUCT_VARIANT, SEEDED_VARIANT_ID);
 
       const view = await useCase.execute(payload);
@@ -251,12 +229,9 @@ describe('PublishProductUseCase', () => {
 
       const view = await useCase.execute(payload);
 
-      // The product is already active — a probe failure cannot un-publish it.
       expect(view.status).toBe(ProductStatusEnum.ACTIVE);
       expect(repository.saved[0].isActive()).toBe(true);
-      // No warning is emitted on a probe failure (we cannot prove media is absent).
       expect(view.warnings).toBeUndefined();
-      // The failure is warn-logged, not raised.
       expect(logger.warn).toHaveBeenCalledWith(
         expect.objectContaining({ correlationId: 'corr-1', productId: SEEDED_PRODUCT_ID }),
         'Media soft-warning probe failed; publish unaffected, no warning emitted',

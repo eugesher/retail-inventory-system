@@ -5,12 +5,6 @@ import { makePinoLoggerMock, PinoLoggerMock } from '@retail-inventory-system/obs
 import { PurgeExpiredIdempotencyKeysUseCase } from '../purge-expired-idempotency-keys.use-case';
 import { buildIdempotencyRecord, FakeIdempotencyStore } from './test-doubles';
 
-// The TTL purge (ADR-036). The store is live-ephemeral — `find` never filters by expiry,
-// so this sweep is the sole deleter of a row past its `expires_at`. The `deleteExpired(now)`
-// seam takes an explicit instant so a test can pin the clock and force a deterministic
-// deletion (the same seam the concurrency e2e uses to "advance time" without touching the
-// system clock). The in-memory `FakeIdempotencyStore` mirrors the adapter's bounded
-// `DELETE … WHERE expires_at < now`.
 describe('PurgeExpiredIdempotencyKeysUseCase', () => {
   let store: FakeIdempotencyStore;
   let logger: PinoLoggerMock;
@@ -30,7 +24,6 @@ describe('PurgeExpiredIdempotencyKeysUseCase', () => {
       buildIdempotencyRecord({ key: 'live', expiresAt: new Date('2026-06-12T00:00:00.000Z') }),
     );
 
-    // `now` sits between the two horizons: the first row has expired, the second has not.
     const deleted = await useCase.execute(new Date('2026-06-11T12:00:00.000Z'));
 
     expect(deleted).toBe(1);
@@ -74,7 +67,6 @@ describe('PurgeExpiredIdempotencyKeysUseCase', () => {
   });
 
   it('defaults now to the wall clock when invoked with no argument (the scheduler path)', async () => {
-    // A long-past horizon is swept regardless of the exact wall-clock instant.
     store.seed(
       buildIdempotencyRecord({ key: 'ancient', expiresAt: new Date('2000-01-01T00:00:00.000Z') }),
     );

@@ -6,10 +6,6 @@ import { VariantStockView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { IGetVariantStockQuery, IInventoryGatewayPort, INVENTORY_GATEWAY_PORT } from '../ports';
 
-// Thin gateway-side orchestrator over the `inventory.stock-level.get` RPC. The
-// availability projection (cache-aside, totals, per-location rows) is the
-// inventory microservice's responsibility — the gateway only threads the
-// correlation id and maps a downstream error onto the right HTTP status.
 @Injectable()
 export class GetVariantStockUseCase {
   constructor(

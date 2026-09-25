@@ -20,16 +20,6 @@ import { resolveCustomerEmail } from './resolve-customer-email';
 import { runWithReturnWriteRetry } from './return-write';
 import { toReturnRequestView } from './return-view.factory';
 
-// Receive Return walks an `authorized` RMA → `received` (warehouse
-// `inventory:receive-return`, gated at the gateway) — the warehouse logging in the
-// physically-returned goods. The domain `receive()` enforces the legal transition
-// (`RETURN_INVALID_STATUS_TRANSITION` from any non-`authorized` start). No per-line
-// outcome is recorded here — that is the Inspect step. Emits
-// `retail.return.received` best-effort post-commit (ADR-020); `receivedAt` is the moment
-// the transition ran (the model stamps no dedicated column).
-//
-// **The read and the write are not in the same unit of work** (ADR-063) — see
-// `AuthorizeReturnUseCase`'s note; the shape is identical for every simple transition.
 @Injectable()
 export class ReceiveReturnUseCase {
   constructor(
@@ -52,9 +42,6 @@ export class ReceiveReturnUseCase {
 
     this.logger.info({ correlationId, rmaId, actorId }, 'Receiving return request');
 
-    // Version-checked CAS under the bounded OCC retry (ADR-036): re-read the RMA afresh
-    // each attempt, walk `authorized → received`, and save with the version pinned. A
-    // lost CAS retries; a non-`authorized` start is a terminal domain 409, never retried.
     const saved = await runWithReturnWriteRetry(
       { logger: this.logger, maxAttempts: this.maxAttempts },
       async () => {

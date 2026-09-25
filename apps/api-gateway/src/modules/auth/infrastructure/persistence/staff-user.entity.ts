@@ -31,10 +31,6 @@ export class StaffUserEntity {
   @Column('varchar', { length: 255, nullable: true })
   public refreshTokenHash: string | null;
 
-  // The `staff_user_roles` join is owned on this side. Eager loading stays
-  // off — `StaffUserTypeormRepository` requests `relations: ['roles',
-  // 'roles.permissions']` on every read so the mapped `StaffUser` carries
-  // the inflated permission set.
   @ManyToMany(() => RoleEntity, { eager: false, cascade: false })
   @JoinTable({
     name: 'staff_user_roles',

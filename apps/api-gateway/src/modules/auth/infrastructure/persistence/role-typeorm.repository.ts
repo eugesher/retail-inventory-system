@@ -48,10 +48,6 @@ export class RoleTypeormRepository implements IRoleRepositoryPort {
   }
 
   public async save(role: RoleAggregate): Promise<RoleAggregate> {
-    // Resolve permission ids by code — RoleAggregate stores codes (the
-    // domain key), TypeORM's join table needs the id (the surrogate key).
-    // Skipping this lookup leaves `role_permissions` rows uninserted on a
-    // `repository.save(partial)` call with code-only DeepPartials.
     const codes = Array.from(role.permissions);
     const permissions =
       codes.length === 0
@@ -70,20 +66,10 @@ export class RoleTypeormRepository implements IRoleRepositoryPort {
     return RoleMapper.toDomain(saved);
   }
 
-  // Single-transaction update: persists the scalar columns (description) and,
-  // when `codes` is supplied, replaces the `role_permissions` set in the same
-  // tx so the two never commit independently (no partial update on failure)
-  // and a description-only patch does not rewrite the join at all. The
-  // hand-rolled relation reassignment is deliberate — `repository.save` with a
-  // `permissions: []` relation does not reliably clear the join rows in every
-  // TypeORM version, and observers reading `role_permissions` must never see a
-  // transient empty set.
   public async update(role: RoleAggregate, codes?: PermissionCodeEnum[]): Promise<RoleAggregate> {
     await this.entityManager.transaction(async (mgr) => {
       const roleRepo = mgr.getRepository(RoleEntity);
 
-      // Only load the permissions relation when we intend to replace it —
-      // leaving it unloaded keeps `save` from touching the join table.
       const existingRole = await roleRepo.findOne({
         where: { id: role.id },
         relations: codes === undefined ? [] : ['permissions'],
@@ -95,8 +81,6 @@ export class RoleTypeormRepository implements IRoleRepositoryPort {
       existingRole.description = role.description;
 
       if (codes !== undefined) {
-        // Setting the inverse side + saving via the parent does the
-        // delete-old + insert-new on the join table in one logical step.
         const permRepo = mgr.getRepository(PermissionEntity);
         existingRole.permissions =
           codes.length === 0 ? [] : await permRepo.find({ where: { code: In(codes) } });

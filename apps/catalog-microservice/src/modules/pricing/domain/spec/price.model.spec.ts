@@ -1,7 +1,5 @@
 import { Price, PricingDomainException, PricingErrorCodeEnum } from '..';
 
-// A fixed "now" so the past/future guards are deterministic regardless of when
-// the suite runs.
 const NOW = new Date('2026-06-04T12:00:00.000Z');
 const PAST = new Date('2026-06-04T11:59:59.000Z');
 const FUTURE = new Date('2026-06-05T12:00:00.000Z');
@@ -12,8 +10,6 @@ const validSet = {
   amountMinor: 1999,
 };
 
-// The typed `code` lives on a property, not in the message — assert on it
-// directly rather than matching the human message string.
 const expectCode = (fn: () => unknown, code: PricingErrorCodeEnum): void => {
   expect(fn).toThrow(PricingDomainException);
   try {
@@ -131,15 +127,12 @@ describe('Price.close — the only permitted mutation', () => {
 
     expect(closed.validTo).toBe(NOW);
     expect(closed.isOpen()).toBe(false);
-    // Value fields are carried verbatim — append-only-for-history means a close
-    // never edits the amount/currency/variant/priority.
     expect(closed.id).toBe(7);
     expect(closed.variantId).toBe(42);
     expect(closed.currency).toBe('USD');
     expect(closed.amountMinor).toBe(1999);
     expect(closed.validFrom).toBe(PAST);
     expect(closed.priority).toBe(3);
-    // The original instance is unchanged (close returns a new Price).
     expect(open.isOpen()).toBe(true);
   });
 

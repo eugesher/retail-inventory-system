@@ -55,8 +55,6 @@ import { DuplicateKeyExceptionFilter } from './filters/duplicate-key-exception.f
   ],
   providers: [
     { provide: APP_FILTER, useClass: DuplicateKeyExceptionFilter },
-    // Normalizes a gateway-local TypeORM optimistic-lock failure into the uniform
-    // `409 { code: VERSION_MISMATCH, currentVersion }` (ADR-036 §3).
     { provide: APP_FILTER, useClass: OptimisticLockExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

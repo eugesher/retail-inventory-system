@@ -6,8 +6,6 @@ import { AuditLogEntryEntity } from './audit-log-entry.entity';
 export class AuditLogEntryMapper {
   public static toDomain(entity: AuditLogEntryEntity): AuditLogEntry {
     return AuditLogEntry.reconstitute({
-      // The BIGINT PK comes back from the mysql2 driver as a string; coerce to a
-      // number (the `StockMovementMapper` precedent, ADR-019).
       id: Number(entity.id),
       actorId: entity.actorId ?? null,
       actorType: entity.actorType,
@@ -23,9 +21,6 @@ export class AuditLogEntryMapper {
   }
 
   public static toEntity(domain: AuditLogEntry): DeepPartial<AuditLogEntryEntity> {
-    // `id` (DB-assigned) and `received_at` (DB-defaulted ingest instant) are omitted —
-    // written by the database, never the mapper. There is no update path: an audit
-    // entry is immutable once appended.
     return {
       actorId: domain.actorId,
       actorType: domain.actorType,

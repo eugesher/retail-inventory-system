@@ -56,11 +56,6 @@ describe('ReparentCategoryUseCase', () => {
     };
     const view = await useCase.execute(payload);
 
-    // The repository received the moved aggregate already recomputed to its new
-    // position, plus the path it held BEFORE the move (so the bulk descendant
-    // rebase can match the old subtree prefix). This is the "descendants
-    // recomputed in the same transaction" guarantee asserted at the use-case
-    // altitude — the single-transaction mechanics live in the repository spec.
     expect(repository.reparentCalls).toHaveLength(1);
     const [call] = repository.reparentCalls;
     expect(call.oldPath).toBe('/electronics/phones');
@@ -68,7 +63,6 @@ describe('ReparentCategoryUseCase', () => {
     expect(call.category.parentId).toBe(7);
     expect(call.category.path).toBe('/gadgets/phones');
 
-    // The repository's descendant-rewrite count is threaded through unchanged.
     expect(view.rewrittenDescendantCount).toBe(3);
     expect(view.category.parentId).toBe(7);
     expect(view.category.path).toBe('/gadgets/phones');

@@ -11,9 +11,6 @@ import { AuditLogEntry, IAuditLogEntryProps } from '../../../domain';
 import { IAuditLogPageRequest, IAuditLogRepositoryPort } from '../../ports';
 import { QueryAuditLogEntriesUseCase } from '../query-audit-log-entries.use-case';
 
-// A fake audit repository that RECORDS the arguments `query` was called with — the filters
-// (asserted to arrive verbatim) and the clamped page window — and returns whatever page the
-// test programmed.
 class RecordingAuditLogRepository implements IAuditLogRepositoryPort {
   public lastFilters: IAuditLogQueryFilters | null = null;
   public lastPage: IAuditLogPageRequest | null = null;
@@ -152,8 +149,6 @@ describe('QueryAuditLogEntriesUseCase', () => {
     });
 
     it('returns an empty page for an inverted from/to range without throwing', async () => {
-      // `from > to` becomes `BETWEEN hi AND lo` at the repository, which selects nothing. The
-      // use case pre-validates nothing and raises no domain exception.
       repository.program({ items: [], total: 0, page: 1, size: 20 });
 
       const result = await useCase.execute(
@@ -216,8 +211,6 @@ describe('QueryAuditLogEntriesUseCase', () => {
     });
 
     it('preserves the newest-first order the repository returned (it never re-sorts)', async () => {
-      // The port's contract is `occurred_at DESC, id DESC`. The fake hands the rows back in
-      // exactly that order; the use case must project them in place.
       const newer = makeEntry({ id: 9, occurredAt: new Date('2026-06-27T12:00:00.000Z') });
       const olderSameInstant = makeEntry({ id: 8 });
       const oldest = makeEntry({ id: 7 });

@@ -46,10 +46,6 @@ describe('AssignStaffRoleUseCase', () => {
     useCase = new AssignStaffRoleUseCase(staffUsers, roles, audit);
   });
 
-  // The recorded `StaffUserRolesAssignedEvent` is asserted in `staff-user.model.spec.ts`, not
-  // here: a repository's `save` returns a reconstituted aggregate and reconstitution records no
-  // events, so `result.pullDomainEvents()` is empty in production whatever the use case did. The
-  // effective audit surface is `AUDIT_LOG_PUBLISHER`, covered in full below.
   it('assigns a new role', async () => {
     const result = await useCase.execute({ staffUserId: 'staff-1', roleNames: ['admin'] });
 
@@ -77,10 +73,6 @@ describe('AssignStaffRoleUseCase', () => {
     );
   });
 
-  // A partially-resolvable request is rejected whole, and the message names only the
-  // *missing* roles — the resolvable ones must not leak into it. This is the only path
-  // that builds the `missing` diff (an all-unknown request resolves to an empty set and
-  // never computes one).
   it('names only the unresolved roles when the request is partially resolvable', async () => {
     const error = await useCase
       .execute({ staffUserId: 'staff-1', roleNames: ['admin', 'nope'] })
@@ -88,10 +80,8 @@ describe('AssignStaffRoleUseCase', () => {
 
     expect(error).toBeInstanceOf(BadRequestException);
     expect((error as Error).message).toContain('nope');
-    // The resolvable role must not leak into the missing-roles diff.
     expect((error as Error).message).not.toContain('admin');
 
-    // Rejected whole: `admin` was not assigned as a side effect.
     const untouched = await staffUsers.findById('staff-1');
     expect(untouched!.roles.map((r) => r.name)).toEqual(['order-support']);
   });

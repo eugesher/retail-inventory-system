@@ -11,34 +11,6 @@ import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
 import { ConsentErasureE2ESpecDataSource } from './data-source/consent-erasure.e2e-spec.data-source';
 
-// The tombstone-erase (ADR-037 §2/§3): a customer's PII is nulled IN PLACE while the row's
-// id survives, so downstream references (an order's snapshot address, an audit trail) stay
-// intact and no foreign key dangles. The customer places a real order first — creating an
-// `owner_type='order'` address snapshot — and holds an ACTIVE cart, so the erase has both
-// an immutable order snapshot to leave alone and an active cart to abandon.
-//
-// After the admin erase, the oracle proves:
-//   - the `customer` row is PRESERVED with its id + `status='deleted'`, all PII columns
-//     (email/phone/first_name/last_name/password_hash) NULL, `deleted_at` set, and
-//     `refresh_token_hash` NULL (the session revoked);
-//   - the placed order STILL resolves (admin `order:read` staff override) and its
-//     `owner_type='order'` address snapshot columns are UNTOUCHED — the erasure writer nulls
-//     only `owner_type='customer'` PII, and an order snapshot is immutable (ADR-028);
-//   - every active cart the customer held is `abandoned` (and the `converted` order-cart is
-//     left alone);
-//   - the customer's `consent_record` row is DELETED — the customer opts into marketing
-//     first, so the erase has a real opt-in to clear; afterwards the row is gone and an
-//     admin consent read falls through to the absent-row defaults (marketing denied), so an
-//     erased customer can never be marketed to (ADR-037);
-//   - the customer's captured refresh token is rejected (`POST /api/auth/refresh` → `401`).
-//
-// (No `owner_type='customer'` address is creatable via the API today, so this suite asserts
-// the order-snapshot-untouched oracle; the writer's customer-address nulling is unit-covered.)
-//
-// Asserted through PUBLIC STATE — gateway HTTP + a read-only data-source over the tables an
-// erase mutates (no admin "read customer" endpoint exists). The erase itself runs entirely
-// gateway-side, so only retail/catalog/inventory (for the real order) are booted alongside
-// the gateway. Self-provisioned throwaway customer + fixtures (`e2e-tombstone-*`).
 const ADMIN_EMAIL = 'admin@example.com';
 const ADMIN_PASSWORD = 'admin1234';
 
@@ -270,8 +242,6 @@ describe('Erase customer — tombstone: PII nulled, order snapshot intact, sessi
     order = place.body as IOrderBody;
     expect(order.orderNumber).toBeTruthy();
 
-    // A SECOND, still-active cart so the erase has an active cart to abandon (the order
-    // consumed the first cart, flipping it to `converted`).
     const secondCart = await server()
       .post('/api/cart')
       .set('Authorization', `Bearer ${customerAccessToken}`)
@@ -286,9 +256,6 @@ describe('Erase customer — tombstone: PII nulled, order snapshot intact, sessi
       .send({ marketingEmail: true, marketingSms: true });
     expect(res.status).toBe(HttpStatus.OK);
 
-    // Pre-state: the row exists with marketing ON. This is the dangerous state an erase
-    // must clear — otherwise it could later be re-loaded and used to send marketing to an
-    // erased customer. Asserting it here makes the post-erase oracle non-vacuous.
     const consent = await dataSource.getConsentByCustomerId(customerId);
     expect(consent).toBeDefined();
     expect(consent!.marketingEmail).toBe(true);
@@ -323,15 +290,9 @@ describe('Erase customer — tombstone: PII nulled, order snapshot intact, sessi
   });
 
   it('deletes the consent record so an erased customer can no longer be marketed to', async () => {
-    // Row-level: the `consent_record` row is GONE. The erase deletes it in the same
-    // transaction — the tombstone never hard-deletes the customer, so the FK CASCADE never
-    // fires; the row must be removed explicitly (ADR-037).
     const consent = await dataSource.getConsentByCustomerId(customerId);
     expect(consent).toBeUndefined();
 
-    // Behavior: an admin consent read now resolves to the absent-row DEFAULTS
-    // (transactional on, marketing OFF) — even though the customer had opted INTO marketing
-    // before the erase — so the notification consent-gate suppresses any marketing dispatch.
     const readRes = await server()
       .get(`/api/admin/customers/${customerId}/consent`)
       .set('Authorization', adminAuth);
@@ -343,12 +304,10 @@ describe('Erase customer — tombstone: PII nulled, order snapshot intact, sessi
   });
 
   it('leaves the placed order resolvable with its order-snapshot address intact', async () => {
-    // The order still resolves under an admin `order:read` staff override.
     const orderRes = await server().get(`/api/orders/${order.id}`).set('Authorization', adminAuth);
     expect(orderRes.status).toBe(HttpStatus.OK);
     expect((orderRes.body as IOrderBody).id).toBe(order.id);
 
-    // The `owner_type='order'` snapshot addresses (billing + shipping) are untouched.
     const addresses = await dataSource.getAddressesByOwner('order', String(order.id));
     expect(addresses.length).toBeGreaterThanOrEqual(1);
     for (const address of addresses) {
@@ -363,11 +322,8 @@ describe('Erase customer — tombstone: PII nulled, order snapshot intact, sessi
     const carts = await dataSource.getCartsByCustomerId(customerId);
 
     expect(carts.length).toBeGreaterThanOrEqual(2);
-    // No cart is left active — the erase abandoned the live one.
     expect(carts.every((cart) => cart.status !== 'active')).toBe(true);
-    // The second cart, active at erase time, is now abandoned.
     expect(carts.some((cart) => cart.status === 'abandoned')).toBe(true);
-    // The order-cart stays `converted` (the erase does not touch a non-active cart).
     expect(carts.some((cart) => cart.status === 'converted')).toBe(true);
   });
 

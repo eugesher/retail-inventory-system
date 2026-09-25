@@ -6,12 +6,6 @@ import { CartView } from '@retail-inventory-system/contracts';
 import { throwRpcError } from '../../../../common/utils';
 import { CART_GATEWAY_PORT, ICartClaimCommand, ICartGatewayPort } from '../ports';
 
-// Promotes a guest cart to the authenticated registered customer (Q1/Q7). The
-// controller folds `@CurrentUser().id` into `newCustomerId`; the caller supplies
-// `fromCustomerId` (the guest id handed back by the guest-session response) as
-// the ownership proof. The retail claim use case re-points the cart only if it
-// currently belongs to `fromCustomerId` — a mismatch is a 403, a missing cart a
-// 404, both surfaced via `throwRpcError`.
 @Injectable()
 export class ClaimCartUseCase {
   constructor(

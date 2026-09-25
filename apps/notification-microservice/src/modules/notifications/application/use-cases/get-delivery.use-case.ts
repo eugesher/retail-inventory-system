@@ -10,10 +10,6 @@ import { NotificationDomainException, NotificationErrorCodeEnum } from '../../do
 import { INotificationDeliveryRepositoryPort, NOTIFICATION_DELIVERY_REPOSITORY } from '../ports';
 import { toNotificationDeliveryView } from './notification-delivery-view.factory';
 
-// Get Delivery: the single-row drill-down of one `notification_delivery` audit row by id
-// — including the full materialized `renderedBody`/`renderedSubject` (ADR-033). An unknown
-// id is a typed `DELIVERY_NOT_FOUND` (404), mapped to HTTP by the
-// `NotificationRpcExceptionFilter`.
 @Injectable()
 export class GetDeliveryUseCase {
   constructor(

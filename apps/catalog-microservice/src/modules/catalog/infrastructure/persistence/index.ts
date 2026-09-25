@@ -3,9 +3,6 @@ import { MediaAssetEntity } from './media-asset.entity';
 import { ProductEntity } from './product.entity';
 import { ProductVariantEntity } from './product-variant.entity';
 
-// The module's entity list: `DatabaseModule.forRoot(...)` in `app.module.ts`, and
-// `forFeature(...)` in the module file. UNANNOTATED on purpose — see the note on
-// `DatabaseModule.forRoot` for why the parameter type must not be used here.
 export const catalogEntities = [
   ProductEntity,
   ProductVariantEntity,

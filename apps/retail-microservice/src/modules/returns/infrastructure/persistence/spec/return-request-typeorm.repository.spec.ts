@@ -22,10 +22,6 @@ const buildOpenRequest = (): ReturnRequest =>
     new Date('2026-06-19T09:00:00Z'),
   );
 
-// A persisted-request entity graph (mysql2 returns non-PK BIGINT scalars as strings —
-// the mappers coerce them; `customer_id` is a CHAR(36) string, untouched), used as the
-// re-read result. The `rma_number` is the value the write repository's finalize-UPDATE
-// would have written.
 const reloadedEntity = (overrides: Partial<ReturnRequestEntity> = {}): ReturnRequestEntity =>
   ({
     id: 1,
@@ -69,7 +65,6 @@ describe('return-request mappers', () => {
     expect(request.lines).toHaveLength(1);
     expect(request.lines[0].id).toBe(50);
     expect(request.lines[0].orderLineId).toBe(10);
-    // The parent id is threaded into each child on load.
     expect(request.lines[0].returnRequestId).toBe(1);
   });
 
@@ -116,8 +111,6 @@ describe('return-request mappers', () => {
   });
 });
 
-// The NON-transactional read side only (ADR-063) — `save` and its transactional-manager
-// plumbing moved to `ReturnRequestWriteTypeormRepository`, covered by its own spec.
 describe('ReturnRequestTypeormRepository', () => {
   let requestRepo: jest.Mocked<Pick<Repository<ReturnRequestEntity>, 'findOne' | 'find'>>;
   let repository: ReturnRequestTypeormRepository;

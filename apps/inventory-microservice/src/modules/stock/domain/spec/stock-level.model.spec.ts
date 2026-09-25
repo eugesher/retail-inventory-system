@@ -99,7 +99,6 @@ describe('StockLevel', () => {
 
   describe('reserve', () => {
     it('raises quantityReserved and bumps the version', () => {
-      // available = 10 − 2 − 3 = 5.
       const level = new StockLevel(makeProps({ version: 0 }));
       level.reserve(4);
       expect(level.quantityReserved).toBe(7);
@@ -119,15 +118,13 @@ describe('StockLevel', () => {
       const level = new StockLevel(makeProps({ version: 2 }));
       let caught: unknown;
       try {
-        level.reserve(6); // available is 5
+        level.reserve(6);
       } catch (error) {
         caught = error;
       }
       expect(caught).toBeInstanceOf(InventoryDomainException);
       expect((caught as InventoryDomainException).code).toBe(InventoryErrorCodeEnum.OUT_OF_STOCK);
       expect((caught as InventoryDomainException).details).toEqual({ available: 5 });
-      // No partial mutation: the rejected reserve neither moved the counter nor
-      // bumped the version.
       expect(level.quantityReserved).toBe(3);
       expect(level.version).toBe(2);
     });
@@ -137,7 +134,6 @@ describe('StockLevel', () => {
       (quantity) => {
         const level = new StockLevel(makeProps());
         expect(() => level.reserve(quantity)).toThrow('positive integer');
-        // A plain Error, not a typed domain exception (internal caller bug).
         expect(() => level.reserve(quantity)).not.toThrow(InventoryDomainException);
       },
     );
@@ -162,7 +158,6 @@ describe('StockLevel', () => {
     it('throws a plain Error (counter drift) when releasing more than is reserved', () => {
       const level = new StockLevel(makeProps({ quantityReserved: 3, version: 4 }));
       expect(() => level.releaseReserved(4)).toThrow('only 3 reserved');
-      // Drift is an invariant breach (a 500), not a typed client-facing exception.
       expect(() => level.releaseReserved(4)).not.toThrow(InventoryDomainException);
       expect(level.quantityReserved).toBe(3);
       expect(level.version).toBe(4);
@@ -176,13 +171,10 @@ describe('StockLevel', () => {
 
   describe('allocateFromReserved', () => {
     it('moves units from reserved to allocated, leaving available unchanged, and bumps the version', () => {
-      // onHand 10, allocated 2, reserved 3 → available 5.
       const level = new StockLevel(makeProps({ version: 0 }));
       level.allocateFromReserved(2);
       expect(level.quantityReserved).toBe(1);
       expect(level.quantityAllocated).toBe(4);
-      // A pure reserved → allocated transfer: both subtract from available, so it
-      // is unchanged.
       expect(level.available).toBe(5);
       expect(level.version).toBe(1);
     });
@@ -197,7 +189,6 @@ describe('StockLevel', () => {
     it('throws a plain Error (counter drift) when moving more than is reserved', () => {
       const level = new StockLevel(makeProps({ quantityReserved: 3, version: 4 }));
       expect(() => level.allocateFromReserved(4)).toThrow('only 3 reserved');
-      // Drift is an invariant breach (a 500), not a typed client-facing exception.
       expect(() => level.allocateFromReserved(4)).not.toThrow(InventoryDomainException);
       expect(level.quantityReserved).toBe(3);
       expect(level.quantityAllocated).toBe(2);
@@ -212,7 +203,6 @@ describe('StockLevel', () => {
 
   describe('allocateDirect', () => {
     it('raises allocated, lowers available, and bumps the version', () => {
-      // available = 5.
       const level = new StockLevel(makeProps({ version: 0 }));
       level.allocateDirect(4);
       expect(level.quantityAllocated).toBe(6);
@@ -232,14 +222,13 @@ describe('StockLevel', () => {
       const level = new StockLevel(makeProps({ version: 2 }));
       let caught: unknown;
       try {
-        level.allocateDirect(6); // available is 5
+        level.allocateDirect(6);
       } catch (error) {
         caught = error;
       }
       expect(caught).toBeInstanceOf(InventoryDomainException);
       expect((caught as InventoryDomainException).code).toBe(InventoryErrorCodeEnum.OUT_OF_STOCK);
       expect((caught as InventoryDomainException).details).toEqual({ available: 5 });
-      // No partial mutation.
       expect(level.quantityAllocated).toBe(2);
       expect(level.version).toBe(2);
     });
@@ -247,7 +236,6 @@ describe('StockLevel', () => {
     it.each([0, -1, 1.5])('rejects a non-positive / non-integer quantity (%p)', (quantity) => {
       const level = new StockLevel(makeProps());
       expect(() => level.allocateDirect(quantity)).toThrow('positive integer');
-      // A plain Error, not a typed domain exception (internal caller bug).
       expect(() => level.allocateDirect(quantity)).not.toThrow(InventoryDomainException);
     });
   });
@@ -276,8 +264,6 @@ describe('StockLevel', () => {
       } catch (error) {
         caught = error;
       }
-      // Unlike allocateFromReserved's drift (a 500), an over-cancel IS reachable
-      // (a Cancel RPC with a wrong quantity) — a typed 409, not a plain Error.
       expect(caught).toBeInstanceOf(InventoryDomainException);
       expect((caught as InventoryDomainException).code).toBe(
         InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
@@ -294,16 +280,12 @@ describe('StockLevel', () => {
 
   describe('commitSale', () => {
     it('decrements on-hand AND allocated in one version bump, leaving available unchanged', () => {
-      // onHand 10, allocated 2, reserved 3 → available 5.
       const level = new StockLevel(makeProps({ version: 0 }));
       level.commitSale(2);
       expect(level.quantityOnHand).toBe(8);
       expect(level.quantityAllocated).toBe(0);
       expect(level.quantityReserved).toBe(3);
-      // Both decremented counters subtract from available, so it is unchanged: a
-      // commit-sale neither frees nor consumes sellable stock.
       expect(level.available).toBe(5);
-      // ONE mutation despite two counters moving.
       expect(level.version).toBe(1);
     });
 
@@ -321,7 +303,6 @@ describe('StockLevel', () => {
         makeProps({ quantityOnHand: 10, quantityAllocated: 2, quantityReserved: 0, version: 4 }),
       );
       expect(() => level.commitSale(3)).toThrow('only 2 allocated');
-      // Drift is an invariant breach (a 500), not a typed client-facing exception.
       expect(() => level.commitSale(3)).not.toThrow(InventoryDomainException);
       expect(level.quantityOnHand).toBe(10);
       expect(level.quantityAllocated).toBe(2);
@@ -329,23 +310,19 @@ describe('StockLevel', () => {
     });
 
     it('throws STOCK_RESULT_NEGATIVE (a user-reachable 409) when on-hand fell below allocated', () => {
-      // A prior negative adjust drove on-hand below the allocated amount.
       const level = new StockLevel(
         makeProps({ quantityOnHand: 1, quantityAllocated: 3, quantityReserved: 0, version: 2 }),
       );
       let caught: unknown;
       try {
-        level.commitSale(3); // allocated allows it, but on-hand (1) does not
+        level.commitSale(3);
       } catch (error) {
         caught = error;
       }
-      // The allocated guard passes (3 ≤ 3); the on-hand guard rejects — and because an
-      // operator can reach this via a prior adjust, it is a typed 409, not a 500.
       expect(caught).toBeInstanceOf(InventoryDomainException);
       expect((caught as InventoryDomainException).code).toBe(
         InventoryErrorCodeEnum.STOCK_RESULT_NEGATIVE,
       );
-      // No partial mutation.
       expect(level.quantityOnHand).toBe(1);
       expect(level.quantityAllocated).toBe(3);
       expect(level.version).toBe(2);
@@ -354,7 +331,6 @@ describe('StockLevel', () => {
     it.each([0, -1, 1.5])('rejects a non-positive / non-integer quantity (%p)', (quantity) => {
       const level = new StockLevel(makeProps());
       expect(() => level.commitSale(quantity)).toThrow('positive integer');
-      // A plain Error, not a typed domain exception (internal caller bug).
       expect(() => level.commitSale(quantity)).not.toThrow(InventoryDomainException);
     });
   });

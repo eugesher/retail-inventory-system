@@ -9,12 +9,9 @@ import { AppModule as InventoryMicroserviceAppModule } from '@retail-inventory-s
 import { AppModule as RetailMicroserviceAppModule } from '@retail-inventory-system/apps/retail-microservice';
 import { MicroserviceQueueEnum } from '@retail-inventory-system/contracts';
 
-// Seeded staff fixture with the `order-support` role — it carries `order:read`, the
-// staff override that reads any order regardless of ownership.
 const STAFF_EMAIL = 'support@example.com';
 const STAFF_PASSWORD = 'support1234';
 
-// A seeded, priced variant (USD 4999) so a placed order has a real line total.
 const VARIANT_ID = 1;
 
 const ADDRESS = {
@@ -45,15 +42,11 @@ interface IOrderPageBody {
 
 describe('List My Orders (e2e)', () => {
   const timeout = 60_000;
-  // Unique per run so the spec stays re-runnable against already-migrated infra
-  // (`yarn test:e2e:run`) without colliding on the customer email UNIQUE.
   const suffix = Date.now();
 
   let apiGatewayApp: INestApplication;
   let retailMicroservice: INestMicroservice;
   let catalogMicroservice: INestMicroservice;
-  // Each placed order reserves (add-to-cart) then allocates (place), so the
-  // inventory microservice must be up to serve `inventory.reservation.*`.
   let inventoryMicroservice: INestMicroservice;
 
   const registerAndLogin = async (email: string, password: string): Promise<string> => {
@@ -73,7 +66,6 @@ describe('List My Orders (e2e)', () => {
     return (body as ITokenResponse).accessToken;
   };
 
-  // Builds a one-line cart and places it, returning the placed order body.
   const placeOneOrder = async (accessToken: string): Promise<IOrderBody> => {
     const create = await supertest(apiGatewayApp.getHttpServer())
       .post('/api/cart')
@@ -178,7 +170,6 @@ describe('List My Orders (e2e)', () => {
       const page = body as IOrderPageBody;
       expect(page.total).toBe(2);
       expect(page.items).toHaveLength(2);
-      // Newest-first: the second order placed comes first.
       expect(page.items[0].id).toBe(secondOrder.id);
       expect(page.items[1].id).toBe(firstOrder.id);
       expect(page.items.every((order) => order.customerId === firstOrder.customerId)).toBe(true);

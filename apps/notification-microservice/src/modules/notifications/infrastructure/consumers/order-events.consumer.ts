@@ -8,16 +8,6 @@ import { ROUTING_KEYS } from '@retail-inventory-system/messaging';
 import { RenderAndDispatchUseCase } from '../../application/use-cases';
 import { dispatchCustomerEmailNotification } from './dispatch-customer-email';
 
-// Consumes `retail.order.placed` off `notification_events` and routes it through the
-// template-driven `RenderAndDispatchUseCase` (ADR-033): it loads the active
-// `retail.order.placed` template, renders it against the event fields, persists a `queued`
-// delivery BEFORE the `NOTIFIER` call, then flips the row.
-//
-// The recipient is the buyer's resolved `customerEmail` (carried on the event,
-// producer-side, ADR-033) — a `null` email means a tombstoned/guest customer with no
-// contact, in which case the shared helper warn-logs and skips. The event also carries the
-// buyer's `customerId`, which becomes the dedupe anchor so an at-least-once redelivery is
-// collapsed to a no-op. `correlationId` is logged inline (ADR-011 §7).
 @Controller()
 export class OrderEventsConsumer {
   constructor(

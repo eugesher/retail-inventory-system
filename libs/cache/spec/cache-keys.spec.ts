@@ -1,52 +1,18 @@
 import { CACHE_KEYS } from '../cache-keys';
 
-// Locks in the production cache-key contract. For the inventory stock aggregate
-// five transition layers coexist and each has its own assertion block:
-//
-//   * Current convention (ADR-022 / ADR-027 / ADR-030 `v3`) —
-//     `ris:[t:<tenantId>:]<service>:<aggregate>:<version>:<id>[:<facet>]`. For
-//     stock the `<id>` axis is the `variantId` and the facet is a sorted
-//     stock-location set. Carries the schema-version segment (CACHE-003 fix) and
-//     the opt-in tenant segment (CACHE-009 fix) alongside the pre-existing
-//     CACHE-010 (localeCompare sort) and CACHE-011 (non-glob `__all__` sentinel) fixes.
-//
-// The four RETIRED shapes below have **no caller**. `StockCache` used to sweep each
-// of them on every stock write, for a rolling-deploy transition window; that sweep is
-// gone (ISSUE-03) — it was four Redis SCAN passes per variant that could never match,
-// and could not have been served if they had, because no read path builds a retired
-// key. These specs pin the SHAPES, which is all the builders are now: a registry of
-// what each version bump changed (ADR-046).
-//   * Pre-v3 (v2) — `ris:inventory:stock:v2:<id>:` — `inventoryStockLegacyPrefixV2`
-//     (ADR-030 §7, the reservation-semantics bump).
-//   * Pre-v2 (v1) — `ris:inventory:stock:v1:<id>:` — `inventoryStockLegacyPrefixV1`
-//     (ADR-027).
-//   * Pre-v1 (post-ADR-016) — `ris:<service>:<aggregate>:<id>:` —
-//     `inventoryStockLegacyPrefix`.
-//   * Pre-ADR-016 — `stock:<productId>:*` — `productStockPrefix`. Must keep producing
-//     the same wire format, including the deliberately-preserved `charCodeAt` sort bug.
 describe('CACHE_KEYS', () => {
   describe('inventoryStock (current convention — v3, keyed on variantId)', () => {
     it('embeds the v3 schema-version segment in the single-tenant prefix', () => {
-      // CACHE-003 fix: a breaking DTO shape change bumps the constant in
-      // cache-keys.ts and the pre-bump entries become unreachable on deploy.
-      // ADR-027 bumped v1 → v2 (value reshaped to a per-variant VariantStockView);
-      // ADR-030 bumped v2 → v3 (same field set, new meaning once reservations move
-      // quantityReserved).
       expect(CACHE_KEYS.inventoryStockPrefix(42)).toBe('ris:inventory:stock:v3:42:');
       expect(CACHE_KEYS.inventoryStock(42)).toBe('ris:inventory:stock:v3:42:__all__');
     });
 
     it('omits the tenant segment entirely when no tenantId is supplied', () => {
-      // CACHE-009 fix: ADR-022 explicitly rejects a `default` tenant
-      // fallback — single-tenant mode means the segment is absent, not
-      // silently inherited.
       expect(CACHE_KEYS.inventoryStock(42)).not.toMatch(/(^|:)t:/);
       expect(CACHE_KEYS.inventoryStockPrefix(42)).not.toMatch(/(^|:)t:/);
     });
 
     it('prepends `t:<tenantId>:` immediately after the `ris:` root when tenantId is supplied', () => {
-      // Segment order is tenant-near-root so SCAN-by-tenant is a tight
-      // prefix wipe (ADR-022 §"Segment order").
       expect(CACHE_KEYS.inventoryStockPrefix(42, { tenantId: 'store-7' })).toBe(
         'ris:t:store-7:inventory:stock:v3:42:',
       );
@@ -77,8 +43,6 @@ describe('CACHE_KEYS', () => {
     });
 
     it('uses the __all__ sentinel (non-glob) when no stockLocationIds are provided', () => {
-      // CACHE-011 fix: the literal `*` could be confused with a glob; the
-      // sentinel is unambiguous.
       expect(CACHE_KEYS.inventoryStock(42)).not.toMatch(/\*/);
       expect(CACHE_KEYS.inventoryStock(42)).toBe('ris:inventory:stock:v3:42:__all__');
     });
@@ -88,9 +52,6 @@ describe('CACHE_KEYS', () => {
     });
 
     it('joins sorted stockLocationIds with localeCompare', () => {
-      // CACHE-010 fix: previously the comparator only inspected charCodeAt(0),
-      // so ["ab", "aa"] sorted differently from ["aa", "ab"]. With localeCompare
-      // the two inputs collapse to the same key.
       expect(CACHE_KEYS.inventoryStock(1, ['ab', 'aa'])).toBe('ris:inventory:stock:v3:1:aa,ab');
       expect(CACHE_KEYS.inventoryStock(1, ['aa', 'ab'])).toBe('ris:inventory:stock:v3:1:aa,ab');
     });
@@ -104,23 +65,18 @@ describe('CACHE_KEYS', () => {
 
   describe('inventoryStockLegacyPrefixV2 (pre-v3 — RETIRED, no caller)', () => {
     it('still produces the retired v2 shape', () => {
-      // Nothing reads, writes or sweeps this shape. The builder is a registry entry
-      // recording what the v2→v3 bump changed (ADR-030 §7). Reads and writes go through
-      // `inventoryStockPrefix` (the v3 builder above) and nowhere else.
       expect(CACHE_KEYS.inventoryStockLegacyPrefixV2(42)).toBe('ris:inventory:stock:v2:42:');
     });
   });
 
   describe('inventoryStockLegacyPrefixV1 (pre-v2 — RETIRED, no caller)', () => {
     it('still produces the retired v1 shape', () => {
-      // ADR-027's shape. No caller — see the note at the top of this file.
       expect(CACHE_KEYS.inventoryStockLegacyPrefixV1(42)).toBe('ris:inventory:stock:v1:42:');
     });
   });
 
   describe('inventoryStockLegacyPrefix (pre-v1 — RETIRED, no caller)', () => {
     it('still produces the pre-v1 shape, without a version segment', () => {
-      // The post-ADR-016 / pre-ADR-022 shape: no version, and never a tenant segment.
       expect(CACHE_KEYS.inventoryStockLegacyPrefix(42)).toBe('ris:inventory:stock:42:');
     });
   });
@@ -142,11 +98,6 @@ describe('CACHE_KEYS', () => {
   });
 
   describe('catalogProduct (reserved read-path builder — not consumed yet)', () => {
-    // Locks the reserved catalog read-path key shape (ADR-016 / ADR-022). The
-    // builder is keyed on `variantId` (the downstream backbone — ADR-025), not
-    // productId. It is **not consumed** by any code path today: the catalog
-    // service does not import `CacheModule`. This assertion exists so a future
-    // cached catalog read path adopts the locked v1 shape without re-keying.
     it('embeds the v1 schema-version segment in the single-tenant prefix', () => {
       expect(CACHE_KEYS.catalogProductPrefix(5001)).toBe('ris:catalog:product:v1:5001:');
       expect(CACHE_KEYS.catalogProduct(5001)).toBe('ris:catalog:product:v1:5001:__all__');
@@ -167,12 +118,6 @@ describe('CACHE_KEYS', () => {
   });
 
   describe('catalogPrice (reserved pricing read-path builder — not consumed yet)', () => {
-    // Locks the reserved pricing read-path key shape (ADR-016 / ADR-022 /
-    // ADR-026). The builder keys on `(variantId, currency)` — the entire price
-    // scope. It is **not consumed** by any code path today: the pricing module
-    // does not import `CacheModule`. This assertion exists so a future cached
-    // Select-Applicable-Price read path adopts the locked v1 shape without
-    // re-keying.
     it('embeds the v1 schema-version segment in the single-tenant prefix', () => {
       expect(CACHE_KEYS.catalogPricePrefix(5001)).toBe('ris:catalog:price:v1:5001:');
       expect(CACHE_KEYS.catalogPrice(5001, 'USD')).toBe('ris:catalog:price:v1:5001:USD');
@@ -195,13 +140,7 @@ describe('CACHE_KEYS', () => {
   });
 
   describe('catalogCategory (reserved navigation read-path builders — not consumed yet)', () => {
-    // Locks the reserved category navigation key shapes (ADR-016 / ADR-022 /
-    // ADR-029). Neither builder is consumed by any code path today: the catalog
-    // service does not import `CacheModule`. These assertions exist so a future
-    // cached tree/children read path adopts the locked v1 shape without re-keying.
     it('keys the whole tree as a singleton — no `<id>` axis, version terminates the key', () => {
-      // The materialized hierarchy is a single value, so there is no per-id
-      // segment: the version is the final segment.
       expect(CACHE_KEYS.catalogCategoryTree()).toBe('ris:catalog:category-tree:v1');
     });
 
@@ -234,10 +173,6 @@ describe('CACHE_KEYS', () => {
   });
 
   describe('notificationsConsent (consumed consent read-path builders — ADR-037)', () => {
-    // The first CONSUMED notification cache key: the consent-gate resolves a
-    // customer's channel-consent per dispatch under this key, kept fresh by the
-    // customer.consent.updated / customer.erased consumer. Keyed on the customer's
-    // CHAR(36) UUID (the `<id>` axis); the snapshot is a singleton per customer (no facet).
     it('embeds the v1 schema-version segment and keys on the customer UUID', () => {
       expect(CACHE_KEYS.notificationsConsentPrefix()).toBe('ris:notifications:consent:v1:');
       expect(CACHE_KEYS.notificationsConsent('11111111-1111-4111-8111-111111111111')).toBe(
@@ -266,8 +201,6 @@ describe('CACHE_KEYS', () => {
 
   describe('productStockPrefix (pre-ADR-016 — RETIRED, no caller)', () => {
     it('is the bare, un-namespaced stock prefix from before ADR-016', () => {
-      // No longer SCANned for. Kept as the record of the original convention — the only
-      // stock shape that never carried the `ris:` namespace at all.
       expect(CACHE_KEYS.productStockPrefix(42)).toBe('stock:42:');
     });
   });

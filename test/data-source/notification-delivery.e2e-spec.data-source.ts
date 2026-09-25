@@ -1,14 +1,5 @@
 import { InventoryAutoInitE2ESpecDataSource } from './inventory-auto-init.e2e-spec.data-source';
 
-// One `notification_delivery` row, projected to the fields the notification e2e suites
-// assert on. The gateway deliveries query exposes most of these too, but a direct row read
-// is the most direct proof of the columns the audit trail is built on — especially
-// `recipient_customer_id` being NULL for a system/ops delivery (a low-stock alert has no
-// customer), which no public response massages.
-//
-// mysql2 returns BIGINT columns (the ids) as strings, so `id` / `templateId` are coerced
-// with `Number(...)`; `attemptCount` is a plain INT but coerced for the same plain-number
-// comparison ergonomics.
 export interface INotificationDeliveryRowProjection {
   id: number;
   templateId: number;
@@ -23,13 +14,6 @@ export interface INotificationDeliveryRowProjection {
   renderedBody: string;
 }
 
-// E2E helper for the notification suites. Reads the `notification_delivery` audit trail by
-// its business event reference (`event_reference_type` + `event_reference_id`) — the same
-// key the gateway deliveries query filters on — so a suite can poll for the row(s) a placed
-// order / shipped fulfillment / low-stock adjustment produced and assert on the persisted
-// columns directly. Extends the inventory auto-init data source so a suite can also poll
-// `stock_level` for the async catalog-variant-created auto-init before provisioning stock
-// (the returns/refunds data-source precedent).
 export class NotificationDeliveryE2ESpecDataSource extends InventoryAutoInitE2ESpecDataSource {
   public async getDeliveriesByEventRef(
     eventReferenceType: string,

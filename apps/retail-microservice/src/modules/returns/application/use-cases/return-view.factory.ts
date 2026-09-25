@@ -2,15 +2,6 @@ import { ReturnLineView, ReturnRequestView } from '@retail-inventory-system/cont
 
 import { ReturnLine, ReturnRequest } from '../../domain';
 
-// Pure mapping from the returns domain onto its wire view, shared by every return use
-// case so the projection lives in exactly one place (the `order-view.factory` /
-// `fulfillment-view.factory` pattern). Framework-free — no Nest decorators.
-//
-// A persisted return request (saved or reconstituted) carries a concrete id, and a line
-// re-read from the repository carries its generated BIGINT id, so the `!` assertions are
-// safe here (the same non-null assertion the order/fulfillment factories make). Each `Date` column
-// is serialized to an ISO-8601 string, and stays null until the transition that stamps it runs.
-
 export const toReturnLineView = (line: ReturnLine): ReturnLineView => ({
   id: line.id!,
   orderLineId: line.orderLineId,
